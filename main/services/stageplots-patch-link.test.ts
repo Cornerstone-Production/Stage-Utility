@@ -6,7 +6,7 @@ import { describe, test } from "node:test";
 
 import type { PatchFile, PatchSheet } from "../types/patch.js";
 import type { PatchLink, PlotItem } from "../types/stageplots.js";
-import { publishedItems, resolveItems, resolvePatchLink, stampLinks, swatchOf, tapChannels, type PatchRead } from "./stageplots-patch-link.js";
+import { patchSheets, publishedItems, resolveItems, resolvePatchLink, stampLinks, swatchOf, tapChannels, type PatchRead } from "./stageplots-patch-link.js";
 
 function sheet(over: Partial<PatchSheet> = {}): PatchSheet {
   return {
@@ -177,5 +177,38 @@ describe("items as shown, saved and published", () => {
     assert.equal("patchLink" in items[1]!, false);
     assert.equal(items[1]!.patch, undefined);
     assert.deepEqual(unresolved, [{ label: "Old name", reason: "removed" }]);
+  });
+});
+
+describe("reading a patch sheet", () => {
+  test("keeps only overrides, plan entries, tweaks and service type variants of the shape resolvePatch reads", () => {
+    // What POST /api/patch lets through: it checks only that `sheets` is a list.
+    const [sheet] = patchSheets({
+      sheets: [
+        {
+          id: "s",
+          variants: [
+            { id: "v1", name: "V1", overrides: { "r:in:1": { label: "Kick" }, "r:in:2": null, "r:in:3": "text", "r:in:4": [1] } },
+            { id: "v2", name: "V2", overrides: null },
+          ],
+          assignments: {
+            byServiceType: { st1: "v1", st2: null, st3: 4 },
+            byPlan: { p1: { variantId: "v1", tweaks: { "r:in:5": null, "r:in:6": { label: "Snare" } } }, p2: null, p3: "v1", p4: { variantId: 7, tweaks: "x" } },
+          },
+        },
+      ],
+    });
+    assert.ok(sheet);
+    assert.deepEqual(
+      sheet.variants.map((v) => [v.id, v.overrides]),
+      [
+        ["v1", { "r:in:1": { label: "Kick" } }],
+        ["v2", {}],
+      ],
+    );
+    assert.deepEqual(sheet.assignments, {
+      byServiceType: { st1: "v1" },
+      byPlan: { p1: { variantId: "v1", tweaks: { "r:in:6": { label: "Snare" } } }, p4: { tweaks: {} } },
+    });
   });
 });

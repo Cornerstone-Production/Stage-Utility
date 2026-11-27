@@ -1,7 +1,7 @@
 // stageplots-doc.ts — pure readings of the stage plots document, shared by the
 // routes and the editor so the two cannot name things differently.
 
-import { PLOT_UNITS_WIDE, type Background, type PendingRemoval, type Plot, type PlotItem, type PlotOverride, type StagePlotsDoc, type Venue } from "../types/stageplots.js";
+import { PLOT_UNITS_WIDE, type Background, type PendingRemoval, type Plot, type PlotItem, type PlotOverride, type StagePlotsDoc, type Venue, type VenueView } from "../types/stageplots.js";
 
 /** A plot's height in plot units: its background's aspect ratio over
  *  PLOT_UNITS_WIDE, or 16:9 when it has none. */
@@ -64,7 +64,7 @@ export type PlotReason = "plan" | "default";
  * unreachable, which the caller turns into null) it is the default.
  */
 export function resolvePlot(
-  doc: { venues: readonly Venue[]; plots: readonly Plot[]; overrides: readonly PlotOverride[] },
+  doc: { venues: readonly VenueView[]; plots: readonly Plot[]; overrides: readonly PlotOverride[] },
   venueId: string,
   planId: string | null,
 ): { plot: Plot | null; reason: PlotReason } {

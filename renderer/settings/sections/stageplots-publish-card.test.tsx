@@ -13,7 +13,7 @@
 import { strict as assert } from "node:assert";
 import { afterEach, beforeEach, describe, test } from "node:test";
 
-import type { PendingRemovalView, Venue, VenuePublish } from "@main/types/stageplots";
+import type { PendingRemovalView, Venue, VenuePublish, VenueView } from "@main/types/stageplots";
 
 import { installRenderDom, settle } from "../../test-dom.js";
 
@@ -22,7 +22,13 @@ installRenderDom();
 const ORIGIN = "https://plots.example.workers.dev";
 const SECRET = "A".repeat(42) + "E";
 
+/** The venue as the fake server stores it, secret and all. The card is handed it as a browser gets it (asView). */
 let VENUE: Venue;
+/** Every GET of the venue's link, and, while set, the status the next one fails with. */
+let linkReads = 0;
+let linkFails: number | null = null;
+/** While set, a link read waits for it before it answers. */
+let linkGate: Promise<void> | null = null;
 let PENDING: PendingRemovalView[] = [];
 /** What GET /api/servicecue/publish answers. */
 let SETTINGS: { url: string; token: string } = { url: ORIGIN, token: "••••" };
@@ -41,6 +47,7 @@ function published(extra: Partial<VenuePublish> = {}): VenuePublish {
     secret: SECRET,
     origin: ORIGIN,
     publishedAt: "2026-11-12T20:32:00.000Z",
+    linkAt: "2026-11-12T20:32:00.000Z",
     lastError: null,
     publishedImages: [],
     unpublishedImages: [],
@@ -49,12 +56,27 @@ function published(extra: Partial<VenuePublish> = {}): VenuePublish {
   };
 }
 
+/** The venue with no secret, as GET /api/stageplots, stageplots:updated and every answer carry it. */
+function asView(v: Venue): VenueView {
+  if (!v.publish) return v;
+  const { secret: _secret, ...publish } = v.publish;
+  return { ...v, publish };
+}
+
 (globalThis as unknown as { fetch: unknown }).fetch = async (url: unknown, init?: RequestInit) => {
   const u = new URL(String(url), "http://localhost");
   const method = init?.method ?? "GET";
   let status = 200;
   let json: unknown = {};
   if (u.pathname === "/api/servicecue/publish") json = { enabled: false, ...SETTINGS };
+  else if (method === "GET" && /^\/api\/stageplots\/venues\/[^/]+\/link$/.test(u.pathname)) {
+    linkReads++;
+    if (linkGate) await linkGate;
+    if (linkFails !== null) {
+      status = linkFails;
+      json = { error: "unavailable" };
+    } else json = { url: VENUE.publish ? `${VENUE.publish.origin}/stageplots/${VENUE.publish.secret}` : null };
+  }
   else if (method === "POST" && u.pathname === "/api/stageplots/pending/remove") {
     sent.push(`${method} ${u.pathname}`);
     const here = PENDING.filter((e) => e.origin === ORIGIN).length;
@@ -65,7 +87,7 @@ function published(extra: Partial<VenuePublish> = {}): VenuePublish {
     sent.push(`${method} ${u.pathname} ${String(init?.body)}`);
     const listed = (JSON.parse(String(init?.body)) as { listed: boolean }).listed;
     VENUE = { ...VENUE, publish: { ...VENUE.publish!, listed } };
-    json = VENUE;
+    json = asView(VENUE);
   }
   else if (method === "POST" && /^\/api\/stageplots\/venues\/[^/]+\/(publish|regenerate|unpublish|publish-now)$/.test(u.pathname)) {
     sent.push(`${method} ${u.pathname}`);
@@ -76,7 +98,7 @@ function published(extra: Partial<VenuePublish> = {}): VenuePublish {
     } else {
       const action = u.pathname.split("/").pop();
       VENUE = action === "unpublish" ? { ...VENUE, publish: undefined } : { ...VENUE, publish: published() };
-      json = notice ? { ...VENUE, notice } : VENUE;
+      json = notice ? { ...asView(VENUE), notice } : asView(VENUE);
       notice = null;
     }
   }
@@ -106,7 +128,7 @@ async function mount() {
       { client },
       VENUE.id === "none"
         ? React.createElement(PendingLinksCard, { pending: PENDING, save, notice: FOLLOW, timeZone: "America/Chicago" })
-        : React.createElement(PublishCard, { venue: VENUE, pending: PENDING, save, timeZone: "America/Chicago", follow: FOLLOW, landing: LANDING }),
+        : React.createElement(PublishCard, { venue: asView(VENUE), pending: PENDING, save, timeZone: "America/Chicago", follow: FOLLOW, landing: LANDING }),
       React.createElement(ConfirmHost),
     );
   let rerender!: (ui: React.ReactElement) => void;
@@ -131,6 +153,9 @@ beforeEach(() => {
   VENUE = { id: "v-1", name: "Room One", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: [], defaultPlotId: null };
   SETTINGS = { url: ORIGIN, token: "••••" };
   sent = [];
+  linkReads = 0;
+  linkFails = null;
+  linkGate = null;
   refuse = null;
   notice = null;
   PENDING = [];
@@ -211,6 +236,59 @@ describe("the Publish card, published", () => {
     assert.equal(shortSecret(SECRET), "AAAAAA…AAAE");
     assert.equal(screen.getByTestId("publish-link").parentElement!.getAttribute("title"), `plots.example.workers.dev/stageplots/${SECRET}`);
     assert.equal(screen.queryByRole("alert"), null);
+  });
+
+  test("the link is its own read, read again when another desk regenerates it, and the old one is never offered meanwhile", async () => {
+    VENUE.publish = published();
+    const m = await mount();
+    assert.equal(linkReads, 1);
+    assert.equal(screen.getByTestId("publish-link").textContent, `plots.example.workers.dev/stageplots/${shortSecret(SECRET)}`);
+    // Regenerated elsewhere: the document says only that it was published again.
+    const NEW = "B".repeat(42) + "Q";
+    let open!: () => void;
+    linkGate = new Promise((r) => (open = r));
+    VENUE.publish = published({ secret: NEW, publishedAt: "2026-11-12T21:05:00.000Z", linkAt: "2026-11-12T21:05:00.000Z" });
+    await m.refresh();
+    for (let i = 0; i < 3; i++) await settle();
+    assert.equal(linkReads, 2, "the link was not read again");
+    assert.equal(screen.getByTestId("publish-link").textContent, "plots.example.workers.dev/stageplots/…", "the old link is still shown");
+    assert.equal((screen.getByRole("button", { name: "Copy link" }) as HTMLButtonElement).disabled, true, "Copy offers the old link");
+    await act(async () => open());
+    for (let i = 0; i < 3; i++) await settle();
+    assert.equal(screen.getByTestId("publish-link").textContent, `plots.example.workers.dev/stageplots/${shortSecret(NEW)}`);
+    // A save that leaves the link as it was reads nothing.
+    VENUE.publish = { ...VENUE.publish, listed: true };
+    await m.refresh();
+    for (let i = 0; i < 3; i++) await settle();
+    assert.equal(linkReads, 2);
+  });
+
+  test("a republish (a new publishedAt, the same link) reads nothing and leaves the hand-copy field open", async () => {
+    VENUE.publish = published();
+    delete (navigator as { clipboard?: unknown }).clipboard;
+    Object.defineProperty(window, "isSecureContext", { configurable: true, value: false });
+    (document as unknown as { execCommand: () => boolean }).execCommand = () => false;
+    const m = await mount();
+    await click(screen.getByRole("button", { name: "Copy link" }));
+    assert.ok(screen.queryByRole("textbox", { name: "Link" }), "no hand-copy field, so this tests nothing");
+    // Every edit anywhere republishes, which writes a new publishedAt and leaves the link alone.
+    VENUE.publish = { ...VENUE.publish, publishedAt: "2026-11-12T21:09:00.000Z" };
+    await m.refresh();
+    for (let i = 0; i < 3; i++) await settle();
+    assert.equal(linkReads, 1, "a republish read the link again");
+    assert.ok(screen.queryByRole("textbox", { name: "Link" }), "the hand-copy field closed under the operator on an automatic republish");
+  });
+
+  test("a link that cannot be read says so, offers no link, and Try again reads it", async () => {
+    VENUE.publish = published();
+    linkFails = 503;
+    await mount();
+    assert.match(screen.getByRole("alert").textContent ?? "", /The link could not be read from the server\./);
+    assert.equal((screen.getByRole("button", { name: "Copy link" }) as HTMLButtonElement).disabled, true);
+    linkFails = null;
+    await click(screen.getByRole("button", { name: "Try again" }));
+    assert.equal(screen.queryByRole("alert"), null);
+    assert.equal(screen.getByTestId("publish-link").textContent, `plots.example.workers.dev/stageplots/${shortSecret(SECRET)}`);
   });
 
   test("Copy writes the whole link where there is a clipboard", async () => {

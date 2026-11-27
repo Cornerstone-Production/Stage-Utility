@@ -12,37 +12,11 @@ import { confirm, toast } from "../../components/ui";
 import { invoke as ipc } from "../../lib/api";
 import { useStageState } from "../../main/use-stage-state";
 import { appZoneOf } from "../../lib/app-zone";
+import { planLabel } from "./plan-date-label";
 import { useEditingTarget } from "./editing-target";
 
 /** Which board the editor is showing. Not the wire shape — see `SlotsTarget`. */
 export type SlotsTargetSide = "default" | "plan";
-
-/**
- * "Wed Sep 13" from the plan's PCO sort_date.
- *
- * Falls back to the plan's dates AS PLANNING CENTER WORDS THEM when there is no
- * sort_date to format — parsing that string into a weekday would be guessing at
- * a format somebody typed, and a wrong date on this pill points a save at the
- * wrong week.
- */
-export function planLabel(
-  planSortDate: string | null,
-  planDates: string | null,
-  timeZone: string | null,
-): string {
-  if (planSortDate) {
-    const at = Date.parse(planSortDate);
-    if (Number.isFinite(at)) {
-      return new Intl.DateTimeFormat(undefined, {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-        timeZone: timeZone ?? undefined,
-      }).format(at);
-    }
-  }
-  return planDates ?? "This plan";
-}
 
 /**
  * "the Weekend" / "The Gathering" / "the service type".

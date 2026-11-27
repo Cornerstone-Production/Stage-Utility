@@ -130,7 +130,7 @@ const { __resetForTests } = await import("../../main/use-stage-state.js");
 const { invoke: ipc, __resetReplayCacheForTests } = await import("../../lib/api.js");
 const { encodeTarget } = await import("./plan-switcher-step.js");
 const { toast } = await import("../../components/ui/toast.js");
-const { planLabel } = await import("./slots-target-pill.js");
+const { planLabel } = await import("./plan-date-label.js");
 const { serverZoneApartFromBrowser } = await import("../../test-fixtures/zones.js");
 
 /** Several macrotasks: the state hydrate, the two queries and the re-renders

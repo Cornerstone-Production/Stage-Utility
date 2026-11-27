@@ -10,13 +10,15 @@ import type { PatchFile, ServiceCueLayout, Slot } from "../../types/stage.js";
 import type { CategoryRole } from "../../types/servicecue-roles.js";
 import { SlotsNotFoundError, stageController } from "../stage-controller.js";
 import { patchStore } from "../patch-store.js";
+import { patchShapeProblem } from "../patch-shape.js";
 import { parseXlsx } from "../patch-xlsx.js";
 import { exportFilename, exportRows } from "../patch-export.js";
 import { toCsv } from "../patch-export-csv.js";
 import { toXlsx } from "../patch-export-xlsx.js";
 import { servicecuePublisher } from "../servicecue-publisher-instance.js";
 import { LayoutNameRefused } from "../servicecue-slug.js";
-import { isRecord } from "../is-record.js";
+import { isRecord } from "../../types/is-record.js";
+import { scrub } from "../scrub.js";
 
 export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, url, method } = c;
@@ -129,12 +131,16 @@ export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
     if (method === "POST" && pathname === "/api/patch") {
       const body = (await readBody(req)) as Record<string, unknown>;
       const file = body.file as PatchFile | undefined;
-      if (!file || typeof file !== "object" || !Array.isArray(file.sheets)) {
-        error(res, "body.file (PatchFile) required");
+      // A sheet whose variants, overrides or assignments are not the shape every reader takes is
+      // refused whole and said: the editor never writes one (patch-shape.ts).
+      const problem = patchShapeProblem(file);
+      if (problem) {
+        console.warn(`[patch] save refused: ${scrub(problem)}`);
+        error(res, problem);
         return;
       }
       // patchStore.save broadcasts patch:updated, for the editor, /patch and stage plots.
-      json(res, await patchStore.save(file));
+      json(res, await patchStore.save(file!));
       return;
     }
 

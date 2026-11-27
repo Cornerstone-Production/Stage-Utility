@@ -17,7 +17,7 @@
 // its rules lazily where a static import would be a cycle.
 
 import { errorMessage } from "./errors.js";
-import { isRecord } from "./is-record.js";
+import { isRecord } from "../types/is-record.js";
 import { isSafeKey } from "./safe-key.js";
 
 export type RestoreResult = { ok: true; value: unknown } | { ok: false; reason: string };

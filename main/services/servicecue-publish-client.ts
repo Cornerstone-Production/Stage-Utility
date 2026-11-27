@@ -18,7 +18,7 @@
 
 import { readCapped } from "./capped-download.js";
 import { fetchFailureMessage, untrustedCertificateCode } from "./errors.js";
-import { isStringList } from "./is-record.js";
+import { isStringList } from "../types/is-record.js";
 import { pinToOrigin } from "./pinned-origin.js";
 import type { PublishOrigin } from "./servicecue-publish-rules.js";
 import type { PublishProblem } from "../types/servicecue-publish-status.js";

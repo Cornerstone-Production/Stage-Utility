@@ -53,7 +53,7 @@ const RUNDOWN: ServiceCueRundownDTO = {
   ],
   noteCategories: ["Audio"],
   serviceTimes: [],
-  timeZone: null,
+  timeZone: "UTC",
   isActivePlan: false,
   isDefaultPlan: true,
 };

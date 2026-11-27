@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import { onNotification } from "../lib/api";
+import { useLatestRef } from "../lib/use-latest-ref";
 import { useResyncOn } from "../lib/use-resync-on";
 
 /**
@@ -64,6 +65,9 @@ import { useResyncOn } from "../lib/use-resync-on";
  *   when the answer's scope does (wireless: connections added or removed). A real
  *   input, not a `void rev` inside `read`: the React Compiler drops that and
  *   hoists `read`, so nothing would ever re-run this.
+ * @param options.onReadFailure  told why a hydrate failed, beside the [status-channel]
+ *   console line: for a caller that says it on /log (logReadFailure), as the stage
+ *   plots document does. Read when the failure lands, so it need not be memoised.
  * @param options.clearOnReadFailure  drop back to null when the hydrate fails,
  *   instead of keeping whatever was already there. OFF by default, which is what
  *   every integration status wants: a value that was true a moment ago is better
@@ -116,13 +120,14 @@ export function useStatusChannel<T extends object>(
   read: () => Promise<T | null | undefined>,
   pushChannel: string,
   enabled = true,
-  options: { clearOnReadFailure?: boolean; resubscribeKey?: number } = {},
+  options: { clearOnReadFailure?: boolean; resubscribeKey?: number; onReadFailure?: (err: unknown) => void } = {},
 ): StatusChannelResult<T> {
   // Destructured, not carried as an object: an options literal is a new object
   // every render, and as an effect dependency that re-subscribes and re-hydrates
   // on every one.
   const clearOnReadFailure = options.clearOnReadFailure ?? false;
   const resubscribeKey = options.resubscribeKey;
+  const onReadFailure = useLatestRef(options.onReadFailure);
   const [value, setValue] = useState<T | null>(null);
   const [known, setKnown] = useState(false);
   const [failed, setFailed] = useState(false);
@@ -212,6 +217,7 @@ export function useStatusChannel<T extends object>(
         // shape as a wrapper — not to add a tenth hand-rolled hydrate.
         if (cancelled) return;
         console.warn(`[status-channel] hydrate failed for ${pushChannel}`, err);
+        onReadFailure.current?.(err);
         // A failed read still SETTLES the window: an operator staring at a
         // placeholder because the server is unreachable is worse than the best
         // available answer, which is whatever `value` already holds (or the
@@ -229,7 +235,7 @@ export function useStatusChannel<T extends object>(
     // useCallback). An unmemoised one would re-subscribe and re-hydrate on every
     // render — wasteful, but not wrong: the ordering rule still holds, because a
     // fresh window resets the counter above.
-  }, [enabled, pushChannel, read, clearOnReadFailure, resubscribeKey]);
+  }, [enabled, pushChannel, read, clearOnReadFailure, resubscribeKey, onReadFailure]);
 
   // A disabled hook neither reads nor subscribes, so what it holds from an
   // earlier enabled window is a snapshot nothing is keeping current. Reporting

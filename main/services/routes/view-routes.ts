@@ -19,7 +19,7 @@ import {
 } from "../layout-library.js";
 import type { NotesContent } from "../notes-store.js";
 import { errorMessage } from "../errors.js";
-import { isStringList } from "../is-record.js";
+import { isStringList } from "../../types/is-record.js";
 import { type RouteCtx, json, error, readBody, readObjectBody, isDisplayKind, MAX_CONFIG_BODY_BYTES } from "./context.js";
 import { isLayoutShape, isSlotsLayoutValue, type ViewSurface } from "../../types/views.js";
 import { oscManager } from "../osc-manager.js";

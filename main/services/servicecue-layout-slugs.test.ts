@@ -248,8 +248,8 @@ describe("an imported layout", () => {
     assert.ok(report.skipped.some((s) => s.includes('"AUDIO" — imported as "AUDIO 2"')), report.skipped.join("\n"));
     // And on /log, where an operator can find it after the dialog has closed.
     const lines = logged.mock.calls.map((c) => c.arguments.join(" "));
-    assert.deepEqual(lines.filter((l) => l.startsWith("[view-import] ServiceCue preset")), [
-      '[view-import] ServiceCue preset "AUDIO" imported as "AUDIO 2": that name was taken here',
+    assert.deepEqual(lines.filter((l) => l.startsWith("[view-import] ServiceCue layout")), [
+      '[view-import] ServiceCue layout "AUDIO" imported as "AUDIO 2": that name was taken here',
     ]);
   });
 });

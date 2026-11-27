@@ -272,6 +272,52 @@ export function withoutTokens(devices: readonly BoundDevice[]): PublicDevice[] {
   return devices.map(({ token: _secret, ...rest }) => rest);
 }
 
+/** Pauses held by restores landing: while any is, no write reaches the bindings. */
+let bindingWritesPaused = 0;
+
+/** A write to the bindings refused because a config restore is landing. */
+export class BindingsRestoring extends Error {
+  readonly status = 503;
+  constructor() {
+    super("A config restore is landing; screen bindings are not changed until it has. Try again in a moment.");
+    this.name = "BindingsRestoring";
+  }
+}
+
+/** Whether a restore holds the bindings: a probe or heartbeat that would only refresh
+ *  what a device last said skips its write rather than failing on it. */
+export function bindingWritesHeld(): boolean {
+  return bindingWritesPaused > 0;
+}
+
+/**
+ * Hold every write to the bindings while a config restore lands, once any write in
+ * flight has finished. Returns the release.
+ *
+ * A restore writes kiosk-devices.json to disk itself, while this store's cache keeps
+ * the bindings from before it. A probe (every two seconds per screen) or a heartbeat
+ * in the 1.2 s before the process exits would read that cache and write the old
+ * bindings straight back over the restored file, the restore still reporting success.
+ */
+export async function pauseBindingWrites(): Promise<() => void> {
+  bindingWritesPaused++;
+  // Queued behind any write in flight, and writes nothing itself (update skips an
+  // unchanged value): when it resolves, nothing is mid-write. A wait that fails
+  // takes its hold back: the restore is refused, and nothing may stay held for it.
+  try {
+    await kioskDevicesStore.update((current) => current);
+  } catch (err) {
+    bindingWritesPaused--;
+    throw err;
+  }
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    bindingWritesPaused--;
+  };
+}
+
 /**
  * Write to the bound-device store and tell anybody watching.
  *
@@ -288,6 +334,7 @@ export function withoutTokens(devices: readonly BoundDevice[]): PublicDevice[] {
 export async function updateDevices(
   mutate: (current: readonly BoundDevice[]) => BoundDevice[],
 ): Promise<boolean> {
+  if (bindingWritesPaused > 0) throw new BindingsRestoring();
   let changed = false;
   await kioskDevicesStore.update((current) => {
     const next = mutate(current);
@@ -319,6 +366,8 @@ export async function recordDisplayScreen(
   // record 390 x 844 as that screen's size, and the two would then fight, each
   // flip a real disk write.
   if (typeof deviceId !== "string" || !deviceId) return null;
+  // The next heartbeat says it again; nothing is lost by not writing it over a restore.
+  if (bindingWritesHeld()) return null;
   const r = reported as { w?: unknown; h?: unknown; dpr?: unknown } | undefined;
   const screen = r ? screenFrom(r.w, r.h, r.dpr) : null;
   if (!screen) return null;

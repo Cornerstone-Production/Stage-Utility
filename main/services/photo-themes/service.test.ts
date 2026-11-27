@@ -16,7 +16,7 @@ const { photoThemes, photoFingerprint, PHOTO_THEME_IMAGE_DIR } = await import(".
 const { setAppTimeZone } = await import("../app-timezone.js");
 const { addBroadcastListener } = await import("../broadcaster.js");
 const { captureConsole } = await import("../fixtures/capture-console.js");
-const { errorBody, fakeServer, pcoPhoto, startFakeOpenAi } = await import("./photo-themes-harness.js");
+const { approveAllShown, approveShown, errorBody, fakeServer, pcoPhoto, shownFile, startFakeOpenAi } = await import("./photo-themes-harness.js");
 const { THEMED_PHOTO_REF_PREFIX } = await import("../../types/photo-themes.js");
 type FakeOpenAi = Awaited<ReturnType<typeof startFakeOpenAi>>;
 type FakeServer = Awaited<ReturnType<typeof fakeServer>>;
@@ -104,7 +104,7 @@ describe("generating", () => {
   it("reuses an approved photo at no cost, on this plan and the next", async () => {
     const theme = await themed();
     await generated();
-    assert.equal((await photoThemes.approveAll(PLAN)).approved, 3);
+    assert.equal((await approveAllShown(photoThemes, PLAN)).approved, 3);
     fake.requests.length = 0;
     srv.loads.length = 0;
 
@@ -131,6 +131,44 @@ describe("generating", () => {
     await assert.rejects(() => photoThemes.generate(PLAN, TYPE, "missing"), /Could not read who is on this plan: Planning Center is not configured/);
     await photoThemes.connection.clearKey();
     await assert.rejects(() => photoThemes.generate(PLAN, TYPE, "missing"), /OpenAI is not connected/);
+    assert.equal(fake.edits(), 0);
+  });
+
+  it("an answer that only starts like a PNG fails the person with the reason, not a record that cannot be saved", async () => {
+    const theme = await themed([person("1")]);
+    fake.edit = () => ({ status: 200, body: { data: [{ b64_json: Buffer.from("\x89PNG but not one", "latin1").toString("base64") }] } });
+    await generated();
+    assert.equal(statusOf(theme.id, "1"), "failed");
+    assert.equal(photoThemes.state().themes[0]!.people[0]!.pending?.reason, "OpenAI answered with something that is not an image");
+  });
+
+  it("an answer over the 12 MB the store allows fails the person with the reason, though it is a real PNG", async () => {
+    const theme = await themed([person("1")]);
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(12 * 1024 * 1024)]);
+    fake.edit = () => ({ status: 200, body: { data: [{ b64_json: png.toString("base64") }] } });
+    await generated();
+    assert.equal(statusOf(theme.id, "1"), "failed");
+    assert.equal(photoThemes.state().themes[0]!.people[0]!.pending?.reason, "OpenAI answered with something that is not an image");
+  });
+
+  it("counts for the Generate button only the people a Generate would send", async () => {
+    await themed([person("1"), { personId: "2", name: "Person 2", photoUrl: "https://example.com/avatar.jpg" }, { personId: "3", name: "Person 3", photoUrl: null }]);
+    assert.equal((await photoThemes.planPeople(PLAN, TYPE)).toGenerate, 1);
+    const r = await generated();
+    assert.equal(r.queued, 1, "the count and the send agree");
+    assert.deepEqual(r.skipped.map((x) => x.reason).sort(), ["No Planning Center photo", "Their photo is not on Planning Center"]);
+  });
+
+  it("a Redo from a plan whose roster cannot be read says so, and sends nothing", async () => {
+    const theme = await themed([person("1")]);
+    await generated();
+    await approveShown(photoThemes, theme.id, "1");
+    fake.requests.length = 0;
+    srv.unreadable.set(PLAN, "Planning Center did not answer");
+    await assert.rejects(
+      () => photoThemes.redo(theme.id, "1", { planId: PLAN, serviceTypeId: TYPE }),
+      (e: Error & { status?: number }) => e.status === 502 && /Could not read who is on this plan: Planning Center did not answer/.test(e.message),
+    );
     assert.equal(fake.edits(), 0);
   });
 
@@ -167,6 +205,22 @@ describe("generating", () => {
     assert.equal(fake.edits(), 2);
     assert.equal(photoThemes.connection.status().state, "out-of-credits");
     assert.equal(photoThemes.state().themes[0]!.people.every((p) => p.pending?.reason === "Out of API credits"), true);
+  });
+
+  it("fails the rest of a run once when both edits in flight come back out of credits, and sends nothing more", async (t) => {
+    const lines = captureConsole(t, "log", "warn");
+    const theme = await themed(["1", "2", "3", "4", "5", "6"].map((id) => person(id)));
+    // Both in flight answer together, so their two drains of the queue overlap.
+    fake.edit = async () => {
+      await new Promise((r) => setTimeout(r, 30));
+      return { status: 429, body: errorBody("credit_balance_exhausted", "insufficient_quota") };
+    };
+    await generated();
+    assert.equal(fake.edits(), 2, "the two in flight; the rest failed without a request");
+    for (const id of ["1", "2", "3", "4", "5", "6"]) assert.equal(statusOf(theme.id, id), "failed", id);
+    const runs = lines.filter((l) => l.startsWith("[photo-theme] generate for plan"));
+    assert.deepEqual(runs, ['[photo-theme] generate for plan 2001 in "Christmas 2026": 0 made, 6 failed, 0 reused at no cost, 0 skipped'], "each job settled once");
+    assert.equal(lines.filter((l) => l.includes("failed: Out of API credits")).length, 6, "each person failed once");
   });
 
   it("waits out a rate limit for as long as OpenAI asks, then tries again", async () => {
@@ -211,7 +265,7 @@ describe("paying once", () => {
   it("a double-clicked Redo sends one edit", async () => {
     const theme = await themed([person("1"), person("2")]);
     await generated();
-    await photoThemes.approveAll(PLAN);
+    await approveAllShown(photoThemes, PLAN);
     fake.requests.length = 0;
     const edits = slowEdits();
     const from = { planId: PLAN, serviceTypeId: TYPE };
@@ -226,7 +280,7 @@ describe("paying once", () => {
   it("a double-clicked Generate after a prompt change sends each person once", async () => {
     const theme = await themed([person("1"), person("2"), person("3")]);
     await generated();
-    await photoThemes.approveAll(PLAN);
+    await approveAllShown(photoThemes, PLAN);
     await photoThemes.updateTheme(theme.id, { prompt: "Snow, keep the face the same" });
     fake.requests.length = 0;
     const edits = slowEdits();
@@ -240,7 +294,7 @@ describe("paying once", () => {
   it("Generate does not spend again on somebody with an approved photo whose Redo failed", async () => {
     const theme = await themed([person("1")]);
     await generated();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     fake.edit = () => ({ status: 400, body: { error: { code: "moderation_blocked" } } });
     await photoThemes.redo(theme.id, "1", { planId: PLAN, serviceTypeId: TYPE });
     await photoThemes.idle();
@@ -256,7 +310,7 @@ describe("what screens are given", () => {
   it("approved photos of a plan set to Themed, and nothing else", async () => {
     const theme = await themed();
     await generated();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     const shown = photoThemes.shownPhotos(PLAN);
     assert.deepEqual([...shown.keys()], ["1"], "the two still waiting for review are not shown");
     assert.match(shown.get("1")!, new RegExp(`^${THEMED_PHOTO_REF_PREFIX}[0-9a-f]{16}\\.webp$`));
@@ -274,7 +328,7 @@ describe("what screens are given", () => {
     const theme = await themed([person("1")]);
     await photoThemes.choosePlan(PLAN, { serviceTypeId: TYPE, sortDate: undefined, show: "original" });
     await generated();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     assert.equal(photoThemes.state().plans[0]!.show, "themed");
   });
 
@@ -283,14 +337,14 @@ describe("what screens are given", () => {
     await photoThemes.choosePlan(PLAN, { serviceTypeId: TYPE, sortDate: undefined, show: "original" });
     await generated();
     srv.unreadable.set(PLAN, "Planning Center did not answer");
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     assert.equal(photoThemes.state().plans[0]!.show, "original");
   });
 
   it("keeps the approved photo on screen while a redo is made, until the redo is approved", async () => {
     const theme = await themed([person("1")]);
     await generated();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     const before = photoThemes.shownPhotos(PLAN).get("1");
     await photoThemes.redo(theme.id, "1", { planId: PLAN, serviceTypeId: TYPE });
     await photoThemes.idle();
@@ -300,9 +354,72 @@ describe("what screens are given", () => {
     fake.edit = async () => ({ status: 200, body: { data: [{ b64_json: Buffer.concat([await (await import("./photo-themes-harness.js")).webpBytes(), Buffer.from("x")]).toString("base64") }] } });
     await photoThemes.redo(theme.id, "1", { planId: PLAN, serviceTypeId: TYPE });
     await photoThemes.idle();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     assert.notEqual(photoThemes.shownPhotos(PLAN).get("1"), before);
     assert.equal((await fs.readdir(path.join(TMP, PHOTO_THEME_IMAGE_DIR))).length, 1, "the replaced photo's file is gone");
+  });
+});
+
+describe("an approval approves only what was shown", () => {
+  /** Edits from here on are a different file from the ones already made. */
+  function nextEditsDiffer() {
+    fake.edit = async () => ({ status: 200, body: { data: [{ b64_json: Buffer.concat([await (await import("./photo-themes-harness.js")).webpBytes(), Buffer.from("redo")]).toString("base64") }] } });
+  }
+
+  it("Approve all leaves an edit that landed after the view unapproved, and says who", async () => {
+    const theme = await themed([person("1"), person("2")]);
+    await generated();
+    // What the panel shows: 1 and 2 ready.
+    const shown = [
+      { personId: "1", file: shownFile(photoThemes, theme.id, "1") },
+      { personId: "2", file: shownFile(photoThemes, theme.id, "2") },
+    ];
+    // Meanwhile: 1 is redone into a different edit, and 3 joins the plan and is made.
+    nextEditsDiffer();
+    srv.rosters.set(PLAN, [person("1"), person("2"), person("3")]);
+    await photoThemes.redo(theme.id, "1", { planId: PLAN, serviceTypeId: TYPE });
+    await generated();
+    assert.equal(statusOf(theme.id, "3"), "ready");
+
+    const r = await photoThemes.approveAll(PLAN, shown);
+    assert.deepEqual(r, { approved: 1, skipped: ["1"] });
+    assert.equal(statusOf(theme.id, "1"), "ready", "the redo nobody saw waits for review");
+    assert.equal(statusOf(theme.id, "2"), "approved");
+    assert.equal(statusOf(theme.id, "3"), "ready", "an edit not on screen when Approve all was pressed waits for review");
+    assert.deepEqual([...photoThemes.shownPhotos(PLAN).keys()], ["2"]);
+  });
+
+  it("Approve refuses an edit that replaced the one shown, and approves nothing", async () => {
+    const theme = await themed([person("1")]);
+    await generated();
+    const seen = shownFile(photoThemes, theme.id, "1");
+    nextEditsDiffer();
+    await photoThemes.redo(theme.id, "1", { planId: PLAN, serviceTypeId: TYPE });
+    await photoThemes.idle();
+    assert.notEqual(shownFile(photoThemes, theme.id, "1"), seen);
+
+    await assert.rejects(photoThemes.approve(theme.id, "1", seen), (e: Error & { status?: number }) => e.status === 409 && /changed since it was shown/.test(e.message));
+    assert.equal(statusOf(theme.id, "1"), "ready");
+    assert.equal(photoThemes.shownPhotos(PLAN).size, 0);
+  });
+
+  it("Approve all for one plan does not approve an edit made for another, whatever file it is sent", async () => {
+    const theme = await themed([person("1")]);
+    srv.rosters.set(PLAN_2, [person("1")]);
+    await photoThemes.choosePlan(PLAN_2, { serviceTypeId: TYPE, sortDate: "2026-12-31T16:00:00Z", themeId: theme.id });
+    await generated();
+    // Person 1's edit was made for PLAN; a caller names it under PLAN_2.
+    const shown = [{ personId: "1", file: shownFile(photoThemes, theme.id, "1") }];
+    await assert.rejects(photoThemes.approveAll(PLAN_2, shown), (e: Error & { status?: number }) => e.status === 409);
+    assert.equal(statusOf(theme.id, "1"), "ready");
+  });
+
+  it("Approve all with nothing left as it was shown is refused, not a silent success", async () => {
+    const theme = await themed([person("1")]);
+    await generated();
+    const shown = [{ personId: "1", file: shownFile(photoThemes, theme.id, "1") }];
+    await photoThemes.remove(theme.id, "1");
+    await assert.rejects(photoThemes.approveAll(PLAN, shown), (e: Error & { status?: number }) => e.status === 409);
   });
 });
 
@@ -310,7 +427,7 @@ describe("made from an older photo", () => {
   it("is flagged when the Planning Center photo changes, and Keep clears it", async () => {
     const theme = await themed([person("1")]);
     await generated();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     assert.equal(statusOf(theme.id, "1"), "approved");
     // The same upload at another size is the same photo.
     assert.equal(photoFingerprint(pcoPhoto("1", 1)), photoFingerprint(pcoPhoto("1", 1).replace("256x256%23", "512x512")));
@@ -329,7 +446,7 @@ describe("a person's original photo, for Manage themes", () => {
   it("is their current Planning Center photo where this server has seen it", async () => {
     const theme = await themed([person("1"), person("2")]);
     await generated();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     const of = (id: string) => photoThemes.state().themes.find((t) => t.id === theme.id)!.people.find((p) => p.personId === id)!.originalUrl;
     assert.equal(of("1"), pcoPhoto("1", 1));
     // A new upload is what Manage should draw as their original, so it shows what the edit was NOT made from.
@@ -339,12 +456,136 @@ describe("a person's original photo, for Manage themes", () => {
 });
 
 describe("move, copy and remove", () => {
+  /** Hold every original's read until released: the window between an edit starting and its request. */
+  function holdOriginals() {
+    const load = srv.deps.loadOriginal!;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    let reading = 0;
+    srv.deps.loadOriginal = async (url) => {
+      reading++;
+      await gate;
+      return load(url);
+    };
+    return {
+      reading: async () => {
+        while (reading === 0) await new Promise((r) => setTimeout(r, 5));
+      },
+      release: () => {
+        release();
+        srv.deps.loadOriginal = load;
+      },
+    };
+  }
+
+  it("a person removed while their original is being read is not sent to OpenAI", async () => {
+    const theme = await themed([person("1")]);
+    await generated();
+    await approveShown(photoThemes, theme.id, "1");
+    fake.requests.length = 0;
+    const held = holdOriginals();
+    await photoThemes.redo(theme.id, "1", { planId: PLAN, serviceTypeId: TYPE });
+    await held.reading();
+    await photoThemes.remove(theme.id, "1");
+    held.release();
+    await photoThemes.idle();
+    assert.equal(fake.edits(), 0, "nothing billed for somebody no longer in the theme");
+  });
+
+  it("removing someone whose first photo is still being made cancels it, and is not a 404", async () => {
+    const theme = await themed([person("1"), person("2")]);
+    const held = holdOriginals();
+    await photoThemes.generate(PLAN, TYPE, "missing");
+    await held.reading();
+    assert.equal((await photoThemes.planPeople(PLAN, TYPE)).people.find((p) => p.personId === "1")?.status, "generating");
+    await photoThemes.remove(theme.id, "1");
+    held.release();
+    await photoThemes.idle();
+    assert.equal(fake.edits(), 1, "only person 2 is sent");
+    assert.equal(statusOf(theme.id, "1"), "none");
+    assert.equal(statusOf(theme.id, "2"), "ready");
+    await assert.rejects(photoThemes.remove(theme.id, "1"), (e: Error & { status?: number }) => e.status === 404, "once nothing is being made, a remove of nobody is still a 404");
+  });
+
+  it("a theme deleted while its originals are being read sends nothing", async () => {
+    const theme = await themed([person("1")]);
+    const held = holdOriginals();
+    await photoThemes.generate(PLAN, TYPE, "missing");
+    await held.reading();
+    await photoThemes.deleteTheme(theme.id);
+    held.release();
+    await photoThemes.idle();
+    assert.equal(fake.edits(), 0);
+  });
+
+  it("an edit that lands while a remove of that person is still being written is not kept", async (t) => {
+    const lines = captureConsole(t, "log");
+    const theme = await themed([person("1")]);
+    await generated();
+    await approveShown(photoThemes, theme.id, "1");
+    // The write queue, held: the remove waits in it, and the redo's result queues behind the remove.
+    const writes = (photoThemes as unknown as { writes: { enqueue: <R>(fn: () => Promise<R>) => Promise<R> } }).writes;
+    const enqueue = writes.enqueue;
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let removing: Promise<void> | null = null;
+    const base = fake.edit;
+    fake.edit = async (r) => {
+      let queued = 0;
+      writes.enqueue = <R>(fn: () => Promise<R>): Promise<R> => {
+        const out = enqueue.call(writes, fn) as Promise<R>;
+        // The hold, the remove, then the redo's result: let them run, in that order.
+        if (++queued === 3) release();
+        return out;
+      };
+      void writes.enqueue(() => held);
+      removing = photoThemes.remove(theme.id, "1");
+      return base(r);
+    };
+    try {
+      await photoThemes.redo(theme.id, "1", { planId: PLAN, serviceTypeId: TYPE });
+      await photoThemes.idle();
+      await removing;
+    } finally {
+      writes.enqueue = enqueue;
+      fake.edit = base;
+    }
+    assert.equal(photoThemes.state().themes[0]!.people.some((p) => p.personId === "1"), false, "removed, and not put back by the redo that landed behind the remove");
+    assert.ok(lines.some((l) => l.includes("finished after it was removed from its theme, and was not kept")));
+  });
+
+  it("a remove whose save fails leaves the person's edit in flight to land, paid for and kept", async () => {
+    const theme = await themed([person("1")]);
+    await generated();
+    await approveShown(photoThemes, theme.id, "1");
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const base = fake.edit;
+    fake.edit = async () => {
+      await gate;
+      return { status: 200, body: { data: [{ b64_json: Buffer.concat([await (await import("./photo-themes-harness.js")).webpBytes(), Buffer.from("redo")]).toString("base64") }] } };
+    };
+    await photoThemes.redo(theme.id, "1", { planId: PLAN, serviceTypeId: TYPE });
+    while (fake.edits() === 0) await new Promise((r) => setTimeout(r, 5));
+    // The data directory refuses the write: the remove fails, and the book keeps them.
+    await fs.chmod(TMP, 0o555);
+    try {
+      await assert.rejects(photoThemes.remove(theme.id, "1"));
+    } finally {
+      await fs.chmod(TMP, 0o755);
+    }
+    release();
+    await photoThemes.idle();
+    fake.edit = base;
+    assert.equal(statusOf(theme.id, "1"), "ready", "the redo they are still in the theme for is kept");
+  });
+
   it("copy shares the file, move takes it out, remove drops it when nothing else holds it", async () => {
     const a = await themed([person("1")]);
     const b = await photoThemes.createTheme({ name: "Easter 2027", prompt: "Spring" });
     const c = await photoThemes.createTheme({ name: "Summer 2027", prompt: "Sun" });
     await generated();
-    await photoThemes.approve(a.id, "1");
+    await approveShown(photoThemes, a.id, "1");
     const files = () => fs.readdir(path.join(TMP, PHOTO_THEME_IMAGE_DIR));
 
     await photoThemes.transfer(a.id, "1", b.id, "copy");
@@ -381,7 +622,7 @@ describe("move, copy and remove", () => {
   it("deleting a theme puts its plans back on the originals and removes its photos", async () => {
     const a = await themed([person("1")]);
     await generated();
-    await photoThemes.approve(a.id, "1");
+    await approveShown(photoThemes, a.id, "1");
     assert.deepEqual(await photoThemes.deleteTheme(a.id), { plans: 1, photos: 1 });
     assert.equal(photoThemes.state().plans[0]!.themeId, null);
     assert.equal(photoThemes.shownPhotos(PLAN).size, 0);
@@ -394,7 +635,7 @@ describe("retention", () => {
     const lines = captureConsole(t, "log", "warn");
     const theme = await themed([person("1")]);
     await generated();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     assert.equal(photoThemes.state().themes[0]!.keptUntil, "2027-03-24");
 
     // 03:00 UTC on the 25th is still the 24th in Chicago: kept. A sweep that
@@ -425,7 +666,7 @@ describe("retention", () => {
   it("does not clear a theme chosen for a later service while the sweep waited its turn", async () => {
     const theme = await themed([person("1")]);
     await generated();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     now = Date.parse("2027-03-25T12:00:00Z");
     // Queued first, so it lands before the sweep's write.
     const chosen = photoThemes.choosePlan(PLAN_2, { serviceTypeId: TYPE, sortDate: "2027-04-04T15:00:00Z", themeId: theme.id });
@@ -438,10 +679,122 @@ describe("retention", () => {
   it("leaves alone a theme a plan with no known date uses", async () => {
     const theme = await themed([person("1")]);
     await generated();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     await photoThemes.choosePlan("2003", { serviceTypeId: TYPE, sortDate: null, themeId: theme.id });
     now = Date.parse("2028-01-01T12:00:00Z");
     assert.equal((await photoThemes.sweep()).photos, 0);
+  });
+});
+
+describe("a changed prompt", () => {
+  const SNOW = "Snow, keep the face the same";
+  const flagged = (themeId: string) => photoThemes.state().themes.find((t) => t.id === themeId)!.promptChanged;
+  const flaggedOn = async (plan: string) =>
+    (await photoThemes.planPeople(plan, TYPE)).people.filter((p) => p.promptChanged).map((p) => p.personId);
+
+  /** Two plans sharing person 2, everyone approved under the first prompt, then the prompt changed. */
+  async function twoPlansThenNewPrompt() {
+    const theme = await themed([person("1"), person("2")]);
+    srv.rosters.set(PLAN_2, [person("2"), person("3")]);
+    await photoThemes.choosePlan(PLAN_2, { serviceTypeId: TYPE, sortDate: "2026-12-31T16:00:00Z", themeId: theme.id });
+    await generated();
+    await generated("missing", PLAN_2);
+    await approveAllShown(photoThemes, PLAN);
+    await approveAllShown(photoThemes, PLAN_2);
+    assert.equal(flagged(theme.id), false);
+    await photoThemes.updateTheme(theme.id, { prompt: SNOW });
+    return theme;
+  }
+
+  it("Redo all on one plan leaves another plan's people made under the old prompt flagged, until they are redone too", async () => {
+    const theme = await twoPlansThenNewPrompt();
+    assert.equal(flagged(theme.id), true);
+    assert.deepEqual(await flaggedOn(PLAN), ["1", "2"]);
+
+    fake.requests.length = 0;
+    assert.deepEqual(await generated("all", PLAN), { queued: 2, reused: 0, skipped: [] });
+    assert.deepEqual(await flaggedOn(PLAN), [], "this plan's people are redone under the new prompt");
+    assert.equal(flagged(theme.id), true, "person 3, on the other plan only, is still made under the old prompt");
+    assert.deepEqual(await flaggedOn(PLAN_2), ["3"], "person 2 was redone from the first plan");
+
+    // Redo all there sends only person 3: person 2 keeps their approved photo, and their new edit waits for review.
+    assert.deepEqual(await generated("all", PLAN_2), { queued: 1, reused: 1, skipped: [] });
+    assert.equal(fake.edits(), 3, "nobody was paid for twice");
+    assert.equal(flagged(theme.id), false);
+  });
+
+  it("Redo all's count is what Redo all sends: not someone whose photo is not on Planning Center", async () => {
+    const theme = await twoPlansThenNewPrompt();
+    // Person 2's photo has moved off Planning Center since it was made.
+    srv.rosters.set(PLAN, [person("1"), { personId: "2", name: "Person 2", photoUrl: "https://example.com/avatar.jpg" }]);
+    const read = await photoThemes.planPeople(PLAN, TYPE);
+    assert.deepEqual(read.people.filter((p) => p.promptChanged).map((p) => p.personId), ["1", "2"]);
+    assert.equal(read.toRedoAll, 1);
+    const r = await generated("all", PLAN);
+    assert.equal(r.queued, read.toRedoAll, "the count and the send agree");
+    assert.equal(statusOf(theme.id, "2"), "stale", "not sent: their approved photo stands, made from the photo they had");
+  });
+
+  it("the prompt each photo was made under survives a restart", async () => {
+    await twoPlansThenNewPrompt();
+    await generated("all", PLAN);
+    await approveAllShown(photoThemes, PLAN);
+    await photoThemes.reloadForTests();
+    await photoThemes.connection.saveKey(KEY);
+    assert.deepEqual(await flaggedOn(PLAN), [], "redone under the new prompt, and read back so");
+    fake.requests.length = 0;
+    assert.deepEqual(await generated("all", PLAN), { queued: 0, reused: 2, skipped: [] });
+    assert.equal(fake.edits(), 0, "nobody paid for again after a restart");
+  });
+
+  it("Keep these clears it for everyone, on every plan, and sends nothing", async () => {
+    const theme = await twoPlansThenNewPrompt();
+    fake.requests.length = 0;
+    await photoThemes.keepPrompt(theme.id);
+    assert.equal(flagged(theme.id), false);
+    assert.deepEqual(await flaggedOn(PLAN_2), []);
+    assert.deepEqual(await generated("all", PLAN), { queued: 0, reused: 2, skipped: [] }, "Redo all has nobody left to redo");
+    assert.equal(fake.edits(), 0);
+  });
+
+  it("a photo moved into a theme stands for that theme's prompt", async () => {
+    const a = await themed([person("1")]);
+    await generated();
+    await approveShown(photoThemes, a.id, "1");
+    const b = await photoThemes.createTheme({ name: "Easter 2027", prompt: "Spring flowers, keep the face the same" });
+    await photoThemes.transfer(a.id, "1", b.id, "copy");
+    assert.equal(flagged(b.id), false, "a copy put there on purpose is not 'made under an earlier prompt'");
+  });
+
+  it("a book written before photos recorded their prompt still loads, read against its baseline prompt", async () => {
+    const file = (baselinePrompt: string) =>
+      JSON.stringify({
+        version: 1,
+        themes: [
+          {
+            id: "th-0123456789ab",
+            name: "Christmas 2026",
+            prompt: SNOW,
+            baselinePrompt,
+            createdAt: "2026-11-01T00:00:00Z",
+            lastUsedDate: null,
+            people: [
+              {
+                personId: "1",
+                name: "Person 1",
+                approved: { file: "0123456789abcdef.webp", madeFrom: "0123456789abcdef", sourceUrl: pcoPhoto("1"), planId: null, serviceDate: null, approvedAt: "2026-11-02T00:00:00Z" },
+              },
+            ],
+          },
+        ],
+        plans: [],
+      });
+    await fs.writeFile(path.join(TMP, "photo-themes.json"), file("Christmas lights"));
+    await photoThemes.reloadForTests();
+    assert.equal(flagged("th-0123456789ab"), true, "made under the baseline, which is not the prompt now");
+    await fs.writeFile(path.join(TMP, "photo-themes.json"), file(SNOW));
+    await photoThemes.reloadForTests();
+    assert.equal(flagged("th-0123456789ab"), false);
   });
 });
 
@@ -479,7 +832,7 @@ describe("files on disk", () => {
   it("are never removed because the book read empty from a damaged file", async () => {
     const theme = await themed([person("1")]);
     await generated();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     const dir = path.join(TMP, PHOTO_THEME_IMAGE_DIR);
     const [file] = await fs.readdir(dir);
     await fs.writeFile(path.join(TMP, "photo-themes.json"), '{"version":1,"themes":[{"id"');
@@ -493,7 +846,7 @@ describe("files on disk", () => {
     const lines = captureConsole(t, "warn");
     const theme = await themed([person("1")]);
     await generated();
-    await photoThemes.approve(theme.id, "1");
+    await approveShown(photoThemes, theme.id, "1");
     assert.equal(photoThemes.shownPhotos(PLAN).size, 1);
     await fs.rm(path.join(TMP, PHOTO_THEME_IMAGE_DIR), { recursive: true });
     await photoThemes.reloadForTests();
@@ -551,5 +904,16 @@ describe("the key", () => {
     assert.equal(photoThemes.connection.status().hint, "sk-…ssss");
     // It is the key that went to OpenAI, in the one header.
     assert.equal(fake.requests.at(-1)!.authorization, `Bearer ${KEY}`);
+  });
+
+  it("a key saved, removed or refused goes out on the channel, with the connection as it stands", async () => {
+    const said = () => frames.filter((f) => f.startsWith("photo-themes:changed")).map((f) => (JSON.parse(f.slice(f.indexOf(" ") + 1)) as { connection: { state: string } }).connection.state);
+    frames.length = 0;
+    await photoThemes.connection.clearKey();
+    await photoThemes.connection.saveKey("sk-another-key-".padEnd(40, "a"));
+    fake.models = () => ({ status: 401, body: errorBody("invalid_api_key", null) });
+    await photoThemes.connection.test();
+    await photoThemes.connection.test();
+    assert.deepEqual(said(), ["not-connected", "unchecked", "invalid-key"], "one frame per change, none for a test that changes nothing");
   });
 });

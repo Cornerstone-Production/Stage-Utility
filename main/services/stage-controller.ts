@@ -63,7 +63,7 @@ import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, startOfZone
 import { buildGrid, gridWindow, monthAnchor } from "./calendar-grid.js";
 import { errorMessage } from "./errors.js";
 import { serviceRunning, shouldRecordLive } from "./live-service-gate.js";
-import { isStringList } from "./is-record.js";
+import { isStringList } from "../types/is-record.js";
 import { OutageLog } from "./repeat-log.js";
 import {
   incompleteOf,
@@ -86,7 +86,7 @@ import type {
 } from "../types/calendar.js";
 
 import type { PlanSwitcherMode, UpcomingPlan, UpcomingPlansDTO } from "../types/pco.js";
-import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ServiceCueConfig, ServiceCueLayout, ServiceCueRundownDTO, ServiceTypeDTO, Slot, SlotBoardDTO, SlotBoardMeta, SlotBoardShownOn, BoardCheckDTO, SlotPreset, SlotsLayout, SlotsPreviewDTO, SlotsPreviewTarget, SlotsScope, SlotTargetsDTO, ViewSlotsLayout, StageState, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, TypedTeamPositionDTO, AllTeamPositionsDTO, View, ViewKind } from "../types/stage.js";
+import type { AutoUpdateSettings, ChargerBayDTO, DisplayInfo, LayoutDTO, Output, PcoAttachmentDTO, PcoLiveDTO, PlanDTO, PlanItemsDTO, ReconnectSchedule, ResolvedOutput, ServiceCueConfig, ServiceCueLayout, ServiceCueRundownDTO, ServiceTypeDTO, Slot, SlotBoardDTO, SlotBoardMeta, SlotBoardShownOn, BoardCheckDTO, SlotPreset, SlotsLayout, SlotsPreviewDTO, SlotsPreviewTarget, SlotsScope, SlotTargetsDTO, ViewSlotsLayout, StageState, RolloverHeld, BaptismAutoStart, TaperWindow, TeamMemberDTO, TeamPositionDTO, TypedTeamPositionDTO, AllTeamPositionsDTO, View, ViewKind } from "../types/stage.js";
 import { CHARGER_BAYS_CHANNEL, WIRELESS_STATUS_CHANNEL, type DeviceStatus } from "../types/devices.js";
 import { broadcast, channelHasSubscribers, channelInDemand } from "./broadcaster.js";
 import { pcoService } from "./pco-service.js";
@@ -469,6 +469,16 @@ export function writeIconEntry(
 /** A service type and its nearest upcoming plan, as auto mode weighs them. */
 type Candidate = { type: ServiceTypeDTO; plan: PlanDTO };
 
+/** A rundown's columns: the note categories its items use, in `order` (Planning Center's),
+ *  then any it does not name in the order the items first use them. */
+function columnsInOrder(items: readonly PlanItemDTO[], order: readonly string[]): string[] {
+  const used = new Set<string>();
+  for (const it of items) for (const k of Object.keys(it.notesByCategory)) used.add(k);
+  const ordered = order.filter((c) => used.has(c));
+  for (const c of used) if (!ordered.includes(c)) ordered.push(c);
+  return ordered;
+}
+
 export class StageController {
   private state: StageState = {
     serviceTypeId: null,
@@ -484,6 +494,7 @@ export class StageController {
     barItems: [],
     barMobileItems: [],
     sidebar: { sections: [], hidden: [] },
+    listRevisions: { boot: randomUUID(), sidebar: 0, bar: 0 },
     savedColors: [],
     notesByObject: {},
     slotsByLayoutObject: {},
@@ -498,6 +509,7 @@ export class StageController {
     showQr: true,
     kioskDiscovery: false,
     serverIdentity: { id: null, check: { state: "off" }, duplicates: [] },
+    rolloverHeld: null,
     autoUpdateMachines: true,
     allowedServiceTypeIds: [],
     planSwitcherMode: "upcoming",
@@ -607,9 +619,14 @@ export class StageController {
   /** What the last `[plans] upcoming list refreshed` line said, so an unchanged list is not
    *  said again every time its cache expires. */
   private lastRefreshLine = "";
-  /** Plan-list reads that keep failing, said once per outage. Keys:
-   *  `followed:<serviceTypeId>` and `upcoming:<serviceTypeId>`. */
+  /** Planning Center reads that keep failing, said once per outage. Keys:
+   *  `followed:<serviceTypeId>`, `upcoming:<serviceTypeId>`, `hold:<serviceTypeId>`, and
+   *  a rundown part's (rundownPart): `note categories:<serviceTypeId>`,
+   *  `service times:<serviceTypeId>`, and the org-wide `the time zone` and `service types`. */
   private readonly plansOutage = new OutageLog();
+  /** Each rundown part's last good answer, by part and what it is for (rundownPart):
+   *  what a failed read answers with, so a degraded rundown is not an emptied one. */
+  private readonly rundownLastGood = new Map<string, unknown>();
   /** Daily sweep for overrides whose plan is long past. */
   private slotsPruneTimer: ReturnType<typeof setInterval> | null = null;
   /** The one-shot sweep shortly after boot, held so it can be cancelled too. */
@@ -1721,13 +1738,76 @@ export class StageController {
     if (!this.state.serviceTypeId || !this.state.planId) return empty;
     const [items, categories] = await Promise.all([
       pcoService.listPlanItems(this.pcoAppId, this.pcoSecret, this.state.serviceTypeId, this.state.planId),
-      pcoService.listItemNoteCategories(this.pcoAppId, this.pcoSecret, this.state.serviceTypeId),
+      this.noteCategoryOrder(this.state.serviceTypeId),
     ]);
-    const used = new Set<string>();
-    for (const it of items) for (const k of Object.keys(it.notesByCategory)) used.add(k);
-    const ordered = categories.filter((c) => used.has(c));
-    for (const c of used) if (!ordered.includes(c)) ordered.push(c); // any non-canonical, at end
-    return { planId: this.state.planId, items, noteCategories: ordered };
+    return { planId: this.state.planId, items, noteCategories: columnsInOrder(items, categories) };
+  }
+
+  /**
+   * Planning Center's order for a service type's note categories, for a rundown's columns.
+   *
+   * The order is all this decides: which columns a rundown has comes from its items' own
+   * notes. So a failed read is not the rundown's failure, as it was while this threw
+   * through the Promise.all beside the items and blanked the ServiceCue page, the public
+   * page and the plan items over one failed request. It falls back to the order last read,
+   * or none (the items' own order). The note-categories route and Home's row read the
+   * categories themselves, and still fail.
+   */
+  private noteCategoryOrder(serviceTypeId: string): Promise<string[]> {
+    return this.rundownPart({
+      what: "note categories",
+      serviceTypeId,
+      keep: serviceTypeId,
+      read: () => pcoService.listItemNoteCategories(this.pcoAppId!, this.pcoSecret!, serviceTypeId),
+      none: { value: [], without: "their columns in the order the items use them" },
+    });
+  }
+
+  /**
+   * One read that only dresses a rundown whose items were read: its column order,
+   * service times, time zone or row colours. Never rejects.
+   *
+   * A failure answers with the part's last good value (kept per `keep`: the plan for
+   * its times, the service type for its categories), so a degraded rundown is the one
+   * last served rather than an emptied one: the public page's publisher keeps its last
+   * good copy only for a failed read, and would otherwise replace a good page with one
+   * in the wrong zone, without its projected clock or row colours. Only with nothing
+   * read yet does it answer `none`. Said once per outage on [pco], keyed by the part
+   * and, for a per-type read, its service type: an org-wide read (`serviceTypeId`
+   * null) is one outage however many types' rundowns ask.
+   */
+  private async rundownPart<T>(part: {
+    what: string;
+    serviceTypeId: string | null;
+    keep: string;
+    read: () => Promise<T>;
+    none: { value: T; without: string };
+  }): Promise<T> {
+    const { what, serviceTypeId, read, none } = part;
+    const outageKey = serviceTypeId === null ? what : `${what}:${serviceTypeId}`;
+    const keepKey = `${what}:${part.keep}`;
+    const forWhom = serviceTypeId === null ? "" : ` for service type ${serviceTypeId}`;
+    try {
+      const value = await read();
+      // Re-set, so the most recently used stay when the map is bounded below.
+      this.rundownLastGood.delete(keepKey);
+      this.rundownLastGood.set(keepKey, value);
+      if (this.rundownLastGood.size > 500) this.rundownLastGood.delete(this.rundownLastGood.keys().next().value!);
+      const back = this.plansOutage.ok(outageKey, Date.now());
+      if (back.log) console.log(`[pco] ${scrub(what)}${scrub(forWhom)} can be read again${scrub(back.note)}`);
+      return value;
+    } catch (err) {
+      const kept = this.rundownLastGood.has(keepKey);
+      const value = kept ? (this.rundownLastGood.get(keepKey) as T) : none.value;
+      const without = kept ? `with the ${what} last read` : none.without;
+      const decision = this.plansOutage.fail(outageKey, errorMessage(err), Date.now());
+      if (decision.log) {
+        console.warn(
+          `[pco] ${scrub(what)}${scrub(forWhom)} could not be read (${scrub(errorMessage(err))}); rundowns still answer, ${scrub(without)}${scrub(decision.note)}`,
+        );
+      }
+      return value;
+    }
   }
 
   // ── Pre-service checklist, sourced from Planning Center plan notes ───────
@@ -1984,7 +2064,7 @@ export class StageController {
     );
     if (orphaned.length > 0) {
       console.log(
-        `[stage-controller] ${scrub(orphaned.length)} view(s) referenced a deleted ServiceCue preset — ` +
+        `[stage-controller] ${scrub(orphaned.length)} view(s) referenced a deleted ServiceCue layout — ` +
           `cleared to all columns: ${orphaned.map((v) => scrub(v.name)).join(", ")}`,
       );
       const views = this.state.views.map((v) =>
@@ -2067,8 +2147,10 @@ export class StageController {
       planDates: null, items: [], noteCategories: [], serviceTimes: [], timeZone: null, isActivePlan: false, isDefaultPlan: true,
     };
     if (!this.pcoAppId || !this.pcoSecret || !serviceTypeId) return empty;
+    const appId = this.pcoAppId;
+    const secret = this.pcoSecret;
 
-    const plans = await pcoService.listUpcomingPlans(this.pcoAppId, this.pcoSecret, serviceTypeId);
+    const plans = await pcoService.listUpcomingPlans(appId, secret, serviceTypeId);
     const isActiveType = serviceTypeId === this.state.serviceTypeId;
 
     /**
@@ -2124,16 +2206,30 @@ export class StageController {
     // costs nothing — the colors ride along on a request already being made.
     const [items, categories, serviceTimes, timeZone, serviceTypes] = await Promise.all([
       pcoService.listPlanItems(this.pcoAppId, this.pcoSecret, serviceTypeId, plan.id),
-      pcoService.listItemNoteCategories(this.pcoAppId, this.pcoSecret, serviceTypeId),
-      pcoService.listPlanServiceTimes(this.pcoAppId, this.pcoSecret, serviceTypeId, plan.id),
-      pcoService.listOrgTimeZone(this.pcoAppId, this.pcoSecret),
-      pcoService.listServiceTypes(this.pcoAppId, this.pcoSecret),
+      this.noteCategoryOrder(serviceTypeId),
+      this.rundownPart({
+        what: "service times",
+        serviceTypeId,
+        keep: plan.id,
+        read: () => pcoService.listPlanServiceTimes(appId, secret, serviceTypeId, plan.id),
+        none: { value: [] as string[], without: "with no service times to anchor the projected clock" },
+      }),
+      // Org-wide, so one outage however many types ask. Never read: the app's own zone.
+      this.rundownPart<string | null>({
+        what: "the time zone",
+        serviceTypeId: null,
+        keep: appId,
+        read: () => pcoService.listOrgTimeZone(appId, secret),
+        none: { value: appTimeZone(), without: "in this server's time zone" },
+      }),
+      this.rundownPart({
+        what: "service types",
+        serviceTypeId: null,
+        keep: appId,
+        read: () => pcoService.listServiceTypes(appId, secret),
+        none: { value: [] as ServiceTypeDTO[], without: "with no item row colours" },
+      }),
     ]);
-    const used = new Set<string>();
-    for (const it of items) for (const k of Object.keys(it.notesByCategory)) used.add(k);
-    const ordered = categories.filter((c) => used.has(c));
-    for (const c of used) if (!ordered.includes(c)) ordered.push(c);
-
     return {
       serviceTypeId,
       planId: plan.id,
@@ -2141,7 +2237,7 @@ export class StageController {
       planSeriesTitle: plan.seriesTitle,
       planDates: plan.dates,
       items,
-      noteCategories: ordered,
+      noteCategories: columnsInOrder(items, categories),
       itemTypeColors: serviceTypes.find((t) => t.id === serviceTypeId)?.itemTypeColors ?? [],
       serviceTimes,
       timeZone,
@@ -2224,24 +2320,32 @@ export class StageController {
    * manual mode, when unconfigured, or when already advanced from this plan.
    */
   async maybeAutoAdvance(): Promise<void> {
-    if (this.state.planMode !== "auto") return;
-    if (!this.pcoAppId || !this.pcoSecret) return;
-    if (!this.state.serviceTypeId || !this.state.planId) return;
-    if (this.autoAdvancedFromPlanId === this.state.planId) return;
-    const retry = this.rolloverRetry?.planId === this.state.planId ? this.rolloverRetry : null;
-    if (retry && Date.now() < retry.at) return;
+    const planId = this.state.planId;
+    // A hold is about the plan it was set for. Cleared here, before any return below:
+    // an end that cannot be read keeps a hold, but only this plan's.
+    if (this.state.rolloverHeld && this.state.rolloverHeld.planId !== planId) this.setRolloverHeld(null);
+    if (this.state.planMode !== "auto" || !this.pcoAppId || !this.pcoSecret || !this.state.serviceTypeId || !planId) {
+      return this.setRolloverHeld(null);
+    }
+    if (this.autoAdvancedFromPlanId === planId) return this.setRolloverHeld(null);
+    const retry = this.rolloverRetry?.planId === planId ? this.rolloverRetry : null;
+    if (retry && Date.now() < retry.at) return this.setRolloverHeld(null);
     const endIso = await pcoService
-      .getServiceEnd(this.pcoAppId, this.pcoSecret, this.state.serviceTypeId, this.state.planId)
+      .getServiceEnd(this.pcoAppId, this.pcoSecret, this.state.serviceTypeId, planId)
       .catch(() => null);
+    // An end that cannot be read changes nothing: a held plan stays said, and none is
+    // said on a guess.
     if (!endIso) return;
     const end = Date.parse(endIso);
     if (!Number.isFinite(end)) return;
-    if (Date.now() < end + StageController.ROLLOVER_GRACE_MS) return;
+    if (Date.now() < end + StageController.ROLLOVER_GRACE_MS) return this.setRolloverHeld(null);
 
     // A service Planning Center still reports running is not over, however long
     // past its planned end it runs: nothing time-based may stop it. No time limit,
-    // as the recorders have none, so it is said once per plan instead.
+    // as the recorders have none. Said once per plan on the log, and on Home's Needs
+    // attention for as long as it holds, with the way to pick another plan.
     if (this.followedPlanLive()) {
+      this.setRolloverHeld({ planId, planTitle: this.state.planTitle, planDates: this.state.planDates, endsAt: new Date(end).toISOString() });
       if (this.rolloverWaitSaidFor !== this.state.planId) {
         this.rolloverWaitSaidFor = this.state.planId;
         const live = this.lastLive!;
@@ -2253,10 +2357,11 @@ export class StageController {
       return;
     }
 
+    this.setRolloverHeld(null);
     console.log(
-      `[stage-controller] auto rollover — plan ${scrub(this.state.planId)} ended >1h ago, selecting next`,
+      `[stage-controller] auto rollover — plan ${scrub(planId)} ended >1h ago, selecting next`,
     );
-    const from = this.state.planId;
+    const from = planId;
     this.autoAdvancedFromPlanId = from;
     await this.selectGlobalNextPlan().catch((err) =>
       console.error("[stage-controller] auto rollover error:", scrubError(err)),
@@ -2270,6 +2375,16 @@ export class StageController {
     const delayMs = retry ? Math.min(retry.delayMs * 2, StageController.ROLLOVER_RETRY_MAX_MS) : StageController.ROLLOVER_RETRY_MS;
     this.rolloverRetry = { planId: from, at: Date.now() + delayMs, delayMs };
     console.warn(`[stage-controller] auto rollover — still on plan ${scrub(from)}; trying again in ${scrub(Math.round(delayMs / 1000))} s`);
+  }
+
+  /** What Home's Needs attention says about a held plan. Broadcast only when it changes:
+   *  the poller asks every tick. */
+  private setRolloverHeld(next: RolloverHeld | null): void {
+    const cur = this.state.rolloverHeld;
+    if (cur === next) return;
+    if (cur && next && cur.planId === next.planId && cur.endsAt === next.endsAt && cur.planTitle === next.planTitle && cur.planDates === next.planDates) return;
+    this.state = { ...this.state, rolloverHeld: next };
+    this.broadcast();
   }
 
   /** Whether Planning Center reports the followed plan live: in one of its
@@ -3498,9 +3613,12 @@ export class StageController {
    * keeps the id a box has, and here that id is the copy. Refused while no other
    * server is heard with it, because every screen bound here refers to the id and
    * changing it without cause would orphan the lot. The screens both servers have
-   * set up stay with the other one, which keeps the old id; the ones set up only
-   * here are told "not set up" by it, and are answered as claimed here, so they
-   * follow the new id on their own. Nothing restarts.
+   * set up stay with the other one, which keeps the old id. The ones set up only
+   * here still probe bound to the old id, which this server now ignores (rule 1 in
+   * decideProbe), so they move only once the other server answers them "not set
+   * up" (its rule 3) and they probe again unbound, when this server answers them
+   * as claimed. If the other server is off, nothing answers them until it is back,
+   * or until they are set up here again. Nothing restarts.
    */
   async newServerId(): Promise<StageState> {
     const before = this.state.serverIdentity;
@@ -5525,7 +5643,10 @@ export class StageController {
    */
   async setBarItems(next: { items?: string[]; mobileItems?: string[] }): Promise<StageState> {
     const saved = await barConfigStore.set(next);
-    this.state = { ...this.state, barItems: saved.items, barMobileItems: saved.mobileItems };
+    // Counted where the state changes, after the write, so the answer and the
+    // broadcast carry the number in the order the saves landed.
+    const listRevisions = { ...this.state.listRevisions, bar: this.state.listRevisions.bar + 1 };
+    this.state = { ...this.state, barItems: saved.items, barMobileItems: saved.mobileItems, listRevisions };
     console.log(
       `[stage-controller] setBarItems desktop=${scrub(saved.items.length)} mobile=${scrub(
         saved.mobileItems.length === 0 ? "(follows desktop)" : saved.mobileItems.length,
@@ -5547,7 +5668,9 @@ export class StageController {
     // where the saved arrangement had one is carried over from it.
     const { arrangement, dropped } = keepKnownConsoles(keepHeldPlacements(this.state.sidebar, next, consoles), consoles);
     const saved = await sidebarConfigStore.set(arrangement);
-    this.state = { ...this.state, sidebar: saved };
+    // Counted where the state changes, as setBarItems does.
+    const listRevisions = { ...this.state.listRevisions, sidebar: this.state.listRevisions.sidebar + 1 };
+    this.state = { ...this.state, sidebar: saved, listRevisions };
     // A save is the moment a dropped id leaves the file, so the ids reported
     // before it are forgotten, which also keeps this set from growing for ever.
     this.sidebarDropsReported.clear();

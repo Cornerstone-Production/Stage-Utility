@@ -125,7 +125,8 @@ export interface ServiceCueLayout {
   /** True while the layout still carries the name Add layout gave it ("Layout 3"). The
    *  first rename moves the slug to the new name and clears this; after that the slug is
    *  fixed. A flag rather than a look at the name, since "Layout 3" can be typed on
-   *  purpose. Set by the server for a new layout only; never set by a backfill. */
+   *  purpose. Set by the editor on a layout it adds or copies, and kept by the server only
+   *  for a layout it has not stored before; never set by a backfill. */
   autoNamed?: boolean;
   order: number;
   /** @deprecated Ordered note-category NAMES. Migrated to `columnRoles` on load and

@@ -46,12 +46,22 @@ const WIRING: { what: string; helper: string; usedBy: string }[] = [
   },
   {
     what: "the context bar's arrangement is saved",
-    helper: "setBarItems",
+    helper: "barListIo",
+    usedBy: "app/bar-editor.tsx",
+  },
+  {
+    what: "the context bar's sets are saved one change at a time",
+    helper: "useSavedList",
     usedBy: "app/bar-editor.tsx",
   },
   {
     what: "the sidebar's arrangement is saved",
-    helper: "setSidebar",
+    helper: "sidebarListIo",
+    usedBy: "app/customize-mode.tsx",
+  },
+  {
+    what: "the sidebar's changes are saved one at a time",
+    helper: "useSavedList",
     usedBy: "app/customize-mode.tsx",
   },
 ];

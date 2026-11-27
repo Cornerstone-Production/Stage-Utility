@@ -5,7 +5,8 @@
 // belong to no service (Manage themes).
 //
 // Nothing here spends money except two buttons, Generate and Redo (and Redo all,
-// which is Generate over everyone). Each is a press, each is refused while it is
+// which is Generate with mode all: those made under an earlier prompt, and anyone
+// Generate would send). Each is a press, each is refused while it is
 // in flight, and each first saves a prompt that was typed and not yet kept: a
 // billed edit made from text the operator can no longer see on the server would
 // be the worst way to find out the save was refused.
@@ -13,17 +14,18 @@
 import { CheckIcon, SparklesIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { MAX_THEME_NAME, MAX_THEME_PROMPT, type PlanPersonDTO, type ThemeDTO } from "@main/types/photo-themes";
+import { MAX_THEME_NAME, MAX_THEME_PROMPT, type ApproveAllResultDTO, type GenerateResultDTO, type PlanPersonDTO, type ThemeDTO } from "@main/types/photo-themes";
 import { errorMessage } from "@main/services/errors";
 
-import { Button, ErrorNote, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Textarea } from "../../../components/ui";
+import { Button, ErrorNote, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Textarea, toast } from "../../../components/ui";
 import { invoke as ipc } from "../../../lib/api";
 import { cn } from "../../../lib/cn";
+import { INLINE_LINK } from "../../../lib/link-classes";
 import { useInAppLink } from "../../../lib/use-search-param";
 import { useCardOps } from "./card-ops";
 import { ManageThemes } from "./manage-themes";
 import { STATES } from "./openai-wording";
-import { Num, ShowSwitch } from "./photo-bits";
+import { Num, ShowSwitch, useEscapeFirst } from "./photo-bits";
 import { PersonCard, type CardAction } from "./person-card";
 import { DeleteTheme, ThemeFacts, themeLabel } from "./theme-boxes";
 import { type PhotoPlan, type PhotoThemes, usePlanPeople } from "./use-photo-themes";
@@ -130,6 +132,9 @@ function PanelBody({
   const generating = list.some((p) => p.status === "generating");
   const readyHere = list.filter((p) => p.status === "ready" && p.pending?.planId === plan.planId);
   const addedLater = list.some((p) => p.status !== "none");
+  /** People on THIS service whose photo was made under an earlier prompt. Others' stay flagged on their own services. */
+  const promptChangedHere = list.some((p) => p.promptChanged);
+  const [askRedoAll, setAskRedoAll] = useState(false);
 
   async function choose(themeId: string) {
     if (themeId === NEW_THEME) return setNewTheme({ name: "", prompt: "", error: null });
@@ -162,7 +167,9 @@ function PanelBody({
 
   async function generate(mode: "missing" | "all") {
     if (!theme || !(await flushPrompt())) return;
-    await photos.write(`generate:${plan.planId}`, () => ipc("photoThemes:generate", { planId: plan.planId, serviceTypeId: plan.serviceTypeId, mode }));
+    const r = await photos.write<GenerateResultDTO>(`generate:${plan.planId}`, () => ipc("photoThemes:generate", { planId: plan.planId, serviceTypeId: plan.serviceTypeId, mode }));
+    // Whoever was not sent, and why, said where the operator is looking rather than only in the log.
+    if (r.ok && r.value.skipped.length > 0) toast.info(`Not sent: ${r.value.skipped.map((x) => `${x.name} (${x.reason})`).join(", ")}`);
   }
 
   async function act(person: PlanPersonDTO, action: CardAction) {
@@ -173,15 +180,39 @@ function PanelBody({
         ipc("photoThemes:redo", { id: theme.id, personId: person.personId, planId: plan.planId, serviceTypeId: plan.serviceTypeId }),
       );
     } else if (action === "approve") {
-      await photos.write(`approve:${theme.id}:${person.personId}`, () => ipc("photoThemes:approve", { id: theme.id, personId: person.personId }));
+      await photos.write(`approve:${theme.id}:${person.personId}`, () => ipc("photoThemes:approve", { id: theme.id, personId: person.personId, file: person.pending?.file }));
     } else {
       await photos.write(`keep:${theme.id}:${person.personId}`, () => ipc("photoThemes:keep", { id: theme.id, personId: person.personId }));
     }
   }
 
+  /** Approve the ready edits on screen, each by the file shown: one redone meanwhile stays for another look. */
+  async function approveAll() {
+    const shown = readyHere.flatMap((p) => {
+      const file = p.pending?.file;
+      return file ? [{ personId: p.personId, file }] : [];
+    });
+    const r = await photos.write<ApproveAllResultDTO>(`approve-all:${plan.planId}`, () => ipc("photoThemes:approveAll", { planId: plan.planId, people: shown }));
+    if (r.ok && r.value.skipped.length > 0) {
+      const names = r.value.skipped.map((id) => list.find((p) => p.personId === id)?.name ?? "Someone");
+      toast.info(`Changed since it was shown, so left for another look: ${names.join(", ")}`);
+    }
+  }
+
   const toGenerate = roster?.toGenerate ?? 0;
-  const generateLabel = generating ? "Generating…" : toGenerate === 0 ? `Everyone has a photo in ${theme ? themeLabel(theme) : "this theme"}` : `Generate ${toGenerate} for ${theme ? themeLabel(theme) : ""}`;
-  const trouble = conn && STATES[conn.state].tone === "warn" ? conn : null;
+  /** What Redo all sends, as the server counts it: those made under an earlier prompt, and anyone Generate would send. */
+  const redoAllCount = roster?.toRedoAll ?? 0;
+  /** People with no photo in the theme whom Generate would still not send: no Planning Center photo it can edit. */
+  const unsendable = toGenerate === 0 ? list.filter((p) => !p.approved && (p.status === "none" || p.status === "failed")).length : 0;
+  const generateLabel = generating
+    ? "Generating…"
+    : toGenerate > 0
+      ? `Generate ${toGenerate} for ${theme ? themeLabel(theme) : ""}`
+      : unsendable > 0
+        ? `Nothing to send: ${unsendable} without a usable Planning Center photo`
+        : `Everyone has a photo in ${theme ? themeLabel(theme) : "this theme"}`;
+  // No key, or one OpenAI rejected, stops Generate and Redo; the rest of the sheet works without one.
+  const trouble = conn && (!photos.canSend || STATES[conn.state].tone === "warn") ? conn : null;
 
   return (
     <>
@@ -270,24 +301,36 @@ function PanelBody({
             </div>
           </div>
 
-          {theme.promptChanged && (
+          {promptChangedHere && (
             <div role="status" data-prompt-changed className="flex flex-wrap items-center gap-x-2.5 gap-y-2 rounded-lg border border-warn-9/35 bg-warn-9/10 px-3 py-2 text-[12.5px] leading-[17px]">
               <span className="min-w-0 flex-[1_1_11rem]">The prompt for {themeLabel(theme)} changed; existing approved photos stay until redone.</span>
               <span className="flex gap-1.5">
-                <Button variant="accent" size="small" disabled={planBusy("generate")} onClick={() => void generate("all")}>
-                  Redo all
+                <Button variant="accent" size="small" disabled={planBusy("generate") || !photos.canSend || redoAllCount === 0} onClick={() => setAskRedoAll(true)}>
+                  Redo all (<Num>{redoAllCount}</Num>)
                 </Button>
                 <Button variant="filled" size="small" disabled={photos.isBusy(`keep-prompt:${theme.id}`)} onClick={() => void photos.write(`keep-prompt:${theme.id}`, () => ipc("photoThemes:keepPrompt", { id: theme.id }))}>
                   Keep these
                 </Button>
               </span>
+              {askRedoAll && (
+                <RedoAllConfirm
+                  count={redoAllCount}
+                  themeName={themeLabel(theme)}
+                  busy={planBusy("generate")}
+                  onGo={() => {
+                    setAskRedoAll(false);
+                    void generate("all");
+                  }}
+                  onCancel={() => setAskRedoAll(false)}
+                />
+              )}
             </div>
           )}
 
           {trouble && (
             <div role="status" className="flex flex-wrap items-center gap-x-2.5 gap-y-2 rounded-lg border border-danger-9/35 bg-danger-9/10 px-3 py-2 text-[12.5px] leading-[17px]">
               <span className="min-w-0 flex-[1_1_11rem]">{trouble.reason ?? STATES[trouble.state].detail}</span>
-              <a href="/settings/integrations" onClick={(e) => goInApp(e, { to: "/settings/integrations" })} className="text-accent underline">
+              <a href="/settings/integrations" onClick={(e) => goInApp(e, { to: "/settings/integrations" })} className={INLINE_LINK}>
                 Open Integrations
               </a>
             </div>
@@ -300,7 +343,7 @@ function PanelBody({
           )}
 
           <div className="flex flex-col items-start gap-2">
-            <Button variant="accent" size="medium" disabled={generating || toGenerate === 0 || planBusy("generate") || people.isLoading} onClick={() => void generate("missing")} data-generate>
+            <Button variant="accent" size="medium" disabled={generating || toGenerate === 0 || planBusy("generate") || people.isLoading || !photos.canSend} onClick={() => void generate("missing")} data-generate>
               <SparklesIcon className="size-4" />
               {generateLabel}
             </Button>
@@ -311,7 +354,7 @@ function PanelBody({
             <h4 className="m-0 text-[10px] font-medium uppercase tracking-[0.07em] text-fg-subtle">
               People · <Num>{list.length}</Num>
             </h4>
-            <Button variant="filled" size="small" disabled={readyHere.length === 0 || planBusy("approve-all")} onClick={() => void photos.write(`approve-all:${plan.planId}`, () => ipc("photoThemes:approveAll", { planId: plan.planId }))}>
+            <Button variant="filled" size="small" disabled={readyHere.length === 0 || planBusy("approve-all")} onClick={() => void approveAll()}>
               <CheckIcon className="size-3.5" />
               Approve all ready{readyHere.length > 0 && <> (<Num>{readyHere.length}</Num>)</>}
             </Button>
@@ -338,8 +381,9 @@ function PanelBody({
                     person={p}
                     theme={theme}
                     original={p.originalUrl}
-                    context={{ planId: plan.planId, noOriginal: !p.originalUrl, addedLater }}
+                    context={{ planId: plan.planId, noOriginal: !p.originalUrl, addedLater, timeZone: photos.timeZone }}
                     busy={busyActions(photos, theme.id, p.personId)}
+                    canRedo={photos.canSend}
                     onAction={(a) => void act(p, a)}
                     onMenu={(kind) => ops.open(theme, p.personId, kind)}
                     hasOtherTheme={ops.hasOtherTheme(theme)}
@@ -360,6 +404,27 @@ function PanelBody({
 
       <ThemesBlock themes={themes} usedHere={theme?.id ?? null} photos={photos} onManage={onManage} />
     </>
+  );
+}
+
+/** Redo all bills for every photo it sends: it says how many, and waits for a yes. */
+function RedoAllConfirm({ count, themeName, busy, onGo, onCancel }: { count: number; themeName: string; busy: boolean; onGo: () => void; onCancel: () => void }) {
+  useEscapeFirst(onCancel);
+  return (
+    <div role="group" aria-label="Confirm redo all" className="flex w-full flex-col gap-1.5 border-t border-warn-9/35 pt-2">
+      <span>
+        Make <Num>{count}</Num> {count === 1 ? "photo" : "photos"} again for {themeName}? Each is a new OpenAI edit, and is billed. Approved photos stay on screens
+        until the new ones are approved.
+      </span>
+      <span className="flex flex-wrap gap-1.5">
+        <Button variant="accent" size="small" disabled={busy} onClick={onGo}>
+          Redo <Num>{count}</Num>
+        </Button>
+        <Button variant="filled" size="small" onClick={onCancel}>
+          Cancel
+        </Button>
+      </span>
+    </div>
   );
 }
 
@@ -386,7 +451,7 @@ function ThemesBlock({ themes, usedHere, photos, onManage }: { themes: ThemeDTO[
             <b className="font-semibold">{themeLabel(t)}</b>{" "}
             {t.id === usedHere && <span className="ml-1 rounded-full bg-accent-soft px-2 py-px text-[11.5px] font-medium text-accent-soft-fg">This plan</span>}
           </span>
-          <ThemeFacts theme={t} showPeople />
+          <ThemeFacts theme={t} timeZone={photos.timeZone} showPeople />
           <span className="flex flex-wrap gap-1.5">
             <Button variant="filled" size="small" onClick={() => onManage(t.id)}>
               Manage

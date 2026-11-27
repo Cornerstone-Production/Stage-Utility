@@ -133,7 +133,11 @@ jobs:
   # needs them, does not run at all then.
   verify-failed:
     needs: [verify-checks, verify-tests]
-    if: ${{ failure() }}
+    # failure() alone is true when any job this one depends on, directly or not,
+    # failed. already-verified is such an ancestor, and an error there is not a
+    # failed gate: it must not mark the commit failed. Only a verify job's own
+    # result counts.
+    if: ${{ failure() && (needs.verify-checks.result == 'failure' || needs.verify-tests.result == 'failure') }}
     runs-on: ubuntu-latest
     permissions:
       statuses: write # the failure `build` status, and nothing else
@@ -162,13 +166,12 @@ jobs:
     runs-on: ubuntu-latest
     # The release app's private key is a secret of this environment, which only
     # beta and main may deploy to. As a repository secret, a workflow pushed to
-    # any branch could read it and push past the ruleset with it.
+    # any branch could read it and push to beta or main with it.
     environment: release
     permissions:
       # Read only: the version-bump commit and the tag are pushed with the
-      # release app's token (the step before the push), never this one, because
-      # beta and main admit only that app and the maintainer. A push with this
-      # token would be refused.
+      # release app's token (the step before the push), never this one: the
+      # app is the identity a branch ruleset can admit, and GITHUB_TOKEN is not.
       contents: read
       # To mark the version-bump commit with the `build` status the verify jobs
       # earned, so the release PR whose head it is shows a verified commit without
@@ -384,11 +387,12 @@ jobs:
           RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
         run: scripts/sign-release-assets.sh --check
 
-      # beta and main admit pushes only from the maintainer and the release
-      # GitHub App; GITHUB_TOKEN cannot be put on a ruleset's bypass list. So the
-      # push takes a token minted here: this repository only, contents only, and
-      # revoked when the job ends. A missing RELEASE_APP_CLIENT_ID variable or
-      # RELEASE_APP_PRIVATE_KEY secret fails this step, before anything is pushed.
+      # Where beta and main have a ruleset, it admits the maintainer and the
+      # release GitHub App, and GITHUB_TOKEN cannot be put on a ruleset's bypass
+      # list. So the push takes a token minted here, which works with or without
+      # one: this repository only, contents only, and revoked when the job ends.
+      # A missing RELEASE_APP_CLIENT_ID variable or RELEASE_APP_PRIVATE_KEY secret
+      # fails this step, before anything is pushed.
       - name: Mint the release app token
         id: app-token
         if: steps.version.outputs.skip == 'false'
@@ -565,6 +569,14 @@ jobs:
       # with, not the runner image's default.
       - uses: $/.github/actions/select-xcode
 
+      # The Xcode that was just selected, for the cache key below: ninja reruns a
+      # command when its text changes, not when the compiler behind it does.
+      - name: Read the Xcode version
+        id: toolchain
+        run: |
+          set -euo pipefail
+          echo "xcode=$(xcodebuild -version | tr -c 'A-Za-z0-9.\n' '-' | paste -sd- -)" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
@@ -583,11 +595,11 @@ jobs:
           path: |
             helper/macos/.cef-build/${{ matrix.arch }}
             helper/macos/.tools
-          key: helper-cef-${{ matrix.arch }}-${{ hashFiles('helper/macos/cef.json', 'helper/macos/build-tools.txt') }}-${{ hashFiles('helper/macos/CEFHost/**') }}
+          key: helper-cef-${{ matrix.arch }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('helper/macos/cef.json', 'helper/macos/build-tools.txt') }}-${{ hashFiles('helper/macos/CEFHost/**') }}
           # A change to our CEF host alone still reuses the wrapper: ninja rebuilds
           # only what changed.
           restore-keys: |
-            helper-cef-${{ matrix.arch }}-${{ hashFiles('helper/macos/cef.json', 'helper/macos/build-tools.txt') }}-
+            helper-cef-${{ matrix.arch }}-${{ steps.toolchain.outputs.xcode }}-${{ hashFiles('helper/macos/cef.json', 'helper/macos/build-tools.txt') }}-
 
       - name: Build and package the architecture
         env:
@@ -652,6 +664,11 @@ jobs:
     if: ${{ always() && needs.release.outputs.published == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # RELEASE_SIGNING_KEY is a secret of this environment, so only beta and main
+    # can read it. `published` is only true once the release job, which names the
+    # same environment, has pushed the tag, so a run on another branch never
+    # reaches this job and the environment's branch policy cannot refuse it.
+    environment: release
     permissions:
       contents: read
     steps:
@@ -789,6 +806,10 @@ jobs:
     # once the tag is on the remote, so this never builds for a stand-down.
     if: ${{ always() && needs.release.outputs.published == 'true' }}
     runs-on: ubuntu-latest
+    # STAGE_TAP_TOKEN is a secret of this environment, so only beta and main can
+    # read it. Same reasoning as the sign job: `published` is only true on a
+    # branch the release job's environment admitted.
+    environment: release
     permissions:
       contents: write
     steps:

@@ -29,7 +29,7 @@
 
 import { randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { DataStore } from "../data-store.js";
-import { isRecord } from "../is-record.js";
+import { isRecord } from "../../types/is-record.js";
 import { checked, refuse } from "../restore-check.js";
 import { scrub } from "../scrub.js";
 import type { PinCheck } from "../../types/qsys.js";

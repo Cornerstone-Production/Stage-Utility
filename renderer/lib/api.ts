@@ -672,6 +672,7 @@ export type IpcChannel =
   | "stageplots:get"
   | "stageplots:keepDraft"
   | "stageplots:keepDraftOnLeave"
+  | "stageplots:link"
   | "stageplots:patch"
   | "stageplots:publish"
   | "stageplots:publishNow"
@@ -918,6 +919,10 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     // with the sentence the card shows (409, 502, or 400 for a plot too large to publish).
     case "stageplots:publish":
       return post<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}/publish`);
+
+    // The venue's public link (VenueLink): the one stage plots read that carries a secret.
+    case "stageplots:link":
+      return apiFetch<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}/link`);
 
     case "stageplots:regenerate":
       return post<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}/regenerate`);
@@ -1941,8 +1946,9 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return del<T>(`/api/photo-themes/themes/${encodeURIComponent(p.id as string)}`);
     case "photoThemes:keepPrompt":
       return post<T>(`/api/photo-themes/themes/${encodeURIComponent(p.id as string)}/keep-prompt`);
+    // An approval names the edit it was shown, so one that replaced it meanwhile is refused.
     case "photoThemes:approve":
-      return post<T>(`/api/photo-themes/themes/${encodeURIComponent(p.id as string)}/people/${encodeURIComponent(p.personId as string)}/approve`);
+      return post<T>(`/api/photo-themes/themes/${encodeURIComponent(p.id as string)}/people/${encodeURIComponent(p.personId as string)}/approve`, { file: p.file });
     case "photoThemes:keep":
       return post<T>(`/api/photo-themes/themes/${encodeURIComponent(p.id as string)}/people/${encodeURIComponent(p.personId as string)}/keep`);
     case "photoThemes:redo":
@@ -1964,7 +1970,7 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "photoThemes:generate":
       return post<T>(`/api/photo-themes/plans/${encodeURIComponent(p.planId as string)}/generate`, { serviceTypeId: p.serviceTypeId, mode: p.mode });
     case "photoThemes:approveAll":
-      return post<T>(`/api/photo-themes/plans/${encodeURIComponent(p.planId as string)}/approve-all`);
+      return post<T>(`/api/photo-themes/plans/${encodeURIComponent(p.planId as string)}/approve-all`, { people: p.people });
     case "photoThemes:getPlanPeople":
       return apiFetch<T>(`/api/photo-themes/plans/${encodeURIComponent(p.planId as string)}?serviceTypeId=${encodeURIComponent(p.serviceTypeId as string)}`);
 
