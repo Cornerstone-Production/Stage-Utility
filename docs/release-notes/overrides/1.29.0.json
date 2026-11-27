@@ -38,5 +38,140 @@
     "commit": "872a3616",
     "betaOnly": true,
     "reason": "Greys an empty role in the layout card's tray and tags it in the roles list, both rebuilt in this cycle (637fce2a, 78eb67ee); v1.28.1 has neither."
+  },
+  {
+    "commit": "0dff78f4",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "144653ed",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "197ba111",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "21bc79e4",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "22bf4ddf",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "233b4838",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "23a96d94",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "286d07a2",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "31b9e7bd",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "33e9dc96",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "34d8bcb1",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "3dd9eb4c",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "67293043",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "7ac3fce6",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "7c34d953",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "8a77b6ef",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "92fdcaa6",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "99938708",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "9e104f2e",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "a9151c09",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "ac47bd9b",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "ad35cb96",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "aea4f8a1",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "c5b934f7",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "d6aee1e5",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "dd8032d7",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
+  },
+  {
+    "commit": "dde070ee",
+    "omit": true,
+    "reason": "Photo themes and the OpenAI tile are held out of 1.29.0 and ship in their own release: this commit is in the release's history, and a revert in it takes its change out again."
   }
 ]

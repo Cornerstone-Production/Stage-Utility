@@ -184,7 +184,6 @@ What reaches the internet, and when:
 | SenSource Vea, and SafeSpace | People counts, only while those integrations are on |
 | ESPN | Live scores for followed teams, only while any are followed |
 | YouTube, and Resi | Whether you are live, only while those integrations are on |
-| OpenAI | [Photo themes](../features/photo-themes.md): each original photo and the theme's prompt, only while a Generate or Redo runs; a key test lists OpenAI's models |
 | Your public ServiceCue page, and Cloudflare | [ServiceCue on the web](servicecue-on-the-web.md), only while the Public link is on: the layouts, rundowns and live position ServiceCue shows, and published stage plots, to the page address you set. With a Cloudflare API token saved, Cloudflare's API too, to update that page |
 | Wherever an embed or external feed points | A YouTube or Resi player reaches its own platform, and an external feed reaches whatever address it names |
 
@@ -193,7 +192,7 @@ downloads the pinned MediaMTX release from GitHub (about 27 MB), unless the
 archive was placed by hand; see
 [Video feeds](../integrations/video-feeds.md#the-relay-and-its-switch).
 
-Every other integration, and every other feature, is LAN-only, and so is a pull or push feed: its picture
+Every other integration is LAN-only, and so is a pull or push feed: its picture
 passes through Stage Utility's own relay, but never any further than the network
 the encoders and screens are already on. NDI is the one path that skips the app
 entirely — discovered and received peer-to-peer by the client.
