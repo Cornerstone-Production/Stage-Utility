@@ -7,6 +7,7 @@ import {
   error,
   json,
   readBody,
+  readJsonObject,
   readRawBody,
 } from "./context.js";
 import { callRoute } from "./route-harness.js";
@@ -266,7 +267,7 @@ test("the default limits are what the routes actually get", async () => {
 });
 
 test("a body that is not JSON rejects with a status of 400, so no route has to catch it to answer 400", async () => {
-  // handlerErrorStatus answers 500 for an error that declares no status, and ~85
+  // handlerErrorStatus answers 500 for an error that declares no status, and many
   // routes read the body with a bare `await readBody(req)`.
   const out = await callRoute(
     async ({ req, res }) => {
@@ -280,4 +281,16 @@ test("a body that is not JSON rejects with a status of 400, so no route has to c
     { method: "POST", raw: "{ not json" },
   );
   assert.equal((out.json as { status: number }).status, 400);
+});
+
+test("readJsonObject refuses null, an array and a scalar with a status of 400", async () => {
+  for (const raw of ["null", "[1]", "5", '"x"']) {
+    await assert.rejects(
+      callRoute(async ({ req }) => void (await readJsonObject(req)), "/x", { method: "POST", raw }),
+      (e: unknown) => (e as { status?: number }).status === 400,
+      raw,
+    );
+  }
+  const ok = await callRoute(async ({ req, res }) => json(res, await readJsonObject(req)), "/x", { method: "POST", body: { a: 1 } });
+  assert.deepEqual(ok.json, { a: 1 });
 });

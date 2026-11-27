@@ -8,7 +8,7 @@
 //
 // A bare `return` means "handled, stop" (see RouteCtx).
 
-import { type RouteCtx, json, error, readBodyOrEmpty } from "./context.js";
+import { type RouteCtx, json, error, readBody } from "./context.js";
 import { isRecord } from "../../types/is-record.js";
 import { scrub } from "../scrub.js";
 import { readSlotsTarget, INVALID_TARGET, TARGET_ERROR } from "../slots-target-body.js";
@@ -27,7 +27,7 @@ function boardFailure(res: RouteCtx["res"], err: unknown): void {
 /** The body as an object; anything else (null, a list) reads as empty, which
  *  every route below then refuses for what it lacks. */
 async function bodyOf(req: RouteCtx["req"]): Promise<Record<string, unknown>> {
-  const body = await readBodyOrEmpty(req);
+  const body = await readBody(req);
   return isRecord(body) ? body : {};
 }
 

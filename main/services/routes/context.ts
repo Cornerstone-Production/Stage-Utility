@@ -229,7 +229,7 @@ export class BadJsonBodyError extends Error {
 /** The request body parsed as JSON; `{}` for an empty body. Throws
  *  BodyTooLargeError (413) over `limit` and BadJsonBodyError (400) for text that
  *  is not JSON. Any JSON value comes back as it is — a route that needs an
- *  object uses readObjectBody. */
+ *  object uses readJsonObject. */
 export async function readBody(
   req: http.IncomingMessage,
   limit = MAX_JSON_BODY_BYTES,
