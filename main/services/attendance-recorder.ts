@@ -15,6 +15,7 @@ import { attendanceStore } from "./attendance-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { sensourceService } from "./sensource-service.js";
 import { classifyPhase, inTaper, type Phase } from "./attendance-phase.js";
+import { serviceRunning } from "./live-service-gate.js";
 import { ServiceRecorder, type NewRecordContext, type RecorderStore } from "./service-recorder.js";
 
 /** Minimum gap between recorded trend points (attendance changes slowly). */
@@ -120,7 +121,11 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
       }
 
       const gapSinceLive = this.lastLiveAt === 0 ? Infinity : Date.now() - this.lastLiveAt;
-      if (live.mode === "item") this.lastLiveAt = Date.now(); // gap is measured between live items
+      // The gap is measured between ticks of a RUNNING service, as the SPL and
+      // timeline recorders measure it. Counting the parked ticks past SERVICE
+      // END too made this recorder alone hold the finished service open when the
+      // next one began, and sample the next service into it.
+      if (serviceRunning(live)) this.lastLiveAt = Date.now();
 
       // Establish the record for pre/service; "post" only ever samples into the
       // record we just ended (never spins up a new one for an emptying room).
