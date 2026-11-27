@@ -361,7 +361,8 @@ describe("where the server looks for Cloudflare", () => {
 
 describe("what the deployer reads from the app", () => {
   it("is the app updater's live test, the service window, the service times, the app's version and the app's own page copy", (t) => {
-    // The stage controller's own isServiceLive(), driven by the snapshot it keeps: the countdown before a service, and a service parked between items, are live.
+    // The update lock's own check (service-activity.ts), driven by the snapshot the stage controller keeps: an item
+    // is live, and the countdown before a service is not. service-activity.test.ts holds the recorders to it too.
     const ctl = stageController as unknown as { lastLive: unknown };
     const was = ctl.lastLive;
     t.after(() => {
@@ -369,17 +370,20 @@ describe("what the deployer reads from the app", () => {
       serviceWindow.setWindows([]);
     });
     for (const live of [
-      { mode: "preservice", currentItemId: null },
       { mode: "item", currentItemId: "item-1", serviceEnded: true },
       { mode: "item", currentItemId: "item-1" },
     ]) {
       ctl.lastLive = live;
       assert.equal(deployerDeps.serviceLive(), true, `${JSON.stringify(live)} did not count as live`);
     }
-    ctl.lastLive = { mode: "none", currentItemId: null };
-    assert.equal(deployerDeps.serviceLive(), false);
-    ctl.lastLive = null;
-    assert.equal(deployerDeps.serviceLive(), false);
+    for (const live of [
+      { mode: "preservice", currentItemId: null, targetAt: new Date(Date.now() + 2 * 86_400_000).toISOString() },
+      { mode: "none", currentItemId: null },
+      null,
+    ]) {
+      ctl.lastLive = live;
+      assert.equal(deployerDeps.serviceLive(), false, `${JSON.stringify(live)} counted as live`);
+    }
 
     const now = Date.now();
     serviceWindow.setWindows([{ open: now - 60_000, close: now + 600_000 }]);

@@ -258,7 +258,7 @@ describe("the status line, by state", () => {
   test("waiting for a live service: says so, and what the build is", async () => {
     await with_(deployOf({ state: "waiting", waitingFor: "live", page: { build: "9c41e07", version: "1.27.0", at: DEPLOYED_AT } }));
     assert.equal(status(), "Waiting for the service to end, then updating to build 3f2a91c (1.28.0)");
-    assert.ok(sectionText().includes("Planning Center has a service live (the countdown before it included), so the page is left alone until it ends."));
+    assert.ok(sectionText().includes("A service is under way (Planning Center is in an item, or a recorder is open), so the page is left alone until it ends."));
     // A request now could only be refused: the status line says why.
     assert.equal(updateButton()?.disabled, true);
   });
@@ -274,7 +274,7 @@ describe("the status line, by state", () => {
     await with_(deployOf({ state: "waiting", waitingFor: "unknown" }));
     assert.equal(status(), "Waiting to hear whether a service is live, then updating");
     assert.ok(sectionText().includes("Update the page now goes ahead when the state is merely unknown, never through a live service."));
-    assert.ok(!sectionText().includes("Planning Center has a service live"));
+    assert.ok(!sectionText().includes("A service is under way"));
     // Allowed when the state is merely unknown, so it can be pressed.
     assert.equal(updateButton()?.disabled, false);
   });

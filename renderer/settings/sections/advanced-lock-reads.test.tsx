@@ -14,7 +14,7 @@
 // lock roughly once every few seconds for as long as it stayed open.
 //
 // The fix derives the one fact each channel's payload carries that the
-// server's lock (serviceActivity() in system-routes.ts) actually depends on —
+// server's lock (serviceActivity() in main/services/service-activity.ts) actually depends on —
 // pco:live's `mode === "item"`, and each recorder's `endedAt == null` — and
 // reads the lock again only when a LIVE (non-replayed) frame changes that
 // fact from what was last known.

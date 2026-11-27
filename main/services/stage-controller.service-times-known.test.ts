@@ -17,6 +17,8 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 const { stageController } = await import("./stage-controller.js");
+// Wires the controller's auto-update to the update lock's check, as server.ts does.
+await import("./service-activity.js");
 const { pcoService } = await import("./pco-service.js");
 const { serviceWindow } = await import("./service-window.js");
 const { captureConsole } = await import("./fixtures/capture-console.js");

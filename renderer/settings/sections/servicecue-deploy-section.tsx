@@ -146,7 +146,7 @@ function deployLine(d: DeployStatus, zone: string | undefined, elapsedMs: number
         : {
             tone: "warn",
             text: `Waiting for the service to end, then updating${d.bundle ? ` to build ${d.bundle.build} (${d.bundle.version})` : ""}`,
-            detail: "Planning Center has a service live (the countdown before it included), so the page is left alone until it ends.",
+            detail: "A service is under way (Planning Center is in an item, or a recorder is open), so the page is left alone until it ends.",
           };
     case "failed": {
       const e = d.error;

@@ -16,26 +16,9 @@ import { exitForRestart, type RelaunchPrep } from "../update/relaunch.js";
 import { backupScheduler } from "../backup-scheduler.js";
 import { configSnapshot } from "../config-snapshot.js";
 import { refuseUnansweredHost } from "./host-name-routes.js";
-import { splRecorder } from "../spl-recorder.js";
-import { attendanceRecorder } from "../attendance-recorder.js";
-import { serviceTimelineRecorder } from "../service-timeline-recorder.js";
+import { serviceActivity } from "../service-activity.js";
 import { zonedDateKey } from "../app-timezone.js";
 import { isUpdateMode, type UpdateMode } from "../../types/state.js";
-
-/** Whether a live service / active recording is in progress, and why. Used to lock
- *  self-updates (which restart the process and would interrupt a service mid-flight
- *  and drop the last un-persisted samples) unless the operator explicitly overrides. */
-function serviceActivity(): { active: boolean; reasons: string[] } {
-  const reasons: string[] = [];
-  if (stageController.getLastLive()?.mode === "item") reasons.push("A PCO service is live");
-  const spl = splRecorder.getCurrent();
-  if (spl && !spl.endedAt) reasons.push("SPL is recording");
-  const att = attendanceRecorder.getCurrent();
-  if (att && !att.endedAt) reasons.push("Attendance is recording");
-  const tl = serviceTimelineRecorder.getCurrent();
-  if (tl && !tl.endedAt) reasons.push("Service history is recording");
-  return { active: reasons.length > 0, reasons };
-}
 
 /** Exit shortly, so the service manager restarts us. On launchd the exit alone
  *  is not enough — it parks KeepAlive respawns ("pended nondemand spawn =

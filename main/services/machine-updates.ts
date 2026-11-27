@@ -168,6 +168,7 @@ export interface Gate {
   auto: boolean;
   /** Someone pressed Update now or Try again for this machine. */
   requested: boolean;
+  /** A service is under way (service-activity.ts): a Planning Center item, or a recorder still open. */
   live: boolean;
   /** When the service window open now closes, or null when none is open. */
   windowCloses: number | null;

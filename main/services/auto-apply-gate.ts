@@ -1,8 +1,9 @@
 // auto-apply-gate.ts — whether the server installs an update on its own right now.
 //
 // The server's own updater runs at the hour (and day) the operator chose, and
-// never during a service. "During a service" is what Planning Center last
-// reported live. When that reading is not current (Planning Center is not
+// never during a service. "During a service" is service-activity.ts's answer,
+// the one the update lock reads: Planning Center in an item, or a recorder still
+// open. When Planning Center's reading is not current (Planning Center is not
 // answering, or has not answered since boot), a service may have gone live since,
 // so the gate falls back on the service windows computed from the cached plans:
 // inside one, it waits; outside one, the scheduled hour is as safe as it was.
@@ -20,7 +21,7 @@ export interface AutoApplyInput {
   cfg: AutoUpdateSettings;
   behind: number;
   updating: boolean;
-  /** Planning Center's last reading says a service is live. */
+  /** A service is under way (service-activity.ts): a Planning Center item, or a recorder still open. */
   serviceLive: boolean;
   /** That reading is current: true without Planning Center or a followed plan. */
   liveKnown: boolean;

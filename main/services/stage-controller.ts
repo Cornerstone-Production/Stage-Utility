@@ -92,6 +92,7 @@ import { presetsStore } from "./presets-store.js";
 import { PrepTagBook } from "./pco-prep-tags.js";
 import { matchMembers, resolveSlots, stripResolvedFields, unrosteredPersonIds, type AvatarFit } from "./slot-resolver.js";
 import type { PlanPeopleRead, PlanPerson } from "./photo-themes/service.js";
+import type { ServiceActivity } from "./service-activity.js";
 import { PersonDirectory } from "./person-directory.js";
 import { iconBackgrounds, iconToSettings, type AppIconInput } from "./app-icon.js";
 import { DEFAULT_ICON_BACKGROUND, NO_TAB_BACKGROUND } from "./install-metadata.js";
@@ -1632,11 +1633,6 @@ export class StageController {
     // Remembered for the auto-update guard (don't update mid-service).
     this.lastLive = live;
     return live;
-  }
-
-  /** True when a PCO Services Live session is running (used to defer auto-updates). */
-  isServiceLive(): boolean {
-    return this.lastLive != null && this.lastLive.mode !== "none";
   }
 
   /** Whether Planning Center's live reading is current: always without Planning
@@ -3811,7 +3807,7 @@ export class StageController {
       cfg: this.state.autoUpdate,
       behind,
       updating: updater.phase === "updating",
-      serviceLive: this.isServiceLive(),
+      serviceLive: this.serviceActivity().active,
       liveKnown: this.liveKnown(),
       windowUntil: serviceWindow.activeUntil(now.getTime()),
       // The APP's zone. On a UTC host "Monday 03:00" fires at 22:00 Sunday in
@@ -6332,6 +6328,19 @@ export class StageController {
       this.prepTags.map,
       this.themedPhotos(planId),
     );
+  }
+
+  /** Whether a service is under way (service-activity.ts serviceActivity), the
+   *  same answer the update lock and the ServiceCue deploy read. Wired when that
+   *  module loads: it reads every recorder, and each recorder imports this
+   *  controller, so importing it here would be a cycle. Unwired, it throws, and
+   *  the update check that asked logs the failure and installs nothing. */
+  private serviceActivity: () => ServiceActivity = () => {
+    throw new Error("the service activity check is not wired (service-activity.ts was never loaded)");
+  };
+
+  setServiceActivitySource(source: () => ServiceActivity): void {
+    this.serviceActivity = source;
   }
 
   /** Themed photos for a plan (photo-themes/service.ts shownPhotos), wired at

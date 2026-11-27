@@ -29,7 +29,7 @@ const FAST: Partial<DeployTimings> = { backoffMinMs: 30, backoffMaxMs: 60, liveR
 
 interface World {
   creds: DeployCredentials | null;
-  /** Is a service live, as stageController.isServiceLive() says? */
+  /** Is a service under way, as service-activity.ts serviceActivity() says? */
   live: boolean;
   /** When the service window open now closes, as serviceWindow.activeUntil() says. */
   windowCloses: number | null;
@@ -786,7 +786,7 @@ describe("another server at the same version", () => {
 describe("a live state that is not known", () => {
   it("counts as live on the server's own account: after a restart, or a Planning Center outage, nothing is deployed until the service times are known", async (t) => {
     const lines = captureConsole(t, "log");
-    world.live = false; // as isServiceLive() is, after a restart, until the first Planning Center read
+    world.live = false; // as serviceActivity() is, after a restart, until the first Planning Center read
     world.known = false;
     const d = makeDeployer();
     d.consider(BUILD_A);

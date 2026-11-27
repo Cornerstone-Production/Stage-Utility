@@ -40,7 +40,8 @@ server running on the old build.
 Settings → Advanced → Updates can install a new release on its own: **Install**
 applies it and leaves the restart to the operator, **Install + restart** does
 both. Either runs only at the chosen hour (and day, if one is set) in the app's
-time zone, and never while Planning Center reports a service live. When Planning
+time zone, and never while a service is under way, as [the update lock](#the-update-lock)
+decides it. When Planning
 Center is not answering, its last reading may be out of date, so the updater
 falls back on the service windows worked out from the plans it last read: inside
 one it waits for the next scheduled time, outside one it goes ahead, so an outage
@@ -63,8 +64,15 @@ with this server* turns it off.
 
 ### The update lock
 
-While a Planning Center service is live, or any recorder is open (SPL, attendance,
-service history), `GET /api/update/lock` reports `active` with the reasons. Every
+While Planning Center is in one of the plan's items, or any recorder is open (SPL,
+attendance, service history), a service is under way and `GET /api/update/lock`
+reports `active` with the reasons. The countdown Planning Center shows before a
+service is not one: every plan with a service time reports it, days ahead. A recorder
+still open after Planning Center leaves its last item keeps the lock until its record
+closes. The same check holds the [automatic update](#automatic-updates), the
+[Mac helpers' updates](../kiosk-devices.md#keeping-the-helper-on-the-servers-version)
+and the [public ServiceCue page's](servicecue-on-the-web.md#keeping-it-up-to-date)
+update. Every
 control that would restart the server — **Update now**, **Restart**, the update
 **track switch**, and the **Restart now** on a deferred update — is guarded, and
 Advanced prints the reasons above them.

@@ -8,11 +8,11 @@
 //   no token                   nothing: updating is on while an API token is stored for the page
 //   no copy of the page        nothing to deploy
 //   the page is this build     nothing; what Cloudflare holds about it is read once
-//   a service is live, the     wait, and look again each half minute. The app updater's own test
-//   service window is open,    (stageController.isServiceLive(): Planning Center in any live mode,
-//   or neither is known        the preservice countdown and a service parked between items
-//                              included), and the window around a service the Mac helpers wait
-//                              out (serviceWindow.activeUntil()). After a restart, and while
+//   a service is under way,    wait, and look again each half minute. Under way is the app
+//   the service window is      updater's own check (service-activity.ts: Planning Center in an
+//   open, or neither is known  item, or a recorder still open; the countdown before a service is
+//                              not), and the window is the one around a service the Mac helpers
+//                              wait out (serviceWindow.activeUntil()). After a restart, and while
 //                              Planning Center cannot be reached, the times are unknown. Update the
 //                              page now goes ahead of the window and of unknown, never of live
 //   the page was deployed      leave it: from a NEWER version, or from the same version by another
@@ -90,7 +90,7 @@ export interface DeployerDeps {
   bundleDir: string;
   /** The version this server runs, as package.json says it. */
   version(): string;
-  /** Is Planning Center reporting a service live? The app updater's test: stageController.isServiceLive(). */
+  /** Is a service under way? The app updater's check: service-activity.ts serviceActivity().active. */
   serviceLive(): boolean;
   /** When the service window open now closes, or null outside one: serviceWindow.activeUntil(). */
   windowCloses(): number | null;

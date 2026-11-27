@@ -175,7 +175,7 @@ function isRecordOpen(payload: unknown): boolean {
 
 /**
  * The one fact each lock-relevant channel carries that the server's lock
- * (serviceActivity() in main/services/routes/system-routes.ts) actually
+ * (serviceActivity() in main/services/service-activity.ts) actually
  * depends on — never the rest of the payload, which changes far more often
  * than the lock does.
  */
@@ -353,7 +353,7 @@ export function UpdatesPanel({
     // keepalive) with the lock's own fact unchanged, so a read is worth
     // repeating only when that fact — a PCO item live, or a recorder's
     // record newly opened/closed — actually flips. See serviceActivity() in
-    // main/services/routes/system-routes.ts for what the lock reads.
+    // main/services/service-activity.ts for what the lock reads.
     const lastFact = new Map<string, boolean>();
     const offs = LOCK_CHANNELS.map(([ch, fact]) =>
       onNotification(ch, (payload, replayed) => {
