@@ -1,0 +1,84 @@
+# Q-SYS integration
+
+Connects to a Q-SYS Core over QRC (JSON-RPC over TCP, default port 1710) and
+reads the design's components and controls.
+
+## How it works
+
+- The service connects to the Core, logs on if a user is set, reads the design
+  status and then every component and its controls (the catalog).
+- A silent connection is kept alive with a `NoOp` after 30 seconds without a
+  request; the Core drops a connection after 60 seconds of silence.
+- If the connection drops, the service reconnects with exponential backoff, capped
+  by the PCO-time-aware service window. A logon the Core refuses is retried the
+  same way. The first failure in a run of them is logged; the retries are not.
+- When the Core reports a new design (a different design code, as after a redeploy
+  or a Core restart), the catalog is read again. A second change reported while
+  that read runs is read after it.
+- The integration never calls a method that changes the design.
+
+The card's row shows the state: connected with the design name, reconnecting, or
+the reason it could not connect. `/log` shows the decisions, tagged `[qsys]`; see
+[Troubleshooting](#troubleshooting).
+
+## Setup
+
+### On the Core
+
+1. **QRC** answers on TCP port **1710**. Nothing needs enabling for the connection
+   itself.
+2. **Script Access.** Set Script Access to **External** (or **All**) in Q-SYS
+   Designer on every component whose controls this integration should reach, then
+   deploy. If a component is missing from the catalog, check this first.
+3. **Access Control.** If the Core has Access Control on, create a user for this
+   app (a Core Manager Administrator user) and enter its name
+   and password below. With Access Control off, leave both blank.
+
+### In Stage
+
+**Settings → Integrations → Q-SYS**:
+
+| Field | Meaning |
+|---|---|
+| Core host | The Core's address. |
+| Port | QRC port. Default 1710. |
+| User, Password | Only if the Core requires a QRC logon. The password is stored encrypted on this machine and is never sent to a browser. |
+| Volunteer meter rate | Meter updates per second for volunteer panels. Whole number, 1 to 30, default 10. |
+| Staff meter rate | Meter updates per second for staff panels. Whole number, 1 to 30, default 20. |
+
+The two meter rates are stored for the Q-SYS panels, which arrive in a later
+release. Nothing in this release reads them.
+
+Enable the integration and use **Test connection**. It connects, logs on, and
+reports `Connected to <design name>` with the number of components it read, or
+the reason it could not. Saving any field, the meter rates included, reconnects to
+the Core. A stored rate outside 1 to 30 is read as the nearer bound, and one that
+is not a number as its default.
+
+### Trying it without a Core
+
+Q-SYS Designer in **Emulate** answers QRC on the machine it runs on, port 1710.
+Point **Core host** at that machine to try the integration with no Core. The
+status reports `emulator` so it is not mistaken for a live Core.
+
+## What it never does
+
+It reads the design. It never calls a method that changes the design: no components are added, no designs loaded, no Core settings changed.
+
+## Troubleshooting
+
+Look at `/log` and filter for `[qsys]`.
+
+| Line or message | Meaning |
+|---|---|
+| `connecting to <host>:<port>` | The service is dialling. If nothing follows, the address or port is wrong, or the machine is not reachable. |
+| `<host> connection failed: <reason>` | The Core did not answer. `ECONNREFUSED` usually means nothing listens on that port; a timeout means a network path problem. |
+| `logon refused` | The user or password is wrong, or the user lacks access. Test connection reports "The Core refused the user name or password". Logged once; the retries are quiet until it connects. |
+| `logon required, and no user is set` | The Core has Access Control on and the card has no User. Test connection reports "The Core requires a logon: set User and Password". |
+| `connection lost: <reason>` | The connection dropped. The service reconnects with backoff. |
+| `connected to <design> (<n> components, emulator=<bool>)` | Connected and the catalog is read. Few or no components usually means Script Access is not set where it is needed, or no design is running. |
+| `design changed, refreshing catalog` | The Core reports a new design code, as after a redeploy or a Core restart. |
+| `a QRC message passed <n> bytes without a terminator, dropping the connection` | One message from the Core ran past 32 MiB without ending. Real designs stay far under that; the service reconnects, and if this repeats, the address is probably not a Q-SYS Core. |
+| `ignoring QRC message with no matching request (id <n>)` | A reply arrived for a request that had already given up after 5 seconds. Occasional lines mean a busy Core or network; a steady stream means replies are consistently slow. |
+| `ignoring unparseable QRC message: <reason>` | The Core sent something that is not JSON. If it was a reply, its request fails 5 seconds later as timed out. |
+| `QRC notification handler for <method> threw: <reason>`, `QRC close handler threw: <reason>`, `catalog listener threw: <reason>` | A bug in this app's handling of a message from the Core. The connection carries on; report the line. |

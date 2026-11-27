@@ -31,6 +31,7 @@ const CASES = [
   { id: "obs", key: "password", config: { host: "obs-a.example", port: 4455 } },
   { id: "prodcom", key: "apiKey", config: { host: "prodcom-a.example", port: 8000 } },
   { id: "pvp", key: "token", config: { host: "pvp-a.example", port: 50742, https: "on" } },
+  { id: "qsys", key: "password", config: { host: "qsys-a.example", port: 1710 } },
   { id: "smaart", key: "password", config: { host: "smaart-a.example", port: 26000 } },
 ] as const;
 
@@ -78,6 +79,7 @@ test("the integrations whose credential follows a typed address are exactly the 
     "obs",
     "prodcom",
     "pvp",
+    "qsys",
     "smaart",
   ]);
   // Every secret those hold is the one sent to the target, so a restore may

@@ -72,6 +72,33 @@ async function controlled(initial: string | null) {
   return c;
 }
 
+/** Every card the panel draws, by id. A sorted list rather than a count, so two
+ *  branches each adding an integration merge as two lines. */
+const EVERY_CARD = [
+  "companion",
+  "obs",
+  "openai",
+  "osc",
+  "planning-center",
+  "prodcom",
+  "propresenter",
+  "pvp",
+  "qsys",
+  "reaper",
+  "resi",
+  "ross-tsl",
+  "rosstalk",
+  "scores",
+  "sensource",
+  "smaart",
+  "video",
+  "wireless",
+  "youtube",
+];
+
+const cards = (root: HTMLElement): string[] =>
+  [...root.querySelectorAll("[data-integration-card]")].map((e) => e.getAttribute("data-integration-card") ?? "").sort();
+
 describe("the panel opens whatever it is told to", () => {
   test("an id in `open` shows that integration's dialog on the first render", async () => {
     await controlled("obs");
@@ -86,13 +113,13 @@ describe("the panel opens whatever it is told to", () => {
   test("an id nobody owns opens nothing and does not throw", async () => {
     const c = await controlled("not-a-thing");
     assertAbsent(dialog(), "an unknown id opened a dialog");
-    assert.equal(c.container.querySelectorAll("[data-integration-card]").length, 18);
+    assert.deepEqual(cards(c.container), EVERY_CARD);
   });
 
   test("null opens nothing", async () => {
     const c = await controlled(null);
     assertAbsent(dialog(), "a null open value opened a dialog");
-    assert.equal(c.container.querySelectorAll("[data-integration-card]").length, 18);
+    assert.deepEqual(cards(c.container), EVERY_CARD);
   });
 
   test("clicking a card reports the id up rather than opening on its own", async () => {

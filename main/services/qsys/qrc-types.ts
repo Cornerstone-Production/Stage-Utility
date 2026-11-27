@@ -1,0 +1,39 @@
+// qrc-types.ts — shapes of the QRC (Q-SYS Remote Control) messages Stage Utility reads.
+// Checked against QSC's QRC Commands reference; only the fields we use are typed.
+
+export interface QrcComponent {
+  /** The component's Code Name. */
+  Name: string;
+  Type: string;
+  Properties: { Name: string; Value: string }[];
+}
+
+export interface QrcControl {
+  Name: string;
+  Type: string;
+  Value: number | boolean | string;
+  String: string;
+  Position: number;
+  Direction: string;
+  /** Present on float controls only. */
+  ValueMin?: number;
+  ValueMax?: number;
+}
+
+export interface QrcStatus {
+  Platform?: string;
+  State: "Idle" | "Active" | "Standby";
+  DesignName: string;
+  DesignCode: string;
+  IsRedundant: boolean;
+  IsEmulator: boolean;
+}
+
+/** One entry of a change-group push: `{ Id, Changes: QrcChange[] }`. */
+export interface QrcChange {
+  Component?: string;
+  Name: string;
+  Value: unknown;
+  String: string;
+  Position?: number;
+}

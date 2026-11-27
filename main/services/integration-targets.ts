@@ -50,8 +50,11 @@ export function hostPortOf(
 const OBS_DEFAULT_PORT = 4455;
 /** Smaart's standard API port, the default when only a host is given. */
 const SMAART_DEFAULT_PORT = 26000;
+/** QRC's standard port on a Q-SYS Core. */
+const QSYS_DEFAULT_PORT = 1710;
 
 export const obsTarget = (cfg: Record<string, unknown>) => hostPortOf(cfg, OBS_DEFAULT_PORT);
+export const qsysTarget = (cfg: Record<string, unknown>) => hostPortOf(cfg, QSYS_DEFAULT_PORT);
 export const smaartTarget = (cfg: Record<string, unknown>) => hostPortOf(cfg, SMAART_DEFAULT_PORT);
 /** ProdCom has no conventional port, so a stored one is required. */
 export const prodcomTarget = (cfg: Record<string, unknown>) => hostPortOf(cfg, null);
@@ -81,6 +84,7 @@ const CREDENTIAL_TARGETS = new Map<IntegrationId, (cfg: Record<string, unknown>)
     // otherwise go to the same host in the clear. Turning it on is not.
     return { host: t.host, port: t.port, encrypted: t.https };
   }],
+  ["qsys", qsysTarget],
   ["smaart", smaartTarget],
 ]);
 

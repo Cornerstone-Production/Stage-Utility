@@ -40,9 +40,12 @@ import {
   positiveConfigNumber,
   prodcomTarget,
   pvpTarget,
+  qsysTarget,
   smaartTarget,
 } from "./integration-targets.js";
 import type { ConnState } from "./integration-base.js";
+import { qsysService, qsysTestMessage } from "./qsys/qsys-service.js";
+import { QSYS_DEFAULT_RATES, QSYS_MAX_HZ, QSYS_MIN_HZ, qsysRates, type QsysSettings } from "./qsys/qsys-settings.js";
 import { smaartService } from "./smaart-service.js";
 import { stageController } from "./stage-controller.js";
 import { type TslFeed, tslService } from "./tsl-service.js";
@@ -356,6 +359,46 @@ const SMAART_DESCRIPTOR: IntegrationDescriptor = {
       label: "API Password",
       type: "password",
       placeholder: "(only if the Smaart API requires authentication)",
+    },
+  ],
+};
+
+// Q-SYS integration — QRC (JSON-RPC over TCP, default port 1710) to a Core.
+// Connects, reports status and reads the design's components and controls (the
+// catalog). The two meter rates are stored for the Q-SYS panels of a later release.
+const QSYS_DESCRIPTOR: IntegrationDescriptor = {
+  id: "qsys",
+  kind: "control",
+  label: "Q-SYS",
+  description: "Connects to a Q-SYS Core and reads its design's components and controls.",
+  docs: "qsys",
+  configSchema: [
+    { key: "host", label: "Core host", type: "text", placeholder: "192.168.1.50" },
+    { key: "port", label: "Port", type: "number", default: 1710 },
+    {
+      key: "user",
+      label: "User",
+      type: "text",
+      help: "Only if the Core requires a QRC logon. Leave blank otherwise.",
+    },
+    { key: "password", label: "Password", type: "password", help: "Only if a user is set." },
+    {
+      key: "volunteerMeterHz",
+      label: "Volunteer meter rate",
+      type: "number",
+      default: QSYS_DEFAULT_RATES.volunteerMeterHz,
+      min: QSYS_MIN_HZ,
+      max: QSYS_MAX_HZ,
+      help: "Meter updates per second for volunteer panels (1 to 30). Stored for the Q-SYS panels of a later release.",
+    },
+    {
+      key: "staffMeterHz",
+      label: "Staff meter rate",
+      type: "number",
+      default: QSYS_DEFAULT_RATES.staffMeterHz,
+      min: QSYS_MIN_HZ,
+      max: QSYS_MAX_HZ,
+      help: "Meter updates per second for staff panels (1 to 30). Stored for the Q-SYS panels of a later release.",
     },
   ],
 };
@@ -763,6 +806,7 @@ const DESCRIPTORS: IntegrationDescriptor[] = [
   PROPRESENTER_DESCRIPTOR,
   PRODCOM_DESCRIPTOR,
   SMAART_DESCRIPTOR,
+  QSYS_DESCRIPTOR,
   OBS_DESCRIPTOR,
   REAPER_DESCRIPTOR,
   PVP_DESCRIPTOR,
@@ -1014,6 +1058,9 @@ export function configuredFor(
       refreshToken: String(c.refreshToken ?? ""),
     });
   }
+  // The dialog posts both meter rates on every save, so "any value present" would
+  // call a Core with no host configured. Read the host the way the dialler does.
+  if (state.id === "qsys") return qsysTarget(state.config).host !== null;
   return Object.values(state.config).some((v) => v !== "" && v != null);
 }
 
@@ -1040,6 +1087,7 @@ const SECRET_KEYS = new Map<IntegrationId, readonly string[]>([
   ["propresenter", []],
   ["prodcom", ["apiKey"]],
   ["smaart", ["password"]],
+  ["qsys", ["password"]],
   ["obs", ["password"]],
   ["pvp", ["token"]],
   ["reaper", []],
@@ -1372,6 +1420,8 @@ class IntegrationManager {
     void this.applyProdcom();
     // Start the Smaart SPL connection if enabled + configured.
     await this.applySmaart();
+    // Start the Q-SYS Core connection if enabled + configured.
+    await this.applyQsys();
     // Start the OBS connection if enabled + configured.
     await this.applyObs();
     // Start the REAPER web-interface poller if enabled + configured.
@@ -1601,6 +1651,7 @@ class IntegrationManager {
       propresenter: () => this.applyPropresenter(),
       prodcom: () => this.applyProdcom(),
       smaart: () => this.applySmaart(),
+      qsys: () => this.applyQsys(),
       obs: () => this.applyObs(),
       pvp: () => this.applyPvp(),
       reaper: () => this.applyReaper(),
@@ -1984,6 +2035,18 @@ class IntegrationManager {
         return this.reportTest("smaart", await smaartService.test(host, port, secrets.password ?? null));
       }
 
+      if (id === "qsys") {
+        const { host, port } = this.getQsysTarget();
+        if (!host || !port) {
+          return { ok: false, message: "Host and Port are required" };
+        }
+        const secrets = await secretsStore.getSecrets("qsys");
+        const result = await qsysService.test(this.qsysSettings(host, port), secrets.password ?? null);
+        const said = qsysTestMessage(result);
+        // The row's badge already says "Connected", so it gets the message without it.
+        return this.reportTest("qsys", { ok: said.ok, message: said.message }, said.rowMessage);
+      }
+
       if (id === "obs") {
         const { host, port } = this.getObsTarget();
         if (!host || !port) {
@@ -2083,8 +2146,9 @@ class IntegrationManager {
   // ── Internals ─────────────────────────────────────────────────────────
 
   /** Put a Test's answer on the integration's row, and hand it back to the caller. */
-  private reportTest<T extends { ok: boolean; message?: string }>(id: string, result: T): T {
-    this.setConnectionState(id, result.ok ? "connected" : "error", result.message ?? null);
+  /** `rowMessage` replaces the Test answer on the card's row, when the two read differently. */
+  private reportTest<T extends { ok: boolean; message?: string }>(id: string, result: T, rowMessage?: string): T {
+    this.setConnectionState(id, result.ok ? "connected" : "error", rowMessage ?? result.message ?? null);
     this.broadcastStates();
     return result;
   }
@@ -2204,6 +2268,37 @@ class IntegrationManager {
       return {
         connecting: `Connecting ${host}:${port}`,
         start: () => smaartService.configure(host, port, secrets.password ?? null),
+      };
+    });
+  }
+
+  /** The Core's standard QRC port is the default when only a host is given. */
+  private getQsysTarget(): { host: string | null; port: number | null } {
+    return qsysTarget(this.configOf("qsys"));
+  }
+
+  /** Everything QsysService is handed, off the integration's config. */
+  private qsysSettings(host: string, port: number): QsysSettings {
+    const cfg = this.configOf("qsys");
+    return {
+      host,
+      port,
+      user: typeof cfg.user === "string" ? cfg.user.trim() : "",
+      enabled: this.states.get("qsys")?.enabled ?? false,
+      ...qsysRates(cfg),
+    };
+  }
+
+  /** Start/stop the Q-SYS Core connection to match enabled + configured state. */
+  private async applyQsys(): Promise<void> {
+    await this.applyService("qsys", qsysService, async () => {
+      const { host, port } = this.getQsysTarget();
+      if (!host || !port) return null;
+      const secrets = await secretsStore.getSecrets("qsys");
+      const settings = this.qsysSettings(host, port);
+      return {
+        connecting: `Connecting ${host}:${port}`,
+        start: () => qsysService.configure(settings, secrets.password ?? null),
       };
     });
   }

@@ -44,6 +44,7 @@ describe("an integration's blurb is a blurb", () => {
         "prodcom",
         "propresenter",
         "pvp",
+        "qsys",
         "reaper",
         "resi",
         "ross-tsl",

@@ -80,17 +80,31 @@ const seeded: Seeded[] = INTEGRATION_DESCRIPTOR_FIXTURE.flatMap((d) => {
 const where = (s: Seeded) => `${s.id}.${s.key}`;
 
 describe("what a number field starts out holding", () => {
-  test("there are exactly thirteen of them", () => {
-    // EXACT, not a floor. A fourteenth number field is a field nobody has
-    // decided the unset behaviour of, and the whole point of this file is that
-    // the decision is made per field rather than defaulted into. Update this
-    // number in the same change that adds the field, having read the rest of
-    // this file first.
-    assert.equal(
-      seeded.length,
-      13,
-      `the app ships ${seeded.length} number fields, not 13: ${seeded.map(where).join(", ")}`,
-    );
+  test("there are exactly these, and no others", () => {
+    // EXACT, not a floor. A new number field is a field nobody has decided the
+    // unset behaviour of, and the whole point of this file is that the decision
+    // is made per field rather than defaulted into. Add it to this list in the
+    // same change that adds the field, having read the rest of this file first.
+    // A sorted list rather than a count, so two branches each adding a field
+    // merge as two lines rather than conflict over one number.
+    assert.deepEqual(seeded.map(where).sort(), [
+      "companion.port",
+      "obs.port",
+      "prodcom.port",
+      "propresenter.pollMs",
+      "propresenter.port",
+      "pvp.imageDurationSec",
+      "pvp.port",
+      "qsys.port",
+      "qsys.staffMeterHz",
+      "qsys.volunteerMeterHz",
+      "reaper.port",
+      "ross-tsl.port",
+      "sensource.attendancePollSeconds",
+      "sensource.pollSeconds",
+      "sensource.safeSpacePollSeconds",
+      "smaart.port",
+    ]);
   });
 
   test("not one of them seeds NaN", () => {
@@ -200,21 +214,31 @@ describe("which number fields say blank is a setting", () => {
     assert.deepEqual(bad.map((f) => `${f.at}=${f.shown}`), [], "a number field reached the input as 0");
   });
 
-  test("all ten fields with no unsetHint are still handed 0 for an empty value", () => {
+  test("every field with no unsetHint is still handed 0 for an empty value", () => {
     // The opt-in, at the render site. Without the `unsetHint` test in
     // numberFieldValue this would blank every number field in the app whose
     // value happened to be missing.
     //
-    // ALL of them, and an exact count. This used to check `fields.find(...)` —
+    // ALL of them, and an exact list. This used to check `fields.find(...)` —
     // one field, whichever came first, which is companion.port — so nine of the
     // ten were covered by nothing, and a descriptor that gave one of them an
     // unsetHint by accident would not have shown up here.
     const plain = fields.filter((f) => f.field.unsetHint == null);
-    assert.equal(
-      plain.length,
-      10,
-      `${plain.length} number fields declare no unsetHint, not 10: ${plain.map((f) => `${f.id}.${f.field.key}`).join(", ")}`,
-    );
+    assert.deepEqual(plain.map((f) => `${f.id}.${f.field.key}`).sort(), [
+      "companion.port",
+      "obs.port",
+      "prodcom.port",
+      "propresenter.port",
+      "pvp.imageDurationSec",
+      "pvp.port",
+      "qsys.port",
+      "qsys.staffMeterHz",
+      "qsys.volunteerMeterHz",
+      "reaper.port",
+      "sensource.pollSeconds",
+      "sensource.safeSpacePollSeconds",
+      "smaart.port",
+    ]);
     for (const f of plain) {
       const at = `${f.id}.${f.field.key}`;
       assert.equal(numberFieldValue(f.field, ""), 0, `${at} rendered blank for ""`);
@@ -412,28 +436,38 @@ const OUT_OF_BOUNDS: { id: string; key: string; stored: number; why: string }[] 
 });
 
 describe("a stored number outside the field's bounds", () => {
-  test("nine reachable cases, across six bounded fields", () => {
-    // EXACT, like the counts above it. A new bound on a number field is a new
+  test("exactly these reachable cases, across these bounded fields", () => {
+    // EXACT, like the lists above it. A new bound on a number field is a new
     // way for an already-stored value to be outside it, and it should arrive
-    // here rather than be covered by luck. Six of the thirteen number fields
-    // declare a bound: five declare both a floor and a ceiling, one
-    // (propresenter.pollMs) declares only a floor. Nine rather than eleven
-    // because companion.port and ross-tsl.port floor at 1, and nothing below
-    // that survives initialConfig — see OUT_OF_BOUNDS.
+    // here rather than be covered by luck. propresenter.pollMs declares only a
+    // floor; the rest declare a floor and a ceiling. A field whose floor is 1
+    // (companion.port, ross-tsl.port, the Q-SYS meter rates) has only its
+    // above-max case, because nothing below 1 survives initialConfig — see
+    // OUT_OF_BOUNDS.
     const bounded = [...new Set(OUT_OF_BOUNDS.map((o) => `${o.id}.${o.key}`))].sort();
     assert.deepEqual(bounded, [
       "companion.port",
       "propresenter.pollMs",
+      "qsys.staffMeterHz",
+      "qsys.volunteerMeterHz",
       "ross-tsl.port",
       "sensource.attendancePollSeconds",
       "sensource.pollSeconds",
       "sensource.safeSpacePollSeconds",
     ]);
-    assert.equal(
-      OUT_OF_BOUNDS.length,
-      9,
-      `out-of-bounds cases: ${OUT_OF_BOUNDS.map((o) => `${o.id}.${o.key} ${o.why}`).join(", ")}`,
-    );
+    assert.deepEqual(OUT_OF_BOUNDS.map((o) => `${o.id}.${o.key} ${o.why}`).sort(), [
+      "companion.port above max 65535",
+      "propresenter.pollMs below min 200",
+      "qsys.staffMeterHz above max 30",
+      "qsys.volunteerMeterHz above max 30",
+      "ross-tsl.port above max 65535",
+      "sensource.attendancePollSeconds above max 3600",
+      "sensource.attendancePollSeconds below min 10",
+      "sensource.pollSeconds above max 3600",
+      "sensource.pollSeconds below min 10",
+      "sensource.safeSpacePollSeconds above max 60",
+      "sensource.safeSpacePollSeconds below min 10",
+    ]);
   });
 
   for (const { id, key, stored, why } of OUT_OF_BOUNDS) {

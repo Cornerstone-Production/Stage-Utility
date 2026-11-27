@@ -215,6 +215,57 @@ export const INTEGRATION_DESCRIPTOR_FIXTURE: IntegrationDescriptor[] = [
     ]
   },
   {
+    "id": "qsys",
+    "kind": "control",
+    "label": "Q-SYS",
+    "description": "Connects to a Q-SYS Core and reads its design's components and controls.",
+    "docs": "qsys",
+    "configSchema": [
+      {
+        "key": "host",
+        "label": "Core host",
+        "type": "text",
+        "placeholder": "192.168.1.50"
+      },
+      {
+        "key": "port",
+        "label": "Port",
+        "type": "number",
+        "default": 1710
+      },
+      {
+        "key": "user",
+        "label": "User",
+        "type": "text",
+        "help": "Only if the Core requires a QRC logon. Leave blank otherwise."
+      },
+      {
+        "key": "password",
+        "label": "Password",
+        "type": "password",
+        "help": "Only if a user is set."
+      },
+      {
+        "key": "volunteerMeterHz",
+        "label": "Volunteer meter rate",
+        "type": "number",
+        "default": 10,
+        "min": 1,
+        "max": 30,
+        "help": "Meter updates per second for volunteer panels (1 to 30). Stored for the Q-SYS panels of a later release."
+      },
+      {
+        "key": "staffMeterHz",
+        "label": "Staff meter rate",
+        "type": "number",
+        "default": 20,
+        "min": 1,
+        "max": 30,
+        "help": "Meter updates per second for staff panels (1 to 30). Stored for the Q-SYS panels of a later release."
+      }
+    ]
+  },
+  {
     "id": "obs",
     "kind": "control",
     "label": "OBS Studio",
