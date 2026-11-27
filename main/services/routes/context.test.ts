@@ -264,3 +264,20 @@ test("the default limits are what the routes actually get", async () => {
   assert.ok(MAX_JSON_BODY_BYTES > 0 && MAX_JSON_BODY_BYTES <= 16 * 1024 * 1024);
   assert.ok(MAX_UPLOAD_BODY_BYTES >= MAX_JSON_BODY_BYTES, "an upload may be larger than JSON");
 });
+
+test("a body that is not JSON rejects with a status of 400, so no route has to catch it to answer 400", async () => {
+  // handlerErrorStatus answers 500 for an error that declares no status, and ~85
+  // routes read the body with a bare `await readBody(req)`.
+  const out = await callRoute(
+    async ({ req, res }) => {
+      try {
+        await readBody(req);
+      } catch (e) {
+        json(res, { status: (e as { status?: number }).status });
+      }
+    },
+    "/x",
+    { method: "POST", raw: "{ not json" },
+  );
+  assert.equal((out.json as { status: number }).status, 400);
+});

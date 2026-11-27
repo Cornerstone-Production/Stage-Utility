@@ -7,7 +7,7 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { errorMessage } from "../errors.js";
-import { type RouteCtx, error, json, readBody, pcoReadFailed } from "./context.js";
+import { type RouteCtx, error, json, pcoReadFailed, readJsonObject } from "./context.js";
 import { scrub } from "../scrub.js";
 import { stageController } from "../stage-controller.js";
 import { integrationManager } from "../integration-manager.js";
@@ -79,7 +79,7 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (method === "POST" && pathname === "/api/scores/favourites") {
-      const body = (await readBody(req)) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (!Array.isArray(body.favourites)) {
         error(res, "body.favourites (array) required");
         return;
@@ -172,7 +172,7 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (method === "POST" && pathname === "/api/spl/visible-metrics") {
-      const body = (await readBody(req)) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const metrics = Array.isArray(body.metrics) ? (body.metrics as unknown[]) : [];
       json(res, { metrics: await splHistoryStore.setVisibleMetrics(metrics as string[]) });
       return;

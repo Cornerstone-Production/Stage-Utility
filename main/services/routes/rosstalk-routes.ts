@@ -3,7 +3,7 @@
 // Every route must finish responding before it returns (see RouteCtx).
 
 import { errorMessage } from "../errors.js";
-import { type RouteCtx, json, error, readBody, readBodyOrEmpty } from "./context.js";
+import { type RouteCtx, json, error, readBodyOrEmpty, readJsonObject } from "./context.js";
 import { ROSSTALK_COMMANDS, commandsForFamily } from "../rosstalk-commands.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
 
@@ -24,7 +24,7 @@ export async function rosstalkRoutes(c: RouteCtx): Promise<void> {
 
   const idMatch = pathname.match(/^\/api\/rosstalk\/targets\/([^/]+)$/);
   if (method === "PATCH" && idMatch) {
-    const body = (await readBody(req)) as Record<string, unknown>;
+    const body = await readJsonObject(req);
     json(res, await rosstalkManager.updateTarget({ id: idMatch[1], patch: body }));
     return;
   }
@@ -54,7 +54,7 @@ export async function rosstalkRoutes(c: RouteCtx): Promise<void> {
     return;
   }
   if (method === "POST" && pathname === "/api/rosstalk/simulate") {
-    const body = (await readBody(req)) as Record<string, unknown>;
+    const body = await readJsonObject(req);
     if (typeof body.simulate !== "boolean") {
       error(res, "body.simulate (boolean) required");
       return;
@@ -64,7 +64,7 @@ export async function rosstalkRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "POST" && pathname === "/api/rosstalk/send") {
-    const body = (await readBody(req)) as Record<string, unknown>;
+    const body = await readJsonObject(req);
     if (typeof body.targetId !== "string") {
       error(res, "body.targetId (string) required");
       return;

@@ -41,11 +41,12 @@ import { GroupsNotCleared, messagesService } from "../messages-service.js";
 import { MessagingConflict } from "../messaging-store.js";
 import { type RouteCtx, error, json, readBodyOrEmpty } from "./context.js";
 import type http from "node:http";
+import { isRecord } from "../../types/is-record.js";
 
 /** A body that must be a JSON object. A JSON array is not one, and readBodyOrEmpty
  *  hands one through, so it is checked here. */
 function objectBody(body: unknown): Record<string, unknown> | null {
-  return body !== null && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
+  return isRecord(body) ? body : null;
 }
 
 /** Answer a failure the caller can act on, or rethrow one they cannot. */

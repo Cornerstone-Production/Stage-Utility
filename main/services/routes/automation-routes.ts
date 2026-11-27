@@ -4,7 +4,7 @@
 
 import { errorMessage } from "../errors.js";
 import { isRecord } from "../../types/is-record.js";
-import { type RouteCtx, error, json, readBody } from "./context.js";
+import { type RouteCtx, error, json, readObjectBody } from "./context.js";
 import { AUTOMATION_ACTIONS } from "../automation-actions.js";
 import { invokeAction } from "../action-invoke.js";
 import { AUTOMATION_CONDITIONS } from "../automation-conditions.js";
@@ -99,20 +99,6 @@ function normalizeSteps(
     out.conditions = [];
   }
   return { body: out };
-}
-
-/**
- * A request body that must be a JSON object, or null after answering 400. Every
- * route here reads fields off it, and `5` or `null` is valid JSON that throws on
- * the first read.
- */
-async function readObjectBody(req: RouteCtx["req"], res: RouteCtx["res"]): Promise<Record<string, unknown> | null> {
-  const body = await readBody(req);
-  if (!isRecord(body)) {
-    error(res, "body must be a JSON object");
-    return null;
-  }
-  return body;
 }
 
 /** A rule body read, object-checked and step-checked in one: null after a 400. */

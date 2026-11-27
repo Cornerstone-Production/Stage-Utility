@@ -8,7 +8,7 @@
 
 import { errorMessage } from "../errors.js";
 import { isStringList } from "../../types/is-record.js";
-import { type RouteCtx, json, error, readBody } from "./context.js";
+import { type RouteCtx, json, error, readBody, readJsonObject } from "./context.js";
 import { hostNames } from "../host-names.js";
 import { refuseUnansweredHost } from "./host-name-routes.js";
 import { stageController } from "../stage-controller.js";
@@ -27,7 +27,7 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
     // that sent `items: "clock"` used to be rejected and must go on being
     // rejected now that its absence is legal.
     if (method === "POST" && pathname === "/api/bar-items") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (body.items !== undefined && !isStringList(body.items)) {
         error(res, "body.items must be a string[]");
         return;
@@ -69,7 +69,7 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
     // ── Saved colours ─────────────────────────────────────────────────────
     // The operator's own palette, kept beside the app's. Global config.
     if (method === "POST" && pathname === "/api/saved-colors") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (typeof body.color !== "string" || !body.color.trim()) {
         error(res, "body.color (string) required");
         return;
@@ -84,7 +84,7 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
 
     // ── Kiosk discovery ───────────────────────────────────────────────────
     if (method === "POST" && pathname === "/api/kiosk-discovery") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (typeof body.enabled !== "boolean") {
         error(res, "body.enabled (boolean) required");
         return;
@@ -102,7 +102,7 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
 
     // ── Mac helpers and Windows kiosks follow this server's version ───────
     if (method === "POST" && pathname === "/api/machine-updates/auto") {
-      const body = (await readBody(req)) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (typeof body.enabled !== "boolean") {
         error(res, "body.enabled (boolean) required");
         return;
@@ -113,7 +113,7 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
 
     // ── QR visibility ─────────────────────────────────────────────────────
     if (method === "POST" && pathname === "/api/show-qr") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (typeof body.show !== "boolean") {
         error(res, "body.show (boolean) required");
         return;
@@ -125,7 +125,7 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
 
     // ── Onboarding checklist dismissal ─────────────────────────────────────
     if (method === "POST" && pathname === "/api/onboarding-dismissed") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (typeof body.dismissed !== "boolean") {
         error(res, "body.dismissed (boolean) required");
         return;
@@ -139,7 +139,7 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
     // POST /api/displays/refresh — reload kiosk pages. Optional body.id targets
     // a single output; omitted/empty reloads all connected displays.
     if (method === "POST" && pathname === "/api/displays/refresh") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const target = typeof body.id === "string" ? body.id : "";
       stageController.refreshDisplays(target);
       json(res, { ok: true, target: target || "all" });
@@ -148,7 +148,7 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
 
     // ── NDI visibility ──────────────────────────────────────────────────────
     if (method === "POST" && pathname === "/api/ndi-enabled") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (typeof body.enabled !== "boolean") {
         error(res, "body.enabled (boolean) required");
         return;
@@ -166,7 +166,7 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
     // persisted. Filed here beside the other settings setters rather than under
     // /api/settings/, which was a path shape nothing else in this app uses.
     if (method === "POST" && pathname === "/api/baptism-auto-start") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const patch: Parameters<typeof stageController.setBaptismAutoStart>[0] = {};
       if (typeof body.enabled === "boolean") patch.enabled = body.enabled;
       if (typeof body.testimonyKeyword === "string") patch.testimonyKeyword = body.testimonyKeyword;
@@ -182,7 +182,7 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
     if (method === "POST" && pathname === "/api/public-url") {
       // The Public address is an answered name, so it changes only by a request whose own name already is.
       if (refuseUnansweredHost(req, res)) return;
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const url = typeof body.url === "string" ? body.url : null;
       let state;
       try {
@@ -198,7 +198,7 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
 
     // ── Icon tint (display id or tool path) ─────────────────────────────────
     if (method === "POST" && pathname === "/api/icon-color") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const key = typeof body.key === "string" ? body.key : "";
       const color = typeof body.color === "string" ? body.color : "";
       try {
@@ -211,7 +211,7 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
 
     // ── Icon glyph (display id or tool path) ────────────────────────────────
     if (method === "POST" && pathname === "/api/icon-glyph") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const key = typeof body.key === "string" ? body.key : "";
       const glyph = typeof body.glyph === "string" ? body.glyph : "";
       try {
@@ -224,7 +224,7 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
 
     // ── Caption channel colors ──────────────────────────────────────────────
     if (method === "POST" && pathname === "/api/caption-colors") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const channel = typeof body.channel === "string" ? body.channel : "";
       const color = typeof body.color === "string" ? body.color : null;
       const state = await stageController.setCaptionChannelColor(channel, color);
@@ -234,7 +234,7 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
 
     // Whether a channel with no custom pick above follows ProdCom's own color.
     if (method === "POST" && pathname === "/api/caption-colors/follow-prodcom") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (typeof body.on !== "boolean") {
         error(res, "body.on (boolean) required");
         return;
