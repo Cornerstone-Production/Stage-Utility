@@ -30,7 +30,9 @@ import type { Rule } from "../types/automation.js";
 import type { View } from "../types/stage.js";
 import type { LayoutObject } from "../types/views.js";
 import { calledCueName } from "./cue-aliases.js";
-import { buttonCueRule, chosenLabel, cueNameFor, cueSlug, namesTakenForNewCue, ruleParams } from "./cue-naming.js";
+import { deriveCueName } from "./cue-name.js";
+import { BUTTON_CUE, buttonCueRule, chosenLabel, namesTakenForNewCue, ruleParams } from "./cue-naming.js";
+import { slugForCue } from "./cue-slug.js";
 import { migrateViews } from "./never-chosen-defaults.js";
 import { automationStore } from "./automation-store.js";
 import { errorMessage } from "./errors.js";
@@ -116,7 +118,7 @@ export function planActionButtonMigration(
       const ruleName = label ?? registryName;
       let cueName = known;
       if (cueName === undefined) {
-        cueName = cueNameFor(cueSlug(ruleName) ? ruleName : registryName, taken, "btn_");
+        cueName = deriveCueName(slugForCue(ruleName) ? ruleName : registryName, taken, BUTTON_CUE);
         taken.add(cueName);
         rules.push({
           ...buttonCueRule({
