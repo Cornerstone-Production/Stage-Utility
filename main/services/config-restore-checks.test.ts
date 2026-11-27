@@ -479,17 +479,13 @@ describe("config restore checks", () => {
   });
 
   describe("a refused restore touches nothing", () => {
-    const poller = livePoller as unknown as { running: boolean; timer: ReturnType<typeof setTimeout> | null };
-
     test("the background writers keep running", async () => {
-      poller.running = true;
+      livePoller["running"] = true;
       try {
         await assert.rejects(() => configSnapshot.apply(bundleOf({ "views.json": BAD["views.json"].value })), RestoreRefusedError);
-        assert.equal(poller.running, true, "a refused restore stopped the live poller");
+        assert.equal(livePoller["running"], true, "a refused restore stopped the live poller");
       } finally {
-        poller.running = false;
-        if (poller.timer) clearTimeout(poller.timer);
-        poller.timer = null;
+        livePoller.stop();
       }
     });
 

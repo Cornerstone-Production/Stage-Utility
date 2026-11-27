@@ -32,9 +32,6 @@ const { livePoller } = await import("./live-poller.js");
 const { stageController } = await import("./stage-controller.js");
 const { PcoAuthError } = await import("./pco-service.js");
 
-type Poller = { running: boolean; timer: ReturnType<typeof setTimeout> | null };
-const poller = livePoller as unknown as Poller;
-
 const realFetchLive = stageController.fetchLive.bind(stageController);
 
 let calls = 0;
@@ -71,8 +68,8 @@ describe("live-poller auth backoff", () => {
 
     // The regression this guards: stop() here ended polling for the process's
     // life, taking every recorder fed by this tick down with it.
-    assert.equal(poller.running, true, "an auth failure must not end polling for the life of the process");
-    assert.ok(poller.timer !== null, "a retry must stay scheduled");
+    assert.equal(livePoller["running"], true, "an auth failure must not end polling for the life of the process");
+    assert.ok(livePoller["timer"] !== null, "a retry must stay scheduled");
   });
 
   it("backs off hard rather than asking once per tick", async () => {
@@ -91,8 +88,8 @@ describe("live-poller auth backoff", () => {
     livePoller.start();
     await settle();
 
-    assert.equal(poller.running, true, "a network blip must not disable the countdown");
-    assert.ok(poller.timer !== null, "the next tick must stay scheduled");
+    assert.equal(livePoller["running"], true, "a network blip must not disable the countdown");
+    assert.ok(livePoller["timer"] !== null, "the next tick must stay scheduled");
   });
 
   it("start() re-arms immediately, which is how saving credentials recovers without waiting out the backoff", async () => {
@@ -107,6 +104,6 @@ describe("live-poller auth backoff", () => {
     await settle();
 
     assert.ok(calls > afterAuthFailure, "saving credentials must poll again at once, not after the backoff");
-    assert.equal(poller.running, true);
+    assert.equal(livePoller["running"], true);
   });
 });

@@ -50,8 +50,6 @@ addBroadcastListener((channel, payload) => {
   if (channel === "pco:live") frames.push({ channel, payload });
 });
 
-type Poller = { keepaliveTimer: ReturnType<typeof setInterval> | null };
-
 /** A fetch that resolves with a live item whose label moves every time, so the
  *  poller's own tick broadcasts on each of its 1 s passes. */
 function fetchAdvances(): void {
@@ -184,7 +182,7 @@ describe("live-poller clock keepalive", () => {
     await settle();
     livePoller.stop();
     assert.equal(
-      (livePoller as unknown as Poller).keepaliveTimer,
+      livePoller["keepaliveTimer"],
       null,
       "a stopped poller holding a live interval keeps the process awake and fires again on restart",
     );

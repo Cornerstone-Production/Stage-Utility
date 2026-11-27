@@ -46,10 +46,7 @@ function venueDoc() {
   };
 }
 function quiet() {
-  const poller = livePoller as unknown as { running: boolean; timer: ReturnType<typeof setTimeout> | null };
-  poller.running = false;
-  if (poller.timer) clearTimeout(poller.timer);
-  poller.timer = null;
+  livePoller.stop();
   const c = stageController as unknown as Record<string, ReturnType<typeof setInterval> | null>;
   for (const k of ["autoRefreshTimer", "updateCheckTimer"]) {
     if (c[k]) clearInterval(c[k]!);

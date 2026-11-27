@@ -33,9 +33,7 @@ const before = [{ id: "dev-before", token: "", outputId: "display-1", label: "Be
 const restored = [{ id: "dev-restored", token: "", outputId: "display-2", label: "Restored", macs: [] }];
 
 after(async () => {
-  const poller = livePoller as unknown as { running: boolean; timer: ReturnType<typeof setTimeout> | null };
-  poller.running = false;
-  if (poller.timer) clearTimeout(poller.timer);
+  livePoller.stop();
   const c = stageController as unknown as Record<string, ReturnType<typeof setInterval> | null>;
   for (const k of ["autoRefreshTimer", "updateCheckTimer"]) if (c[k]) clearInterval(c[k]!);
   await fs.rm(TMP, { recursive: true, force: true });
