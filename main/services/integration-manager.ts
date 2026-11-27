@@ -1289,6 +1289,8 @@ export async function applySecretMigration(plan: SecretMigration): Promise<Secre
 }
 
 class IntegrationManager {
+  /** The tail of the Planning Center reconciles, which run one at a time. */
+  private pcoReconcile: Promise<void> = Promise.resolve();
   private states = new Map<string, IntegrationState>();
 
   /**
@@ -1354,8 +1356,7 @@ class IntegrationManager {
     // leaves the badge on "connecting" and kicks the real check off in the
     // background — startup must not block on a round-trip to PCO over the
     // internet (a slow or down link would delay every display coming up).
-    await this.applyPcoCredentials();
-    void this.verifyPcoCredentials();
+    if (await this.reconcilePco()) void this.verifyPcoCredentials();
 
     // Start auto-refresh with the persisted interval (defaults to 60 min).
     stageController.startAutoRefresh(this.getPcoRefreshIntervalMs());
@@ -1823,7 +1824,7 @@ class IntegrationManager {
     }
 
     if (id === "planning-center") {
-      await this.applyPcoCredentials();
+      const on = await this.reconcilePco();
       // Restart auto-refresh with the (possibly updated) interval.
       stageController.startAutoRefresh(this.getPcoRefreshIntervalMs());
       // Validate against PCO and, if it accepts, load the lineup so the kiosk
@@ -1840,7 +1841,7 @@ class IntegrationManager {
       // the operator to save credentials that were sitting safely in secrets.bin.
       // Saving one thing must not be able to fail on how long a different thing
       // takes.
-      this.verifyPcoThenRefresh();
+      if (on) this.verifyPcoThenRefresh();
     }
 
     await this.applyIntegration(id);
@@ -1867,18 +1868,10 @@ class IntegrationManager {
       this.refreshWirelessSummary();
     }
 
-    if (id === "planning-center" && !enabled) {
-      stageController.setPcoCredentials(null, null);
-      this.setConnectionState("planning-center", "disconnected", null);
-    }
-    // Turned back on, the credentials switching it off cleared are loaded again, as
-    // a start or a save of its settings would. Without this, the tile's Test (which
-    // reads the stored credentials itself) passes while every read still answers
-    // "PCO not configured" until a restart.
-    if (id === "planning-center" && enabled) {
-      await this.applyPcoCredentials();
-      this.verifyPcoThenRefresh();
-    }
+    // Both ways: off clears the credentials, and on has to load them again, or the
+    // tile's Test (which reads the stored credentials itself) passes while every
+    // read still answers "PCO not configured" until a restart.
+    if (id === "planning-center" && (await this.reconcilePco())) this.verifyPcoThenRefresh();
 
     await this.applyIntegration(id);
 
@@ -2618,12 +2611,33 @@ class IntegrationManager {
   }
 
   /**
-   * Ask PCO whether the stored credentials actually work and report the truth.
-   * Never throws — a failure is a reported state, not an exception, so it can be
-   * called at startup without risking init.
+   * Puts the stage controller in step with Planning Center's switch as saved: on
+   * loads the stored credentials, off clears them. The switch is read from disk,
+   * not taken from the caller, and calls run one at a time, so an off that lands
+   * while an on is still loading has the last word, and a restart with it off
+   * comes back off.
    *
-   * @returns true when PCO accepted the credentials.
+   * @returns whether it is on, so the caller can decide whether to check it.
    */
+  private reconcilePco(): Promise<boolean> {
+    const run = this.pcoReconcile.then(async () => {
+      const settings = await settingsStore.load();
+      const on = enabledFor(PCO_DESCRIPTOR, settings.integrationEnabled);
+      if (on) {
+        await this.applyPcoCredentials();
+      } else {
+        stageController.setPcoCredentials(null, null);
+        this.setConnectionState("planning-center", "disconnected", null);
+      }
+      return on;
+    });
+    this.pcoReconcile = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
   // Background: the caller has already answered. verifyPcoCredentials() puts its own
   // failure on the tile, so what can still throw here is the refresh, and the log
   // line is the only place left to report it.
@@ -2635,6 +2649,13 @@ class IntegrationManager {
       });
   }
 
+  /**
+   * Ask PCO whether the stored credentials actually work and report the truth.
+   * Never throws — a failure is a reported state, not an exception, so it can be
+   * called at startup without risking init.
+   *
+   * @returns true when PCO accepted the credentials.
+   */
   private async verifyPcoCredentials(): Promise<boolean> {
     const appId = await this.getPcoAppId();
     const secret = await this.getPcoSecret();
