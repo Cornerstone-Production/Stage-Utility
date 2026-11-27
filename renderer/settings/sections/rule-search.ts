@@ -9,7 +9,6 @@
 // the usage and passes in.
 
 import { CALL_TRIGGER_ID, parseAliases } from "@main/services/cue-aliases";
-import { spokenCueName } from "@main/services/cue-pairs";
 
 interface RuleLike {
   name: string;
@@ -42,17 +41,9 @@ export function ruleSearchText(
     const cueName = String(rule.trigger.params.name ?? "");
     parts.push(cueName);
     parts.push(String(rule.trigger.params.says ?? ""));
-    // THE WORDS ON THE ROW. A pair's row reads `spokenCueName(onParams, base)`
-    // and a single cue's sort key is the same function, so a haystack built from
-    // the cue name alone could not find a pair by the name its own row shows:
-    // typing "House Lights" missed the row reading House Lights, because the
-    // haystack held `house_lights_on`.
-    //
-    // The fallback is the CUE NAME, not the pair's base, and that is enough for
-    // both surfaces: with `says` set the two agree exactly, and without it the
-    // base is the cue name minus its `_on`/`_off` suffix — so the row's words
-    // are always a prefix of what goes in here.
-    parts.push(spokenCueName(rule.trigger.params, cueName));
+    // The words on a row are the rule's `says`, else its own name, else the cue
+    // name humanised (spokenCueName), and all but the last are already here: the
+    // humanised name holds nothing the cue name above does not.
     parts.push(...parseAliases(rule.trigger.params));
   }
   if (rule.action.id === "companion.press") {

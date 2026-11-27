@@ -376,8 +376,8 @@ function rule(opts: {
       params: {
         name: opts.cue,
         // `says` is what the manifest and the generated Home Assistant config
-        // call this on a screen; see spokenCueName. The rule's own `name` is
-        // never used for that — a rule may be called "Rule 4".
+        // call this on a screen; see spokenCueName. Set outright, so
+        // renaming the rule in the list never renames the switch.
         says: opts.name,
         ...(opts.binding ? stateBindingParams(opts.binding) : {}),
       },

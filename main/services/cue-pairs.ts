@@ -459,27 +459,43 @@ export function boundCuePairs(rules: readonly Rule[]): CuePair[] {
   return cuePairs(rules).filter((p) => p.binding !== null);
 }
 
-/**
- * What to call a cue on a screen — the words, not the rule's name.
- *
- * The operator's own `says` first, with a trailing "on" taken off: it is there
- * so the cue can be SAID and is not part of the thing's name. "Projectors on"
- * is a sentence; the switch is called Projectors. Falling back to the cue name
- * humanised, never to the rule's `name` field — a rule may be called "Rule 4",
- * and a house full of switches called that is worse than one called by its cue.
- *
- * Here rather than in cue-manifest.ts, which is where it was, because the rule
- * editor names the switch an operator is about to hide and cue-manifest reaches
- * stage-controller — a renderer importing it crashes the page at load.
- */
-export function spokenCueName(params: Record<string, string | number>, fallback: string): string {
-  const stripped = String(params.says ?? "").trim().replace(/\s+on$/i, "").trim();
-  if (stripped) return stripped;
-  return fallback
+/** "main_conf_tvs" -> "Main Conf Tvs". The cue name is all there is to go on. */
+export function humaniseCueName(cue: string): string {
+  return cue
     .split("_")
     .filter((w) => w !== "")
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
+}
+
+/**
+ * What a person calls a cue: on a screen, in the manifest Home Assistant reads and
+ * in the YAML pasted into it. THE one answer, so the same rules are the same words
+ * whichever way Home Assistant was set up.
+ *
+ * The operator's `says` first, else the rule's own `name` (what they typed when
+ * they made it), else the cue name humanised. A rule called "Foyer TVs" is spoken
+ * "Foyer TVs", not "Foyer Tvs". Every path that makes a cue names its rule from
+ * the words the operator gave and the built-ins set `says`, so the rule name is
+ * the better of the two fallbacks; an operator who renames a rule to something
+ * that is not what they say sets `says`.
+ *
+ * A SWITCH loses a trailing "on": it is the THING, and Home Assistant supplies the
+ * verb ("Projectors on" is a sentence; the switch is called Projectors). A
+ * one-shot `kind: "button"` keeps it: "Lights on" is the whole name of what it does.
+ *
+ * Here rather than in cue-manifest.ts because the rule editor names the switch an
+ * operator is about to hide and cue-manifest reaches stage-controller, which a
+ * renderer importing it would crash the page loading.
+ */
+export function spokenCueName(
+  rule: { name: string; trigger: { params: Record<string, string | number> } },
+  cue: string,
+  kind: "switch" | "button",
+): string {
+  const words = String(rule.trigger.params.says ?? "").trim() || rule.name.trim();
+  const spoken = kind === "switch" ? words.replace(/\s+on$/i, "").trim() : words;
+  return spoken || humaniseCueName(cue);
 }
 
 /**

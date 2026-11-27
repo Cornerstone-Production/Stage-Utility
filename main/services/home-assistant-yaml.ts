@@ -51,10 +51,12 @@ import { CALL_TRIGGER_ID } from "./automation-triggers.js";
 import { calledCueName, parseAliases } from "./cue-aliases.js";
 import {
   cuePairs,
+  humaniseCueName,
   isHiddenFromHome,
   isPairHalfName,
   isTogglePair,
   type StateBinding,
+  spokenCueName,
 } from "./cue-pairs.js";
 import { scrub } from "./scrub.js";
 import type { Rule } from "../types/automation.js";
@@ -118,12 +120,6 @@ function attrOf(base: string): string {
   return `(state_attr('${SENSOR_ENTITY}', '${base}') or {})`;
 }
 
-/** The name a person would say for a cue, from `says` or the rule's own name. */
-function friendlyOf(rule: Rule): string {
-  const says = String(rule.trigger.params.says ?? "").trim();
-  return says || rule.name.trim() || String(rule.trigger.params.name ?? "");
-}
-
 /**
  * The `_on`/`_off` cues that belong together, and what reads each one's state.
  *
@@ -142,10 +138,10 @@ function pairsOf(rules: Rule[], cues: Map<string, Cue>): Pair[] {
   for (const pair of cuePairs(rules)) {
     const cue = cues.get(pair.onName);
     if (!cue) continue;
-    // The friendly name loses the "on": the switch is the THING, and Home
+    // spokenCueName takes the "on" off a switch: the switch is the THING, and Home
     // Assistant supplies the verb. "Turn on Projectors on" is what happens
     // otherwise.
-    const friendly = cue.friendly.replace(/\s+on$/i, "").trim() || pair.base;
+    const friendly = spokenCueName(pair.on, pair.base, "switch");
     out.push({
       base: pair.base,
       friendly,
@@ -157,15 +153,6 @@ function pairsOf(rules: Rule[], cues: Map<string, Cue>): Pair[] {
     });
   }
   return out.sort((a, b) => a.base.localeCompare(b.base));
-}
-
-/** "main_conf_tvs" -> "Main Conf Tvs". The cue name is all there is to go on. */
-function humanise(base: string): string {
-  return base
-    .split("_")
-    .filter(Boolean)
-    .map((w) => w[0]!.toUpperCase() + w.slice(1))
-    .join(" ");
 }
 
 /** One object in the generated config that carries a name a person says. */
@@ -221,7 +208,7 @@ function friendlyNames(items: readonly Spoken[]): Map<string, string> {
     return counts;
   };
   const said = tally((i) => i.friendly);
-  const humanised = tally((i) => humanise(i.id));
+  const humanised = tally((i) => humaniseCueName(i.id));
 
   const out = new Map<string, string>();
   for (const item of items) {
@@ -229,7 +216,7 @@ function friendlyNames(items: readonly Spoken[]): Map<string, string> {
       out.set(item.key, item.friendly);
       continue;
     }
-    const fallback = humanise(item.id);
+    const fallback = humaniseCueName(item.id);
     out.set(
       item.key,
       (humanised.get(fallback.toLowerCase()) ?? 0) < 2 ? fallback : `${fallback} (${item.kind})`,
@@ -253,7 +240,7 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
     if (!name || cues.has(name)) continue;
     cues.set(name, {
       name,
-      friendly: friendlyOf(rule),
+      friendly: spokenCueName(rule, name, "button"),
       formerNames: parseAliases(rule.trigger.params),
       hidden: isHiddenFromHome(rule.trigger.params),
     });

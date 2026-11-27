@@ -176,7 +176,7 @@ export async function writeOwnedRule(opts: {
     const made = await invoke<Rule>(
       "automation:addRule",
       // `says` because a Button with no label draws the command's spoken name, and without it the
-      // manifest falls back to the cue name humanised: "Btn Shutter" for a button called Shutter.
+      // manifest falls back to the rule's name, and the Button's pick can have been renamed since.
       buttonCueRule({ name: ruleName, cueName, action: opts.target.action, ownedBy: opts.owner, says: sayName }),
     );
     if (handOverTo) {

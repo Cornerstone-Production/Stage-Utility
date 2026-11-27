@@ -34,23 +34,9 @@ describe("ruleMatchesSearch", () => {
     assert.equal(ruleMatchesSearch(rule, "lobby_screens", undefined, undefined), true);
   });
 
-  test("matches the words the ROW shows, for a pair with no `says`", () => {
-    // The rules list shows `spokenCueName(...)`: a pair called house_lights_on /
-    // house_lights_off has a row reading "House Lights". Searching for what is
-    // on screen found nothing, because the haystack held only `house_lights_on`.
-    const on = cue({ name: "Rule house_lights_on", params: { name: "house_lights_on" } });
-    const off = cue({ name: "Rule house_lights_off", params: { name: "house_lights_off" } });
-    assert.equal(ruleMatchesSearch(on, "House Lights", undefined, undefined), true);
-    assert.equal(ruleMatchesSearch(off, "house lights", undefined, undefined), true);
-    // And still does not match something that is not there.
-    assert.equal(ruleMatchesSearch(on, "lobby lights", undefined, undefined), false);
-  });
-  // TWO MORE WERE WRITTEN HERE AND DELETED, because neither could be made red.
-  // "a pair with a `says` is found by the words its row shows" cannot fail:
-  // spokenCueName only strips a trailing " on" from `says`, so the row's words
-  // are always a substring of the `says` the haystack already held. And "a rule
-  // that is not a cue gets no spoken name" passes with the push removed, because
-  // spokenCueName of an empty fallback is an empty string either way.
+  // A test that a pair is found by the words its row shows was written here and
+  // deleted: a row's words are `says`, the rule's name or the humanised cue name,
+  // and the haystack holds all three, so it cannot be made red.
 
   test("matches 'says'", () => {
     const rule = cue({ params: { name: "x", says: "the foyer televisions" } });

@@ -197,7 +197,7 @@ export async function cueManifest(opts: { includeHidden?: boolean } = {}): Promi
     const row = states?.states.get(pair.base);
     const entry: ManifestSwitch = {
       id: pair.base,
-      name: spokenName(pair.on, pair.base),
+      name: spokenCueName(pair.on, pair.base, "switch"),
       room: roomOf(pair.on) || roomOf(pair.off),
       on: pair.onName,
       off: pair.offName,
@@ -242,7 +242,7 @@ export async function cueManifest(opts: { includeHidden?: boolean } = {}): Promi
       ...(hiddenButton ? { hiddenFromHome: true as const } : {}),
       ...(isBuiltinRule(rule) ? { builtin: true as const } : {}),
       id: cue,
-      name: spokenName(rule, cue),
+      name: spokenCueName(rule, cue, "button"),
       room: roomOf(rule),
       cue,
       available: pressable(rule),
@@ -257,14 +257,6 @@ export async function cueManifest(opts: { includeHidden?: boolean } = {}): Promi
     switches,
     buttons,
   };
-}
-
-/**
- * What to call a cue on a screen. See spokenCueName — the rule editor names the
- * same switch, and this module cannot be imported from a renderer.
- */
-function spokenName(rule: Rule, fallback: string): string {
-  return spokenCueName(rule.trigger.params, fallback);
 }
 
 function roomOf(rule: Rule): string {

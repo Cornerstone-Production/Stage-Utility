@@ -783,7 +783,7 @@ export function AutomationSection({
       if (!on || !off) continue;
       out.push({
         base: p.base,
-        name: spokenCueName(on.trigger.params, p.base),
+        name: spokenCueName(on, p.base, "switch"),
         onName: p.onName,
         offName: p.offName,
         hidden: p.hiddenFromHome,
@@ -844,7 +844,7 @@ export function AutomationSection({
       .map((r) => ({
         kind: "rule" as const,
         key: r.id,
-        sortBy: spokenCueName(r.trigger.params, String(r.trigger.params.name ?? r.name)),
+        sortBy: spokenCueName(r, String(r.trigger.params.name ?? r.name), "button"),
         rule: r,
       }))
       .sort(byName);
