@@ -8,6 +8,7 @@
 
 import type { DeviceOutputKind } from "../types/kiosk.js";
 import type { OutputHealthReport } from "../types/output-health.js";
+import { isRecord } from "../types/is-record.js";
 
 /** A report older than this is no longer a reading. The helper posts every ten
  *  seconds, so this is six missed posts. */
@@ -40,8 +41,8 @@ const finite = (v: unknown): v is number => typeof v === "number" && Number.isFi
  * nothing says it is wrong.
  */
 export function parseHealthReport(body: unknown): { report: OutputHealthReport; changed?: string } | { error: string } {
-  if (!body || typeof body !== "object" || Array.isArray(body)) return { error: "the body must be a JSON object" };
-  const o = body as Record<string, unknown>;
+  if (!isRecord(body)) return { error: "the body must be a JSON object" };
+  const o = body;
   // A JSON boolean and nothing else: 0 and 1 are not an answer. Absent from a
   // helper older than the switch, and then the server changes nothing.
   if (o.enabled !== undefined && typeof o.enabled !== "boolean") return { error: "enabled must be true or false" };
