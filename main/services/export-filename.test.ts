@@ -30,12 +30,16 @@ describe("attachmentDisposition", () => {
 });
 
 describe("Content-Disposition is built through attachmentDisposition", () => {
-  // Walks the server source and finds every place the header is SET: its name
-  // in quotes, followed by the `:` of an object key or the `,` of a setHeader()
-  // argument. A comment mentioning the header has no quotes, so it is not a
-  // site; a quoted mention in prose can only add an offender, never hide one.
+  // Walks the server source for the header's name in any quotes ('', "", ``).
+  // Each one is a site, and it is built through the helper only when the name
+  // is an object key or a setHeader() argument whose value is
+  // attachmentDisposition(...). Anything else counts as by hand: a name kept in
+  // a constant, a computed key, or a quoted mention in prose. A comment naming
+  // the header without quotes is not a site. So the scan fails closed: a stray
+  // mention can only add an offender, never hide one.
   const MAIN = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-  const SITE = /["']content-disposition["']\s*[:,]\s*/gi;
+  const SITE = /["'`]content-disposition["'`]/gi;
+  const THROUGH_HELPER = /^\]?\s*[:,]\s*attachmentDisposition\(/;
 
   function walk(dir: string, out: string[] = []): string[] {
     for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -54,7 +58,7 @@ describe("Content-Disposition is built through attachmentDisposition", () => {
       for (const m of src.matchAll(SITE)) {
         const rel = path.relative(MAIN, file).split(path.sep).join("/");
         sites.push(rel);
-        if (!src.startsWith("attachmentDisposition(", m.index + m[0].length)) byHand.push(rel);
+        if (!THROUGH_HELPER.test(src.slice(m.index + m[0].length))) byHand.push(rel);
       }
     }
     // Every header site found, so a scan that silently matches nothing cannot pass.
