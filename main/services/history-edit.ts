@@ -31,6 +31,7 @@ import {
   rekeyItemTimeEdits,
 } from "./history-item-times.js";
 import { clockOf } from "./app-timezone.js";
+import { plural } from "./plural.js";
 import { attendanceRecorder } from "./attendance-recorder.js";
 import { splRecorder } from "./spl-recorder.js";
 import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
@@ -209,9 +210,6 @@ function recomputeAttendance(att: ServiceAttendance): void {
   att.lastOccupancy = stat.length ? stat[stat.length - 1].occupancy : 0;
 }
 
-/** Adjust a service's start/end window across all three records: trim the timeline's
- *  trailing items, drop attendance samples / SPL items outside the window, and
- *  recompute derived values. Any of start/end may be omitted to leave it unchanged. */
 /** The ramp/taper windows the recorder samples with, in ms. */
 async function taperMs(): Promise<{ pre: number; post: number }> {
   const tw = (await settingsStore.get()).taperWindow ?? DEFAULT_TAPER_WINDOW;
@@ -261,10 +259,82 @@ function rewindowSamples(att: ServiceAttendance, taper: { pre: number; post: num
   return out;
 }
 
+/** What a window edit deleted, or would have: per record, what fell outside. */
+export interface WindowTrim {
+  /** Timeline items that started after the new end. */
+  items: number;
+  /** Item time corrections whose run went with them. */
+  itemTimeEdits: number;
+  /** Attendance samples outside the new window and its ramp and taper. */
+  samples: number;
+  /** SPL items that started after the new end. */
+  splItems: number;
+}
+
+function trimTotal(t: WindowTrim): number {
+  return t.items + t.itemTimeEdits + t.samples + t.splItems;
+}
+
+/** "3 items, 1 item time correction and 240 attendance samples" — nonzero parts only. */
+function describeTrim(t: WindowTrim): string {
+  const parts = ([
+    [t.items, "timeline item"],
+    [t.itemTimeEdits, "item time correction"],
+    [t.samples, "attendance sample"],
+    [t.splItems, "SPL item"],
+  ] as const).filter(([n]) => n > 0).map(([n, noun]) => plural(n, noun));
+  return parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}` : parts.join("");
+}
+
+/** A window that would delete recorded data, sent without saying that is meant.
+ *  409 with a code, so the page can name what would go and ask. */
+export class WindowTrimsDataError extends Error {
+  readonly status = 409;
+  readonly code = "trims-data";
+  constructor(readonly trim: WindowTrim) {
+    super(`That window would delete ${describeTrim(trim)} recorded outside it. Nothing was changed.`);
+    this.name = "WindowTrimsDataError";
+  }
+}
+
+/** A window that is not one: an unreadable stamp, or an end not after its start. */
+export class InvalidWindowError extends Error {
+  readonly status = 400;
+  readonly code = "invalid-window";
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidWindowError";
+  }
+}
+
+/**
+ * Adjust a service's start/end window across all three records: trim the
+ * timeline's trailing items, drop attendance samples / SPL items outside the
+ * window, and recompute derived values. Either stamp may be omitted to leave it
+ * unchanged.
+ *
+ * Trimming is what this is for — a capture that kept recording through a parked
+ * Stream Buffer is cut back to the service — and it deletes recorded data for
+ * good: Rebuild from raw re-derives attendance from these same stored samples,
+ * so a dropped sample does not come back. So an edit that would drop anything is
+ * REFUSED unless `trim` says it is meant, and the refusal names what would go.
+ * Without that, a browser that sent the window back a day out (its calendar
+ * past the app zone's) deleted a whole service on a Save nobody had changed
+ * anything in.
+ *
+ * Everything is derived on copies first and written only once the edit is
+ * allowed. The stores hand out their live records, so trimming in place and
+ * then refusing would leave the refused edit in memory, saved by the next write.
+ */
 export async function editServiceWindow(
   serviceKey: string,
-  opts: { startedAt?: string; endedAt?: string },
-): Promise<void> {
+  opts: { startedAt?: string; endedAt?: string; trim?: boolean },
+): Promise<WindowTrim> {
+  for (const [name, iso] of [["start", opts.startedAt], ["end", opts.endedAt]] as const) {
+    if (iso != null && !Number.isFinite(Date.parse(iso))) {
+      throw new InvalidWindowError(`The ${name} time is not a time, so the window was not changed.`);
+    }
+  }
   await assertEditable("re-windowed", serviceKey);
   // The delete and merge paths were given this when a record was found
   // resurrecting itself; the two edit paths were missed, so a trimmed window
@@ -273,13 +343,27 @@ export async function editServiceWindow(
   forgetAll(serviceKey);
 
   const endMs = opts.endedAt ? Date.parse(opts.endedAt) : null;
+  const trim: WindowTrim = { items: 0, itemTimeEdits: 0, samples: 0, splItems: 0 };
+  const rewindow = <T extends { startedAt: string; endedAt?: string | null }>(stored: T | null): T | null => {
+    if (!stored) return null;
+    const next = structuredClone(stored);
+    if (opts.startedAt) next.startedAt = opts.startedAt;
+    if (opts.endedAt) next.endedAt = opts.endedAt;
+    const s = Date.parse(next.startedAt);
+    const e = next.endedAt ? Date.parse(next.endedAt) : Number.NaN;
+    if (Number.isFinite(s) && Number.isFinite(e) && e <= s) {
+      throw new InvalidWindowError("The end has to be after the start, so the window was not changed.");
+    }
+    return next;
+  };
 
-  const tl = await serviceTimelineStore.get(serviceKey);
+  const tl = rewindow(await serviceTimelineStore.get(serviceKey));
+  let orphaned: ServiceItemTimeEdit[] = [];
   if (tl) {
-    if (opts.startedAt) tl.startedAt = opts.startedAt;
-    if (opts.endedAt) tl.endedAt = opts.endedAt;
     if (endMs != null) {
+      const before = tl.items.length;
       tl.items = tl.items.filter((it) => Date.parse(it.startedAt) <= endMs); // drop items starting after the end
+      trim.items = before - tl.items.length;
       for (const it of tl.items) {
         if (it.endedAt == null || Date.parse(it.endedAt) > endMs) {
           it.endedAt = new Date(endMs).toISOString();
@@ -292,33 +376,51 @@ export async function editServiceWindow(
     // had not been, so a recording trimmed to fifteen minutes could still show
     // an eighty-five minute item. Clamped the same way the items just were.
     const clamped = clampItemTimeEdits(tl);
-    logOrphanedItemTimeEdits(tl.serviceKey, "the new service window", clamped.orphaned);
+    orphaned = clamped.orphaned;
+    trim.itemTimeEdits = orphaned.length;
     if (clamped.edits.length) tl.itemTimeEdits = clamped.edits;
     else delete tl.itemTimeEdits;
+  }
+
+  const att = rewindow(await attendanceStore.get(serviceKey));
+  if (att) {
+    const before = att.samples.length;
+    att.samples = rewindowSamples(att, await taperMs());
+    trim.samples = before - att.samples.length;
+    recomputeAttendance(att);
+  }
+
+  const spl = rewindow(await splHistoryStore.get(serviceKey));
+  if (spl && endMs != null) {
+    const before = spl.items.length;
+    spl.items = spl.items.filter((it) => Date.parse(it.startedAt) <= endMs);
+    trim.splItems = before - spl.items.length;
+  }
+
+  if (trimTotal(trim) > 0) {
+    if (!opts.trim) {
+      console.warn(
+        `[history] ${scrub(serviceKey)}: refused a window edit that would delete ${scrub(describeTrim(trim))} — not sent as a trim.`,
+      );
+      throw new WindowTrimsDataError(trim);
+    }
+    console.warn(`[history] ${scrub(serviceKey)}: window edit trimmed ${scrub(describeTrim(trim))}.`);
+  }
+
+  if (tl) {
+    logOrphanedItemTimeEdits(tl.serviceKey, "the new service window", orphaned);
     await serviceTimelineStore.upsert(tl);
     broadcastTimeline(tl);
   }
-
-  const att = await attendanceStore.get(serviceKey);
   if (att) {
-    if (opts.startedAt) att.startedAt = opts.startedAt;
-    if (opts.endedAt) att.endedAt = opts.endedAt;
-    att.samples = rewindowSamples(att, await taperMs());
-    recomputeAttendance(att);
     await attendanceStore.upsert(att);
     broadcast("attendance:history", att);
   }
-
-  const spl = await splHistoryStore.get(serviceKey);
   if (spl) {
-    if (opts.startedAt) spl.startedAt = opts.startedAt;
-    if (opts.endedAt) {
-      spl.endedAt = opts.endedAt;
-      spl.items = spl.items.filter((it) => (endMs == null ? true : Date.parse(it.startedAt) <= endMs));
-    }
     await splHistoryStore.upsert(spl);
     broadcast("spl:history", spl);
   }
+  return trim;
 }
 
 /** Set a per-item override for whether it counts toward the service timers (wins

@@ -152,6 +152,9 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       await editServiceWindow(body.serviceKey, {
         startedAt: typeof body.startedAt === "string" ? body.startedAt : undefined,
         endedAt: typeof body.endedAt === "string" ? body.endedAt : undefined,
+        // Only a literal true: a window that would delete recorded data is
+        // refused (409 trims-data) unless the caller says that is meant.
+        trim: body.trim === true,
       });
       json(res, { ok: true });
       return;
