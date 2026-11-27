@@ -144,6 +144,12 @@ describe("exportFilename", () => {
     assert.equal(exportFilename("!!!", null, "xlsx", DAY), "patch-2026-08-03.xlsx");
   });
 
+  it("a long sheet and variant name still make a name a filesystem takes", () => {
+    // Some filesystems cap a file name at 255 bytes.
+    const name = exportFilename("x".repeat(300), "y".repeat(300), "csv", DAY);
+    assert.ok(name.length <= 255, `${name.length} characters`);
+  });
+
   it("dates the file in the app's zone, not the server's clock", () => {
     // 03:35 UTC on the 4th is still the evening of the 3rd in Chicago. A file
     // exported then must not claim to be tomorrow's patch.
