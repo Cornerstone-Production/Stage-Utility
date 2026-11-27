@@ -1,9 +1,9 @@
 // One page or console row in the sidebar, with its own context menu.
 
-import { useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import { SidebarListItem } from "../components/ui/sidebar";
 import { ContextMenu, type ContextMenuItem } from "../components/ui/context-menu";
-import { useContextMenuTrigger } from "../components/ui/context-menu-trigger";
+import { useContextMenuState, useContextMenuTrigger } from "../components/ui/context-menu-trigger";
 import type { Destination } from "./destinations";
 
 /** What a row that opens a list instead of navigating is given: its own click, keys
@@ -42,9 +42,8 @@ export function RailRow({
    *  click, keys and active state, and no destination to select. */
   extras?: RowExtras;
 }) {
-  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
-  const trigger = useContextMenuTrigger((point) => setMenu({ ...point, items: menuItems() }));
-  const onGlyph = (e: React.SyntheticEvent) => e.target instanceof Element && e.target.closest("[data-rail-glyph]") !== null;
+  const { menu, open, close } = useContextMenuState();
+  const trigger = useContextMenuTrigger((point) => open(point, menuItems()));
   return (
     <>
       <SidebarListItem
@@ -53,14 +52,11 @@ export function RailRow({
         title={d.label}
         ariaLabel={ariaLabel}
         badge={badge}
-        onContextMenu={(e) => {
-          // The rail's own menu must not open on top of this one.
-          e.stopPropagation();
-          trigger.onContextMenu(e);
-        }}
-        onPointerDown={(e) => {
-          if (!onGlyph(e)) trigger.onPointerDown(e);
-        }}
+        // The row's trigger claims the press or right-click, so the rail around it
+        // does not open its own menu as well; a console's glyph claims it first, so
+        // its icon menu is the only one that opens there.
+        onContextMenu={trigger.onContextMenu}
+        onPointerDown={trigger.onPointerDown}
         onPointerMove={trigger.onPointerMove}
         onPointerUp={trigger.onPointerUp}
         onPointerCancel={trigger.onPointerCancel}
@@ -68,7 +64,7 @@ export function RailRow({
         style={trigger.style}
         {...extras}
       />
-      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
+      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={close} />}
     </>
   );
 }

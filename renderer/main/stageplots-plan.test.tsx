@@ -303,22 +303,17 @@ describe("/stageplots follows the live or next plan", () => {
     assert.equal(badge(), "Default");
   });
 
-  test("going unreachable and coming back are each said once on [stageplots]", async () => {
+  test("going unreachable and coming back are left to the server's [plans] lines: a crew tab posts nothing", async () => {
     await mount();
     UPCOMING = { ...UPCOMING, unavailable: "Planning Center returned 503" };
     await readAgain();
     await readAgain();
     await readAgain();
+    assert.equal(notice(), "Planning Center is unreachable, showing the default plot.", "the page never went unreachable, so this tests nothing");
     UPCOMING = { plans: UPCOMING.plans, cacheAgeMs: 0 };
     await readAgain();
     await readAgain();
-    assert.deepEqual(
-      logged.map((l) => l.replace(/\(.*\)/, "(…)")),
-      [
-        "Planning Center is unreachable (…); /stageplots shows each venue's default plot",
-        "Planning Center can be read again; /stageplots follows the live or next plan",
-      ],
-    );
+    assert.deepEqual(logged, [], "every tab open on /stageplots would post this line");
   });
 
   test("the venue list says which plot each venue shows", async () => {

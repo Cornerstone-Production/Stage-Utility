@@ -115,12 +115,3 @@ export function addSection(r: ResolvedSidebar, id: string, label = "New section"
   next.sections.push({ id, label, kind: "pages", members: [] });
   return next;
 }
-
-/** A section id nobody has used. No crypto.randomUUID: production is plain HTTP. */
-export function newSectionId(r: ResolvedSidebar): string {
-  const taken = new Set(r.sections.map((s) => s.id));
-  for (let n = 1; ; n++) {
-    const id = `s-${Date.now().toString(36)}-${n}`;
-    if (!taken.has(id)) return id;
-  }
-}

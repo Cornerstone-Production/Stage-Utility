@@ -20,6 +20,7 @@
 import { memo, type ReactNode } from "react";
 
 import type { PlotItem } from "@main/types/stageplots";
+import { round1 } from "@main/services/clamp";
 
 import { layer } from "./draw-layer";
 import { calloutNumbers } from "./legend";
@@ -31,10 +32,6 @@ const LABEL = "var(--su-plot-label)";
 const PAPER = "var(--su-plot-paper)";
 const ACCENT = "var(--su-accent)";
 
-/** One decimal: enough at any zoom, and short in the DOM. */
-function r1(v: number): number {
-  return Math.round(v * 10) / 10;
-}
 
 /** `items` in the order they are drawn: by layer, then as added. */
 export function drawOrder(items: readonly PlotItem[]): PlotItem[] {
@@ -64,13 +61,13 @@ interface ItemProps {
 function Label({ x, y, fs, anchor, children }: { x: number; y: number; fs: number; anchor?: "middle"; children: string }) {
   return (
     <text
-      x={r1(x)}
-      y={r1(y)}
+      x={round1(x)}
+      y={round1(y)}
       textAnchor={anchor}
-      fontSize={r1(fs)}
+      fontSize={round1(fs)}
       fontWeight={500}
       className="font-sans"
-      style={{ fill: LABEL, stroke: PAPER, strokeWidth: r1(fs * 0.34), strokeLinejoin: "round", paintOrder: "stroke" }}
+      style={{ fill: LABEL, stroke: PAPER, strokeWidth: round1(fs * 0.34), strokeLinejoin: "round", paintOrder: "stroke" }}
     >
       <MonoTspans text={children} />
     </text>
@@ -92,19 +89,19 @@ function CableItem({ item: it, k, fs, tapped, labels }: ItemProps) {
   const [first, last] = [pts[0], pts[pts.length - 1]];
   return (
     <>
-      <polyline points={line} fill="none" stroke="transparent" strokeWidth={r1(16 * k)} />
-      {tapped && <polyline points={line} fill="none" strokeWidth={r1(7 * k)} style={{ stroke: ACCENT, strokeOpacity: 0.35 }} strokeLinecap="round" />}
+      <polyline points={line} fill="none" stroke="transparent" strokeWidth={round1(16 * k)} />
+      {tapped && <polyline points={line} fill="none" strokeWidth={round1(7 * k)} style={{ stroke: ACCENT, strokeOpacity: 0.35 }} strokeLinecap="round" />}
       <polyline
         points={line}
         fill="none"
         strokeLinecap="round"
         strokeLinejoin="round"
-        strokeWidth={r1(2.6 * k)}
-        strokeDasharray={it.dashed ? `${r1(9 * k)} ${r1(6 * k)}` : undefined}
+        strokeWidth={round1(2.6 * k)}
+        strokeDasharray={it.dashed ? `${round1(9 * k)} ${round1(6 * k)}` : undefined}
         style={{ stroke: col }}
       />
-      {first && <circle cx={first[0]} cy={first[1]} r={r1(3.5 * k)} style={{ fill: col }} />}
-      {last && <circle cx={last[0]} cy={last[1]} r={r1(3.5 * k)} style={{ fill: col }} />}
+      {first && <circle cx={first[0]} cy={first[1]} r={round1(3.5 * k)} style={{ fill: col }} />}
+      {last && <circle cx={last[0]} cy={last[1]} r={round1(3.5 * k)} style={{ fill: col }} />}
       {it.label && labels && a && (
         <Label x={(a[0] + b[0]) / 2} y={(a[1] + b[1]) / 2 + fs * 0.35} fs={fs} anchor="middle">
           {it.label}
@@ -118,10 +115,10 @@ function body(it: PlotItem, k: number, fs: number, calloutNo: number | undefined
   const { w, h } = it;
   const [hw, hh] = [w / 2, h / 2];
   const col = it.color ?? INK;
-  const sw = r1(1.75 * k);
+  const sw = round1(1.75 * k);
   switch (it.type) {
     case "box":
-      return <rect x={-hw} y={-hh} width={w} height={h} rx={r1(4 * k)} strokeWidth={sw} style={{ fill: col, fillOpacity: 0.08, stroke: col }} />;
+      return <rect x={-hw} y={-hh} width={w} height={h} rx={round1(4 * k)} strokeWidth={sw} style={{ fill: col, fillOpacity: 0.08, stroke: col }} />;
     case "circle":
       return <ellipse rx={hw} ry={hh} strokeWidth={sw} style={{ fill: col, fillOpacity: 0.08, stroke: col }} />;
     case "zone":
@@ -131,9 +128,9 @@ function body(it: PlotItem, k: number, fs: number, calloutNo: number | undefined
           y={-hh}
           width={w}
           height={h}
-          rx={r1(10 * k)}
+          rx={round1(10 * k)}
           strokeWidth={sw}
-          strokeDasharray={`${r1(7 * k)} ${r1(5 * k)}`}
+          strokeDasharray={`${round1(7 * k)} ${round1(5 * k)}`}
           style={{ fill: col, fillOpacity: 0.13, stroke: col }}
         />
       );
@@ -141,9 +138,9 @@ function body(it: PlotItem, k: number, fs: number, calloutNo: number | undefined
       const m = Math.min(w, h);
       return (
         <>
-          <rect x={-hw} y={-hh} width={w} height={h} rx={r1(m * 0.24)} style={{ fill: col }} />
-          <circle r={r1(m * 0.26)} style={{ fill: PAPER }} />
-          <circle r={r1(m * 0.1)} style={{ fill: col }} />
+          <rect x={-hw} y={-hh} width={w} height={h} rx={round1(m * 0.24)} style={{ fill: col }} />
+          <circle r={round1(m * 0.26)} style={{ fill: PAPER }} />
+          <circle r={round1(m * 0.1)} style={{ fill: col }} />
         </>
       );
     }
@@ -155,7 +152,7 @@ function body(it: PlotItem, k: number, fs: number, calloutNo: number | undefined
         return (
           <>
             <circle r={m} style={{ fill: col }} />
-            <text textAnchor="middle" y={r1(m * 0.38)} fontSize={r1(m * 1.05)} fontWeight={600} className="font-mono" style={{ fill: PAPER }}>
+            <text textAnchor="middle" y={round1(m * 0.38)} fontSize={round1(m * 1.05)} fontWeight={600} className="font-mono" style={{ fill: PAPER }}>
               {calloutNo ?? ""}
             </text>
           </>
@@ -181,11 +178,11 @@ function body(it: PlotItem, k: number, fs: number, calloutNo: number | undefined
       return (
         <text
           textAnchor="middle"
-          y={r1(h * 0.2)}
-          fontSize={r1(h * 0.6)}
+          y={round1(h * 0.2)}
+          fontSize={round1(h * 0.6)}
           fontWeight={500}
           className="font-sans"
-          style={{ fill: it.color ?? LABEL, stroke: PAPER, strokeWidth: r1(h * 0.14), strokeLinejoin: "round", paintOrder: "stroke" }}
+          style={{ fill: it.color ?? LABEL, stroke: PAPER, strokeWidth: round1(h * 0.14), strokeLinejoin: "round", paintOrder: "stroke" }}
         >
           <MonoTspans text={it.label} />
         </text>
@@ -222,8 +219,8 @@ function CablePoints({ pts, k }: { pts: PlotItem["points"]; k: number }) {
           data-testid={`h-pt-${i}`}
           cx={p[0]}
           cy={p[1]}
-          r={r1(6 * k)}
-          strokeWidth={r1(1.5 * k)}
+          r={round1(6 * k)}
+          strokeWidth={round1(1.5 * k)}
           className="cursor-crosshair"
           style={{ fill: PAPER, stroke: ACCENT }}
         />
@@ -236,29 +233,29 @@ function Selection({ hw, hh, k, below }: { hw: number; hh: number; k: number; be
   const pad = HANDLE_PAD * k;
   const hs = 10 * k;
   const rl = ROTATE_STALK * k;
-  const lw = r1(1.5 * k);
+  const lw = round1(1.5 * k);
   // Under the item the stalk and handle mirror: the canvas turns a drag of it the other way.
   const dir = below ? 1 : -1;
   return (
     <>
       <rect
-        x={r1(-hw - pad)}
-        y={r1(-hh - pad)}
-        width={r1(2 * (hw + pad))}
-        height={r1(2 * (hh + pad))}
+        x={round1(-hw - pad)}
+        y={round1(-hh - pad)}
+        width={round1(2 * (hw + pad))}
+        height={round1(2 * (hh + pad))}
         fill="none"
         strokeWidth={lw}
-        strokeDasharray={`${r1(4 * k)} ${r1(3 * k)}`}
+        strokeDasharray={`${round1(4 * k)} ${round1(3 * k)}`}
         style={{ stroke: ACCENT }}
         pointerEvents="none"
       />
-      <line pointerEvents="none" x1={0} y1={r1(dir * (hh + pad))} x2={0} y2={r1(dir * (hh + pad + rl))} strokeWidth={lw} style={{ stroke: ACCENT }} />
+      <line pointerEvents="none" x1={0} y1={round1(dir * (hh + pad))} x2={0} y2={round1(dir * (hh + pad + rl))} strokeWidth={lw} style={{ stroke: ACCENT }} />
       <circle
         data-hd="rot"
         data-testid="h-rot"
         data-below={below ? "" : undefined}
-        cy={r1(dir * (hh + pad + rl))}
-        r={r1(hs * 0.6)}
+        cy={round1(dir * (hh + pad + rl))}
+        r={round1(hs * 0.6)}
         strokeWidth={lw}
         className="cursor-grab"
         style={{ fill: PAPER, stroke: ACCENT }}
@@ -266,10 +263,10 @@ function Selection({ hw, hh, k, below }: { hw: number; hh: number; k: number; be
       <rect
         data-hd="size"
         data-testid="h-size"
-        x={r1(hw + pad - hs / 2)}
-        y={r1(hh + pad - hs / 2)}
-        width={r1(hs)}
-        height={r1(hs)}
+        x={round1(hw + pad - hs / 2)}
+        y={round1(hh + pad - hs / 2)}
+        width={round1(hs)}
+        height={round1(hs)}
         strokeWidth={lw}
         className="cursor-nwse-resize"
         style={{ fill: PAPER, stroke: ACCENT }}
@@ -327,7 +324,7 @@ const PlotItemView = memo(function PlotItemView(props: ItemProps) {
     );
   }
   const [hw, hh] = [it.w / 2, it.h / 2];
-  const frame = `translate(${r1(it.x + hw)} ${r1(it.y + hh)}) rotate(${it.rotation})`;
+  const frame = `translate(${round1(it.x + hw)} ${round1(it.y + hh)}) rotate(${it.rotation})`;
   return (
     <g {...data}>
       <g transform={frame}>
@@ -337,9 +334,9 @@ const PlotItemView = memo(function PlotItemView(props: ItemProps) {
             y={-hh - 8 * k}
             width={it.w + 16 * k}
             height={it.h + 16 * k}
-            rx={r1(6 * k)}
+            rx={round1(6 * k)}
             fill="none"
-            strokeWidth={r1(2 * k)}
+            strokeWidth={round1(2 * k)}
             style={{ stroke: ACCENT }}
           />
         )}
@@ -367,7 +364,7 @@ function SelectionOverlay({ item: it, k }: { item: PlotItem; k: number }) {
   const [hw, hh] = [it.w / 2, it.h / 2];
   return (
     <g data-selection-of={it.id}>
-      <g transform={`translate(${r1(it.x + hw)} ${r1(it.y + hh)}) rotate(${it.rotation})`}>
+      <g transform={`translate(${round1(it.x + hw)} ${round1(it.y + hh)}) rotate(${it.rotation})`}>
         <Selection hw={hw} hh={hh} k={k} below={rotateHandleBelow(it, k)} />
       </g>
     </g>

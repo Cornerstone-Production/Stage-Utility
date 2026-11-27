@@ -19,7 +19,8 @@ import {
   type PlotItem,
   type PublishedItem,
 } from "../types/stageplots.js";
-import { isRecord } from "./is-record.js";
+import { isRecord } from "../types/is-record.js";
+import { readSheetShape } from "./patch-shape.js";
 import { resolvePatch } from "./patch-resolve.js";
 
 /** The patch as read: the file, or that it could not be read (a 503, a damaged patch.json). */
@@ -111,22 +112,18 @@ function readDevice(d: Record<string, unknown>): PatchDevice {
   };
 }
 
+/** A sheet as stage plots reads it: its structure by patch-shape.ts (the reader /api/patch and patch.json are held to), its devices read field by field. */
 function readSheet(s: Record<string, unknown>): PatchSheet {
-  const assignments = (isRecord(s.assignments) ? s.assignments : {});
+  const shape = readSheetShape(s);
   return {
     id: asText(s.id),
     name: asText(s.name),
     kind: asText(s.kind) as PatchSheet["kind"],
-    devices: asList(s.devices).filter(isRecord).map(readDevice),
-    // Endpoints and overrides are left as they are: channelsThrough reads each field defensively.
-    endpoints: asList(s.endpoints).filter(isRecord) as unknown as PatchEndpoint[],
-    variants: asList(s.variants)
-      .filter(isRecord)
-      .map((v) => ({ id: asText(v.id), name: asText(v.name), overrides: (isRecord(v.overrides) ? v.overrides : {}) as PatchSheet["variants"][number]["overrides"] })),
-    assignments: {
-      byServiceType: (isRecord(assignments.byServiceType) ? assignments.byServiceType : {}) as PatchSheet["assignments"]["byServiceType"],
-      byPlan: (isRecord(assignments.byPlan) ? assignments.byPlan : {}) as PatchSheet["assignments"]["byPlan"],
-    },
+    devices: shape.devices.map((d) => readDevice(d as unknown as Record<string, unknown>)),
+    // Endpoints are left as they are: channelsThrough reads each field defensively.
+    endpoints: shape.endpoints,
+    variants: shape.variants.map((v) => ({ id: asText(v.id), name: asText(v.name), overrides: v.overrides })),
+    assignments: { byServiceType: shape.assignments.byServiceType, byPlan: shape.assignments.byPlan },
   };
 }
 

@@ -1,21 +1,18 @@
-// How the panel words dates and counts. Dates arrive as `YYYY-MM-DD` day keys in
-// the app's time zone (or an ISO instant for a plan's sort date), so a day key is
-// formatted AS A DAY, in UTC: running one through the browser's zone would shift
-// it a day for anybody west of Greenwich.
+// How the panel words dates. Two kinds arrive, and each is read its own way:
+//
+//   - A plan's sort date (and a photo's `fromDate`, which is one) is an INSTANT.
+//     It is named on the app's calendar, as the server's zonedDateKey does (a 7pm
+//     Sunday service in Chicago is 01:00 Monday in UTC), and in the order the rest
+//     of the Mic slots page names a plan: planLabel, as the plan switcher does.
+//   - `keptUntil` is a `YYYY-MM-DD` day key the server already worked out in the
+//     app's zone, so it is formatted AS A DAY, in UTC: running it through any
+//     zone would shift it a day for somebody.
 
 import type { ThemeDTO } from "@main/types/photo-themes";
 
-const DAY = new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
-const DAY_YEAR = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+import { planLabel } from "../../../settings/sections/plan-date-label";
 
-/** `Sun, Dec 14`, from a day key or an ISO instant. Null for nothing usable. */
-export function serviceDay(date: string | null | undefined): string | null {
-  if (!date) return null;
-  const key = /^\d{4}-\d{2}-\d{2}/.exec(date)?.[0];
-  if (!key) return null;
-  const at = Date.parse(`${key}T12:00:00Z`);
-  return Number.isFinite(at) ? DAY.format(at) : null;
-}
+const DAY_YEAR = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 
 /** `Mar 21, 2027`, from a day key. */
 export function keptDay(date: string): string {
@@ -23,9 +20,9 @@ export function keptDay(date: string): string {
   return Number.isFinite(at) ? DAY_YEAR.format(at) : date;
 }
 
-/** The services using a theme, as a list an operator can read: dates, soonest first. */
-export function usedBy(theme: ThemeDTO): string[] {
+/** The services using a theme, as a list an operator can read: dates on the app's calendar, soonest first. */
+export function usedBy(theme: ThemeDTO, timeZone: string): string[] {
   return [...theme.plans]
     .sort((a, b) => (a.sortDate ?? "9999").localeCompare(b.sortDate ?? "9999"))
-    .map((p) => serviceDay(p.sortDate) ?? "a plan with no date");
+    .map((p) => (p.sortDate ? planLabel(p.sortDate, null, timeZone) : "a plan with no date"));
 }

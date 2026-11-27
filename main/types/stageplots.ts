@@ -46,6 +46,12 @@ export interface VenuePublish {
   origin: string;
   /** When a publish last went through, as an ISO instant. */
   publishedAt: string;
+  /**
+   * When this link (this secret on this page) was made, as an ISO instant: a publish, regenerate
+   * or move, never a republish. Not a secret: the Publish card reads the link again only when it
+   * changes. A state saved before it existed reads it as publishedAt.
+   */
+  linkAt?: string;
   /** The last failure, said in the operator's words and never naming the secret; null once one goes through. */
   lastError: { at: string; message: string } | null;
   /** Converted backgrounds (by hash) the page holds under this secret. Sorted. */
@@ -58,6 +64,18 @@ export interface VenuePublish {
    * gone with an unpublish. See docs/ops/servicecue-on-the-web.md#the-landing-page.
    */
   listed: boolean;
+}
+
+/** A venue's publish state as a browser sees it: never the secret. The manage page reads the
+ *  link itself through GET /api/stageplots/venues/:id/link (VenueLink). */
+export type VenuePublishView = Omit<VenuePublish, "secret">;
+
+/** A venue as GET /api/stageplots, every stageplots:updated frame and every route answer carry it. */
+export type VenueView = Omit<Venue, "publish"> & { publish?: VenuePublishView };
+
+/** GET /api/stageplots/venues/:id/link: the venue's public link, or null while it is not published. The one answer with a secret in it. */
+export interface VenueLink {
+  url: string | null;
 }
 
 /** Why a secret waits to be removed from a page. "publishing" is a publish in flight: written
@@ -243,9 +261,9 @@ export interface StagePlotsDoc {
   pendingRemovals: PendingRemoval[];
 }
 
-/** GET /api/stageplots, and every stageplots:updated frame. */
+/** GET /api/stageplots, and every stageplots:updated frame. No secret: the crew's /stageplots reads it too. */
 export interface StagePlotsView {
-  venues: Venue[];
+  venues: VenueView[];
   backgrounds: BackgroundView[];
   plots: Plot[];
   overrides: PlotOverride[];

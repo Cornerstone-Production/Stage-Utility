@@ -33,11 +33,11 @@ import { TONE_FACE } from "../../components/connection-badge";
 import { integrationDialogClass } from "../../components/integration-dialog-size";
 import { invoke as ipc } from "../../lib/api";
 import { cn } from "../../lib/cn";
+import { INLINE_LINK } from "../../lib/link-classes";
 import { STATES, type Tone } from "../../app/mic-slots/photo-themes/openai-wording";
 import { OPENAI_KEY, PHOTO_THEMES_KEY, useOpenAiConnection } from "../../app/mic-slots/photo-themes/use-photo-themes";
 
 const DOT: Record<Tone, string> = { ok: "bg-ok-9", warn: "bg-warn-11", bad: "bg-danger-9", off: "bg-fg-subtle" };
-const LINK = "text-accent underline underline-offset-2 hover:text-accent-hover";
 const TITLE: Record<Tone, string> = { ok: "text-ok-11", warn: "text-warn-11", bad: "text-danger-11", off: "text-fg" };
 
 /** The id the tile and `?integration=` use. Not one of the server's integration ids. */
@@ -225,11 +225,11 @@ export function OpenAiKeyForm() {
         )}
         <p className="text-caption1 text-fg-muted">
           Uses your ChatGPT Business plan's included API credits: link an{" "}
-          <a href="https://developers.openai.com/api/docs/guides/chatgpt-api-credits" target="_blank" rel="noopener noreferrer" className={LINK}>
+          <a href="https://developers.openai.com/api/docs/guides/chatgpt-api-credits" target="_blank" rel="noopener noreferrer" className={INLINE_LINK}>
             API organization
           </a>{" "}
           to the workspace, then create a{" "}
-          <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className={LINK}>
+          <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className={INLINE_LINK}>
             project key
           </a>{" "}
           there.

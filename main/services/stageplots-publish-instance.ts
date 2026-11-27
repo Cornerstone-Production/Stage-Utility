@@ -15,7 +15,7 @@ import { readStagePlotImage, stagePlotsView } from "./stageplots-files.js";
 import { StagePlotsPublisher, type PublishTarget } from "./stageplots-publish.js";
 import { stageplotsStore } from "./stageplots-store.js";
 import type { PatchFile } from "../types/patch.js";
-import { STAGEPLOTS_CHANNEL } from "../types/stageplots.js";
+import { STAGEPLOTS_CHANNEL, type StagePlotsDoc, type StagePlotsView } from "../types/stageplots.js";
 
 /** What the card says when there is no page to publish to. */
 export const NO_PAGE =
@@ -49,7 +49,21 @@ export const stageplotsPublisher = new StagePlotsPublisher({
   },
   patch: publisherPatch,
   timeZone: appTimeZone,
-  // The follow's notice rides on every broadcast, so the Publish card keeps it until the next save clears it.
-  onSaved: (doc) => broadcast(STAGEPLOTS_CHANNEL, stagePlotsView(doc, stageplotsPublisher.notice(), stageplotsPublisher.landingNotice())),
+  onSaved: broadcastStagePlots,
   listen: (cb) => addBroadcastListener((channel) => cb(channel)),
 });
+
+/**
+ * The document as every browser gets it: GET /api/stageplots and every stageplots:updated frame,
+ * the routes' and the publisher's alike, are made here and nowhere else. No secret (venueView), and
+ * the publisher's follow and landing notices beside it, so the Publish card keeps them until the
+ * next save clears them.
+ */
+export function stagePlotsViewNow(doc: StagePlotsDoc): StagePlotsView {
+  return stagePlotsView(doc, stageplotsPublisher.notice(), stageplotsPublisher.landingNotice());
+}
+
+/** Broadcast the document on stageplots:updated, as stagePlotsViewNow makes it. */
+export function broadcastStagePlots(doc: StagePlotsDoc): void {
+  broadcast(STAGEPLOTS_CHANNEL, stagePlotsViewNow(doc));
+}

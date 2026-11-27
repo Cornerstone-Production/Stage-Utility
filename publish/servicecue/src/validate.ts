@@ -14,12 +14,12 @@ import {
   isAssetName,
   isDocKey,
   isFrameChannel,
-  isRecord,
   readLandingList,
   stagePlotsKeyKind,
   type FixedDocKey,
   type PublicState,
 } from "../../../main/types/servicecue-publish.js";
+import { isRecord } from "../../../main/types/is-record.js";
 
 export type Parsed<T> = { ok: true; value: T } | { ok: false; error: string; status: 400 | 413 };
 

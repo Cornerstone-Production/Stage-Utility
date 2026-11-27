@@ -12,7 +12,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import type { BackgroundView, Plot, PlotDraft, StagePlotsView } from "@main/types/stageplots";
+import type { BackgroundView, Plot, PlotDraft, StagePlotsDoc, StagePlotsView } from "@main/types/stageplots";
 
 import { overridesOfPlot, plotHeight } from "@main/services/stageplots-doc";
 import { applyOverride, itemsWithin, readOverrideChange, validateItems } from "@main/services/stageplots-store";
@@ -53,6 +53,8 @@ let DRAFT_NOTICE: string | null = null;
 let draftPutsOut = 0;
 /** GET /api/stageplots/drafts asked, from any page. */
 let draftReads = 0;
+/** While above 0, a GET /api/stageplots/drafts fails as a server that does not answer, and counts down. */
+let DRAFTS_READ_FAILS = 0;
 /** The drafts note the server broadcasts on stageplots:drafts after any change to them. */
 function announceDrafts() {
   FakeEventSource.last?.push("stageplots:drafts", { drafts: DRAFTS.map((d) => ({ plotId: d.plotId, savedAt: d.savedAt })) });
@@ -194,7 +196,8 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
     // The server's own reading of the body and its own rule, never a canned answer.
     const change = readOverrideChange(body);
     if ("problem" in change) return { status: 400, json: { error: change.problem } };
-    const next = applyOverride({ ...DOC, backgrounds: [], pendingRemovals: [] }, change);
+    // The fake document has no published venue, so no secret is missing from it.
+    const next = applyOverride({ ...DOC, backgrounds: [], pendingRemovals: [] } as StagePlotsDoc, change);
     if ("problem" in next) return { status: next.status, json: { error: next.problem } };
     DOC.overrides = next.doc.overrides;
     return { status: 200, json: DOC };
@@ -234,6 +237,10 @@ function route(method: string, path: string, query: URLSearchParams, body: unkno
   }
   if (u.pathname === "/api/stageplots/drafts") {
     draftReads++;
+    if (DRAFTS_READ_FAILS > 0) {
+      DRAFTS_READ_FAILS--;
+      throw new TypeError("Failed to fetch");
+    }
     const body = { drafts: structuredClone(DRAFTS) };
     return { ok: true, status: 200, statusText: "OK", json: async () => body, text: async () => JSON.stringify(body) };
   }
@@ -363,6 +370,7 @@ beforeEach(() => {
   DRAFT_NOTICE = null;
   draftPutsOut = 0;
   draftReads = 0;
+  DRAFTS_READ_FAILS = 0;
   STATE = {};
   UPCOMING = { plans: [], cacheAgeMs: 0 };
   localStorage.clear();
@@ -809,6 +817,23 @@ describe("/stageplots/edit", () => {
     await settle();
     assert.deepEqual(writes(), ["PATCH /api/stageplots/plots/p-1"]);
     assert.deepEqual(sent[0].body, { bgFade: 0.7 });
+  });
+
+  test("a fade the server refused is sent again when the same value is let go again", async () => {
+    await mount();
+    const slider = screen.getByLabelText("Fade");
+    const letGoAt = async (value: string) => {
+      await act(async () => {
+        fireEvent.change(slider, { target: { value } });
+        fireEvent.pointerUp(slider);
+      });
+      await settle();
+    };
+    refuse = { what: "PATCH /api/stageplots/plots/p-1", error: "the server refused the fade" };
+    await letGoAt("70");
+    assert.equal((slider as HTMLInputElement).value, "40", "the slider kept the fade the server refused");
+    await letGoAt("70");
+    assert.deepEqual(writes(), ["PATCH /api/stageplots/plots/p-1", "PATCH /api/stageplots/plots/p-1"], "the same fade, let go again, was never sent");
   });
 
   test("choosing another background saves the plot", async () => {
@@ -1383,6 +1408,16 @@ describe("the plot editor", () => {
     assert.ok(DOC.plots[0].items.every((it) => it.y <= 562.5));
   });
 
+  test("Discard and switch drops the draft's save error with it, as Discard does", async () => {
+    await mount();
+    await addFromPalette("box");
+    refuse = { what: "PUT /api/stageplots/plots/p-1/items", error: "the server refused this save" };
+    await click(screen.getByRole("button", { name: "Save" }));
+    assert.match(document.body.textContent!, /the server refused this save/);
+    await chooseBackground("", "Discard and switch");
+    assert.doesNotMatch(document.body.textContent!, /the server refused this save/, "the discarded draft's error is still shown");
+  });
+
   test("Discard and switch: the saved item the server moves is taken, and editing it saves (the 409 path)", async () => {
     DOC.plots[0].items = [item({ id: "b", y: 600, h: 60 })];
     await mount();
@@ -1552,6 +1587,31 @@ describe("the kept draft", () => {
       "the save went out before the draft write it should wait for",
     );
     assert.deepEqual(DRAFTS, [], "a draft of what was just saved was left on the server");
+  });
+
+  test("a Save that fails keeps the draft at once, rather than leaving it unkept with nothing on its way", async () => {
+    await mount();
+    await addFromPalette("box");
+    // Pressed inside the second before the change is kept: Save stops that wait.
+    refuse = { what: "PUT /api/stageplots/plots/p-1/items", error: "the server refused it" };
+    await click(screen.getByRole("button", { name: "Save" }));
+    await until(isKept, "the draft to be kept after the failed save");
+    assert.deepEqual(draftWrites(), ["PUT /api/stageplots/plots/p-1/draft"]);
+  });
+
+  test("a re-read of the drafts that fails is made again, so another desk's draft opens rather than being stored over", async () => {
+    await mount();
+    const reads = draftReads;
+    // Another desk keeps a draft of Special, and this editor's read of the drafts fails once.
+    DRAFTS_READ_FAILS = 1;
+    DRAFTS = [...DRAFTS, { plotId: DOC.plots[1].id, baseVersion: DOC.plots[1].version, items: [item({ id: "theirs" })], savedAt: "2026-11-14T15:00:00.000Z" }];
+    await act(async () => announceDrafts());
+    // Past the first wait before a read is made again (DRAFTS_RETRY_FIRST_MS).
+    await wait(2600);
+    assert.ok(draftReads >= reads + 1, "the note did not set off a read, so this tests nothing");
+    await click(tabs()[1]);
+    for (let i = 0; i < 3; i++) await settle();
+    assert.ok(ids().includes("theirs"), "the other desk's draft did not open: this editor would store over it");
   });
 
   test("a plot's draft survives a save on another plot, and opens again when its tab is picked", async () => {

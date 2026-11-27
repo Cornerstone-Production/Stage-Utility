@@ -17,6 +17,8 @@ import type { Metadata, OutputInfo } from "sharp";
 import { loadSharp } from "./sharp-load.js";
 
 import { errorMessage } from "./errors.js";
+import { imageKind } from "./image-files.js";
+import { WriteQueue } from "./write-queue.js";
 
 /** The largest source a conversion decodes. 4000 × 3000 is 12 MP; 50 MP is ample. */
 export const MAX_SOURCE_PIXELS = 50_000_000;
@@ -28,13 +30,6 @@ export const CONVERTED_MAX_BYTES = 1_000_000;
 const QUALITIES = [80, 70, 60, 50, 40] as const;
 
 const INPUT = { failOn: "error", limitInputPixels: MAX_SOURCE_PIXELS } as const;
-
-const PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-const JPEG_MAGIC = [0xff, 0xd8, 0xff];
-
-function startsWith(bytes: Buffer, magic: readonly number[]): boolean {
-  return bytes.length >= magic.length && magic.every((b, i) => bytes[i] === b);
-}
 
 /** Whether `bytes` start with a PDF's `%PDF-` magic. */
 export function isPdf(bytes: Buffer): boolean {
@@ -51,7 +46,8 @@ export type Sniffed = { kind: "png" | "jpeg" } | { kind: "pdf" } | { problem: st
  */
 export async function sniffUpload(bytes: Buffer): Promise<Sniffed> {
   if (isPdf(bytes)) return { kind: "pdf" };
-  if (!startsWith(bytes, PNG_MAGIC) && !startsWith(bytes, JPEG_MAGIC)) return { problem: "is not a PNG, JPEG or PDF" };
+  const kind = imageKind(bytes);
+  if (kind !== "image/png" && kind !== "image/jpeg") return { problem: "is not a PNG, JPEG or PDF" };
   const sharp = await loadSharp();
   let meta: Metadata;
   try {
@@ -118,7 +114,7 @@ async function storableSource(input: Buffer, kind: "png" | "jpeg"): Promise<Buff
 }
 
 /** Conversions run one at a time: each holds a decoded image in memory. */
-let queue: Promise<unknown> = Promise.resolve();
+const queue = new WriteQueue();
 
 /** Conversions running now, and the most there have been at once: the seam
  *  that shows the queue holds. */
@@ -161,13 +157,11 @@ export function prepareBackground(input: Buffer, opts: { kind: "png" | "jpeg"; c
 
 /** Run `job` on the conversion queue, counted, its failure a sentence. */
 function enqueue<T>(job: () => Promise<T>): Promise<T> {
-  const run = queue.then(() =>
+  return queue.enqueue(() =>
     counted(job).catch((err: unknown) => {
       throw new Error(`could not convert the background: ${errorMessage(err)}`, { cause: err });
     }),
   );
-  queue = run.catch(() => undefined);
-  return run;
 }
 
 /**

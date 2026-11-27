@@ -264,6 +264,8 @@ describe("POST /api/servicecue/publish/deploy", () => {
       [{ kind: "limited", retryAfterSec: 42 }, 429, "too-soon", /Try again in 42 seconds/],
       [{ kind: "newer", pageVersion: "1.30.0", runningVersion: "1.28.0" }, 409, "newer", /deployed from 1\.30\.0, which is newer than this server's 1\.28\.0.*confirmDowngrade: true/],
       [{ kind: "failed", message: "down", code: 1, status: 500, step: "upload the files" }, 502, "failed", /could not be updated: down\. It is unchanged/],
+      // The upload got no answer and the page could not be read: it may have taken it.
+      [{ kind: "failed", message: "no answer", code: null, status: null, step: "upload the Worker", unsure: true }, 502, "failed", /could not be updated: no answer\. Whether the page took it is not known\.$/],
     ];
     for (const [outcome, status, code, message] of table) {
       answers(outcome);

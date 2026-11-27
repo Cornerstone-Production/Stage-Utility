@@ -25,7 +25,7 @@ import { oscStore } from "./osc-store.js";
 import { rosstalkStore } from "./rosstalk-store.js";
 import { saveLayoutImageBytes } from "./layout-image-store.js";
 import { isSafeKey } from "./safe-key.js";
-import { isRecord } from "./is-record.js";
+import { isRecord } from "../types/is-record.js";
 import { hasLegacyGridFields, migrateBoards } from "./slot-boards.js";
 import { walkLayoutObjects } from "./view-refs.js";
 import { isLayoutShape } from "../types/views.js";
@@ -474,7 +474,7 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     for (const r of renamed) {
       const why = r.from.trim() ? "that name was taken here" : "it had no name";
       skipped.push(`ServiceCue layout "${r.from}" — imported as "${r.to}", ${why}`);
-      console.log(`[view-import] ServiceCue preset "${scrub(r.from)}" imported as "${scrub(r.to)}": ${scrub(why)}`);
+      console.log(`[view-import] ServiceCue layout "${scrub(r.from)}" imported as "${scrub(r.to)}": ${scrub(why)}`);
     }
   }
 

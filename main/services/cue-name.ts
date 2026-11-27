@@ -9,6 +9,7 @@
 // and not one of the built-ins. The operator types a display name ("Projectors
 // on"); this makes the name from it.
 
+import { firstFree } from "./first-free.js";
 import { slugForCue } from "./cue-slug.js";
 import { isPairHalfName } from "./cue-pairs.js";
 
@@ -44,9 +45,5 @@ export function deriveCueName(display: string, taken: Iterable<string>): string 
   let base = slugForCue(display).slice(0, MAX_CUE_NAME - ROOM).replace(/_+$/, "");
   if (base === "") base = "cue";
   if (isPairHalfName(base)) base += NOT_A_PAIR_HALF;
-  if (!used.has(base)) return base;
-  for (let n = 2; ; n++) {
-    const next = `${base}_${n}`;
-    if (!used.has(next)) return next;
-  }
+  return firstFree(base, (s) => used.has(s), (b, n) => `${b}_${n}`);
 }

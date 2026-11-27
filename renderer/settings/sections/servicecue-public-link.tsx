@@ -20,7 +20,7 @@ import { plural } from "@main/services/plural";
 import { parsePublishUrl } from "@main/services/servicecue-publish-rules";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertCircleIcon } from "lucide-react";
-import { useEffect, useRef, useState, type FocusEvent, type ReactNode } from "react";
+import { useEffect, useState, type FocusEvent, type ReactNode } from "react";
 
 import { AppLink } from "../../app/app-link";
 import { appZoneOf } from "../../lib/app-zone";
@@ -30,7 +30,7 @@ import { QrHint } from "../../components/qr-hint";
 import { Button, ErrorNote, Input, Switch, confirm } from "../../components/ui";
 import { SkeletonRows } from "../../components/ui/skeleton";
 import { invoke } from "../../lib/api";
-import { copyText } from "../../lib/clipboard";
+import { useCopyFeedback } from "../../lib/use-copy-feedback";
 import { useInAppLink } from "../../lib/use-search-param";
 import { docsPageUrl } from "../../lib/docs-url";
 import { cn } from "../../lib/cn";
@@ -50,8 +50,6 @@ import { INTEGRATIONS_ROUTE } from "../../app/legacy-hash";
 
 /** How often the card asks how it is going while the page is open. */
 const POLL_MS = 5_000;
-/** How long "Copied" stays on the button. */
-const COPIED_MS = 1_500;
 
 const QUERY_KEY = ["servicecue:getPublish"] as const;
 
@@ -209,6 +207,12 @@ function usePublishQuery(pollMs: number) {
  */
 export function usePublishSummary(pollMs = POLL_MS): string {
   const { data, error } = usePublishQuery(pollMs);
+  // Said on /log as the card says it (one line per streak), not only as "Couldn't load".
+  const { fail, clear } = useFailedReads<"publish">("servicecue");
+  useEffect(() => {
+    if (error) fail("publish", "the ServiceCue public link status", error);
+    else clear("publish");
+  }, [error, fail, clear]);
   if (data) return pill[viewOf(data)].word;
   return error ? "Couldn't load" : "Loading…";
 }
@@ -348,7 +352,6 @@ export function PublicLinkCard({
   const [qrOpen, setQrOpen] = useState(false);
   // null follows the problem: open when the fix is in these fields, shut otherwise.
   const [connOpen, setConnOpen] = useState<boolean | null>(null);
-  const [copied, setCopied] = useState(false);
   // Once the update has needed the operator the section stays in view: fixing it must not make the answer disappear.
   const [deployShown, setDeployShown] = useState(false);
   const { failed, fail, clear } = useFailedReads<"publish">("servicecue");
@@ -363,13 +366,8 @@ export function PublicLinkCard({
     return () => clearInterval(tick);
   }, []);
 
-  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (copyTimer.current) clearTimeout(copyTimer.current);
-    },
-    [],
-  );
+  const { state: copyState, copy: copyLink } = useCopyFeedback();
+  const copied = copyState === "copied";
 
   if (failed.has("publish") && !dto) {
     return (
@@ -571,12 +569,7 @@ export function PublicLinkCard({
               variant="filled"
               size="small"
               className={RAISED_BUTTON}
-              onClick={async () => {
-                if (!(await copyText(link))) return;
-                setCopied(true);
-                if (copyTimer.current) clearTimeout(copyTimer.current);
-                copyTimer.current = setTimeout(() => setCopied(false), COPIED_MS);
-              }}
+              onClick={() => void copyLink(link)}
             >
               {copied ? "Copied" : "Copy"}
             </Button>

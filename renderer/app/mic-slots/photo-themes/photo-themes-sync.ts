@@ -8,6 +8,13 @@
 // was missed (worth a log line). Skipped: a replayed frame, which is the cached
 // last frame from before this page read anything and only tells it where the
 // count stands, and a live frame that repeats the `seq` already seen.
+//
+// Why not useStatusChannel: that hook carries a VALUE whose rev orders a push
+// against a read of the same value. This channel carries no value to keep, only
+// "the book moved", and what it decides is whether to read the book again. So it
+// keeps the server run's `epoch` and the `seq` of the last frame, and a gap in
+// `seq` (a frame lost to a reconnect) or a new `epoch` (a restart) is a re-read
+// that a rev comparison would have to infer.
 
 import type { PhotoThemesChanged } from "@main/types/photo-themes";
 

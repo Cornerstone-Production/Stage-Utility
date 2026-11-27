@@ -5,7 +5,7 @@
 // SD card holds no display number and the server decides what a screen shows.
 
 import { type RouteCtx, json, error, readBody, readBodyOrEmpty } from "./context.js";
-import { kioskDevicesStore, authorise, claim, release, findById, findByOutput, matchByMac, withoutTokens, pinSecret, setEnabled, updateDevices } from "../kiosk-devices-store.js";
+import { BindingsRestoring, bindingWritesHeld, kioskDevicesStore, authorise, claim, release, findById, findByOutput, matchByMac, withoutTokens, pinSecret, setEnabled, updateDevices } from "../kiosk-devices-store.js";
 import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen, recordHealth, noteSwitchAnswer, takeChange, forgetChange, healthList, forgetHealth, firstSecretMismatch, forgetSecretMismatch, forgetSecret, announceDevices } from "../kiosk-presence.js";
 import { MachineUpdates, minutes, parseCheck, REPORT_TTL_MS } from "../machine-updates.js";
 import { serviceWindow } from "../service-window.js";
@@ -149,8 +149,10 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
     const device = authorise(devices, id, token);
     if (device) {
       forgetSecretMismatch(id);
-      // Claimed before it had ever enrolled — pin what it just showed us.
-      if (device.token === "" && token) {
+      // Claimed before it had ever enrolled — pin what it just showed us. Not while a
+      // restore holds the bindings: the screen still goes to its display, and its next
+      // enrolment pins it, where refusing would leave it on an error page.
+      if (device.token === "" && token && !bindingWritesHeld()) {
         await updateDevices((current) => pinSecret(current, id, token));
       }
       // Bound and proven. Straight to its display — this is the path taken on
@@ -452,6 +454,9 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       error(res, "body.deviceId is required");
       return;
     }
+    // Refused before a screen is made for it: a restore is landing, and the binding
+    // could not be written. The dispatcher answers it 503, try again in a moment.
+    if (bindingWritesHeld()) throw new BindingsRestoring();
     const seen = seenDevices().find((d) => d.id === id);
     // No output named: this is a brand new screen. Creating one HERE rather than
     // when the device was first heard is deliberate — a spare machine booting
@@ -586,7 +591,8 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       stageController.refreshDisplays("all");
       json(res, { ok: true });
     } catch (err) {
-      if (err instanceof StoreReadError) throw err;
+      // Not the caller's mistake: the dispatcher answers these 503.
+      if (err instanceof StoreReadError || err instanceof BindingsRestoring) throw err;
       error(res, errorMessage(err));
     }
     return;
@@ -624,7 +630,8 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       }
       json(res, { ok: true, enabled });
     } catch (err) {
-      if (err instanceof StoreReadError) throw err;
+      // Not the caller's mistake: the dispatcher answers these 503.
+      if (err instanceof StoreReadError || err instanceof BindingsRestoring) throw err;
       error(res, errorMessage(err));
     }
     return;

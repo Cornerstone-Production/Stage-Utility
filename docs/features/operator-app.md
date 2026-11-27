@@ -103,8 +103,10 @@ read, and the next save replaces the original. A page keeps its place when its
 route is renamed: the arrangement names pages by a stable id, not by address.
 
 Each change's **Undo** puts back that change only: a newer change takes the
-older toast down. Two browsers customizing at once see each other's changes as
-they are saved.
+older toast down. A change's toast appears once the server has accepted it. One
+the server refuses shows its reason instead, and the sidebar goes back to what is
+saved. Two browsers customizing at once see each other's changes as they are
+saved.
 
 **On a phone the hamburger is the only way in.** There is no swipe from the left
 edge of the screen — that edge belongs to the browser's own back gesture, and a
@@ -211,6 +213,7 @@ holds wherever it is placed, on Home or on a layout.
 | Problem | When it appears | Severity | The fix |
 |---|---|---|---|
 | Readiness | Each readiness check that fails, in the order to fix them (Planning Center, a plan, a view of your own, every screen has a view). "Screens online" is not repeated here: the next row says it per screen | Warn | The page and control the check names |
+| Plan held live | Auto mode is still following the plan past its planned end and the hour's grace, because Planning Center reports it live: "Still following Sunday Gathering (November 16, 2026)", with how long past its end. Nothing time-based moves off a live service, so a plan left live with no SERVICE END header, or with Live left on its last item, is followed until Planning Center says it has ended. Decided by the server, and gone once the service ends or another plan is picked | Warn | **Pick a plan** (Plan settings) |
 | Wireless battery | A mic assigned to a slot whose runtime is less than the time the service has left (plan length less elapsed). Where the receiver reports no runtime, or the time left is not known, 20% or less. A pack on a charger is not listed | Critical while live, warn otherwise | **Open slots** (the Mic slots page, see [Slots](../slots.md)) |
 | Wireless offline | A mic assigned to a slot that is not reporting, while a service is live | Critical | **Open slots** |
 | Duplicate server id | Another server answers discovery with this server's id, one row per address: screens bound here can switch between the two. Found by the server itself (see [Two servers with one id](../kiosk-devices.md#two-servers-with-one-id)) | Warn; critical while live | **Open setting** (the Server id field on Advanced → Network) |

@@ -18,6 +18,7 @@ import { LayoutCard, type LayoutPatch, type PreviewSource } from "./servicecue-l
 import {
   byOrder,
   columnPatch,
+  placeDrawn,
   copyName,
   deleteLayoutBody,
   deleteRoleBody,
@@ -331,7 +332,7 @@ export function ServiceCueSection() {
   /** A change to a layout's Columns row, from a click or a drop. */
   function changeColumns(layoutId: string, change: ColumnChange, focus?: string) {
     if (focus) focusNext.current = focus;
-    void update(layoutId, (cur) => columnPatch(cur, change));
+    void update(layoutId, (cur) => columnPatch(cur, change, roles));
   }
 
   const roleName = (id: string) => roles.find((r) => r.id === id)?.name ?? id;
@@ -364,9 +365,9 @@ export function ServiceCueSection() {
           const layout = layouts.find((l) => l.id === item.ctx);
           const drawn = layout ? layoutRoles(layout, roles).map((r) => r.id) : [];
           if (drawn.indexOf(item.id) === target.index) return stayed;
-          const n = (layout?.columnRoles ?? []).length;
+          // Counted as drawn: an id no role has is not a column the operator can see.
           changeColumns(item.ctx, { kind: "move-role", roleId: item.id, index: target.index });
-          return `Moved ${item.label} to column ${target.index + 1} of ${n} roles.`;
+          return `Moved ${item.label} to column ${target.index + 1} of ${drawn.length} roles.`;
         }
       }
       if (item.kind === "tray") {
@@ -375,7 +376,8 @@ export function ServiceCueSection() {
           return `Added ${item.label} in its fixed place.`;
         }
         if (target.kind === "index") {
-          const n = (layouts.find((l) => l.id === item.ctx)?.columnRoles ?? []).length + 1;
+          const layout = layouts.find((l) => l.id === item.ctx);
+          const n = (layout ? layoutRoles(layout, roles).length : 0) + 1;
           changeColumns(item.ctx, { kind: "add-role", roleId: item.id, index: target.index });
           return `Added ${item.label} as role column ${target.index + 1} of ${n}.`;
         }
@@ -392,7 +394,10 @@ export function ServiceCueSection() {
     },
     onReorder(item, order) {
       if (item.kind === "layout") void persist((list) => reorderLayouts(list, order));
-      else if (item.kind === "col") void update(item.ctx, { columnRoles: order });
+      else if (item.kind === "col") {
+        // `order` is the drawn columns: an id no role has keeps its slot (placeDrawn).
+        void update(item.ctx, (cur) => ({ columnRoles: placeDrawn(cur.columnRoles ?? [], new Set(layoutRoles(cur, roles).map((r) => r.id)), order) }));
+      }
       else if (item.kind === "member") void editRole(item.ctx, { members: order });
     },
   };
