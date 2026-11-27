@@ -14,7 +14,8 @@
 //                              not), and the window is the one around a service the Mac helpers
 //                              wait out (serviceWindow.activeUntil()). After a restart, and while
 //                              Planning Center cannot be reached, the times are unknown. Update the
-//                              page now goes ahead of the window and of unknown, never of live
+//                              page now goes ahead of the window and of unknown, and of a service
+//                              under way only with `override`, as the app's own Update now does
 //   the page was deployed      leave it: from a NEWER version, or from the same version by another
 //   by someone else's build    build (two servers at one version would otherwise undo each other).
 //                              Only "Update the page now", confirmed, replaces it
@@ -31,7 +32,8 @@
 // leaves the page serving the old build means the Worker is not the page: auto deploys stop until the
 // credentials or the bundle change. One deploy at a time: a request during one joins it.
 //
-// Log lines are `[servicecue-deploy]`, each decision once. Never a token.
+// Log lines are `[servicecue-deploy]`, each decision once, and each deploy that went ahead of a service
+// under way by override. Never a token.
 
 import { clockOf } from "./app-timezone.js";
 import { errorMessage } from "./errors.js";
@@ -51,6 +53,7 @@ import {
   type CloudflareOrigin,
 } from "./servicecue-cloudflare.js";
 import type { DeployCredentials } from "./servicecue-deploy-store.js";
+import type { ServiceActivity } from "./service-activity.js";
 import { backoffMs } from "./servicecue-publisher.js";
 import type { DeployError, DeployState, DeployStatus } from "../types/servicecue-publish-status.js";
 
@@ -90,8 +93,8 @@ export interface DeployerDeps {
   bundleDir: string;
   /** The version this server runs, as package.json says it. */
   version(): string;
-  /** Is a service under way? The app updater's check: service-activity.ts serviceActivity().active. */
-  serviceLive(): boolean;
+  /** Is a service under way, and what would a deploy interrupt? The app updater's check: service-activity.ts serviceActivity(). */
+  serviceActivity(): ServiceActivity;
   /** When the service window open now closes, or null outside one: serviceWindow.activeUntil(). */
   windowCloses(): number | null;
   /** Are the service times and the live state known well enough to say nothing is live? False just after a restart. */
@@ -108,11 +111,20 @@ type AutoOnly = { kind: "unchecked" } | { kind: "held" } | { kind: "backoff" } |
 
 /** What "Update the page now" is answered with. */
 export type DeployNowOutcome =
-  | { kind: "deployed"; uploaded: number; held: number; /** It went ahead on the explicit request with the service state unknown (never with a service known to be live). */ serviceStateUnknown?: true }
+  | {
+      kind: "deployed";
+      uploaded: number;
+      held: number;
+      /** It went ahead on the explicit request with the service state unknown. */
+      serviceStateUnknown?: true;
+      /** It went ahead of a service under way, by override: what it interrupted. */
+      overrode?: string[];
+    }
   | { kind: "current" }
   | { kind: "off" }
   | { kind: "no-bundle"; message: string }
-  | { kind: "waiting" }
+  /** A service is under way, and the request did not say `override`: what a deploy would interrupt. */
+  | { kind: "waiting"; reasons: string[] }
   | { kind: "newer"; pageVersion: string; runningVersion: string }
   | { kind: "other-build"; pageBuild: string | null; version: string }
   | { kind: "limited"; retryAfterSec: number }
@@ -226,18 +238,18 @@ export class ServiceCueDeployer implements DeployHook {
 
   /**
    * The explicit "Update the page now": deploys over an older page or another build's, but over a
-   * newer page, or the same version's other build, only with `confirmDowngrade`. A page that is
-   * already this build is not uploaded again, and at most one request in `nowEveryMs` deploys.
-   * Joins a deploy already under way.
+   * newer page, or the same version's other build, only with `confirmDowngrade`, and while a service
+   * is under way only with `override`. A page that is already this build is not uploaded again, and
+   * at most one request in `nowEveryMs` deploys. Joins a deploy already under way.
    */
-  async deployNow(opts: { confirmDowngrade?: boolean } = {}): Promise<DeployNowOutcome> {
+  async deployNow(opts: { confirmDowngrade?: boolean; override?: boolean } = {}): Promise<DeployNowOutcome> {
     // An attempt of the server's own that is under way answers first; this makes its own when that settles, at most a few times.
     for (let turn = 0; turn < 3; turn++) {
       if (this.inflight) {
         const joined = await this.inflight;
         if (joined.kind === "deployed" || joined.kind === "current") return joined;
       }
-      const outcome = await this.begin("now", opts.confirmDowngrade === true);
+      const outcome = await this.begin("now", opts.confirmDowngrade === true, opts.override === true);
       if (isNowOutcome(outcome)) return outcome;
     }
     return { kind: "failed", message: "another attempt was under way each time: try again", code: null, status: null, step: "deploy" };
@@ -290,16 +302,23 @@ export class ServiceCueDeployer implements DeployHook {
       files: this.files,
       waitingFor: this.state === "waiting" ? this.waitingFor : null,
       waitingUntil: this.state === "waiting" && this.waitingFor === "window" ? this.waitingUntil : null,
+      liveReasons: this.liveReasons(),
       error: this.error,
       now: Date.now(),
     };
   }
 
+  /** What a deploy now would interrupt, read now: null when no service is under way. */
+  private liveReasons(): string[] | null {
+    const activity = this.deps.serviceActivity();
+    return activity.active ? activity.reasons : null;
+  }
+
   // ── One attempt at a time ──────────────────────────────────────────────────
 
-  private begin(mode: "auto" | "now", confirm: boolean): Promise<DeployOutcome> {
+  private begin(mode: "auto" | "now", confirm: boolean, override = false): Promise<DeployOutcome> {
     if (this.inflight) return this.inflight;
-    const attempt: Promise<DeployOutcome> = this.attempt(mode, confirm).finally(() => {
+    const attempt: Promise<DeployOutcome> = this.attempt(mode, confirm, override).finally(() => {
       if (this.inflight === attempt) this.inflight = null;
     });
     this.inflight = attempt;
@@ -331,7 +350,7 @@ export class ServiceCueDeployer implements DeployHook {
   }
 
   /** Never rejects: a failure is the outcome, and is recorded on the card and the log. */
-  private async attempt(mode: "auto" | "now", confirm: boolean): Promise<DeployOutcome> {
+  private async attempt(mode: "auto" | "now", confirm: boolean, override: boolean): Promise<DeployOutcome> {
     const generation = this.generation;
     // A request's own attempt leaves a pending wait for the service to end, or a retry, as it is.
     if (mode === "auto") this.clearTimer();
@@ -385,12 +404,14 @@ export class ServiceCueDeployer implements DeployHook {
       return { kind: "current" };
     }
 
-    const live = this.deps.serviceLive();
+    const activity = this.deps.serviceActivity();
+    // A service under way waits, unless the request overrides it, as the app's own Update now can.
+    const live = activity.active && !(mode === "now" && override);
     const unknown = !this.deps.serviceTimesKnown();
     const windowCloses = this.deps.windowCloses();
-    // A live service always waits. Unknown (just after a restart, or while Planning Center cannot be reached), and the window around a service, wait on its own account, and go ahead when somebody asks.
+    // Unknown (just after a restart, or while Planning Center cannot be reached), and the window around a service, wait on its own account, and go ahead when somebody asks.
     if (live || (mode === "auto" && (unknown || windowCloses !== null))) {
-      return this.wait(mode, live ? "live" : unknown ? "unknown" : "window", windowCloses, `build ${pageBuild ?? "unknown"} to ${manifest.build}`);
+      return this.wait(mode, live ? "live" : unknown ? "unknown" : "window", windowCloses, `build ${pageBuild ?? "unknown"} to ${manifest.build}`, activity.reasons);
     }
 
     try {
@@ -440,17 +461,20 @@ export class ServiceCueDeployer implements DeployHook {
       }
       // The checks above can take a minute: a service that went live meanwhile is still waited out.
       if (mode === "auto") {
-        const nowLive = this.deps.serviceLive();
+        const nowActivity = this.deps.serviceActivity();
         const nowWindow = this.deps.windowCloses();
-        if (nowLive || nowWindow !== null || !this.deps.serviceTimesKnown()) {
-          return this.wait(mode, nowLive ? "live" : nowWindow !== null ? "window" : "unknown", nowWindow, `build ${pageBuild ?? "unknown"} to ${manifest.build}`);
+        if (nowActivity.active || nowWindow !== null || !this.deps.serviceTimesKnown()) {
+          return this.wait(mode, nowActivity.active ? "live" : nowWindow !== null ? "window" : "unknown", nowWindow, `build ${pageBuild ?? "unknown"} to ${manifest.build}`, nowActivity.reasons);
         }
       }
+      // Gone ahead of a service under way, by override: said every time, never folded into the decision lines.
+      const overrode = mode === "now" && override ? this.liveReasons() : null;
+      if (overrode) this.log("warn", `Update the page now goes ahead while a service is under way (${overrode.join(", ")}): overridden, as asked`);
       this.state = "updating";
       this.files = null;
       this.say(
         `deploy:${manifest.build}:${running}`,
-        `deploying build ${manifest.build} as ${running}: the page ${pageBuild === null || pageBuild === undefined ? "reports no build" : `serves build ${pageBuild}`}${mode === "now" ? ", and the update was asked for" : ""}${confirmed && (older || otherBuild) ? ", over a page left alone until now, as confirmed" : ""}${mode === "now" && unknown ? ", with the service state unknown, as asked (no service is known to be live)" : ""}`,
+        `deploying build ${manifest.build} as ${running}: the page ${pageBuild === null || pageBuild === undefined ? "reports no build" : `serves build ${pageBuild}`}${mode === "now" ? ", and the update was asked for" : ""}${confirmed && (older || otherBuild) ? ", over a page left alone until now, as confirmed" : ""}${mode === "now" && unknown ? ", with the service state unknown, as asked (no service is known to be under way)" : ""}`,
       );
       let files: { uploaded: number; held: number };
       try {
@@ -465,7 +489,7 @@ export class ServiceCueDeployer implements DeployHook {
         files = this.files ?? { uploaded: 0, held: 0 };
       }
       if (mode === "now") this.lastNowDeployAt = Date.now();
-      return this.deployed(manifest.build, running, key, files, mode === "now" && unknown);
+      return this.deployed(manifest.build, running, key, files, mode === "now" && unknown, overrode);
     } catch (err) {
       return this.failedWith(err, generation);
     }
@@ -490,21 +514,21 @@ export class ServiceCueDeployer implements DeployHook {
     return true;
   }
 
-  /** Not now: a service is live, its window is open, or neither is known. Looked at again each half minute on its own account. */
-  private wait(mode: "auto" | "now", why: "live" | "unknown" | "window", windowCloses: number | null, change: string): DeployOutcome {
+  /** Not now: a service is under way, its window is open, or neither is known. Looked at again each half minute on its own account. */
+  private wait(mode: "auto" | "now", why: "live" | "unknown" | "window", windowCloses: number | null, change: string, reasons: string[]): DeployOutcome {
     this.state = "waiting";
     this.waitingFor = why;
     this.waitingUntil = why === "window" ? windowCloses : null;
     this.say(
       `waiting:${change}:${why}`,
       why === "live"
-        ? `a service is live, so the page is not updated now (${change}); it will be when the service ends`
+        ? `a service is under way (${reasons.join(", ")}), so the page is not updated now (${change}); it will be when the service ends`
         : why === "window"
           ? `the service window is open until ${clockOf(windowCloses ?? Date.now())}, so the page is not updated now (${change}); it will be when the window closes`
           : `the service times are not known (the server has just started, or Planning Center cannot be reached), so the page is not updated now; it will be once they are (${change})`,
     );
     if (mode === "auto") this.arm(this.timings.liveRecheckMs);
-    return why === "live" ? { kind: "waiting" } : { kind: "waiting-auto" };
+    return why === "live" ? { kind: "waiting", reasons } : { kind: "waiting-auto" };
   }
 
   /** The build the page serves, as far as is known: undefined when nothing says. */
@@ -548,7 +572,7 @@ export class ServiceCueDeployer implements DeployHook {
     return { kind: "current" };
   }
 
-  private deployed(build: string, version: string, key: string, files: { uploaded: number; held: number }, serviceStateUnknown: boolean): DeployNowOutcome {
+  private deployed(build: string, version: string, key: string, files: { uploaded: number; held: number }, serviceStateUnknown: boolean, overrode: string[] | null): DeployNowOutcome {
     this.state = "current";
     this.page = { build, version, at: Date.now() };
     this.files = files;
@@ -560,7 +584,7 @@ export class ServiceCueDeployer implements DeployHook {
     this.log("info", `deployed build ${build} as ${version}: ${plural(files.uploaded, "file")} uploaded, ${files.held} already on Cloudflare`);
     this.said = `current:${build}`;
     for (const listener of this.deployedListeners) listener();
-    return { kind: "deployed", ...files, ...(serviceStateUnknown ? { serviceStateUnknown: true as const } : {}) };
+    return { kind: "deployed", ...files, ...(serviceStateUnknown ? { serviceStateUnknown: true as const } : {}), ...(overrode ? { overrode } : {}) };
   }
 
   /** A deploy went through and the page still serves another build: the Worker is not the page. Nothing more is deployed on its own. */

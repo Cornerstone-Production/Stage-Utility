@@ -70,6 +70,7 @@ const NO_DEPLOY: DeployStatus = {
   files: null,
   waitingFor: null,
   waitingUntil: null,
+  liveReasons: null,
   error: null,
   now: NOW,
 };

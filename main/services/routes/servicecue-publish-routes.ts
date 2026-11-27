@@ -7,7 +7,7 @@
 //   POST /api/servicecue/publish/test   { url?, token? } → whether the page answers
 //   POST /api/servicecue/publish/deploy-credentials   { accountId?, token? }: the Cloudflare account and API
 //                                        token the server keeps the page itself up to date with
-//   POST /api/servicecue/publish/deploy  { confirmDowngrade? }: "Update the page now"
+//   POST /api/servicecue/publish/deploy  { confirmDowngrade?, override? }: "Update the page now"
 //
 // THE TOKENS ARE WRITE-ONLY. It is stored encrypted with the address it was saved for, never
 // returned, and read back only for that address. The app has no login, so anyone on the
@@ -138,12 +138,12 @@ export async function serviceCuePublishRoutes(c: RouteCtx): Promise<void> {
 
   if (method === "POST" && pathname === "/api/servicecue/publish/deploy") {
     const body = (await readBody(req)) as Record<string, unknown>;
-    const wrong = wrongType(body, [["confirmDowngrade", "boolean"]]);
+    const wrong = wrongType(body, [["confirmDowngrade", "boolean"], ["override", "boolean"]]);
     if (wrong) {
       error(res, wrong);
       return;
     }
-    await deployNow(c, body.confirmDowngrade === true);
+    await deployNow(c, { confirmDowngrade: body.confirmDowngrade === true, override: body.override === true });
     return;
   }
 
@@ -246,9 +246,9 @@ async function saveDeployCredentialsFrom(c: RouteCtx, body: DeployCredentialsBod
 }
 
 /** POST /api/servicecue/publish/deploy: the card's "Update the page now". Every outcome has its status and code; the compiler holds this to all of them. */
-async function deployNow(c: RouteCtx, confirmDowngrade: boolean): Promise<void> {
+async function deployNow(c: RouteCtx, opts: { confirmDowngrade: boolean; override: boolean }): Promise<void> {
   const { res } = c;
-  const outcome = await servicecueDeployer.deployNow({ confirmDowngrade });
+  const outcome = await servicecueDeployer.deployNow(opts);
   const dto = await settingsDto();
   const refuse = (message: string, status: number, code: string, more: Record<string, unknown> = {}) => json(res, { error: message, code, ...more, deploy: dto.deploy }, status);
   switch (outcome.kind) {
@@ -266,7 +266,13 @@ async function deployNow(c: RouteCtx, confirmDowngrade: boolean): Promise<void> 
       refuse(outcome.message, 409, "no-bundle");
       return;
     case "waiting":
-      refuse("A service is live. The page is not updated during one: it updates when the service ends.", 409, "service-live");
+      // The update lock's own reasons, and its own way past them: the app's Update now answers 409 "locked" the same way.
+      refuse(
+        `Updating the page now would interrupt: ${outcome.reasons.join(", ")}. It updates when the service ends, or send override: true to update it anyway.`,
+        409,
+        "service-live",
+        { reasons: outcome.reasons },
+      );
       return;
     case "newer":
       refuse(

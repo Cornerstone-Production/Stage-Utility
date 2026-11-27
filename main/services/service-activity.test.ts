@@ -4,7 +4,7 @@
 //
 //   the update lock       GET /api/update/lock (Update now, Restart, Switch track)
 //   the auto-update       stageController.shouldAutoApply
-//   the page deploy       deployerDeps.serviceLive, what servicecue-deployer.ts reads
+//   the page deploy       deployerDeps.serviceActivity, what servicecue-deployer.ts reads
 //   the machine updates   GET /api/machine-updates/check, for a Mac helper
 //
 // The bug this pins: Planning Center reports "preservice" whenever a plan has a
@@ -101,7 +101,7 @@ async function consumers(): Promise<Record<string, boolean>> {
   return {
     "update lock": (lock.json as { active: boolean }).active,
     "auto-update": !auto.apply && auto.why === "live",
-    "page deploy": deployerDeps.serviceLive(),
+    "page deploy": deployerDeps.serviceActivity().active,
     "machine update": (machine.json as { update: boolean }).update === false,
   };
 }

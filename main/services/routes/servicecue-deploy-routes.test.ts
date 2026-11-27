@@ -229,14 +229,25 @@ describe("POST /api/servicecue/publish/deploy", () => {
     return m;
   };
 
-  it("passes the confirmation on, and only a boolean true is one", async () => {
+  it("passes the confirmation and the override on, and only a boolean true is one", async () => {
     const m = answers({ kind: "current" });
     await deploy({});
     await deploy({ confirmDowngrade: false });
     await deploy({ confirmDowngrade: true });
-    assert.deepEqual(m.mock.calls.map((c) => c.arguments[0]), [{ confirmDowngrade: false }, { confirmDowngrade: false }, { confirmDowngrade: true }]);
-    for (const bad of ["true", 1, null]) assert.equal((await deploy({ confirmDowngrade: bad })).status, 400, JSON.stringify(bad));
-    assert.equal(m.mock.callCount(), 3, "a request that was refused for its body deployed");
+    await deploy({ override: true });
+    await deploy({ override: true, confirmDowngrade: true });
+    assert.deepEqual(m.mock.calls.map((c) => c.arguments[0]), [
+      { confirmDowngrade: false, override: false },
+      { confirmDowngrade: false, override: false },
+      { confirmDowngrade: true, override: false },
+      { confirmDowngrade: false, override: true },
+      { confirmDowngrade: true, override: true },
+    ]);
+    for (const bad of ["true", 1, null]) {
+      assert.equal((await deploy({ confirmDowngrade: bad })).status, 400, JSON.stringify(bad));
+      assert.equal((await deploy({ override: bad })).status, 400, JSON.stringify(bad));
+    }
+    assert.equal(m.mock.callCount(), 5, "a request that was refused for its body deployed");
   });
 
   it("answers what the server decided: deployed and current are 200 with the status", async () => {
@@ -259,7 +270,7 @@ describe("POST /api/servicecue/publish/deploy", () => {
     const table: [unknown, number, string, RegExp][] = [
       [{ kind: "off" }, 400, "no-token", /account ID and API token first/],
       [{ kind: "no-bundle", message: "this build has no copy of the page: it has no build/servicecue/deploy.json" }, 409, "no-bundle", /no copy of the page/],
-      [{ kind: "waiting" }, 409, "service-live", /A service is live/],
+      [{ kind: "waiting", reasons: ["A PCO service is live", "SPL is recording"] }, 409, "service-live", /^Updating the page now would interrupt: A PCO service is live, SPL is recording\. .*override: true/],
       [{ kind: "other-build", pageBuild: "aaaaaaaaaaaa", version: "1.28.0" }, 409, "other-build", /build aaaaaaaaaaaa of this server's own version 1\.28\.0.*confirmDowngrade: true/],
       [{ kind: "limited", retryAfterSec: 42 }, 429, "too-soon", /Try again in 42 seconds/],
       [{ kind: "newer", pageVersion: "1.30.0", runningVersion: "1.28.0" }, 409, "newer", /deployed from 1\.30\.0, which is newer than this server's 1\.28\.0.*confirmDowngrade: true/],
@@ -282,6 +293,9 @@ describe("POST /api/servicecue/publish/deploy", () => {
     mock.restoreAll();
     answers({ kind: "limited", retryAfterSec: 42 });
     assert.equal((await deploy()).headers["Retry-After"], "42", "a limited request says when to come back");
+    mock.restoreAll();
+    answers({ kind: "waiting", reasons: ["Attendance is recording"] });
+    assert.deepEqual(((await deploy()).json as { reasons: string[] }).reasons, ["Attendance is recording"], "a live refusal names what is under way");
   });
 
   it("with no token says so, and calls nothing; with a token and no copy of the page says there is none", async () => {
@@ -347,6 +361,40 @@ describe("Update the page now, all the way to Cloudflare", () => {
   });
 });
 
+describe("Update the page now while a service is under way, all the way to Cloudflare", () => {
+  it("is refused without override, naming what is under way, and deploys with it, logging the override once", async (t) => {
+    const lines = captureConsole(t, "log", "warn", "error");
+    const bundle = writeBundle({ dir: BUNDLE, manifest: { build: BUILD_B } });
+    t.after(() => bundle.remove());
+    cloudflare.token = CF_TOKEN;
+    await linked();
+    await credentials({ accountId: ACCOUNT, token: CF_TOKEN });
+    // Planning Center in an item: the update lock's own reading, through the controller's snapshot.
+    const ctl = stageController as unknown as { lastLive: unknown };
+    const was = ctl.lastLive;
+    t.after(() => {
+      ctl.lastLive = was;
+    });
+    ctl.lastLive = { mode: "item", currentItemId: "item-1" };
+    // The one-a-minute limit is the deployer's own, and an earlier test in this file used it up.
+    (servicecueDeployer as unknown as { lastNowDeployAt: number }).lastNowDeployAt = 0;
+
+    const refused = await deploy();
+    assert.equal(refused.status, 409, refused.body);
+    const body = refused.json as { code: string; reasons: string[]; error: string; deploy: { liveReasons: string[] | null } };
+    assert.equal(body.code, "service-live");
+    assert.deepEqual(body.reasons, ["A PCO service is live"]);
+    assert.deepEqual(body.deploy.liveReasons, ["A PCO service is live"], "the card is not told what a deploy would interrupt");
+    assert.equal(cloudflare.puts.length, 0, "deployed during a live service without the override");
+
+    const overridden = await deploy({ override: true });
+    assert.equal(overridden.status, 200, overridden.body);
+    assert.equal(cloudflare.puts.length, 1);
+    const said = lines.filter((l) => /^\[servicecue-deploy\] Update the page now goes ahead while a service is under way \(A PCO service is live\): overridden, as asked$/.test(l));
+    assert.equal(said.length, 1, lines.join("\n"));
+  });
+});
+
 describe("where the server looks for Cloudflare", () => {
   it("is the real API unless the development switch is on and an address is named, and a bad address turns updating off", (t) => {
     const lines = captureConsole(t, "error");
@@ -374,7 +422,7 @@ describe("what the deployer reads from the app", () => {
       { mode: "item", currentItemId: "item-1" },
     ]) {
       ctl.lastLive = live;
-      assert.equal(deployerDeps.serviceLive(), true, `${JSON.stringify(live)} did not count as live`);
+      assert.equal(deployerDeps.serviceActivity().active, true, `${JSON.stringify(live)} did not count as live`);
     }
     for (const live of [
       { mode: "preservice", currentItemId: null, targetAt: new Date(Date.now() + 2 * 86_400_000).toISOString() },
@@ -382,7 +430,7 @@ describe("what the deployer reads from the app", () => {
       null,
     ]) {
       ctl.lastLive = live;
-      assert.equal(deployerDeps.serviceLive(), false, `${JSON.stringify(live)} counted as live`);
+      assert.equal(deployerDeps.serviceActivity().active, false, `${JSON.stringify(live)} counted as live`);
     }
 
     const now = Date.now();
