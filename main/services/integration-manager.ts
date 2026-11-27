@@ -1875,6 +1875,16 @@ class IntegrationManager {
       stageController.setPcoCredentials(null, null);
       this.setConnectionState("planning-center", "disconnected", null);
     }
+    // Turned back on, the credentials switching it off cleared are loaded again, as
+    // a start or a save of its settings would. Without this, the tile's Test (which
+    // reads the stored credentials itself) passes while every read still answers
+    // "PCO not configured" until a restart.
+    if (id === "planning-center" && enabled) {
+      await this.applyPcoCredentials();
+      void this.verifyPcoCredentials()
+        .then((ok) => (ok ? stageController.refresh() : undefined))
+        .catch((err: unknown) => console.warn("[integration-manager] Planning Center check after turning it on failed", scrubError(err)));
+    }
 
     await this.applyIntegration(id);
 
