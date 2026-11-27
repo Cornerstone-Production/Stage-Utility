@@ -36,7 +36,7 @@ const { callRoute } = await import("./routes/route-harness.js");
 const { pkgVersion } = await import("./updater.js");
 const { captureConsole } = await import("./fixtures/capture-console.js");
 
-type Ctl = { lastLive: unknown; state: Record<string, unknown>; pcoAppId: string | null; pcoSecret: string | null };
+type Ctl = { lastLive: unknown; liveStale: boolean; state: Record<string, unknown>; pcoAppId: string | null; pcoSecret: string | null };
 const ctl = stageController as unknown as Ctl;
 const recorders = [splRecorder, attendanceRecorder, serviceTimelineRecorder] as unknown as { current: unknown }[];
 
@@ -59,10 +59,10 @@ const IN_AN_ITEM = {
 const OPEN_RECORD = { endedAt: null };
 const CLOSED_RECORD = { endedAt: at(-60_000) };
 
-let saved: { lastLive: unknown; state: Record<string, unknown>; pcoAppId: string | null; pcoSecret: string | null; current: unknown[] };
+let saved: { lastLive: unknown; liveStale: boolean; state: Record<string, unknown>; pcoAppId: string | null; pcoSecret: string | null; current: unknown[] };
 
 beforeEach(() => {
-  saved = { lastLive: ctl.lastLive, state: ctl.state, pcoAppId: ctl.pcoAppId, pcoSecret: ctl.pcoSecret, current: recorders.map((r) => r.current) };
+  saved = { lastLive: ctl.lastLive, liveStale: ctl.liveStale, state: ctl.state, pcoAppId: ctl.pcoAppId, pcoSecret: ctl.pcoSecret, current: recorders.map((r) => r.current) };
   // No Planning Center credentials: the service times count as known, so only "under way" can hold anything.
   ctl.pcoAppId = null;
   ctl.pcoSecret = null;
@@ -77,6 +77,7 @@ beforeEach(() => {
 
 afterEach(() => {
   ctl.lastLive = saved.lastLive;
+  ctl.liveStale = saved.liveStale;
   ctl.state = saved.state;
   ctl.pcoAppId = saved.pcoAppId;
   ctl.pcoSecret = saved.pcoSecret;
@@ -102,7 +103,8 @@ async function consumers(): Promise<Record<string, boolean>> {
     "update lock": (lock.json as { active: boolean }).active,
     "auto-update": !auto.apply && auto.why === "live",
     "page deploy": deployerDeps.serviceActivity().active,
-    "machine update": (machine.json as { update: boolean }).update === false,
+    // Held for a service, not merely for service times not known yet (that is its own answer).
+    "machine update": /when the service is no longer live/.test((machine.json as { reason: string }).reason),
   };
 }
 
@@ -161,9 +163,43 @@ describe("whether a service is under way, as every restart and deploy asks it", 
     }
   });
 
+  it("is not, while Planning Center is parked on an item past SERVICE END: the recorders and the rollover call that over too", async (t) => {
+    quiet(t);
+    ctl.lastLive = { ...IN_AN_ITEM, label: "Stream Buffer", serviceEnded: true };
+    assert.deepEqual(serviceActivity(), { active: false, reasons: [] });
+    await allSay(false, "parked past SERVICE END");
+  });
+
+  describe("through a Planning Center outage that began mid-service", () => {
+    /** Planning Center set up and a plan followed, its last reading kept while reads fail. */
+    const outage = (live: unknown) => {
+      ctl.pcoAppId = "app";
+      ctl.pcoSecret = "secret";
+      ctl.state = { ...ctl.state, serviceTypeId: "1", planId: "p1" };
+      ctl.lastLive = live;
+      ctl.liveStale = true;
+    };
+
+    it("holds while the kept reading's service is near now: a failing read is not evidence the service stopped", async (t) => {
+      quiet(t);
+      outage(IN_AN_ITEM);
+      assert.deepEqual(serviceActivity(), { active: true, reasons: ["A PCO service is live"] });
+      await allSay(true, "an outage an hour into a service");
+    });
+
+    it("does not hold once that service is hours past: nor does a record no tick can close", async (t) => {
+      quiet(t);
+      const started = at(-14 * 60 * 60_000);
+      outage({ ...IN_AN_ITEM, serviceTimeStartsAt: started, liveStartAt: started });
+      for (const r of recorders) r.current = OPEN_RECORD;
+      assert.deepEqual(serviceActivity(), { active: false, reasons: [] });
+      await allSay(false, "an outage that began fourteen hours into a service");
+    });
+  });
+
   it("names every reason, in order", () => {
     assert.deepEqual(
-      serviceActivityOf({ live: IN_AN_ITEM as never, spl: OPEN_RECORD, attendance: OPEN_RECORD, timeline: OPEN_RECORD }).reasons,
+      serviceActivityOf({ live: IN_AN_ITEM as never, stale: false, nowMs: NOW.getTime(), spl: OPEN_RECORD, attendance: OPEN_RECORD, timeline: OPEN_RECORD }).reasons,
       ["A PCO service is live", "SPL is recording", "Attendance is recording", "Service history is recording"],
     );
   });

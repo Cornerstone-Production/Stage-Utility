@@ -410,22 +410,21 @@ describe("where the server looks for Cloudflare", () => {
 describe("what the deployer reads from the app", () => {
   it("is the app updater's live test, the service window, the service times, the app's version and the app's own page copy", (t) => {
     // The update lock's own check (service-activity.ts), driven by the snapshot the stage controller keeps: an item
-    // is live, and the countdown before a service is not. service-activity.test.ts holds the recorders to it too.
+    // is live, and the countdown before a service, or an item parked past SERVICE END, is not. service-activity.test.ts
+    // holds the recorders and a Planning Center outage to it too.
     const ctl = stageController as unknown as { lastLive: unknown };
     const was = ctl.lastLive;
     t.after(() => {
       ctl.lastLive = was;
       serviceWindow.setWindows([]);
     });
-    for (const live of [
-      { mode: "item", currentItemId: "item-1", serviceEnded: true },
-      { mode: "item", currentItemId: "item-1" },
-    ]) {
+    for (const live of [{ mode: "item", currentItemId: "item-1" }]) {
       ctl.lastLive = live;
       assert.equal(deployerDeps.serviceActivity().active, true, `${JSON.stringify(live)} did not count as live`);
     }
     for (const live of [
       { mode: "preservice", currentItemId: null, targetAt: new Date(Date.now() + 2 * 86_400_000).toISOString() },
+      { mode: "item", currentItemId: "item-1", serviceEnded: true },
       { mode: "none", currentItemId: null },
       null,
     ]) {

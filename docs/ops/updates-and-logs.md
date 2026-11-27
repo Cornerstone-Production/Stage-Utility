@@ -66,12 +66,16 @@ with this server* turns it off.
 
 ### The update lock
 
-While Planning Center is in one of the plan's items, or any recorder is open (SPL,
+While Planning Center reports the service running, or any recorder is open (SPL,
 attendance, service history), a service is under way and `GET /api/update/lock`
-reports `active` with the reasons. The countdown Planning Center shows before a
-service is not one: every plan with a service time reports it, days ahead. A recorder
-still open after Planning Center leaves its last item keeps the lock until its record
-closes. The same check holds the [automatic update](#automatic-updates), the
+reports `active` with the reasons. Running is what the recorders themselves go by:
+in one of the plan's items, and not parked on one past its **SERVICE END** header.
+The countdown Planning Center shows before a service is not one: every plan with a
+service time reports it, days ahead. A recorder still open after Planning Center
+leaves its last item keeps the lock until its record closes, on the next live
+reading. While Planning Center cannot be reached, its last reading, and any record
+left open, count only until 12 hours after that service's start: a failing read is
+not evidence the service stopped, nor that one is still going hours later. The same check holds the [automatic update](#automatic-updates), the
 [Mac helpers' updates](../kiosk-devices.md#keeping-the-helper-on-the-servers-version)
 and the [public ServiceCue page's](servicecue-on-the-web.md#keeping-it-up-to-date)
 update, whose **Update the page now** has the same override. Every
