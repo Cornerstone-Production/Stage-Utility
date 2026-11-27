@@ -35,6 +35,36 @@ export class PcoAuthError extends Error {
     this.name = "PcoAuthError";
   }
 }
+
+/** Longest reason PCO's answer may add to the message an operator reads. */
+const MAX_REASON = 120;
+
+/** The short reason in a refused PCO answer: the first JSON:API error's title (else
+ *  detail), otherwise the status text. The raw body can be a page of JSON and belongs in
+ *  the log, not in the toast built from this message. */
+function refusalReason(statusText: string, body: string): string {
+  let reason = "";
+  try {
+    const first = (JSON.parse(body) as { errors?: { title?: unknown; detail?: unknown }[] }).errors?.[0];
+    for (const field of [first?.title, first?.detail]) {
+      if (typeof field === "string" && field.trim()) {
+        reason = field.trim();
+        break;
+      }
+    }
+  } catch {
+    // Not JSON (a gateway's HTML page, say): the status text says it.
+  }
+  reason ||= statusText || "no reason given";
+  return reason.length > MAX_REASON ? `${reason.slice(0, MAX_REASON)}…` : reason;
+}
+
+/** A refused PCO answer's operator-facing reason, with the whole body on a tagged log
+ *  line, so the message stays readable and the evidence stays in /log. */
+function refusal(url: PcoUrl, response: Response, body: string): string {
+  console.warn(`[pco] ${scrub(response.status)} from ${scrub(url)}: ${scrub(body || response.statusText)}`);
+  return refusalReason(response.statusText, body);
+}
 import { scrub } from "./scrub.js";
 import { PCO_BASE, PcoUrlRefused, isPcoId, pcoAttachmentId, pcoId, pcoSegment, pcoUrl, pcoUrlOf, type PcoUrl } from "./pco-path.js";
 
@@ -996,8 +1026,8 @@ class PcoService {
       }
       if (!response.ok) {
         const body = await response.text().catch(() => "");
-        const message = `PCO API error ${response.status}: ${body || response.statusText}`;
-        throw response.status === 404 ? new PcoNotFoundError(message) : new Error(message);
+        if (response.status === 404) throw new PcoNotFoundError(`PCO API error 404: ${refusalReason(response.statusText, body)}`);
+        throw new Error(`PCO API error ${response.status}: ${refusal(url, response, body)}`);
       }
 
       const json = await response.json() as PcoResponse<T>;
@@ -1023,7 +1053,7 @@ class PcoService {
     }
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw new Error(`PCO live control failed (${response.status}). ${response.statusText || body}`);
+      throw new Error(`PCO live control failed (${response.status}). ${refusal(url, response, body)}`);
     }
   }
 
@@ -1100,7 +1130,7 @@ class PcoService {
     }
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw new Error(`PCO API error ${response.status}: ${body || response.statusText}`);
+      throw new Error(`PCO API error ${response.status}: ${refusal(url, response, body)}`);
     }
     return (await response.json()) as PcoResponse<T>;
   }
