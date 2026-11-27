@@ -23,6 +23,7 @@ import {
   isStepBackTo,
   itemLiveSinceMs,
   lastItemEntry,
+  stampItemEnds,
   type NewRecordContext,
   type RecorderStore,
 } from "./service-recorder.js";
@@ -298,7 +299,7 @@ class SplRecorder extends ServiceRecorder<ServiceSplHistory> {
   protected override finalizeRecord(): void {
     if (!this.current) return;
     const now = new Date().toISOString();
-    for (const it of this.current.items) if (!it.endedAt) it.endedAt = now;
+    stampItemEnds(this.current.items, now);
     super.finalizeRecord(now);
     // The record is closed: name what the raw layer captured, then release the
     // appenders. A later item going live reopens the record and the files resume.

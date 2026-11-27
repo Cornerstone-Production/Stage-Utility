@@ -21,7 +21,7 @@
 // resuming one means (SPL rebuilds from the raw archive; the others do not), and
 // everything about sampling. The base owns only the lifecycle.
 
-import type { PcoLiveDTO } from "../types/stage.js";
+import type { PcoLiveDTO, ServiceTimelineItem } from "../types/stage.js";
 import { clockOf } from "./app-timezone.js";
 import { serviceDateKey } from "./live-service-gate.js";
 import { scrub, scrubError } from "./scrub.js";
@@ -129,6 +129,38 @@ export function isStepBackTo(entry: RecordedItem, goingLiveAtMs: number): boolea
 export function itemLiveSinceMs(live: { liveStartAt: string | null }): number {
   const parsed = live.liveStartAt ? Date.parse(live.liveStartAt) : NaN;
   return Number.isFinite(parsed) ? parsed : Date.now();
+}
+
+/**
+ * Close every item still open at `endIso`: the SPL record's whole item close.
+ *
+ * Also the timeline's when nothing measured how long its last item ran — see
+ * reconcile-records.ts, the one caller that can be in that position.
+ */
+export function stampItemEnds(items: { endedAt: string | null }[], endIso: string): void {
+  for (const it of items) if (!it.endedAt) it.endedAt = endIso;
+}
+
+/** Close one timeline run at `endIso` and measure it. Whole seconds, never
+ *  negative: PCO's `live_start_at` can sit a moment ahead of this host's clock. */
+export function closeTimelineItem(item: ServiceTimelineItem, endIso: string): void {
+  item.endedAt = endIso;
+  const startMs = Date.parse(item.startedAt);
+  const endMs = Date.parse(endIso);
+  item.actualDurationSec =
+    Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, Math.round((endMs - startMs) / 1000)) : null;
+}
+
+/**
+ * Close every timeline item still open at `endIso`, each with its length.
+ *
+ * Shared by the timeline recorder's own close and the boot-time close of a
+ * record a crash left open. That second one had a copy that stamped the end
+ * and left `actualDurationSec` null, and nothing computes a length on read, so
+ * History's Actual total, the row and the overrun stats all skipped the item.
+ */
+export function closeTimelineItems(items: ServiceTimelineItem[], endIso: string): void {
+  for (const it of items) if (!it.endedAt) closeTimelineItem(it, endIso);
 }
 
 /** The identity every service record carries. */

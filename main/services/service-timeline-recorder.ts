@@ -20,6 +20,8 @@ import { scrub } from "./scrub.js";
 import {
   ServiceRecorder,
   SERVICE_GAP_MS,
+  closeTimelineItem,
+  closeTimelineItems,
   isStepBackTo,
   itemLiveSinceMs,
   lastItemEntry,
@@ -170,28 +172,14 @@ class ServiceTimelineRecorder extends ServiceRecorder<ServiceTimeline> {
     // The LAST entry for the id — the run that was actually on air. `find` would
     // close an earlier run of the same item and leave the live one open forever.
     const prev = lastItemEntry(this.current.items, this.lastItemId);
-    if (prev && !prev.endedAt) {
-      const endMs = Date.now();
-      prev.endedAt = new Date(endMs).toISOString();
-      const startMs = Date.parse(prev.startedAt);
-      prev.actualDurationSec = Number.isFinite(startMs) ? Math.max(0, Math.round((endMs - startMs) / 1000)) : null;
-    }
+    if (prev && !prev.endedAt) closeTimelineItem(prev, new Date().toISOString());
   }
 
   /** Close every open item, then let the base stamp the record's end once. */
   protected override finalizeRecord(): void {
     // One clock read for the items AND the record's own end, as before.
-    const endMs = Date.now();
-    const iso = new Date(endMs).toISOString();
-    if (this.current) {
-      for (const it of this.current.items) {
-        if (!it.endedAt) {
-          it.endedAt = iso;
-          const startMs = Date.parse(it.startedAt);
-          it.actualDurationSec = Number.isFinite(startMs) ? Math.max(0, Math.round((endMs - startMs) / 1000)) : null;
-        }
-      }
-    }
+    const iso = new Date().toISOString();
+    if (this.current) closeTimelineItems(this.current.items, iso);
     super.finalizeRecord(iso);
   }
 }

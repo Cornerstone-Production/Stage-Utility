@@ -8,7 +8,12 @@ timing — and browsable afterwards under **History** in the sidebar.
 Three recorders run while a service is live, keyed to the plan and the specific
 service time so a 9am and an 11am stay separate. They finalise at the plan's
 service-end marker and are reconciled on startup, so a restart mid-service does
-not lose the record.
+not lose the record. A record a crash left open is closed at boot the way the
+recorders close one, every item with an end and each rundown item with its
+length, at the last moment the records show the service running. That is the
+last in-service attendance sample when one came after the last item change;
+otherwise the item that was on air keeps no length, since nothing measured it.
+If the service is still live, the next tick reopens the record and that item.
 
 While Planning Center reports a service live, **nothing time-based can stop it
 being recorded** — no clock, calendar or time zone. A recording ends only when the
