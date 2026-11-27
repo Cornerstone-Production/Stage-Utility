@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import type { PatchEndpoint, PatchSheet } from "../types/stage.js";
 import { setAppTimeZone } from "./app-timezone.js";
 import { EXPORT_HEADERS, exportFilename, exportRows, rowCells } from "./patch-export.js";
+import { safeFilename } from "./export-filename.js";
 
 const ep = (over: Partial<PatchEndpoint> & Pick<PatchEndpoint, "rackId" | "dir" | "index">): PatchEndpoint => over;
 
@@ -144,10 +145,12 @@ describe("exportFilename", () => {
     assert.equal(exportFilename("!!!", null, "xlsx", DAY), "patch-2026-08-03.xlsx");
   });
 
-  it("a long sheet and variant name still make a name a filesystem takes", () => {
-    // Some filesystems cap a file name at 255 bytes.
+  it("a long sheet and variant name still make a name the download header takes", () => {
+    // Some filesystems cap a file name at 255 bytes, and attachmentDisposition
+    // refuses anything longer rather than writing the header.
     const name = exportFilename("x".repeat(300), "y".repeat(300), "csv", DAY);
     assert.ok(name.length <= 255, `${name.length} characters`);
+    assert.equal(safeFilename(name), name);
   });
 
   it("dates the file in the app's zone, not the server's clock", () => {

@@ -13,6 +13,7 @@ import { patchStore } from "../patch-store.js";
 import { patchShapeProblem } from "../patch-shape.js";
 import { parseXlsx } from "../patch-xlsx.js";
 import { exportFilename, exportRows } from "../patch-export.js";
+import { attachmentDisposition } from "../export-filename.js";
 import { toCsv } from "../patch-export-csv.js";
 import { toXlsx } from "../patch-export-xlsx.js";
 import { servicecuePublisher } from "../servicecue-publisher-instance.js";
@@ -108,14 +109,14 @@ export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
       if (format === "xlsx") {
         res.writeHead(200, {
           "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          "Content-Disposition": `attachment; filename="${filename}"`,
+          "Content-Disposition": attachmentDisposition(filename),
         });
         res.end(await toXlsx(rows));
         return;
       }
       res.writeHead(200, {
         "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": attachmentDisposition(filename),
       });
       res.end(toCsv(rows));
       return;

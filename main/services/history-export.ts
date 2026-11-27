@@ -14,6 +14,7 @@ import writeXlsxFile, { type Cell, type Row } from "write-excel-file/node";
 import { tableFeature, type TableSpec } from "./xlsx-table.js";
 import { appTimeZone, zonedDateKey } from "./app-timezone.js";
 import { isCalendarDate } from "./calendar-date.js";
+import { safeFilename } from "./export-filename.js";
 
 import { attendanceStore } from "./attendance-store.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
@@ -150,7 +151,9 @@ function sheet<T>(name: string, columns: Column<T>[], rows: T[]) {
 export function historyFileName(from?: string | null, to?: string | null): string {
   checkRange(from, to);
   const span = from && to ? (from === to ? from : `${from}_to_${to}`) : from ? `from-${from}` : to ? `through-${to}` : "all-dates";
-  return `stage-utility-history-${span}.xlsx`;
+  // Through the shared check as well: its header is written in remote-server.ts,
+  // which builds the Content-Disposition value itself.
+  return safeFilename(`stage-utility-history-${span}.xlsx`);
 }
 
 /** Assemble the workbook and return its bytes. */

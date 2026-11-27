@@ -29,7 +29,7 @@ import { readSlotsTarget, INVALID_TARGET, TARGET_ERROR } from "../slots-target-b
 import { LayoutConflictError, SlotsNotFoundError, stageController, ViewScreensChangedError, ViewShownError } from "../stage-controller.js";
 import { isSelectionList } from "../../types/calendar.js";
 import { calendarBroadcaster } from "../calendar-broadcaster.js";
-import { datedExportFilename } from "../export-filename.js";
+import { attachmentDisposition, datedExportFilename } from "../export-filename.js";
 import { answerScreenWriteFailure, readCreateScreenBody, refuseMode } from "./screen-write.js";
 
 /** `stage-utility-view-left-mic-display-2026-08-17.json`. */
@@ -342,7 +342,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         const filename = exportFilename(bundle.views[0].name, new Date());
         res.writeHead(200, {
           "content-type": "application/json; charset=utf-8",
-          "content-disposition": `attachment; filename="${filename}"`,
+          "content-disposition": attachmentDisposition(filename),
           "cache-control": "no-store",
         });
         res.end(JSON.stringify(bundle, null, 2));

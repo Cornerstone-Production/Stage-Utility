@@ -55,6 +55,7 @@ import { runCompanionReconcile } from "../companion-reconcile.js";
 import { bearerOf, cueTokens, isSameOriginBrowser, refusalReason } from "../cue-tokens.js";
 import { CALL_TRIGGER_ID } from "../automation-triggers.js";
 import { homeAssistantYaml } from "../home-assistant-yaml.js";
+import { attachmentDisposition } from "../export-filename.js";
 import { cueStates, cueStatesBody } from "../cue-states.js";
 import { cueManifest } from "../cue-manifest.js";
 import { reservedCueNames } from "../builtin-cues.js";
@@ -167,7 +168,7 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
     // same entities `/api/cues/manifest` lists.
     text(c, homeAssistantYaml(automationEngine.rulesWithBuiltins(), baseUrlFor(c)), {
       "Content-Type": "text/yaml; charset=utf-8",
-      "Content-Disposition": 'attachment; filename="stage_utility.yaml"',
+      "Content-Disposition": attachmentDisposition("stage_utility.yaml"),
     });
     return;
   }

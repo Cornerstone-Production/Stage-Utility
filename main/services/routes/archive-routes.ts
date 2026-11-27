@@ -12,6 +12,7 @@ import { StoreReadError } from "../data-store.js";
 import { ServiceNotSavedError } from "../history-edit.js";
 import { BodyTooLargeError, error, json, readRawBody, type RouteCtx } from "./context.js";
 import { zonedDateKey } from "../app-timezone.js";
+import { attachmentDisposition } from "../export-filename.js";
 
 /** Dated in the app's zone, not the server's clock — see view-routes.exportFilename. */
 export function archiveExportFilename(at: number): string {
@@ -36,7 +37,7 @@ export async function archiveRoutes({ req, res, pathname, method }: RouteCtx): P
     const fname = archiveExportFilename(Date.now());
     res.writeHead(200, {
       "Content-Type": "application/zip",
-      "Content-Disposition": `attachment; filename="${fname}"`,
+      "Content-Disposition": attachmentDisposition(fname),
       "Content-Length": String(zip.byteLength),
     });
     res.end(Buffer.from(zip));
