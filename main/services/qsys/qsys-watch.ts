@@ -31,7 +31,7 @@ import { backoffMs } from "../backoff.js";
 import { addSubscriptionListener, broadcast, channelNamedByClient } from "../broadcaster.js";
 import { errorMessage } from "../errors.js";
 import { scrub } from "../scrub.js";
-import { addressKey, parseAddressKey, type PanelKind, type QsysAddress } from "../../types/qsys.js";
+import { addressKey, isMeterControl, parseAddressKey, type PanelKind, type QsysAddress } from "../../types/qsys.js";
 import { QrcError, type QrcTransport } from "./qrc-client.js";
 import type { QrcChange } from "./qrc-types.js";
 import { qsysService, type QsysCatalog } from "./qsys-service.js";
@@ -59,14 +59,8 @@ export interface WatchSource {
   onCatalog(cb: (c: QsysCatalog) => void): void;
 }
 
-/**
- * A meter: a control on a meter component (meter2 and kin), or a control named
- * `meter...`. Which component types the Core reports for meters is one of the
- * spec's "verify in Emulate" items; the name rule covers meter2's `meter_1`.
- */
-export function isMeterControl(componentType: string, control: { Name: string; Type: string }): boolean {
-  return /^meter/i.test(componentType) || /^meter/i.test(control.Name) || /^meter/i.test(control.Type);
-}
+// The rule lives in types/qsys.ts so the editor shares it; re-exported for the server.
+export { isMeterControl };
 
 interface Group {
   keys: Set<string>;
@@ -102,6 +96,9 @@ export class QsysWatch {
   /** Set when the connection or the design is new; cleared once the rebuilt
    *  groups have been Invalidated. */
   private rebuilding = true;
+  /** What ready() said when last asked by noteReady; listeners hear only a false-to-true turn. */
+  private wasReady = false;
+  private readonly readyListeners = new Set<() => void>();
   /**
    * Groups Invalidated since the last reset whose resent values have not all
    * arrived: the keys still missing. Write readiness waits for it to empty.
@@ -220,11 +217,37 @@ export class QsysWatch {
     if (failure) throw failure;
   }
 
+  /**
+   * Call `cb` each time writes become possible again: after a connect, a
+   * reconnect or a new design, once every rebuilt group's resent values have
+   * arrived (the moment ready() turns true). A release the server owes is sent
+   * from here (qsys-write.ts). Returns the function that stops listening.
+   */
+  onReady(cb: () => void): () => void {
+    this.readyListeners.add(cb);
+    return () => this.readyListeners.delete(cb);
+  }
+
+  private noteReady(): void {
+    const r = this.ready();
+    if (r === this.wasReady) return;
+    this.wasReady = r;
+    if (!r) return;
+    for (const cb of [...this.readyListeners]) {
+      try {
+        cb();
+      } catch (err) {
+        console.error(`[qsys] ready listener failed: ${scrub(errorMessage(err))}`);
+      }
+    }
+  }
+
   /** Adopt the service's current transport. A different one means the old groups
    *  died with the old connection: forget them, and every value read on it. */
   private sync(): void {
     const t = this.source.transport;
     if (t === this.transport) return;
+    this.wasReady = false;
     this.transport = t;
     this.designCode = null;
     this.broken = false;
@@ -238,6 +261,7 @@ export class QsysWatch {
 
   /** Forget the groups and every value: the connection or the design is new. */
   private reset(): void {
+    this.wasReady = false;
     this.groups.clear();
     this.meterKinds = new Map();
     this.cache.clear();
@@ -289,6 +313,7 @@ export class QsysWatch {
       this.cancelRetry();
       this.failures = 0;
       this.logSummary();
+      this.noteReady();
     } catch (err) {
       // The connection went away under us: the service logs that, and the next
       // connection's catalog rebuilds everything.
@@ -502,6 +527,7 @@ export class QsysWatch {
       this.cancelReread();
       this.rereadAttempts = 0;
     }
+    this.noteReady();
   }
 
   /** Cache a push and broadcast what actually changed, on the channels of the

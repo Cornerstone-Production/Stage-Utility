@@ -45,6 +45,7 @@ import { OscButton } from "./osc-button";
 import { PvpObject } from "./pvp-object";
 import { PvpNowObject } from "./pvp-now";
 import { CueButton } from "./cue-button";
+import { QsysObject } from "./qsys/qsys-objects";
 import { UnconvertedButton, isUnconvertedButton } from "./unconverted-button";
 import { useCueLiveStatus, type CuesLive } from "./use-cue-live";
 import { NotesObject, ChecklistObject } from "./notes-objects";
@@ -783,6 +784,12 @@ function proFor(
   return named
     ? { pro: ctx.propInstances?.status[named], known: ctx.propInstances != null }
     : { pro: ctx.propresenter, known: ctx.propresenterKnown };
+}
+
+/** A Q-SYS object's panel: the View that holds it, the innermost of the embed chain,
+ *  which is what the server builds its panels from. Null on Home. */
+function qsysPanelOf(ctx: LayoutRenderCtx): string | null {
+  return ctx.embedChain.at(-1) ?? null;
 }
 
 function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
@@ -1722,6 +1729,17 @@ function ObjectBody({ o, ctx }: { o: LayoutObject; ctx: LayoutRenderCtx }) {
         />
       );
     }
+    case "qsys-fader":
+    case "qsys-meter":
+    case "qsys-mute":
+    case "qsys-button":
+    case "qsys-switch":
+    case "qsys-presets":
+    case "qsys-selector":
+    case "qsys-label":
+    case "qsys-strip":
+    case "qsys-status":
+      return <QsysObject config={c} panelId={qsysPanelOf(ctx)} interactive={ctx.interactive} ts={ts} />;
     case "messages":
       return (
         <MessagesObject

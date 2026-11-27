@@ -90,6 +90,7 @@ import {
 import { SlotsGridBoard } from "./slots-grid-board";
 import { TimerInspector } from "./timer-inspector";
 import { LyricsInspector } from "./lyrics-inspector";
+import { isQsysConfig, QsysInspector } from "./qsys-inspector";
 import { readConfig, timerSource } from "../main/timer-config";
 import { ResponsiveControls } from "./responsive-controls";
 import { MessagesGroupsPicker } from "./messages-groups-picker";
@@ -818,7 +819,7 @@ export function ReaperLiveLabel() {
 }
 
 export function Inspector({
-  o, viewId, viewName, draftObjects, pressSettleRef, canvas, parentW, parentH, nested, locked, onGeom, onStyle, onResetLook, onConfig, onReorder, onDuplicate, onRemove, onReparentOut, onToggleLock, onSaveGroup, onSnapToGrid,
+  o, viewId, viewName, draftObjects, pressSettleRef, canvas, parentW, parentH, nested, locked, onGeom, onStyle, onResetLook, onConfig, onReorder, onDuplicate, onRemove, onBreakApart, onReparentOut, onToggleLock, onSaveGroup, onSnapToGrid,
 }: {
   o: LayoutObject;
   /** The view being edited (`"home"` for Home) and its name: which Buttons' own commands are this one's. */
@@ -845,6 +846,8 @@ export function Inspector({
   onReorder: (d: "front" | "back" | "up" | "down") => void;
   onDuplicate: () => void;
   onRemove: () => void;
+  /** Replace a Q-SYS channel strip with its parts, in the same footprint. */
+  onBreakApart?: () => void;
   onReparentOut: () => void;
   onToggleLock: () => void;
   /** Save this object (typically a container) to the reusable group library. */
@@ -1479,6 +1482,7 @@ export function Inspector({
       })()}
       {c.type === "timer" && <TimerInspector c={c} onConfig={onConfig} propInstances={propInstances} />}
       {c.type === "lyrics" && <LyricsInspector c={c} onConfig={onConfig} />}
+      {isQsysConfig(c) && <QsysInspector c={c} onConfig={onConfig} onBreakApart={onBreakApart} />}
       {c.type === "rosstalk-button" && <RossTalkButtonConfig c={c} onConfig={onConfig} />}
 
       {c.type === "osc-button" && (() => {

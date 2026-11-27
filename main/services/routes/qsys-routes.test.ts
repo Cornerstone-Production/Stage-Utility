@@ -147,6 +147,7 @@ describe("/api/qsys", () => {
     assert.equal(status.writable, false);
     assert.equal((await callRoute(qsysRoutes, "/api/qsys/catalog")).status, 503);
     assert.equal((await callRoute(qsysRoutes, "/api/qsys/catalog/refresh", { method: "POST" })).status, 503);
+    assert.equal((await callRoute(qsysRoutes, "/api/qsys/bindings")).status, 503, "an empty list here would read as all clear");
     await quietly(() => put([GAIN]));
     const r = await quietly(() => write({ component: "Lobby_Mixer", control: "gain", value: -5 }));
     assert.equal(r.status, 200);
@@ -243,6 +244,49 @@ describe("/api/qsys", () => {
     await assert.rejects(write(big), (err: unknown) => err instanceof BodyTooLargeError);
   });
 
+  test("a momentary press over the route takes a lease, read from the saved views; renewals over /api/qsys/lease hold it", async () => {
+    const { qsysWriter } = await import("../qsys/qsys-write.js");
+    const { viewsStore } = await import("../views-store.js");
+    // The views as the server reads them (the real store): panel-m has a momentary button on the mute.
+    await viewsStore.save([
+      {
+        id: "panel-m",
+        name: "M",
+        kind: "custom",
+        createdAt: "2026-01-01",
+        layout: { version: 1, canvas: {}, objects: [{ id: "b1", x: 0, y: 0, w: 0.1, h: 0.1, z: 0, config: { type: "qsys-button", binding: { component: "Lobby_Mixer", control: "mute" }, label: "Talk", hold: false, press: "momentary" } }] },
+      },
+    ] as never);
+    for (const [what, body] of [
+      ["lease not boolean", { component: "Lobby_Mixer", control: "mute", value: true, lease: "yes" }],
+      ["cid a number", { component: "Lobby_Mixer", control: "mute", value: true, lease: true, cid: 5 }],
+    ] as const) {
+      assert.equal((await quietly(() => write(body))).status, 400, `${what} was not a 400`);
+    }
+    const MUTE_ADDR = { component: "Lobby_Mixer", control: "mute" };
+    const mute = () => fake.received.filter((r) => r.method === "Component.Set" && (r.params as { Controls: { Name: string }[] }).Controls[0].Name === "mute").length;
+    try {
+      const press = await quietly(() => write({ component: "Lobby_Mixer", control: "mute", value: true, lease: true, cid: "page-9", panelId: "panel-m" }));
+      assert.equal((press.json as { ok: boolean }).ok, true);
+      assert.equal(qsysWriter.leases.has(MUTE_ADDR), true, "the press took no lease");
+      const stranger = await callRoute(qsysRoutes, "/api/qsys/lease", { method: "POST", body: { component: "Lobby_Mixer", control: "mute", cid: "page-8" } });
+      assert.deepEqual(stranger.json, { held: false }, "another page's stream renewed it");
+      const renew = await callRoute(qsysRoutes, "/api/qsys/lease", { method: "POST", body: { component: "Lobby_Mixer", control: "mute", cid: "page-9" } });
+      assert.deepEqual(renew.json, { held: true });
+      const other = await callRoute(qsysRoutes, "/api/qsys/lease", { method: "POST", body: { component: "Lobby_Mixer", control: "mute" } });
+      assert.deepEqual(other.json, { held: false });
+      await quietly(() => write({ component: "Lobby_Mixer", control: "mute", value: false }));
+      assert.equal(qsysWriter.leases.has(MUTE_ADDR), false, "the page's release did not end the lease");
+      // A panel with no momentary button on the control: refused, nothing sent.
+      const before = mute();
+      const refused = await quietly(() => write({ component: "Lobby_Mixer", control: "mute", value: true, lease: true, cid: "page-9", panelId: "panel-x" }));
+      assert.equal((refused.json as { reason?: string }).reason, "no-lease");
+      assert.equal(mute(), before, "a press the server will not hold was sent");
+    } finally {
+      qsysWriter.leases.clear();
+    }
+  });
+
   test("the write log serves only entries with the shape one is written with", async () => {
     const { entries } = (await callRoute(qsysRoutes, "/api/qsys/write-log")).json as { entries: { device: string }[] };
     assert.equal(entries.filter((e) => e.device === "seed").length, 1);
@@ -289,5 +333,57 @@ describe("/api/qsys", () => {
     const r = (await callRoute(qsysRoutes, "/api/qsys/values?panel=panel-v")).json as { ready: boolean; values: unknown[] };
     assert.equal(r.ready, true);
     assert.deepEqual(r.values, [{ component: "Lobby_Mixer", control: "mute", value: false, string: "false", position: 0 }]);
+  });
+  test("GET /api/qsys/bindings reports the views' broken bindings against the live catalog and allowlist", async () => {
+    await quietly(connect);
+    const { viewsStore } = await import("../views-store.js");
+    const object = (id: string, control: string) => ({
+      id,
+      x: 0,
+      y: 0,
+      w: 0.1,
+      h: 0.1,
+      z: 0,
+      config: { type: "qsys-mute", binding: { component: "Lobby_Mixer", control } },
+    });
+    await viewsStore.save([
+      { id: "v1", name: "V", kind: "custom", createdAt: "2026-01-01", layout: { version: 1, canvas: {}, objects: [object("ok", "mute"), object("bad", "nope")] } },
+    ] as never);
+    assert.equal((await put([MUTE])).status, 200);
+    // The GET changes nothing: it answers what the subscriptions to the views, the allowlist and the catalog computed.
+    const { qsysBindings } = await import("../qsys/qsys-bindings.js");
+    await quietly(async () => {
+      qsysBindings.start();
+      await qsysBindings.refresh();
+    });
+    const r = await quietly(() => callRoute(qsysRoutes, "/api/qsys/bindings"));
+    assert.equal(r.status, 200);
+    const setPanels = mock.method(qsysWatch, "setPanels");
+    try {
+      await quietly(() => callRoute(qsysRoutes, "/api/qsys/bindings"));
+      assert.equal(setPanels.mock.callCount(), 0, "a GET reset the watch's panels");
+    } finally {
+      setPanels.mock.restore();
+    }
+    assert.deepEqual(r.json, [{ panelId: "v1", objectId: "bad", address: { component: "Lobby_Mixer", control: "nope" }, problem: "missing-control" }]);
+  });
+
+  test("GET /api/qsys/bindings answers 503 with the reason while the check cannot read the views, never an empty list", async () => {
+    await quietly(connect);
+    const { viewsStore } = await import("../views-store.js");
+    const { qsysBindings } = await import("../qsys/qsys-bindings.js");
+    const failing = mock.method(viewsStore, "loadStrict", async () => {
+      throw new Error("views.json: permission denied");
+    });
+    try {
+      await quietly(() => qsysBindings.refresh());
+      const r = await callRoute(qsysRoutes, "/api/qsys/bindings");
+      assert.equal(r.status, 503, `a check that could not run answered ${r.status} ${JSON.stringify(r.json)}`);
+      assert.match((r.json as { error: string }).error, /could not run/);
+    } finally {
+      failing.mock.restore();
+    }
+    await quietly(() => qsysBindings.refresh());
+    assert.equal((await callRoute(qsysRoutes, "/api/qsys/bindings")).status, 200, "a good run did not bring the report back");
   });
 });

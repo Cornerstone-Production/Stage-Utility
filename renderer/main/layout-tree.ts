@@ -45,6 +45,27 @@ export function mapById(
   });
 }
 
+/**
+ * `replacement` (any number of nodes) in place of the node `id`, wherever it
+ * sits. A subtree it does not touch keeps its identity, and the same array comes
+ * back when `id` is not in the tree.
+ */
+export function replaceById(nodes: LayoutObject[], id: string, replacement: LayoutObject[]): LayoutObject[] {
+  let changed = false;
+  const out: LayoutObject[] = [];
+  for (const n of nodes) {
+    if (n.id === id) {
+      out.push(...replacement);
+      changed = true;
+      continue;
+    }
+    const next = n.children?.length ? replaceById(n.children, id, replacement) : n.children;
+    if (next !== n.children) changed = true;
+    out.push(next === n.children ? n : { ...n, children: next });
+  }
+  return changed ? out : nodes;
+}
+
 /** Remove the node with `id` from anywhere in the tree. Returns the new tree and
  *  the removed node (or null if not found). */
 export function removeById(

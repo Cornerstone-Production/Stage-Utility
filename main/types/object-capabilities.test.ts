@@ -44,6 +44,13 @@ describe("capability registry", () => {
       "message-composer",
       "messages",
       "osc-button",
+      "qsys-button",
+      "qsys-fader",
+      "qsys-mute",
+      "qsys-presets",
+      "qsys-selector",
+      "qsys-strip",
+      "qsys-switch",
       "rosstalk-button",
     ]);
   });

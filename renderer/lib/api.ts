@@ -572,6 +572,12 @@ export type IpcChannel =
   | "propresenter:getInstances"
   | "propresenter:getStatus"
   | "pvp:getStatus"
+  | "qsys:allowlist"
+  | "qsys:catalog"
+  | "qsys:lease"
+  | "qsys:panelValues"
+  | "qsys:status"
+  | "qsys:write"
   | "reaper:getStatus"
   | "resi:getStatus"
   | "rosstalk:addTarget"
@@ -1001,6 +1007,21 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return apiFetch<T>("/api/reaper/status");
     case "pvp:getStatus":
       return apiFetch<T>("/api/pvp/status");
+
+    // Q-SYS panels. The values read is a panel's hydration (its pushes carry only
+    // changes); a write is one control, checked again on the server.
+    case "qsys:allowlist":
+      return apiFetch<T>("/api/qsys/allowlist");
+    case "qsys:catalog":
+      return apiFetch<T>("/api/qsys/catalog");
+    case "qsys:lease":
+      return post<T>("/api/qsys/lease", p);
+    case "qsys:panelValues":
+      return apiFetch<T>(`/api/qsys/values?panel=${encodeURIComponent(String(p.panel ?? ""))}`);
+    case "qsys:status":
+      return apiFetch<T>("/api/qsys/status");
+    case "qsys:write":
+      return post<T>("/api/qsys/write", p);
 
     case "scores:getStatus":
       return apiFetch<T>("/api/scores/status");
@@ -2130,9 +2151,88 @@ let reportTimer: ReturnType<typeof setTimeout> | null = null;
 // last would drop channels added after it. See subscribe-reporter.ts.
 const subscribeReporter = createSubscribeReporter(
   () => [...new Set([...directHandlers.keys(), ...sseListeners.map((l) => l.channel)])],
-  (channels) => post("/api/events/subscribe", { cid: CLIENT_ID, channels }),
+  (channels) => {
+    // Every waiter registered before this report started is answered by it.
+    const answering = [...subscribedWaiters];
+    subscribedWaiters.clear();
+    return post("/api/events/subscribe", { cid: CLIENT_ID, channels }).then(
+      (r) => {
+        for (const w of answering) w();
+        return r;
+      },
+      (err: unknown) => {
+        // Not acknowledged: the next report answers them, or their own deadline does.
+        for (const w of answering) subscribedWaiters.add(w);
+        throw err;
+      },
+    );
+  },
   (err) => console.warn("[sse] subscribe report failed", err),
 );
+
+// ── Has the server been told? ───────────────────────────────────────────────
+// A channel this page subscribes to reaches the server in a report (above, or the
+// shared worker's), and until that report lands a client whose stream already
+// carries a filter is not sent that channel. A read meant to pair with a push
+// stream (read, then follow the pushes) must start AFTER the report, or a change
+// in between is in neither. That is what this answers.
+const subscribedWaiters = new Set<() => void>();
+/** The shared worker's stream client id, once it has said. */
+let workerCid: string | null = null;
+
+/**
+ * The client id of the event stream this page is on: its own, or the shared
+ * worker's. The server knows a stream by it, and ends what a page held only
+ * while connected (a Q-SYS momentary) when that stream closes.
+ */
+export function streamClientId(): string | null {
+  if (isPublicMode()) return null;
+  return sharedSse && sseWorker ? workerCid : CLIENT_ID;
+}
+const workerAckWaiters = new Map<number, () => void>();
+let nextAckToken = 1;
+/** Give up waiting for an acknowledgement after this, and let the caller go on. */
+const SUBSCRIBED_DEADLINE_MS = 5_000;
+let subscribedDeadlineMs = SUBSCRIBED_DEADLINE_MS;
+/** Test seam: a shorter deadline, so a case can prove the wait cannot hang. */
+export function __setSubscribedDeadlineForTests(ms: number | null): void {
+  subscribedDeadlineMs = ms ?? SUBSCRIBED_DEADLINE_MS;
+}
+
+/**
+ * Resolves true once the server has acknowledged a channel report sent after
+ * this call, so it includes every channel subscribed to by now. Sends that report
+ * at once rather than after the usual 200 ms batching. Resolves false after
+ * SUBSCRIBED_DEADLINE_MS without one (a server that cannot take the report cannot
+ * serve a read either, and a caller must not wait for ever); the caller says so
+ * on its own tagged line. True at once on the public page, which reports nothing.
+ */
+export function whenSubscribed(): Promise<boolean> {
+  if (isPublicMode()) return Promise.resolve(true);
+  return new Promise<boolean>((resolve) => {
+    let done = false;
+    /** This wait's token with the shared worker, when it asked the worker. */
+    let token: number | null = null;
+    const finish = (acked: boolean) => {
+      if (done) return;
+      done = true;
+      clearTimeout(deadline);
+      subscribedWaiters.delete(ack);
+      if (token !== null) workerAckWaiters.delete(token);
+      resolve(acked);
+    };
+    const ack = () => finish(true);
+    const deadline = setTimeout(() => finish(false), subscribedDeadlineMs);
+    if (sharedSse && sseWorker) {
+      token = nextAckToken++;
+      workerAckWaiters.set(token, ack);
+      sseWorker.port.postMessage({ type: "subscribe", channels: [...workerHandlers.keys()], ack: token });
+      return;
+    }
+    subscribedWaiters.add(ack);
+    subscribeReporter.report();
+  });
+}
 function reportChannels(): void {
   // The public page writes nothing to the Worker.
   if (isPublicMode()) return;
@@ -2346,6 +2446,18 @@ function ensureWorker(): boolean {
       if (msg.type === "stream") {
         // Whether the worker's stream is delivering: what every tab on it sees.
         noteStream(msg.delivering === true);
+        return;
+      }
+      if (msg.type === "cid") {
+        const cid = (msg as { cid?: unknown }).cid;
+        workerCid = typeof cid === "string" ? cid : null;
+        return;
+      }
+      if (msg.type === "subscribed") {
+        // The worker's report carrying this tab's channels was acknowledged.
+        const token = (msg as { ack?: unknown }).ack;
+        const waiter = typeof token === "number" ? workerAckWaiters.get(token) : undefined;
+        if (waiter) waiter();
         return;
       }
       if (msg.type === "pong") {

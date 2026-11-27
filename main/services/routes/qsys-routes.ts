@@ -10,9 +10,12 @@
 //                                      entry; 409 over an invalid stored file unless replaceInvalid is true
 //   POST /api/qsys/allowlist/export    the allowlist file
 //   POST /api/qsys/allowlist/import    an allowlist file (+ replaceInvalid?) -> { entries }; 400 keeps the old list; 409 as PUT
-//   POST /api/qsys/write               { component, control, value, panelId?, final? } -> WriteResult;
+//   POST /api/qsys/write               { component, control, value, panelId?, final?, lease?, cid? } -> WriteResult;
 //                                      body capped at 16 KB (413)
-//   GET  /api/qsys/values?panel=<id>   { ready, values }: the panel's values as last read; 404 unknown panel
+//   POST /api/qsys/lease               { component, control, cid? } -> { held }: renew a held momentary
+//   GET  /api/qsys/values?panel=<id>   { ready, values, catalogAt }: the panel's values as last read; 404 unknown panel
+//   GET  /api/qsys/bindings            the binding check: [{ panelId, objectId, address, problem }]; 503 while not
+//                                      connected, or while the check cannot read the views or the allowlist
 //   GET  /api/qsys/write-log           { entries, saveError }
 //
 // Not PIN-gated: the allowlist and its limits are open like every other
@@ -23,9 +26,11 @@ import type * as http from "node:http";
 import { errorMessage } from "../errors.js";
 import { oneLine, scrub } from "../scrub.js";
 import { AllowlistRefused, AllowlistStoredInvalid, isLine, qsysAllowlist } from "../qsys/qsys-allowlist-store.js";
+import { qsysBindings } from "../qsys/qsys-bindings.js";
 import { qsysService } from "../qsys/qsys-service.js";
 import { qsysWatch } from "../qsys/qsys-watch.js";
-import { writeControl } from "../qsys/qsys-write.js";
+import { qsysWriter, writeControl } from "../qsys/qsys-write.js";
+import { usableCid } from "../channel-reports.js";
 import { qsysWriteLog } from "../qsys/qsys-write-log.js";
 import { type RouteCtx, error, json, readObjectBody, remoteAddressOf } from "./context.js";
 
@@ -107,7 +112,8 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
   if (method === "POST" && pathname === "/api/qsys/write") {
     const body = await readObjectBody(req, res, MAX_WRITE_BODY_BYTES);
     if (!body) return;
-    const { component, control, value, final } = body;
+    const { component, control, value, final, lease } = body;
+    const cid = body.cid ?? null;
     const panelId = body.panelId ?? null;
     if (typeof component !== "string" || typeof control !== "string") return error(res, "component and control must be text");
     if (typeof value !== "number" && typeof value !== "boolean" && typeof value !== "string") {
@@ -117,7 +123,21 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
       return error(res, `panelId must be null or text of up to ${MAX_PANEL_ID} characters on one line`);
     }
     if (final !== undefined && typeof final !== "boolean") return error(res, "final must be true or false");
-    json(res, await writeControl({ component, control, value, panelId, device: deviceOf(req), remote: remoteOf(req), final }));
+    if (lease !== undefined && typeof lease !== "boolean") return error(res, "lease must be true or false");
+    if (cid !== null && !usableCid(cid)) return error(res, "cid must be null or a stream client id");
+    json(res, await writeControl({ component, control, value, panelId, device: deviceOf(req), remote: remoteOf(req), final, lease, cid }));
+    return;
+  }
+
+  if (method === "POST" && pathname === "/api/qsys/lease") {
+    // A momentary still held: renew its lease. Only from the address that pressed it.
+    const body = await readObjectBody(req, res, MAX_WRITE_BODY_BYTES);
+    if (!body) return;
+    const { component, control } = body;
+    const cid = body.cid ?? null;
+    if (typeof component !== "string" || typeof control !== "string") return error(res, "component and control must be text");
+    if (cid !== null && !usableCid(cid)) return error(res, "cid must be null or a stream client id");
+    json(res, { held: qsysWriter.leases.renew({ component, control }, remoteOf(req), cid) });
     return;
   }
 
@@ -134,7 +154,18 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
       string: v.String,
       position: v.Position,
     }));
-    json(res, { ready: qsysWatch.ready(), values });
+    // catalogAt: the stamp the status push carries, so a page can tell from its first push whether the catalog is new.
+    json(res, { ready: qsysWatch.ready(), values, catalogAt: qsysService.getStatus().catalogAt });
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/qsys/bindings") {
+    // Read only: the check reruns when the views, the allowlist or the catalog change.
+    await qsysBindings.settled();
+    const answer = qsysBindings.current();
+    if ("report" in answer) return json(res, answer.report);
+    // Never an empty report in place of a check that could not run: empty means every binding resolves.
+    error(res, answer.error === "not-connected" ? "the Q-SYS Core is not connected" : "the binding check could not run: the saved views or the allowlist could not be read; see /log", 503);
     return;
   }
 

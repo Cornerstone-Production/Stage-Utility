@@ -402,6 +402,17 @@ const ADDED_SINCE: { type: string; label: string; group: string; after: string |
   // The words on the slide with their group's tag. Sits after the two slide-text
   // widgets it is the richer form of.
   { type: "lyrics", label: "Lyrics", group: "ProPresenter", after: "next-slide-text" },
+  // The Q-SYS objects, in their own group. Sorted by palette order, one per line.
+  { type: "qsys-fader", label: "Q-SYS fader", group: "Q-SYS", after: null },
+  { type: "qsys-meter", label: "Q-SYS meter", group: "Q-SYS", after: "qsys-fader" },
+  { type: "qsys-mute", label: "Q-SYS mute", group: "Q-SYS", after: "qsys-meter" },
+  { type: "qsys-button", label: "Q-SYS button", group: "Q-SYS", after: "qsys-mute" },
+  { type: "qsys-switch", label: "Q-SYS switch", group: "Q-SYS", after: "qsys-button" },
+  { type: "qsys-presets", label: "Q-SYS presets", group: "Q-SYS", after: "qsys-switch" },
+  { type: "qsys-selector", label: "Q-SYS selector", group: "Q-SYS", after: "qsys-presets" },
+  { type: "qsys-label", label: "Q-SYS label", group: "Q-SYS", after: "qsys-selector" },
+  { type: "qsys-strip", label: "Q-SYS channel strip", group: "Q-SYS", after: "qsys-label" },
+  { type: "qsys-status", label: "Q-SYS status", group: "Q-SYS", after: "qsys-strip" },
 ];
 
 /**

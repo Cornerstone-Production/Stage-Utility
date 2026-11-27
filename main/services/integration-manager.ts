@@ -44,6 +44,7 @@ import {
   smaartTarget,
 } from "./integration-targets.js";
 import type { ConnState } from "./integration-base.js";
+import { qsysBindings } from "./qsys/qsys-bindings.js";
 import { qsysService, qsysTestMessage } from "./qsys/qsys-service.js";
 import { QSYS_DEFAULT_RATES, QSYS_MAX_HZ, QSYS_MIN_HZ, qsysRates, type QsysSettings } from "./qsys/qsys-settings.js";
 import { smaartService } from "./smaart-service.js";
@@ -1420,6 +1421,8 @@ class IntegrationManager {
     void this.applyProdcom();
     // Start the Smaart SPL connection if enabled + configured.
     await this.applySmaart();
+    // Hand the watch the Q-SYS panels in the views, and keep them and the binding check current.
+    qsysBindings.start();
     // Start the Q-SYS Core connection if enabled + configured.
     await this.applyQsys();
     // Start the OBS connection if enabled + configured.

@@ -11,6 +11,7 @@
 import type { CalendarSelection } from "./calendar.js";
 import { externKeyed } from "./extern-keyed.js";
 import type { Rotation } from "./output-format.js";
+import type { QsysBinding, QsysDensity } from "./qsys.js";
 
 export type ViewKind =
   | "slots"
@@ -648,6 +649,49 @@ export type LayoutObjectConfig =
   // manifest id: a pair's base for a switch, the cue name for a lone button.
   // Empty is unbound and renders as such, never as a fake state.
   | { type: "cue-button"; cue: string; label?: string; showDevice?: boolean }
+  // Q-SYS controls. A binding is the control on the Core an object reads or writes;
+  // null is unbound and renders as such. See main/types/qsys.ts.
+  | {
+      type: "qsys-fader";
+      binding: QsysBinding | null;
+      orientation: "vertical" | "horizontal";
+      showDb: boolean;
+      steps: boolean;
+      stepDb: number;
+      // "dense": the staff panel's narrow strip, with a dB tick scale. Absent is standard.
+      density?: QsysDensity;
+    }
+  | { type: "qsys-meter"; binding: QsysBinding | null; binding2?: QsysBinding | null; form: "bar" | "number"; unit?: string }
+  | { type: "qsys-mute"; binding: QsysBinding | null }
+  // press: what the bound control is. "momentary" is an on and off control held on while
+  // pressed (the server leases it); absent is "trigger", fired once on press.
+  | { type: "qsys-button"; binding: QsysBinding | null; label: string; hold: boolean; press?: "trigger" | "momentary" }
+  // A boolean control, or a pair of trigger controls (on and off).
+  | {
+      type: "qsys-switch";
+      binding: QsysBinding | null;
+      onBinding?: QsysBinding | null;
+      offBinding?: QsysBinding | null;
+      label: string;
+      // The words on a trigger pair with no readable state ("Open" / "Closed"). Absent: On / Off.
+      onLabel?: string;
+      offLabel?: string;
+    }
+  | { type: "qsys-presets"; items: { label: string; binding: QsysBinding }[]; previous?: QsysBinding | null }
+  // binding is the control holding the choice list; items are fixed alternatives.
+  | { type: "qsys-selector"; binding?: QsysBinding | null; items: { label: string; binding: QsysBinding }[] }
+  | { type: "qsys-label"; binding: QsysBinding | null; text: string }
+  | {
+      type: "qsys-strip";
+      name: QsysBinding | null;
+      label: string;
+      gain: QsysBinding | null;
+      mute: QsysBinding | null;
+      meter: QsysBinding | null;
+      meter2?: QsysBinding | null;
+      density?: QsysDensity;
+    }
+  | { type: "qsys-status" }
   // Shure SBC charger bay battery levels. `bays` lists which bays to show (by
   // ChargerBay id) with an optional custom label; `show` toggles each metric.
   | {
@@ -1281,6 +1325,21 @@ export interface LayoutObject {
   /** Nested objects, positioned relative to this object's box. Only meaningful
    *  for `container` objects; absent/empty for leaf objects. */
   children?: LayoutObject[];
+}
+
+/**
+ * Walk an object tree, parent before children. Containers nest arbitrarily deep.
+ *
+ * The one traversal: this repository carried several hand-rolled copies of it,
+ * and each was a place for a container's children to get forgotten. Here, beside
+ * the type, so the page and the server share it without the page importing
+ * server code (main/services/view-refs.ts re-exports it).
+ */
+export function walkLayoutObjects(objects: readonly LayoutObject[], visit: (o: LayoutObject) => void): void {
+  for (const o of objects) {
+    visit(o);
+    if (o.children?.length) walkLayoutObjects(o.children, visit);
+  }
 }
 
 export interface LayoutDTO {

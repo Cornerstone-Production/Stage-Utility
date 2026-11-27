@@ -19,7 +19,9 @@ import {
   addBroadcastListener,
   setNamedSubscriberCheck,
   setSubscriberCheck,
+  setConnectionLookup,
   setSubscriberCount,
+  streamClosed,
   subscriptionsChanged,
 } from "./broadcaster.js";
 import { EventPollHub, serializePollResponse, type PollFrame } from "./event-poll.js";
@@ -392,6 +394,24 @@ export const channelReports = new ChannelReports();
  *  one token does. A stream holds its cid with its own response. */
 const POLL_CLAIM = "poll";
 
+// Which connection carries a cid. A cid outlives its connections (an EventSource
+// reconnects with the same one, and the server can hear of the old socket's death
+// tens of seconds later), so state tied to a connection is keyed by the
+// connection, not the cid: a Q-SYS momentary is released when the connection it
+// was pressed on closes, never by a late close of one already replaced.
+/** cid → the newest open connection carrying it: a stream's response, or a poll client's token. */
+const newestConnection = new Map<string, object>();
+/** cid → its poll client's token, from its first poll until it expires. */
+const pollConnections = new Map<string, object>();
+setConnectionLookup((cid) => newestConnection.get(cid) ?? null);
+
+/** A connection carrying `cid` has gone: release its channel-report claim, and what was pressed on it. */
+function connectionClosed(cid: string, connection: object, claim: unknown): void {
+  channelReports.release(cid, claim);
+  if (newestConnection.get(cid) === connection) newestConnection.delete(cid);
+  streamClosed(cid, connection);
+}
+
 // Clients on the polling transport (`GET /api/events/poll`), which read the same
 // broadcasts out of a short replay buffer instead of holding a stream open. They
 // share the cid namespace with the streams above, so POST /api/events/subscribe
@@ -401,8 +421,19 @@ const eventPoll = new EventPollHub({
   // A cid's reported channel filter outlives its stream, so drop it with the
   // client the way the stream's close handler does — otherwise every panel that
   // ever polled leaves an entry behind for the life of the process.
-  onExpire: (cid) => channelReports.release(cid, POLL_CLAIM),
+  onExpire: (cid) => {
+    const connection = pollConnections.get(cid);
+    pollConnections.delete(cid);
+    if (connection) connectionClosed(cid, connection, POLL_CLAIM);
+    else channelReports.release(cid, POLL_CLAIM);
+  },
 });
+
+/** Expire every poll client quiet since before `nowMs`. The hub's own timer runs
+ *  this; exported so a test can expire one without waiting out the real interval. */
+export function sweepPollClients(nowMs?: number): void {
+  eventPoll.sweep(nowMs);
+}
 
 // Currently-connected Companion-module clients (SSE streams opened with the
 // X-Companion-Module header / ?client=companion marker). A Set keyed by the
@@ -988,6 +1019,8 @@ export class RemoteServer {
     }
     eventPoll.reset();
     channelReports.reset();
+    pollConnections.clear();
+    newestConnection.clear();
     await hostNames.stop();
     // Force-close all tracked sockets so the server shuts down promptly.
     for (const socket of this.sockets) {
@@ -1209,6 +1242,7 @@ export class RemoteServer {
         resCid.set(res, cid);
         // Claimed now, so a report that arrived before the stream keeps applying.
         channelReports.claim(cid, res);
+        newestConnection.set(cid, res);
       }
       // A Companion module marks its event stream so we can show a live
       // connected-client count in the integration panel. Re-broadcast the
@@ -1223,7 +1257,7 @@ export class RemoteServer {
       req.on("close", () => {
         sseClients.delete(res);
         console.log(`[events] stream client closed (${sseClients.size} streams)`);
-        if (cid) channelReports.release(cid, res);
+        if (cid) connectionClosed(cid, res, res);
         if (isCompanion) {
           companionClients.delete(res);
           integrationManager.setCompanionClients(companionClients.size);
@@ -1250,6 +1284,11 @@ export class RemoteServer {
       const since = sinceNum !== null && Number.isFinite(sinceNum) ? sinceNum : null;
       // Held while this client keeps polling; the hub's expiry releases it.
       channelReports.claim(cid, POLL_CLAIM);
+      if (!pollConnections.has(cid)) {
+        const connection = {};
+        pollConnections.set(cid, connection);
+        newestConnection.set(cid, connection);
+      }
       const chans = channelReports.get(cid);
       const result = eventPoll.buildPollResponse(cid, since, (c) => !chans || chans.has(c), helloSnapshot);
       const frames = result.frames.map((f) => `{"channel":${JSON.stringify(f.channel)},"data":${f.serialized}}`);

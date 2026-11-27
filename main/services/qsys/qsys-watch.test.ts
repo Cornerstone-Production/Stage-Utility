@@ -676,3 +676,50 @@ test("isMeterControl: meter components and controls named meter*", () => {
   assert.equal(isMeterControl("gain", { Name: "gain", Type: "Float" }), false);
   assert.equal(isMeterControl("mixer", { Name: "parameter", Type: "Float" }), false);
 });
+
+// An owed momentary release is sent from onReady (qsys-write.ts): a turn to ready
+// that does not fire it leaves the release waiting for the next reconnect.
+for (const withPanel of [true, false]) {
+  test(`onReady fires once on every turn to ready, and not while ready holds (${withPanel ? "a panel open" : "no panel open"})`, async () => {
+    let fires = 0;
+    watch.onReady(() => fires++);
+    const turned = async (what: string, n: number) => {
+      await until(() => watch.ready(), what);
+      await settle();
+      assert.equal(fires, n, `${what}: onReady fired ${fires} times in all, expected ${n}`);
+    };
+    if (withPanel) watch.setPanels([panel("a", "staff", GAIN), panel("b", "staff", MUTE)]);
+    await connect();
+    if (withPanel) await open("a");
+    await turned("connect", 1);
+    // Opening a panel on a live connection keeps readiness: no turn.
+    if (withPanel) await open("b");
+    await turned("a panel opened while ready", 1);
+
+    fake.status = { ...fake.status, DesignCode: "design-2" };
+    pushEngineStatus();
+    await until(() => svc.getCatalog()?.designCode === "design-2", "design refresh");
+    await turned("a new design", 2);
+
+    await fake.dropClients();
+    await until(() => svc.transport === null, "disconnect");
+    mock.timers.tick(3_000);
+    await until(() => svc.transport !== null, "reconnected");
+    await turned("a reconnect", 3);
+
+    // A failed rebuild on the live connection, then its retry.
+    if (withPanel) fake.failNext("ChangeGroup.AutoPoll", 5);
+    fake.status = { ...fake.status, DesignCode: "design-3" };
+    const warn = mock.method(console, "warn", () => {});
+    try {
+      pushEngineStatus();
+      await until(() => svc.getCatalog()?.designCode === "design-3", "design refresh");
+      await settle();
+      if (withPanel) assert.equal(watch.ready(), false, "ready through a failed rebuild");
+      mock.timers.tick(1_000);
+      await turned("a new design after a failed rebuild", 4);
+    } finally {
+      warn.mock.restore();
+    }
+  });
+}

@@ -251,8 +251,8 @@ export class EventPollHub {
 
   /** Expire anything that has gone quiet. Public so a test drives it directly
    *  rather than waiting out a real interval. */
-  sweep(): void {
-    const cutoff = this.now() - POLL_CLIENT_TTL_MS;
+  sweep(nowMs = this.now()): void {
+    const cutoff = nowMs - POLL_CLIENT_TTL_MS;
     let expired = 0;
     for (const [cid, seen] of this.clients) {
       if (seen > cutoff) continue;
