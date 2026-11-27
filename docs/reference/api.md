@@ -930,7 +930,7 @@ Either channel having a subscriber starts the five-second read.
 | GET | `/manifest.webmanifest` | The web app manifest, built per request: `name` and `short_name` are the app name, so renaming the app renames the home-screen label on Android. `no-cache` |
 | GET | `/apple-touch-icon.png` \| `/icon-192.png` \| `/icon-512.png` \| `/icon-maskable-512.png` | The home-screen icons the pages and the manifest name. The operator's own [tab and home-screen icon](../features/operator-app.md#branding) when one is set, else the built-in file, and the built-in file too when the stored one is missing. A query string is ignored. `no-cache`, so a new icon reaches the next install. The operator's icon carries the uploaded images' `Content-Security-Policy` |
 | POST | `/api/layout-images` | Store an image and return its URL |
-| GET | `/api/history/export` | The service report as a spreadsheet (`?from=&to=&include=…`, `include` a comma-separated choice of `services`, `attendance`, `items`, `spl` and `baptisms`; names it does not know are ignored) |
+| GET | `/api/history/export` | The service report as a spreadsheet (`?from=&to=&include=…`, `include` a comma-separated choice of `services`, `attendance`, `items`, `spl` and `baptisms`; names it does not know are ignored). `from` and `to` are inclusive `YYYY-MM-DD` days, either left out or empty for an open end; anything else, including a day that does not exist, is a 400 |
 
 Everything else is the app itself: `/<display id>` and `/<slug>` render a
 screen, and the operator pages render the app — see
