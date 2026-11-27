@@ -498,7 +498,8 @@ The **Publish** card, at the foot of the editor's left column, is per venue:
   card lists it as not yet published.
 - **Republishing** is automatic. Any saved change to the venue, its plots, its plan
   overrides or its backgrounds, and the followed plan moving, is sent about two seconds
-  later; only what changed is sent. If it fails, the page keeps what it had, the card
+  later; only what changed is sent. If it fails, the page keeps what it had (when its
+  answer was lost the card says it is not known whether the page took it), the card
   shows the error, and the next change or **Publish now** tries again. A send whose
   answer never came back may have been stored all the same, so the next one sends it
   whatever it is, and the list of what the venue keeps goes with it: a plot or

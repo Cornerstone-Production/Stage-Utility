@@ -413,6 +413,37 @@ describe("a send whose answer is lost", () => {
     assert.match(await shown(), /Wedge/, "the page still shows the change whose answer was lost");
   });
 
+  test("a lost answer says it is not known whether the page took it, on the card and in the log; a refusal says the page keeps what it had", async () => {
+    const h = await harness(venueDoc(1, 0));
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    const secret = (await h.venue()).publish!.secret;
+    const lines: string[] = [];
+    const spies = (["log", "warn", "error"] as const).map((level) => mock.method(console, level, (...a: unknown[]) => void lines.push(a.map(String).join(" "))));
+    try {
+      applyThenLose(h.page, { status: 500, body: "" }, (req) => req.method === "PUT" && SP.exec(req.path)?.[2] === "plot/p-0");
+      await h.edit(labelled("Monitor"));
+      await h.publisher.settle();
+      const unsure = (await h.venue()).publish!.lastError?.message ?? "";
+      assert.match(unsure, /Whether the page took it is not known\.$/);
+      const said = lines.filter((l) => l.startsWith("[stageplots]") && l.includes("could not be republished"));
+      assert.equal(said.length, 1, lines.join(" / "));
+      assert.match(said[0]!, /Whether the page took it is not known\./);
+      assert.ok(!said[0]!.includes("keeps what it had"), said[0]);
+
+      lines.length = 0;
+      h.page.respond = (req) => (req.method === "PUT" && SP.exec(req.path)?.[2] === "plot/p-0" ? { status: 429, body: "" } : h.page.worker(req));
+      await h.edit(labelled("Wedge"));
+      await h.publisher.settle();
+      const refused = lines.filter((l) => l.startsWith("[stageplots]") && l.includes("could not be republished"));
+      assert.equal(refused.length, 1, lines.join(" / "));
+      assert.match(refused[0]!, /the page keeps what it had/);
+      assert.ok(!refused[0]!.includes("not known"), refused[0]);
+      assert.ok(!((await h.venue()).publish!.lastError?.message ?? "").includes("not known"));
+    } finally {
+      for (const sp of spies) sp.mock.restore();
+    }
+  });
+
   test("a keep whose answer was lost is sent again when the venue goes back to the keys before it", async () => {
     const h = await harness(venueDoc(1, 0));
     assert.ok((await h.publisher.publish("v-1")).ok);
