@@ -114,7 +114,7 @@ describe("the integration card", () => {
     );
     // An exact count, not a floor: the context bar aims a highlight at whichever
     // integration is down, and that is any of them.
-    assert.equal(seen.size, INTEGRATION_IDS.length);
+    assert.deepEqual([...seen.keys()].sort(), [...INTEGRATION_IDS].sort());
     for (const id of INTEGRATION_IDS) {
       assert.equal(seen.get(id), integrationFlashId(id), `${id}'s card carries the wrong flash id`);
     }
