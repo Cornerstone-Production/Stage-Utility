@@ -416,7 +416,6 @@ describe("a send whose answer is lost", () => {
   test("a lost answer says it is not known whether the page took it, on the card and in the log; a refusal says the page keeps what it had", async () => {
     const h = await harness(venueDoc(1, 0));
     assert.ok((await h.publisher.publish("v-1")).ok);
-    const secret = (await h.venue()).publish!.secret;
     const lines: string[] = [];
     const spies = (["log", "warn", "error"] as const).map((level) => mock.method(console, level, (...a: unknown[]) => void lines.push(a.map(String).join(" "))));
     try {
