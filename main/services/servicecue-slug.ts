@@ -8,6 +8,7 @@
 
 import type { ServiceCueLayout } from "../types/pco.js";
 import { slugCore } from "../types/slug.js";
+import { firstFree } from "./first-free.js";
 
 /** The implicit layout showing every column; its slug is not a layout's to take. */
 export const ALL_COLUMNS_SLUG = "all-columns";
@@ -80,9 +81,7 @@ export function assignSlugs(layouts: ServiceCueLayout[]): ServiceCueLayout[] {
   for (const i of visit) {
     if (slugs.has(i)) continue;
     const base = slugify(layouts[i].name);
-    let n = 2;
-    while (taken.has(`${base}-${n}`)) n++;
-    claim(i, `${base}-${n}`);
+    claim(i, firstFree(base, (s) => taken.has(s)));
   }
   return layouts.map((l, i) => (l.slug === slugs.get(i) ? l : { ...l, slug: slugs.get(i) }));
 }
@@ -164,8 +163,7 @@ export function prepareLayoutsImport(
   const added = incoming.map((l) => {
     const { autoNamed: _flag, slug, ...rest } = l;
     const base = l.name.trim() || "Layout";
-    let name = base;
-    for (let n = 2; keys.has(layoutNameKey(name)); n++) name = `${base} ${n}`;
+    const name = firstFree(base, (s) => keys.has(layoutNameKey(s)), (b, n) => `${b} ${n}`);
     keys.add(layoutNameKey(name));
     if (name !== l.name.trim()) renamed.push({ from: l.name, to: name });
     return { ...rest, name, ...(isSlug(slug) && !slugsHere.has(slug) ? { slug } : {}) };

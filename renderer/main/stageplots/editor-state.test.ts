@@ -10,6 +10,7 @@ import { itemsWithin, validateItems } from "@main/services/stageplots-store";
 
 import { DEFAULT_SIZES, editorReducer, initialEditorState, isDirty, type EditorAction, type EditorState } from "./editor-state";
 import { SYMBOLS } from "./symbols";
+import { calloutNumbers } from "./legend";
 import { resizeInFrame, snapRotation } from "./geometry";
 
 const H = 562.5;
@@ -280,6 +281,24 @@ describe("paste and arrange", () => {
     // Already there: nothing changes, and no undo step is made.
     const same = run(start(items), { type: "arrange", id: "c", to: "front" });
     assert.equal(same.undo.length, 0);
+  });
+
+  test("arrange keeps every callout's number: a callout moves past other text, never past another callout", () => {
+    const callout = (id: string) => box({ id, type: "text", textKind: "callout", label: id });
+    const label = (id: string) => box({ id, type: "text", textKind: "label", label: id });
+    const items = [callout("c1"), callout("c2"), label("L"), callout("c3")];
+    const numbers = (s: EditorState) => [...calloutNumbers(s.items)];
+    const before = numbers(start(items));
+    for (const [id, to] of [["c1", "front"], ["c3", "back"], ["c2", "forward"], ["c2", "backward"]] as const) {
+      const s = run(start(items), { type: "arrange", id, to });
+      assert.deepEqual(numbers(s), before, `arranging ${id} ${to} renumbered the callouts: ${ids(s).join(" ")}`);
+    }
+    // It still moves past the label between it and the next callout.
+    assert.deepEqual(ids(run(start(items), { type: "arrange", id: "c2", to: "front" })), ["c1", "L", "c2", "c3"]);
+    assert.deepEqual(ids(run(start(items), { type: "arrange", id: "c3", to: "back" })), ["c1", "c2", "c3", "L"]);
+    // Between two callouts there is nowhere to go: nothing changes, and no undo step.
+    const twins = [callout("c1"), callout("c2")];
+    assert.equal(run(start(twins), { type: "arrange", id: "c2", to: "back" }).undo.length, 0);
   });
 });
 

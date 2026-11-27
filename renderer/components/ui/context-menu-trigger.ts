@@ -74,6 +74,18 @@ const CONTROL_SELECTOR = "button, a, select, input, textarea, [role='combobox'],
  */
 const CLICK_SUPPRESS_MS = 700;
 
+/**
+ * Presses and right-clicks a trigger has taken as its own, so a trigger around it
+ * leaves them alone: a row's menu inside the rail's, a glyph's inside the row's.
+ * Each trigger sees the event as it bubbles, innermost first, and the first to
+ * act claims it.
+ *
+ * A mark on the event, NOT `stopPropagation`. Stopping a touch's pointerdown also
+ * stops it reaching `document`, where an open popover listens for a press outside
+ * it to close: a tap on the rail then left the popover open.
+ */
+const claimed = new WeakSet<Event>();
+
 export interface ContextMenuTriggerProps {
   onContextMenu: (e: ReactMouseEvent<HTMLElement>) => void;
   onPointerDown: (e: ReactPointerEvent<HTMLElement>) => void;
@@ -191,11 +203,14 @@ export function useContextMenuTrigger(
 
   function onPointerDown(e: ReactPointerEvent<HTMLElement>) {
     if (e.pointerType === "mouse") return;
+    // A trigger inside this one has the press: see `claimed`.
+    if (claimed.has(e.nativeEvent)) return;
     // A hold on a control inside the trigger — a Switch, a button, anything
     // with its own press behaviour — must not ALSO start timing a long press
     // that opens a menu on top of it 500ms later. Reproduced: a 500ms hold on
     // an inner `<button>` opened the menu before this guard existed.
     if (withinControl(e)) return;
+    claimed.add(e.nativeEvent);
     // A second finger while one is already being timed cancels the first
     // rather than racing it — two fingers down is a different gesture (pinch,
     // scroll), never "open the menu twice."
@@ -251,6 +266,8 @@ export function useContextMenuTrigger(
   }
 
   function onContextMenu(e: ReactMouseEvent<HTMLElement>) {
+    if (claimed.has(e.nativeEvent)) return;
+    claimed.add(e.nativeEvent);
     e.preventDefault();
     open({ x: e.clientX, y: e.clientY });
   }

@@ -23,7 +23,7 @@ const teardown = installRenderDom();
 const { render, screen, cleanup, fireEvent, act } = await import("@testing-library/react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const React = await import("react");
-const { PublicLinkCard, ProblemText, sentAgo } = await import("./servicecue-public-link.js");
+const { PublicLinkCard, PublicLinkStatusRow, ProblemText, sentAgo } = await import("./servicecue-public-link.js");
 const { TooltipProvider } = await import("../../components/ui/index.js");
 const { RouterContextProvider } = await import("@tanstack/react-router");
 const { routerAt } = await import("../../test-fixtures/router.js");
@@ -722,6 +722,18 @@ describe("a read that fails", () => {
     cleanup();
     await mount();
     assert.equal(alerts(), "");
+  });
+});
+
+describe("the one-line summary on the layouts page", () => {
+  test("a failed read says Couldn't load and reaches /log, as the card does", async () => {
+    server.failRead = true;
+    await mountInAct(render, inApp(React.createElement(PublicLinkStatusRow)));
+    await eventually(() => assert.match(document.body.textContent ?? "", /Couldn't load/));
+    assert.ok(
+      logs.some((l) => l.tag === "servicecue" && /public link status/.test(l.message)),
+      `the summary's failed read did not reach /log: ${JSON.stringify(logs)}`,
+    );
   });
 });
 

@@ -242,7 +242,7 @@ export function Rail({
           items.push({
             label: s.label || "Top, beside Home",
             onSelect: () =>
-              customize.apply(movePage(resolved, d.id, s.id, Infinity), `Moved ${d.label} to ${s.label || "the top"}.`, true),
+              customize.apply((r) => movePage(r, d.id, s.id, Infinity), `Moved ${d.label} to ${s.label || "the top"}.`, true),
           });
         }
       }
@@ -385,6 +385,8 @@ export function Rail({
           role="separator"
           aria-orientation="vertical"
           aria-label="Resize sidebar"
+          // The press is this handle's, and its trigger claims it: the rail around
+          // it leaves it alone, so the one-item menu opens and not the rail's too.
           onPointerDown={(e) => {
             onStartResize(e);
             resizeTrigger.onPointerDown(e);
@@ -392,11 +394,7 @@ export function Rail({
           onPointerMove={resizeTrigger.onPointerMove}
           onPointerUp={resizeTrigger.onPointerUp}
           onPointerCancel={resizeTrigger.onPointerCancel}
-          onContextMenu={(e) => {
-            // Its own one-item menu, not the rail's as well.
-            e.stopPropagation();
-            resizeTrigger.onContextMenu(e);
-          }}
+          onContextMenu={resizeTrigger.onContextMenu}
           onClickCapture={resizeTrigger.onClickCapture}
           onDoubleClick={onResetWidth}
           style={resizeTrigger.style}

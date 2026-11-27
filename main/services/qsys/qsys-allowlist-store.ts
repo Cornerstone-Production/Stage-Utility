@@ -25,7 +25,7 @@ import * as path from "node:path";
 import { getUserDataPath } from "../app-paths.js";
 import { DataStore } from "../data-store.js";
 import { errorMessage } from "../errors.js";
-import { isRecord } from "../is-record.js";
+import { isRecord } from "../../types/is-record.js";
 import { asObject, checked } from "../restore-check.js";
 import { hasControlChars, scrub } from "../scrub.js";
 import { WriteQueue } from "../write-queue.js";

@@ -4,7 +4,8 @@
 // Rows group items by label and colour, so two orange "Floor wedge" read as one
 // row, "×2". An item with no label, and every text item, is left out of the
 // rows: a callout's text is listed in the callout key instead, numbered in the
-// order the callouts were added (the number drawn on the plot).
+// order the callouts were added (the number drawn on the plot). That is their order
+// in the item list, which Arrange keeps among callouts (editor-state.ts).
 
 import type { ItemType, PlotItem, SymbolKind } from "@main/types/stageplots";
 
@@ -53,6 +54,7 @@ export function connectionInputs(items: readonly PlotItem[]): { label: string; i
   return items.filter((it) => it.type === "conn" && it.inputs.length > 0).map((it) => ({ label: it.label, inputs: it.inputs }));
 }
 
-function isCallout(it: PlotItem): boolean {
+/** A callout: numbered on the plot by its place among the plot's callouts. */
+export function isCallout(it: PlotItem): boolean {
   return it.type === "text" && it.textKind === "callout";
 }

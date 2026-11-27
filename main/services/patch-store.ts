@@ -6,7 +6,9 @@
 import type { PatchFile, PatchSheet, PatchSheetKind } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 import { DataStore, StoreReadError } from "./data-store.js";
+import { normalizePatch } from "./patch-shape.js";
 import { asArray, asObject, checked } from "./restore-check.js";
+import { scrub } from "./scrub.js";
 
 const emptyAssignments = () => ({ byServiceType: {}, byPlan: {} });
 function blankSheet(id: string, name: string, kind: PatchSheetKind): PatchSheet {
@@ -62,9 +64,28 @@ class PatchStore {
     }),
   });
 
+  /** What normalizePatch has left out of patch.json and said, so each is said once. */
+  private said = new Set<string>();
+
+  /**
+   * The file migrated, and every sheet read by patch-shape.ts: a value the readers cannot take
+   * (written by an older build, by hand or by a restore) is left out of what is answered, said on
+   * [patch] once, and gone from patch.json at the next save. The editor never writes one, and
+   * POST /api/patch refuses one.
+   */
+  private read(raw: PatchFile): PatchFile {
+    const { file, dropped } = normalizePatch(migrate(raw));
+    for (const what of dropped) {
+      if (this.said.has(what)) continue;
+      this.said.add(what);
+      console.warn(`[patch] patch.json: ${scrub(what)}; it is left out`);
+    }
+    return file;
+  }
+
   /** The full patch file (all sheets), migrated to the current shape. */
   async load(): Promise<PatchFile> {
-    return migrate(await this.store.load());
+    return this.read(await this.store.load());
   }
 
   /**
@@ -76,7 +97,7 @@ class PatchStore {
   async loadStrict(): Promise<PatchFile> {
     const raw = await this.store.loadStrict();
     if (this.store.loadedFromCorrupt && raw === EMPTY) throw new StoreReadError("patch.json", null, "was damaged and set aside, and nothing has been saved since");
-    return migrate(raw);
+    return this.read(raw);
   }
 
   /**

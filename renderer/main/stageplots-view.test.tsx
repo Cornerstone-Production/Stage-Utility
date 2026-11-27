@@ -130,6 +130,44 @@ async function mountAt(url: string) {
 }
 const addressOf = (router: Awaited<ReturnType<typeof mountAt>>) => router.state.location.pathname;
 
+/** As mountAt, with the app bar's action slot and the editor's route: what Edit up there opens, and how. */
+async function mountWithBar(url: string) {
+  const { PageActionsProvider, PageActionsSlot } = await import("../app/page-actions.js");
+  const root = createRootRoute({});
+  const manage = createRoute({ getParentRoute: () => root, path: "/stageplots/manage", component: StagePlotsManagePage });
+  const manageVenue = createRoute({ getParentRoute: () => root, path: "/stageplots/manage/$venueId", component: StagePlotsManageVenueRoute });
+  const edit = createRoute({ getParentRoute: () => root, path: "/stageplots/edit", component: () => React.createElement("p", null, "the editor") });
+  const router = createRouter({ routeTree: root.addChildren([manage, manageVenue, edit]), history: createMemoryHistory({ initialEntries: [url] }) });
+  await act(async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+    render(
+      React.createElement(
+        QueryClientProvider,
+        { client },
+        React.createElement(PageActionsProvider, null, React.createElement("header", { "aria-label": "App bar" }, React.createElement(PageActionsSlot)), React.createElement(RouterProvider, { router } as never)),
+      ),
+    );
+  });
+  for (let i = 0; i < 4; i++) await settle();
+  return router;
+}
+
+describe("/stageplots/manage: Edit", () => {
+  test("the app bar's Edit opens the editor in the app, on the venue shown and the tab on screen", async () => {
+    const router = await mountWithBar("/stageplots/manage/v-main");
+    const tab = screen.getByRole("tab", { name: "Standard" });
+    await act(async () => void fireEvent.click(tab));
+    await settle();
+    const bar = screen.getByRole("banner", { name: "App bar" });
+    const edit = within(bar).getByRole("link", { name: "Edit" });
+    assert.equal(edit.getAttribute("href"), "/stageplots/edit?venue=v-main&plot=p-std", "the address names another plot than the click opens: a new tab opens the wrong one");
+    await act(async () => void fireEvent.click(edit));
+    for (let i = 0; i < 3; i++) await settle();
+    assert.equal(router.state.location.pathname, "/stageplots/edit", "Edit did not open the editor in the app");
+    assert.deepEqual({ ...router.state.location.search }, { venue: "v-main", plot: "p-std" }, "the editor did not open on the tab on screen");
+  });
+});
+
 describe("/stageplots: the venue's address", () => {
   test("in the app, a venue opens at /stageplots/manage/<id> with Edit, and the back link stays on /stageplots/manage", async () => {
     const router = await mountAt("/stageplots/manage");

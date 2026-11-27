@@ -27,6 +27,8 @@ import {
 } from "@main/types/photo-themes";
 
 import { invoke as ipc, onNotification } from "../../../lib/api";
+import { appZoneOf } from "../../../lib/app-zone";
+import { useStageState } from "../../../main/use-stage-state";
 import { toast } from "../../../components/ui";
 import { readFrame } from "./photo-themes-sync";
 
@@ -37,8 +39,23 @@ export const planPeopleKey = (planId: string, serviceTypeId: string) => [...PHOT
 export const OPENAI_KEY = ["openai", "status"] as const;
 
 /** OpenAI's connection, read once and shared: the Integrations tile, its dialog and the
- *  key form all draw from this one query, so a saved key moves all three at once. */
+ *  key form all draw from this one query, so a saved key moves all three at once. A
+ *  live `photo-themes:changed` frame carries the connection as it stands, so a key
+ *  saved in another browser, or refused by an edit, moves them too. A replayed frame
+ *  is the cached last one and may be old: the read stands over it. */
 export function useOpenAiConnection() {
+  const qc = useQueryClient();
+  useEffect(
+    () =>
+      onNotification(PHOTO_THEMES_CHANNEL, (payload, replayed) => {
+        const connection = (payload as Partial<PhotoThemesChanged>).connection;
+        if (replayed || !connection) return;
+        // A read still out would land after this and put the older value back: drop it.
+        void qc.cancelQueries({ queryKey: OPENAI_KEY });
+        qc.setQueryData(OPENAI_KEY, connection);
+      }),
+    [qc],
+  );
   return useQuery({ queryKey: OPENAI_KEY, queryFn: () => ipc<OpenAiConnectionDTO>("openai:getStatus") });
 }
 
@@ -64,9 +81,9 @@ export function usePhotoThemes(plan: PhotoPlan | null) {
 
   const stateQ = useQuery({ queryKey: photoStateKey, queryFn: () => ipc<PhotoThemesDTO>("photoThemes:getState") });
 
-  // The channel is a position. The last frame seen is kept for the next, and the
-  // latest for the progress line.
-  const [frame, setFrame] = useState<PhotoThemesChanged | null>(null);
+  // The channel is a position: the last frame seen is kept, in the effect, to
+  // read the next one against. Not in state: nothing draws a frame, and a
+  // state copy re-rendered the whole Mic slots page on every one.
   useEffect(() => {
     let last: PhotoThemesChanged | null = null;
     return onNotification(PHOTO_THEMES_CHANNEL, (payload, replayed) => {
@@ -75,7 +92,6 @@ export function usePhotoThemes(plan: PhotoPlan | null) {
       // A replay is the cached last frame: it says where the count stands, and a
       // later frame still compares against it.
       last = next;
-      setFrame(next);
       if (!reading.reread) return;
       if (reading.why === "missed" || reading.why === "restart") {
         console.info(`[photo-themes] a photo-themes:changed frame was missed (${reading.why}); reading the themes again`);
@@ -91,6 +107,10 @@ export function usePhotoThemes(plan: PhotoPlan | null) {
   const theme: ThemeDTO | null = useMemo(() => (choice?.themeId ? (state?.themes.find((t) => t.id === choice.themeId) ?? null) : null), [state, choice]);
   /** The plan uses a theme that has an approved photo: the Original | Themed switch is worth showing. */
   const hasApproved = !!theme?.people.some((p) => p.approved);
+  /** The zone a plan's date is named in: the app's, never this browser's. */
+  const timeZone = appZoneOf(useStageState().state);
+  /** Generate and Redo can be sent: a key is saved and OpenAI has not rejected it. Nothing else waits for one. */
+  const canSend = connectionWorks(state?.connection);
 
   // One write at a time per kind of billing action.
   const inFlight = useRef(new Set<string>());
@@ -162,7 +182,7 @@ export function usePhotoThemes(plan: PhotoPlan | null) {
     [write, reread],
   );
 
-  return { state, stateError: stateQ.error, stateLoading: stateQ.isLoading, frame, choice, theme, hasApproved, reread, write, savePrompt, isBusy };
+  return { state, stateError: stateQ.error, stateLoading: stateQ.isLoading, choice, theme, hasApproved, canSend, timeZone, reread, write, savePrompt, isBusy };
 }
 
 export type PhotoThemes = ReturnType<typeof usePhotoThemes>;

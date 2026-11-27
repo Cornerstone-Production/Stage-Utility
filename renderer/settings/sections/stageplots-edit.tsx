@@ -29,7 +29,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type CSS
 import { ChevronLeftIcon, MaximizeIcon, MinusIcon, PlusIcon, Redo2Icon, Undo2Icon } from "lucide-react";
 
 import { errorMessage } from "@main/services/errors";
-import { PLOT_UNITS_WIDE, type BackgroundView, type Plot, type PlotDraft, type PlotItem, type StagePlotsView, type Venue } from "@main/types/stageplots";
+import { PLOT_UNITS_WIDE, type BackgroundView, type Plot, type PlotDraft, type PlotItem, type StagePlotsView, type VenueView } from "@main/types/stageplots";
 
 import { LeaveGuard } from "../../components/leave-guard";
 import { Button } from "../../components/ui/button";
@@ -89,17 +89,20 @@ function PlotEditor({
   dispatch,
   dirty,
   saveDraft,
+  discard,
   shown,
   patch,
 }: {
   doc: StagePlotsView;
-  venue: Venue;
+  venue: VenueView;
   plot: Plot;
   save: Save;
   draft: EditorState;
   dispatch: Dispatch<EditorAction>;
   dirty: boolean;
   saveDraft: () => Promise<boolean>;
+  /** The editor's Discard: the draft, its banner and its error go, and the keeper deletes it on the server. */
+  discard: () => void;
   /** The draft as drawn: linked points with their devices' names and colours. */
   shown: ResolvedItems;
   patch: PatchRead | null;
@@ -127,7 +130,10 @@ function PlotEditor({
   const update = async (changes: { backgroundId?: string | null; bgFade?: number }) => {
     const r = await save(() => stageplotsApi.updatePlot(plot.id, changes));
     setError(r.ok ? null : r.error);
-    if (!r.ok) setFade(plot.bgFade);
+    if (r.ok) return;
+    // Back to what is saved, the slider and what counts as sent alike: the same fade let go again goes again.
+    setFade(plot.bgFade);
+    setSentFade(plot.bgFade);
   };
   // Let go, a key up and leaving the slider each commit, so the value last sent
   // is kept: the same fade is sent once, not again before the save lands.
@@ -157,7 +163,7 @@ function PlotEditor({
     setPendingBackground(null);
     if (!target) return;
     if (how === "save" && !(await saveDraft())) return;
-    if (how === "discard") dispatch({ type: "discard" });
+    if (how === "discard") discard();
     await update({ backgroundId: target.id });
   };
 
@@ -474,13 +480,13 @@ function EditorBody({
   onDraftNote,
 }: {
   doc: StagePlotsView;
-  venue: Venue | null;
+  venue: VenueView | null;
   plots: Plot[];
   plot: Plot | null;
   header: ReactNode;
   error: boolean;
   save: Save;
-  refresh: () => Promise<void>;
+  refresh: () => void;
   onVenue: (id: string) => void;
   onPlot: (pick: { venueId: string; plotId: string }) => void;
   backgroundId: string | null;
@@ -636,6 +642,9 @@ function EditorBody({
     } catch (err) {
       if ((err as ApiError).status === 409) setConflict(true);
       else setSaveError(errorMessage(err));
+      // The Save stopped the wait to keep the draft (hold, above): with the Save gone, nothing
+      // else would keep it, and the banner would say "Keeping draft" with nothing on its way.
+      void keeper.flush();
       return false;
     } finally {
       setSaving(false);
@@ -658,6 +667,8 @@ function EditorBody({
       setSaveError(null);
     } catch (err) {
       setSaveError(errorMessage(err));
+      // As a failed Save: the draft is still there, and the wait to keep it was stopped.
+      void keeper.flush();
     }
     void refresh();
   };
@@ -798,6 +809,7 @@ function EditorBody({
                   dispatch={dispatch}
                   dirty={dirty}
                   saveDraft={saveDraft}
+                  discard={discard}
                   shown={shown}
                   patch={patch}
                 />

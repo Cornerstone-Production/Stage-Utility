@@ -53,14 +53,22 @@ export class OpenAiConnection {
   private reason: string | null = null;
   private checkedAt: string | null = null;
   private hint: string | null = null;
+  /** What `status()` said last time it was announced: an unchanged set() says nothing. */
+  private announced = "";
 
-  constructor(private readonly now: () => number = Date.now) {}
+  /** `onChange` hears every change to what `status()` says but the time: a key saved
+   *  or removed, a state reached. The service puts it on its channel. */
+  constructor(
+    private readonly now: () => number = Date.now,
+    private readonly onChange: () => void = () => undefined,
+  ) {}
 
   /** Read the saved key's hint. Call once, at boot. */
   async start(): Promise<void> {
     const key = await this.apiKey();
     this.hint = key ? keyHint(key) : null;
     this.state = key ? "unchecked" : "not-connected";
+    this.announced = this.signature();
   }
 
   /** The key, for the one header that carries it. Null when none is saved. */
@@ -145,5 +153,14 @@ export class OpenAiConnection {
     this.state = state;
     this.reason = reason;
     this.checkedAt = state === "not-connected" || state === "unchecked" ? null : new Date(this.now()).toISOString();
+    const sig = this.signature();
+    if (sig !== this.announced) {
+      this.announced = sig;
+      this.onChange();
+    }
+  }
+
+  private signature(): string {
+    return JSON.stringify([this.hint, this.state, this.reason]);
   }
 }

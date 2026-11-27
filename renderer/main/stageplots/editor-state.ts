@@ -20,6 +20,7 @@ import { fitToHeight } from "@main/services/stageplots-doc";
 import { PLOT_UNITS_WIDE, type CablePoint, type PatchLink, type PlotItem, type SymbolKind, type TextKind } from "@main/types/stageplots";
 
 import { layer } from "./draw-layer";
+import { isCallout } from "./legend";
 import { clampPoint, fitItem, keepsShape, resizeInFrame, round1, scaledToFit, snapRotation, withCableBox } from "./geometry";
 import { SYMBOLS } from "./symbols";
 
@@ -300,8 +301,11 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       const i = state.items.findIndex((it) => it.id === action.id);
       if (i < 0) return state;
       const it = state.items[i];
-      // The indexes of the items drawn in the same layer, in drawing order.
-      const peers = state.items.map((x, j) => (layer(x) === layer(it) ? j : -1)).filter((j) => j >= 0);
+      // The indexes of the items drawn in the same layer, in drawing order. A callout's number is its
+      // place among the callouts (legend.ts), so it moves only between the callouts either side of
+      // it, past the other text there, and never renumbers.
+      const fence = isCallout(it) ? calloutFence(state.items, i) : { lo: -1, hi: state.items.length };
+      const peers = state.items.map((x, j) => (layer(x) === layer(it) && j > fence.lo && j < fence.hi ? j : -1)).filter((j) => j >= 0);
       const at = peers.indexOf(i);
       const to = { front: peers.length - 1, back: 0, forward: Math.min(at + 1, peers.length - 1), backward: Math.max(at - 1, 0) }[action.to];
       if (to === at) return state;
@@ -379,6 +383,15 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return { ...state, items: fitted.every((it, i) => it === action.items[i]) ? action.items : fitted, undo: [], redo: [], gesture: null, selectedId: null };
     }
   }
+}
+
+/** The indexes of the callouts either side of the one at `i` (-1 and the list's length with none): how far Arrange may move it. */
+function calloutFence(items: readonly PlotItem[], i: number): { lo: number; hi: number } {
+  let lo = i - 1;
+  while (lo >= 0 && !isCallout(items[lo]!)) lo--;
+  let hi = i + 1;
+  while (hi < items.length && !isCallout(items[hi]!)) hi++;
+  return { lo, hi };
 }
 
 /** A snapshot put back, its selection dropped if that item is not in it. */

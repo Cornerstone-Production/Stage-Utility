@@ -14,8 +14,8 @@ import type { PhotoThemes } from "./use-photo-themes";
 
 export const themeLabel = (t: ThemeDTO) => t.name.trim() || "Untitled theme";
 
-export function ThemeFacts({ theme, showPeople }: { theme: ThemeDTO; showPeople?: boolean }) {
-  const used = usedBy(theme);
+export function ThemeFacts({ theme, timeZone, showPeople }: { theme: ThemeDTO; timeZone: string; showPeople?: boolean }) {
+  const used = usedBy(theme, timeZone);
   return (
     <ul className="m-0 flex list-none flex-col gap-0.5 p-0 text-caption1 text-fg-muted">
       {showPeople && (
@@ -50,7 +50,7 @@ export function DeleteTheme({ theme, photos, onDeleted }: { theme: ThemeDTO; pho
 function DeleteConfirm({ theme, photos, onDeleted, close }: { theme: ThemeDTO; photos: PhotoThemes; onDeleted?: () => void; close: () => void }) {
   const [error, setError] = useState<string | null>(null);
   useEscapeFirst(close);
-  const used = usedBy(theme);
+  const used = usedBy(theme, photos.timeZone);
   const photoCount = theme.people.filter((p) => p.approved || p.pending?.url).length;
   return (
     <div role="group" aria-label="Confirm delete theme" className="flex flex-col gap-1.5 rounded-[10px] border border-line px-3 py-2.5 text-[12.5px] leading-[17px]">

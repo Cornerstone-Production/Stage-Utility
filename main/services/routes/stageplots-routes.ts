@@ -2,7 +2,10 @@
 //
 // Every route must finish responding before it returns (see RouteCtx).
 //
-//   GET    /api/stageplots                          the whole document, backgrounds with URLs
+//   GET    /api/stageplots                          the whole document, backgrounds with URLs; never a
+//                                                   secret (the crew's /stageplots reads it too)
+//   GET    /api/stageplots/venues/:id/link          { url }: the venue's public link, null while it is
+//                                                   not published; the only answer with a secret
 //   GET    /api/stageplots/patch                    the patch file, for linked connection points;
 //                                                   503 when it cannot be read, never the seed sheets
 //   POST   /api/stageplots/venues                   { name, kind, notes? } → 201 venue, its address
@@ -89,14 +92,16 @@ import type http from "node:http";
 import {
   STAGEPLOT_DRAFTS_CHANNEL,
   STAGEPLOT_LIMITS,
-  STAGEPLOTS_CHANNEL,
   type Background,
   type Plot,
   type PlotDraft,
+  type PlotDraftNotes,
   type StagePlotsDoc,
   type Venue,
   type VenueKind,
+  type VenueLink,
 } from "../../types/stageplots.js";
+import { STAGEPLOTS_PATH } from "../../types/servicecue-publish.js";
 import { broadcast, channelHasSubscribers } from "../broadcaster.js";
 import { plotDraftsStore } from "../stageplot-drafts-store.js";
 import { patchStore } from "../patch-store.js";
@@ -104,20 +109,19 @@ import { errorMessage } from "../errors.js";
 import { contentName } from "../image-files.js";
 import { scrub } from "../scrub.js";
 import { CONVERTED_MAX_BYTES, convertBackground, prepareBackground, sniffUpload } from "../stageplots-convert.js";
-import { overridesOfPlot, plotsUsing } from "../stageplots-doc.js";
+import { overridesOfPlot, plotHeight, plotsUsing } from "../stageplots-doc.js";
 import {
   MAX_PENDING_ORIGINALS,
   pendingOriginals,
   readStagePlotSource,
   stagePlotOriginalBytes,
   backgroundView,
+  venueView,
   storeStagePlotImage,
   storeStagePlotOriginal,
-  stagePlotsView,
   tidyStagePlotFiles,
 } from "../stageplots-files.js";
-import { stageplotsPublisher } from "../stageplots-publish-instance.js";
-import { plotHeight } from "../stageplots-doc.js";
+import { broadcastStagePlots, stageplotsPublisher, stagePlotsViewNow } from "../stageplots-publish-instance.js";
 import {
   STAGEPLOT_ID,
   addressOwners,
@@ -135,8 +139,6 @@ import {
 } from "../stageplots-store.js";
 import { BodyTooLargeError, type RouteCtx, error, json, readObjectBody, readRawBody } from "./context.js";
 
-/** The document as browsers get it: secrets left out, and the publisher's follow notice beside it. */
-const toView = (doc: StagePlotsDoc) => stagePlotsView(doc, stageplotsPublisher.notice(), stageplotsPublisher.landingNotice());
 
 const PREFIX = "/api/stageplots";
 
@@ -194,12 +196,28 @@ async function mutate(
     console.error(`[stageplots] save failed: ${scrub(errorMessage(err))}`);
     throw err;
   }
-  if (changed) broadcast(STAGEPLOTS_CHANNEL, toView(doc));
+  if (changed) broadcastStagePlots(doc);
   // What the drafts could not do after it: said beside the answer, which stays a success.
   const draftNotice = (await afterSave?.(doc, changed)) ?? null;
   const picked = pick(doc);
   json(res, draftNotice ? { ...(picked as object), draftNotice } : picked, status);
   return changed ? doc : null;
+}
+
+/**
+ * The request's JSON object, or null once a 400 has answered it. A body that is not an object, or
+ * is over the cap, is said on [stageplots] as `refused` ("items refused for plot p-1") with why.
+ */
+async function readBodyOrSay(c: RouteCtx, refused: string): Promise<Record<string, unknown> | null> {
+  let body: Record<string, unknown> | null;
+  try {
+    body = await readObjectBody(c.req, c.res);
+  } catch (err) {
+    if (err instanceof BodyTooLargeError) console.warn(`[stageplots] ${scrub(refused)}: ${scrub(err.message)}`);
+    throw err;
+  }
+  if (!body) console.warn(`[stageplots] ${scrub(refused)}: the body is not a JSON object`);
+  return body;
 }
 
 function findVenue(doc: StagePlotsDoc, id: string): Venue {
@@ -253,7 +271,7 @@ async function createVenue(c: RouteCtx): Promise<void> {
       };
       return { ...doc, venues: [...doc.venues, venue] };
     },
-    (doc) => findVenue(doc, id),
+    (doc) => venueView(findVenue(doc, id)),
     201,
   );
 }
@@ -328,7 +346,7 @@ async function updateVenue(c: RouteCtx, id: string): Promise<void> {
         ...addressesAfter(doc, v, body),
       });
     },
-    (doc) => findVenue(doc, id),
+    (doc) => venueView(findVenue(doc, id)),
   );
   if (saved && before) logAddressChange(before, findVenue(saved, id));
 }
@@ -389,7 +407,7 @@ async function setDefault(c: RouteCtx, id: string): Promise<void> {
       if (typeof body.plotId !== "string" || !v.plotIds.includes(body.plotId)) throw new Refused(400, "plotId must be one of the venue's plots");
       return replaceIn<Venue>(doc, "venues", { ...v, defaultPlotId: body.plotId });
     },
-    (doc) => findVenue(doc, id),
+    (doc) => venueView(findVenue(doc, id)),
   );
 }
 
@@ -510,17 +528,8 @@ function refuseItems(id: string, status: number, why: string, extra: Record<stri
  * to the stored one changes nothing: no write, no broadcast, no new version.
  */
 async function saveItems(c: RouteCtx, id: string): Promise<void> {
-  let body: Record<string, unknown> | null;
-  try {
-    body = await readObjectBody(c.req, c.res);
-  } catch (err) {
-    if (err instanceof BodyTooLargeError) console.warn(`[stageplots] items refused for plot ${scrub(id)}: ${scrub(err.message)}`);
-    throw err;
-  }
-  if (!body) {
-    console.warn(`[stageplots] items refused for plot ${scrub(id)}: the body is not a JSON object`);
-    return;
-  }
+  const body = await readBodyOrSay(c, `items refused for plot ${scrub(id)}`);
+  if (!body) return;
   const version = body.version;
   await mutate(
     c.res,
@@ -596,7 +605,7 @@ async function deletePlot(c: RouteCtx, id: string): Promise<void> {
 // ── Drafts ───────────────────────────────────────────────────────────────
 
 /** What stageplots:drafts carries: which plots have a draft, and since when. Never the items. */
-const draftNotes = (drafts: readonly PlotDraft[]) => ({ drafts: drafts.map((d) => ({ plotId: d.plotId, savedAt: d.savedAt })) });
+const draftNotes = (drafts: readonly PlotDraft[]): PlotDraftNotes => ({ drafts: drafts.map((d) => ({ plotId: d.plotId, savedAt: d.savedAt })) });
 
 /** Change the drafts and, when that changed anything, say which plots have one now on stageplots:drafts. A failed write is said on [stageplots] and thrown. */
 async function changeDrafts(fn: (drafts: PlotDraft[]) => PlotDraft[]): Promise<PlotDraft[]> {
@@ -683,17 +692,8 @@ function refuseDraft(res: http.ServerResponse, id: string, status: number, why: 
 
 /** Keep a plot's unsaved items: held to a save's rules, never written to the plot. */
 async function putDraft(c: RouteCtx, id: string): Promise<void> {
-  let body: Record<string, unknown> | null;
-  try {
-    body = await readObjectBody(c.req, c.res);
-  } catch (err) {
-    if (err instanceof BodyTooLargeError) console.warn(`[stageplots] draft refused for plot ${scrub(id)}: ${scrub(err.message)}`);
-    throw err;
-  }
-  if (!body) {
-    console.warn(`[stageplots] draft refused for plot ${scrub(id)}: the body is not a JSON object`);
-    return;
-  }
+  const body = await readBodyOrSay(c, `draft refused for plot ${scrub(id)}`);
+  if (!body) return;
   const doc = await stageplotsStore.get();
   const plot = doc.plots.find((p) => p.id === id);
   if (!plot) return refuseDraft(c.res, id, 404, "no such plot");
@@ -725,17 +725,8 @@ async function deleteDraft(c: RouteCtx, id: string): Promise<void> {
  * refusal is said there too, with why.
  */
 async function saveOverride(c: RouteCtx): Promise<void> {
-  let body: Record<string, unknown> | null;
-  try {
-    body = await readObjectBody(c.req, c.res);
-  } catch (err) {
-    if (err instanceof BodyTooLargeError) console.warn(`[stageplots] override refused: ${scrub(err.message)}`);
-    throw err;
-  }
-  if (!body) {
-    console.warn("[stageplots] override refused: the body is not a JSON object");
-    return;
-  }
+  const body = await readBodyOrSay(c, "override refused");
+  if (!body) return;
   const change = readOverrideChange(body);
   if ("problem" in change) {
     console.warn(`[stageplots] override refused: ${scrub(change.problem)}`);
@@ -753,7 +744,7 @@ async function saveOverride(c: RouteCtx): Promise<void> {
       names = next;
       return next.doc;
     },
-    toView,
+    stagePlotsViewNow,
   );
   if (!saved || !names) return;
   const { venueName, plotName } = names as { venueName: string; plotName: string | null };
@@ -795,8 +786,6 @@ async function uploadBytes(c: RouteCtx, name: string, cap: number): Promise<Buff
   return Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength);
 }
 
-/** The tidy over a document a change just saved, still holding off if the
- *  store started from a damaged file. */
 /** sniffUpload, saying so on [stageplots] when sharp itself will not load (a 500). */
 async function sniffOrSay(bytes: Buffer): ReturnType<typeof sniffUpload> {
   try {
@@ -881,6 +870,12 @@ async function uploadImage(c: RouteCtx): Promise<void> {
       throw new Refused(400, errorMessage(err));
     }
     const { source, converted } = prepared;
+    // The source is re-encoded (2400 px, sRGB), so it is not the upload and not held to its cap:
+    // one over what the image store keeps is refused by name here, not a 500 from the store.
+    if (source.length > STAGEPLOT_LIMITS.imageBytes) {
+      const why = `is over 12 MB once brought to 2400 px in sRGB (${kb(source.length)}); save it as a JPEG and upload that`;
+      refuseUpload(name, bytes.length, why, { answer: `the upload ${why}` });
+    }
     // The source as stored, 2400 px and no metadata, is a PNG or JPEG upload's original too.
     const sourceHash = await storeStagePlotImage(source, ext);
     const convertedHash = await storeStagePlotImage(converted.webp, "webp");
@@ -992,7 +987,7 @@ async function publishAction(c: RouteCtx, action: string, id: string, run: (id: 
   if (!r.ok && r.status === 503) console.warn(`[stageplots] ${scrub(action)} refused for venue ${scrub(id)}: ${scrub(r.error)}`);
   // A notice rides beside the venue: something done that the operator should know about (a copy
   // left on a page this server can no longer reach).
-  if (r.ok) json(c.res, r.notice ? { ...r.venue, notice: r.notice } : r.venue);
+  if (r.ok) json(c.res, { ...venueView(r.venue), ...(r.notice ? { notice: r.notice } : {}) });
   else json(c.res, { error: r.error }, r.status);
 }
 
@@ -1006,6 +1001,16 @@ async function setListed(c: RouteCtx, id: string): Promise<void> {
     return error(c.res, "listed must be true or false");
   }
   await publishAction(c, "landing page listing", id, (venueId) => stageplotsPublisher.setListed(venueId, listed));
+}
+
+/** The venue's public link, for the manage page's Publish card: the one answer that carries a secret (VenueLink). */
+async function venueLink(c: RouteCtx, id: string): Promise<void> {
+  const venue = (await stageplotsStore.get()).venues.find((v) => v.id === id);
+  if (!venue) return error(c.res, "no such venue", 404);
+  const link: VenueLink = { url: venue.publish ? `${venue.publish.origin}${STAGEPLOTS_PATH}/${venue.publish.secret}` : null };
+  // Never kept by the browser or anything between: a secret in a cache outlives its regenerate.
+  c.res.setHeader("Cache-Control", "no-store");
+  json(c.res, link);
 }
 
 /** Remove now: every old link queued against the page set up is dropped from it. Answers how many went, failed and wait for another page. */
@@ -1031,7 +1036,7 @@ export async function stageplotsRoutes(c: RouteCtx): Promise<void> {
   const { pathname, method } = c;
   if (pathname !== PREFIX && !pathname.startsWith(`${PREFIX}/`)) return;
 
-  if (pathname === PREFIX && method === "GET") return json(c.res, toView(await stageplotsStore.get()));
+  if (pathname === PREFIX && method === "GET") return json(c.res, stagePlotsViewNow(await stageplotsStore.get()));
   if (pathname === `${PREFIX}/patch` && method === "GET") return json(c.res, await patchStore.loadStrict());
   if (pathname === `${PREFIX}/venues` && method === "POST") return createVenue(c);
   if (pathname === `${PREFIX}/plots` && method === "POST") return createPlot(c);
@@ -1043,6 +1048,8 @@ export async function stageplotsRoutes(c: RouteCtx): Promise<void> {
 
   let id = idIn(pathname, "venues", "default");
   if (id && method === "POST") return setDefault(c, id);
+  id = idIn(pathname, "venues", "link");
+  if (id && method === "GET") return venueLink(c, id);
   id = idIn(pathname, "venues", "listed");
   if (id && method === "POST") return setListed(c, id);
   for (const [action, run] of PUBLISH_ACTIONS) {

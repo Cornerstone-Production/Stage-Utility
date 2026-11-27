@@ -18,7 +18,6 @@
 import { useState } from "react";
 import { screenName, type CreateScreenInput, type ViewSurface } from "@main/types/views";
 import type { Rotation } from "@main/types/output-format";
-import { MouseSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke as ipc, type ApiError, type IpcChannel } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
@@ -41,6 +40,7 @@ import {
 import { markUpdatePending } from "./update-lifecycle";
 import { setBranding, type BrandingPatch } from "./set-branding";
 import { setViewShowInSidebar } from "./set-view-show-in-sidebar";
+import { usePointerSensors } from "./drag-parts";
 import { screensListViews } from "@main/services/home-view";
 import { plural } from "@main/services/plural";
 
@@ -185,22 +185,9 @@ export function useStageSettings(pinnedViewId?: string) {
 
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // DnD sensors for the Screens page's card reorder -- mouse and touch
-  // deliberately separate.
-  //
-  // A single PointerSensor treats them identically: it claims the gesture on
-  // touch-down and waits to see whether you move far enough to be dragging,
-  // which is exactly the window in which the page cannot scroll. On a phone
-  // that made the Displays and Views lists unscrollable, because every swipe
-  // that began on a card started as a maybe-drag.
-  //
-  // Distance works for a mouse, where a click is a distinct act from a drag.
-  // Touch needs TIME instead: hold briefly to drag, swipe to scroll. 200ms is
-  // short enough to feel deliberate and long enough that a flick never trips it.
-  const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
-  );
+  // DnD sensors for the Screens page's card reorder: mouse and touch separately,
+  // so a swipe on a phone still scrolls (see usePointerSensors).
+  const sensors = usePointerSensors();
 
   async function handleServiceTypeChange(id: string) {
     if (await writeState("stage:setServiceType", { id }, { fail: "Failed to set service type" })) {

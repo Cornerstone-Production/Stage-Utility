@@ -480,6 +480,63 @@ describe("a service running past its planned end", () => {
     assert.match(said[0]!, /ended 90 min ago, Planning Center still reports it live \(item Benediction\)/);
   });
 
+  // Home's Needs attention says so, rather than a time limit (CLAUDE.md, "Time").
+  it("is put on the state while held, once (one broadcast over several ticks), and taken off when it ends", async (t) => {
+    captureConsole(t, "log", "warn", "error");
+    ctl.lastLive = liveReading("item", STARTED());
+    ctl.state = { ...ctl.state, rolloverHeld: null };
+    await stageController.maybeAutoAdvance();
+    await stageController.maybeAutoAdvance();
+    const held = ctl.state.rolloverHeld as { planId: string; planTitle: string; planDates: string; endsAt: string } | null;
+    assert.ok(held, "a plan held past its planned end because Planning Center reports it live was not put on the state");
+    assert.equal(held.planId, "p-held");
+    assert.equal(held.planTitle, "Held plan");
+    assert.equal(held.planDates, "Nov 16");
+    assert.ok(Math.abs(Date.parse(held.endsAt) - Date.parse(LONG_END())) < 5_000, `endsAt is the planned end: ${held.endsAt}`);
+    assert.equal(broadcasts, 1, "every tick broadcast the same hold");
+    ctl.lastLive = liveReading("none", STARTED());
+    await stageController.maybeAutoAdvance();
+    assert.equal(ctl.state.planId, "p-wed");
+    assert.equal(ctl.state.rolloverHeld, null, "the hold stayed on the state after the service ended");
+  });
+
+  it("is never put on the state in manual mode, nor before the planned end and its grace", async (t) => {
+    captureConsole(t, "log", "warn", "error");
+    ctl.lastLive = liveReading("item", STARTED());
+    ctl.state = { ...ctl.state, rolloverHeld: null, planMode: "manual" };
+    await stageController.maybeAutoAdvance();
+    assert.equal(ctl.state.rolloverHeld, null, "manual mode never rolls over, so there is no hold to say");
+    ctl.state = { ...ctl.state, planMode: "auto" };
+    pco.getServiceEnd = async () => new Date(Date.now() - 10 * 60_000).toISOString();
+    await stageController.maybeAutoAdvance();
+    assert.equal(ctl.state.rolloverHeld, null, "said before the grace was up");
+  });
+
+  it("stays said while the planned end cannot be read", async (t) => {
+    captureConsole(t, "log", "warn", "error");
+    ctl.lastLive = liveReading("item", STARTED());
+    ctl.state = { ...ctl.state, rolloverHeld: null };
+    await stageController.maybeAutoAdvance();
+    assert.ok(ctl.state.rolloverHeld);
+    pco.getServiceEnd = async () => {
+      throw new Error("Planning Center returned 503");
+    };
+    await stageController.maybeAutoAdvance();
+    assert.ok(ctl.state.rolloverHeld, "one failed read of the plan times took the hold off Home");
+  });
+
+  it("is taken off the state when the plan changes, even to one whose end cannot be read", async (t) => {
+    captureConsole(t, "log", "warn", "error");
+    ctl.lastLive = liveReading("item", STARTED());
+    ctl.state = { ...ctl.state, rolloverHeld: null };
+    await stageController.maybeAutoAdvance();
+    assert.ok(ctl.state.rolloverHeld);
+    // Another plan, with no ends_at: getServiceEnd answers null for it.
+    ctl.state = { ...ctl.state, planId: "p-other", planTitle: "Other" };
+    await stageController.maybeAutoAdvance();
+    assert.equal(ctl.state.rolloverHeld, null, "the hold of a plan no longer followed stayed on the state");
+  });
+
   it("is not rolled over from on a stale live reading still near now", async (t) => {
     captureConsole(t, "log", "warn", "error");
     ctl.lastLive = liveReading("item", STARTED());

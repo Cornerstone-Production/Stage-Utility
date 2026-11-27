@@ -27,7 +27,7 @@ const { pcoService } = await import("./pco-service.js");
 const { photoThemes } = await import("./photo-themes/service.js");
 const { proxyRoutes } = await import("./routes/proxy-routes.js");
 const { callRoute } = await import("./routes/route-harness.js");
-const { jpegBytes, pcoPhoto, startFakeOpenAi } = await import("./photo-themes/photo-themes-harness.js");
+const { approveShown, jpegBytes, pcoPhoto, startFakeOpenAi } = await import("./photo-themes/photo-themes-harness.js");
 const { THEMED_PHOTO_REF_PREFIX } = await import("../types/photo-themes.js");
 
 const VIEW = "v-wall";
@@ -141,7 +141,7 @@ describe("a themed photo on the wall", () => {
     assert.equal(photoThemes.state().themes[0]!.people[0]!.status, "ready");
     assert.ok(wallPhoto()?.startsWith("https://avatars.planningcenteronline.com/"), "a ready photo is not drawn");
 
-    await photoThemes.approve(theme.id, "1001");
+    await approveShown(photoThemes, theme.id, "1001");
     ref = wallPhoto()!;
     assert.match(ref, new RegExp(`^${THEMED_PHOTO_REF_PREFIX}[0-9a-f]{16}\\.webp$`), "the wall redrew with the approved photo");
     assert.equal(await previewPhoto(PLAN), ref, "the editor's preview of this plan shows it too");

@@ -282,7 +282,7 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
               followedPlanId={followedPlanId}
               following={following}
               fallbackLabel={[rundown?.planTitle ?? rundown?.planSeriesTitle, rundown?.planDates].filter(Boolean).join(" · ") || null}
-              timeZone={rundown?.timeZone ?? appZoneOf(state)}
+              timeZone={rundown?.timeZone || appZoneOf(state)}
               onSelect={(id) => setPlanParam(id)}
               onOpenElsewhere={(typeId, typeName, planId) =>
                 navigateTo(serviceCueUrl(typeName ?? typeId, currentLayoutKey, layout ? layoutSlug(layout) : undefined), { plan: planId }, { keepSearch: true })

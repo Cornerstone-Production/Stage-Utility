@@ -3,7 +3,7 @@
 // Every route must finish responding before it returns (see RouteCtx).
 
 import { errorMessage } from "../errors.js";
-import { isRecord } from "../is-record.js";
+import { isRecord } from "../../types/is-record.js";
 import { type RouteCtx, error, json, readBody } from "./context.js";
 import { AUTOMATION_ACTIONS } from "../automation-actions.js";
 import { invokeAction } from "../action-invoke.js";

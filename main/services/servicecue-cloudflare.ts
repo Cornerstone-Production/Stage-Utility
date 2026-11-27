@@ -31,7 +31,7 @@ import * as path from "node:path";
 
 import { errorMessage, fetchFailureMessage, isNotFound } from "./errors.js";
 import { readCapped } from "./capped-download.js";
-import { isRecord, isStringList } from "./is-record.js";
+import { isRecord, isStringList } from "../types/is-record.js";
 import { pinToOrigin } from "./pinned-origin.js";
 import { parseTag } from "./release-tags.js";
 import { isViewerBuildId } from "../types/servicecue-publish.js";

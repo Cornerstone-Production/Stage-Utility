@@ -16,7 +16,7 @@ import { Fragment, useEffect, useRef, useState, type MouseEvent, type PointerEve
 import { DropdownMenu } from "radix-ui";
 import { MoreHorizontalIcon, PlusIcon } from "lucide-react";
 
-import { STAGEPLOT_LIMITS, type Plot, type Venue } from "@main/types/stageplots";
+import { STAGEPLOT_LIMITS, type Plot, type VenueView } from "@main/types/stageplots";
 
 import { MENU_ITEM, MENU_ITEM_DANGER, menuContent } from "../../components/ui";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
@@ -53,7 +53,7 @@ export function moved(ids: readonly string[], id: string, to: number): string[] 
 }
 
 /** What the delete confirm says: what goes, which plot takes over as default, which plans fall back. */
-export function deleteMessage(venue: Venue, plots: readonly Plot[], plot: Plot, plans: readonly string[]): string {
+export function deleteMessage(venue: VenueView, plots: readonly Plot[], plot: Plot, plans: readonly string[]): string {
   const left = plots.filter((p) => p.id !== plot.id);
   const parts = [`It is removed from ${venue.name}. Its background stays.`];
   if (plot.id === venue.defaultPlotId) {
@@ -73,7 +73,7 @@ export function PlotTabs({
   save,
   drafted,
 }: {
-  venue: Venue;
+  venue: VenueView;
   plots: Plot[];
   selected: Plot | null;
   onSelect: (plotId: string) => void;

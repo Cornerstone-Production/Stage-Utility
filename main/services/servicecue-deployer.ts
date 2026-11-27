@@ -116,7 +116,15 @@ export type DeployNowOutcome =
   | { kind: "newer"; pageVersion: string; runningVersion: string }
   | { kind: "other-build"; pageBuild: string | null; version: string }
   | { kind: "limited"; retryAfterSec: number }
-  | { kind: "failed"; message: string; code: number | null; status: number | null; step: string };
+  | {
+      kind: "failed";
+      message: string;
+      code: number | null;
+      status: number | null;
+      step: string;
+      /** The upload got no answer and what Cloudflare holds could not be read either: the page may have taken it. */
+      unsure?: true;
+    };
 
 type DeployOutcome = DeployNowOutcome | AutoOnly;
 
@@ -570,7 +578,14 @@ export class ServiceCueDeployer implements DeployHook {
     if (err instanceof BundleUnavailable) return this.noCopy(err);
     const failure = err instanceof CloudflareError ? err : new CloudflareError(errorMessage(err), null, null, "deploy");
     const where = read ? "reading what is deployed failed" : "the update failed";
-    const outcome = { kind: "failed", message: scrub(failure.message, 300), code: failure.code, status: failure.status, step: failure.step } as const;
+    const outcome = {
+      kind: "failed",
+      message: scrub(failure.message, 300),
+      code: failure.code,
+      status: failure.status,
+      step: failure.step,
+      ...(unsure ? { unsure: true as const } : {}),
+    } as const;
     if (generation !== this.generation) {
       this.log("warn", `${where} ${failure.describe()}; that was with credentials since replaced, so it is ignored`);
       if (this.state === "updating") this.state = this.creds ? "unchecked" : "off";

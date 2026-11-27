@@ -29,7 +29,7 @@ type Target =
   | { kind: "none" };
 
 export interface RailDropActions {
-  apply: (next: ResolvedSidebar | null) => void;
+  apply: (change: (r: ResolvedSidebar) => ResolvedSidebar | null) => void;
   hide: (id: string, label: string) => void;
   setConsoleShown: (id: string, shown: boolean) => void;
   describe: (id: string) => { label: string } | null;
@@ -178,7 +178,7 @@ export function useRailDrag(resolved: ResolvedSidebar, listRef: RefObject<HTMLDi
     const t = targetAt(d, at);
     if (t.kind === "none") return;
     if (d.kind === "head") {
-      if (t.kind === "head") act.apply(moveSection(resolved, d.id, t.before));
+      if (t.kind === "head") act.apply((r) => moveSection(r, d.id, t.before));
       return;
     }
     if (t.kind === "out") {
@@ -193,7 +193,7 @@ export function useRailDrag(resolved: ResolvedSidebar, listRef: RefObject<HTMLDi
       const staying = from.members.filter((m) => m !== d.id);
       if (from.members.indexOf(d.id) === Math.min(t.index, staying.length)) return;
     }
-    act.apply(movePage(resolved, d.id, t.section, t.index));
+    act.apply((r) => movePage(r, d.id, t.section, t.index));
     // A hidden console's tile lands where the caret said, then comes back through
     // its own switch: the place is saved first, so it appears there.
     if (d.kind === "tile" && isConsoleId(d.id)) act.setConsoleShown(d.id, true);

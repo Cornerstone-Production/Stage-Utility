@@ -1,6 +1,6 @@
 // geometry.ts — the editor's geometry, pure: resizing a rotated item in its own
 // frame, snapping a rotation, and keeping an item inside the plot so the draft
-// is always something the server accepts (stageplots-store checkItems).
+// is always something the server accepts (stageplot-items checkItems).
 
 import { clamp, round1 } from "@main/services/clamp";
 import { withCableBox } from "@main/services/stageplots-doc";

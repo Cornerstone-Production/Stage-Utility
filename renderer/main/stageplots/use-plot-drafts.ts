@@ -6,8 +6,10 @@
 // here (another desk kept one) reads the drafts again; a note about a plot this editor is
 // writing does not (the server broadcasts before it answers, and the answer is what this
 // editor keeps). A read that a later note overtook is dropped and made again, so an older
-// answer never puts back a draft that has gone. Not part of the SSE hello burst: like the
-// document itself, the drafts are read on mount.
+// answer never puts back a draft that has gone. A read after the first that fails is made
+// again after 2 s, then 4, 8… up to 30, until it reads: until then the drafts held here may
+// miss one another desk kept, which this editor would store over. Not part of the SSE hello
+// burst: like the document itself, the drafts are read on mount.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -16,6 +18,10 @@ import { STAGEPLOT_DRAFTS_CHANNEL, type PlotDraft, type PlotDraftNotes } from "@
 import { onNotification } from "../../lib/api";
 import { logReadFailure } from "../../lib/client-log";
 import { stageplotsApi } from "./stageplots-api";
+
+/** A failed re-read is made again after this, doubling up to DRAFTS_RETRY_MAX_MS. */
+export const DRAFTS_RETRY_FIRST_MS = 2000;
+export const DRAFTS_RETRY_MAX_MS = 30_000;
 
 export interface PlotDraftsState {
   /** Every kept draft by plot; null until the first read answers. */
@@ -39,6 +45,10 @@ export function usePlotDrafts(): PlotDraftsState {
   const heard = useRef(0);
   /** Plots whose draft this editor is writing now. */
   const ours = useRef(new Map<string, number>());
+  /** The read made again after one failed, and how long the one after it waits. */
+  const retry = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retryMs = useRef(0);
+  const gone = useRef(false);
 
   const replace = useCallback((next: ReadonlyMap<string, PlotDraft>) => {
     held.current = next;
@@ -54,10 +64,19 @@ export function usePlotDrafts(): PlotDraftsState {
           if (heard.current !== at && held.current !== null) return attempt();
           replace(new Map(r.drafts.map((d) => [d.plotId, d])));
           setError(false);
+          retryMs.current = 0;
         },
         (err: unknown) => {
           logReadFailure("stageplots", "the unsaved plot drafts", err);
           setError(true);
+          // The first read's failure is the page's to show (it waits for it). A later one would
+          // leave the held drafts behind the server's: read again until it reads.
+          if (held.current === null || gone.current || retry.current) return;
+          retryMs.current = Math.min(DRAFTS_RETRY_MAX_MS, retryMs.current === 0 ? DRAFTS_RETRY_FIRST_MS : retryMs.current * 2);
+          retry.current = setTimeout(() => {
+            retry.current = null;
+            void attempt();
+          }, retryMs.current);
         },
       );
     };
@@ -78,7 +97,13 @@ export function usePlotDrafts(): PlotDraftsState {
       if ([...now.keys()].some((id) => !named.has(id))) replace(new Map([...now].filter(([id]) => named.has(id))));
     });
     void refresh();
-    return off;
+    gone.current = false;
+    return () => {
+      off();
+      gone.current = true;
+      if (retry.current) clearTimeout(retry.current);
+      retry.current = null;
+    };
   }, [refresh, replace]);
 
   const kept = useCallback((draft: PlotDraft) => replace(new Map(held.current).set(draft.plotId, draft)), [replace]);

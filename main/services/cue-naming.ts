@@ -8,6 +8,7 @@
 import type { OwnedBy, Rule } from "../types/automation.js";
 import { CALL_TRIGGER_ID, takenCueNames } from "./cue-aliases.js";
 import { homeVisibilityParams, isPairHalfName } from "./cue-pairs.js";
+import { firstFree } from "./first-free.js";
 import { slugForCue } from "./cue-slug.js";
 
 /** The label every action button was created with, before a blank one meant "use
@@ -43,11 +44,7 @@ export function cueSlug(text: string): string {
 export function cueNameFor(text: string, taken: ReadonlySet<string>, prefix = ""): string {
   let base = `${prefix}${cueSlug(text) || "button"}`;
   if (isPairHalfName(base)) base = `${base}_cue`;
-  if (!taken.has(base)) return base;
-  for (let n = 2; ; n += 1) {
-    const candidate = `${base}_${n}`;
-    if (!taken.has(candidate)) return candidate;
-  }
+  return firstFree(base, (s) => taken.has(s), (b, n) => `${b}_${n}`);
 }
 
 /** Rule params hold strings and numbers only, and so does every registry param;

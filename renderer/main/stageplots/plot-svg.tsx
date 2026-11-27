@@ -6,7 +6,7 @@
 // background's aspect ratio, or 16:9 with a plain grid when there is none.
 // Items are drawn in those units, in the empty layer below.
 
-import { useLayoutEffect, useRef, useState, type RefObject, type SVGProps } from "react";
+import { useRef, type RefObject, type SVGProps } from "react";
 
 import type { PanZoom, View } from "./use-pan-zoom";
 
@@ -15,6 +15,7 @@ import { plotHeight } from "@main/services/stageplots-doc";
 import { PLOT_UNITS_WIDE, type Plot, type PlotBackground } from "@main/types/stageplots";
 
 import { cn } from "../../lib/cn";
+import { useElementSize } from "../../lib/use-element-size";
 import { PlotItems } from "./plot-items";
 
 /** Columns in the grid a plot with no background is drawn on. */
@@ -46,22 +47,6 @@ function PlotGrid({ height }: { height: number }) {
 /** What a plot's labels and strokes are sized against before the SVG has been
  *  measured, and wherever nothing is (a DOM with no layout): a typical width. */
 const UNMEASURED_PX = 700;
-
-/** The SVG's own width in CSS pixels, watched as it resizes; 0 until measured. */
-function useSvgWidth(ref: RefObject<SVGSVGElement | null>): number {
-  const [width, setWidth] = useState(0);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const measure = () => setWidth(el.getBoundingClientRect().width);
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [ref]);
-  return width;
-}
 
 export interface PlotSvgProps {
   plot: Pick<Plot, "name" | "items">;
@@ -110,7 +95,7 @@ export function PlotSvg({
   const height = plotHeight(background);
   const ownRef = useRef<SVGSVGElement>(null);
   const ref = svgRef ?? ownRef;
-  const measured = useSvgWidth(ref);
+  const { w: measured } = useElementSize(ref);
   const k = (view?.w ?? PLOT_UNITS_WIDE) / (widthPx ?? (measured || UNMEASURED_PX));
   return (
     <svg
