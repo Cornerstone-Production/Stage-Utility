@@ -409,7 +409,8 @@ showed and makes them its own again. Linking and unlinking are draft edits, save
 
 A linked point follows its device. Rename or recolour the device on the patch sheet and
 the point shows the new name and colour in the editor and on `/stageplots` at once, with
-nothing to save; the next **Save** of the plot keeps them as its last. A device colour
+nothing to save. Each save of the patch also writes them onto the point as its last name and
+colour, so a device removed from the patch leaves the point showing what the device last had. A device colour
 that is not one of the ten swatches takes the nearest one.
 
 A tap on a linked point on `/stageplots` lists **Patch channels · *sheet***: each channel

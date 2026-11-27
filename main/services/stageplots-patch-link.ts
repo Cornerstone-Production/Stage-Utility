@@ -279,6 +279,24 @@ export function stampLinks(items: readonly PlotItem[], links: ReadonlyMap<string
   return changed ? out : (items as PlotItem[]);
 }
 
+/**
+ * The stored document with every linked point whose device `patch` has stamped as it is (see
+ * stampLinks), so a point's last name and colour are the device's as of the latest patch save.
+ * Plot versions are not bumped: a draft on this version stays saveable. The same document
+ * when nothing changes.
+ */
+export function stampDoc<D extends { plots: { items: PlotItem[] }[] }>(doc: D, patch: PatchRead): D {
+  const ctx: PatchContext = { serviceTypeId: null, planId: null };
+  let changed = false;
+  const plots = doc.plots.map((p) => {
+    const items = stampLinks(p.items, resolveItems(p.items, patch, ctx).links);
+    if (items === p.items) return p;
+    changed = true;
+    return { ...p, items };
+  });
+  return changed ? { ...doc, plots } : doc;
+}
+
 /** A point that will be published unlinked, for the [stageplots] log line saying so. */
 export interface UnresolvedLink {
   label: string;

@@ -5,6 +5,7 @@
 
 import type { PatchFile, PatchSheet, PatchSheetKind } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
+import { errorMessage } from "./errors.js";
 import { DataStore, StoreReadError } from "./data-store.js";
 import { normalizePatch } from "./patch-shape.js";
 import { asArray, asObject, checked } from "./restore-check.js";
@@ -51,7 +52,17 @@ function migrate(raw: PatchFile): PatchFile {
   };
 }
 
+/** What a saved patch owes others before it is announced: `before` is the file it replaced. */
+type SavedHook = (before: PatchFile, after: PatchFile) => Promise<void>;
+
 class PatchStore {
+  private savedHooks: SavedHook[] = [];
+
+  /** Run, awaited, after every save and before patch:updated goes out. A hook that throws is said on [patch]; the save stands. */
+  onSaved(hook: SavedHook): void {
+    this.savedHooks.push(hook);
+  }
+
   // POST /api/patch: an object with a list of sheets. A file in the shape
   // before sheets existed restores too, and migrate() reads it on load.
   private store = new DataStore<PatchFile>("patch.json", EMPTY, "config", {
@@ -108,7 +119,18 @@ class PatchStore {
    */
   async save(file: PatchFile): Promise<PatchFile> {
     const next: PatchFile = { ...file, updatedAt: new Date().toISOString() };
-    await this.store.update(() => next);
+    let before: PatchFile = EMPTY;
+    await this.store.update((prev) => {
+      before = prev;
+      return next;
+    });
+    for (const hook of this.savedHooks) {
+      try {
+        await hook(this.read(before), next);
+      } catch (err) {
+        console.error(`[patch] a follower of the saved patch failed: ${scrub(errorMessage(err))}`);
+      }
+    }
     broadcast("patch:updated", next);
     return next;
   }
