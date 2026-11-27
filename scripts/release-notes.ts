@@ -233,9 +233,21 @@ const BETA_ONLY = /^Beta-only:\s*(true|yes)\s*$/im;
  * this mechanism exists to prevent, and a stale or mistyped override is a
  * correction that would silently never be applied.
  *
+ * The other correction is `{ "commit": "…", "omit": true, "reason": "…" }`: the
+ * commit is in this release's history and its change is not in the release,
+ * because a revert that also landed in it took the change out again. It is left
+ * out of every section and counted nowhere, since nothing was held back — the
+ * change is simply not there. It takes any visible commit, a `feat` included,
+ * which `betaOnly` cannot reach: a feature is never "beta-only". A commit has
+ * `betaOnly` or `omit`, not both.
+ *
  * Returned by full SHA.
  */
-function betaOnlyOverrides(v: string): Map<string, { betaOnly: boolean; reason: string; given: string }> {
+type Override =
+  | { omit: true; reason: string; given: string }
+  | { omit: false; betaOnly: boolean; reason: string; given: string };
+
+function betaOnlyOverrides(v: string): Map<string, Override> {
   const file = path.join(releaseNotesDir(), "overrides", `${v}.json`);
   const shown = path.posix.join("docs/release-notes/overrides", `${v}.json`);
 
@@ -257,7 +269,7 @@ function betaOnlyOverrides(v: string): Map<string, { betaOnly: boolean; reason: 
   }
   if (!Array.isArray(list)) throw new Error(`${shown} must be a JSON array of overrides`);
 
-  const out = new Map<string, { betaOnly: boolean; reason: string; given: string }>();
+  const out = new Map<string, Override>();
   list.forEach((entry: unknown, i: number) => {
     const at = `${shown} entry ${i}`;
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error(`${at} is not an object`);
@@ -270,7 +282,10 @@ function betaOnlyOverrides(v: string): Map<string, { betaOnly: boolean; reason: 
     if (!/^[0-9a-f]{7,40}$/i.test(e.commit.trim())) {
       throw new Error(`${at}: "${e.commit}" is not a commit SHA — an override must name one immutable commit`);
     }
-    if (typeof e.betaOnly !== "boolean") throw new Error(`${at} (${e.commit}) needs "betaOnly": true or false`);
+    const omit = e.omit === true;
+    if (e.omit !== undefined && !omit) throw new Error(`${at} (${e.commit}): "omit" can only be true`);
+    if (omit && e.betaOnly !== undefined) throw new Error(`${at} (${e.commit}) has both "omit" and "betaOnly": it is one or the other`);
+    if (!omit && typeof e.betaOnly !== "boolean") throw new Error(`${at} (${e.commit}) needs "betaOnly": true or false, or "omit": true`);
     if (typeof e.reason !== "string" || !e.reason.trim()) {
       throw new Error(`${at} (${e.commit}) has no "reason" — say why the commit's own trailer cannot be trusted`);
     }
@@ -285,7 +300,9 @@ function betaOnlyOverrides(v: string): Map<string, { betaOnly: boolean; reason: 
       throw new Error(`${at}: ${e.commit} does not name one commit in this repository`, { cause: err });
     }
     if (out.has(sha)) throw new Error(`${at}: ${sha.slice(0, 9)} is overridden twice`);
-    out.set(sha, { betaOnly: e.betaOnly, reason: e.reason.trim(), given: e.commit.trim() });
+    const reason = e.reason.trim();
+    const given = e.commit.trim();
+    out.set(sha, omit ? { omit: true, reason, given } : { omit: false, betaOnly: e.betaOnly as boolean, reason, given });
   });
   return out;
 }
@@ -356,10 +373,17 @@ for (const { sha, subject, body } of entries) {
   // Skipped before featScopes: a feat(release) must not make `release` read as
   // a surface introduced this cycle.
   if (key && INTERNAL_SCOPES.has(key) && !bang) continue;
+  const override = overrides.get(sha);
+  // Before featScopes, so a feature that is not in the release does not make its
+  // scope read as one introduced by it.
+  if (override?.omit) {
+    overridesApplied.add(sha);
+    console.error(`[release-notes] ${sha.slice(0, 9)} left out of the notes — ${override.reason}`);
+    continue;
+  }
   if (!bang && MINOR_TYPES.has(type) && key) featScopes.add(key);
 
   const trailer = BETA_ONLY.test(body);
-  const override = overrides.get(sha);
   // Only a patch-level commit is ever held back, so an override on anything else
   // would read as applied and change nothing. Left unapplied, and caught below.
   const correctable = !bang && PATCH_TYPES.has(type);
@@ -385,8 +409,8 @@ function say(betaOnly: boolean, trailer: boolean): string {
 for (const [sha, o] of overrides) {
   if (overridesApplied.has(sha)) continue;
   throw new Error(
-    `docs/release-notes/overrides/${version}.json names ${o.given}, which is not a non-breaking ${[...PATCH_TYPES].map((t) => `${t}:`).join("/")} ` +
-      `commit in ${range}. An override that matches nothing is a correction that would never be applied.`,
+    `docs/release-notes/overrides/${version}.json names ${o.given}, which is not a non-breaking ${[...PATCH_TYPES].map((t) => `${t}:`).join("/")} commit in ${range} ` +
+      `(or, for an "omit", a visible commit there). An override that matches nothing is a correction that would never be applied.`,
   );
 }
 
