@@ -14,7 +14,7 @@
 // when the Core confirms the write.
 //
 // A fader's thumb, its drag and its limit line all use one scale (fader-scale.ts).
-// On a range whose taper has been measured (main/types/qsys-taper.ts) it is the
+// On a component kind and range whose taper has been measured (main/types/qsys-taper.ts) it is the
 // Core's own: the thumb sits at the Position the Core reports, as on a UCI, a drag
 // moves along that taper and writes the value the table gives for where the finger
 // is, and the limit line sits at the limit's place on it. On any other range it is
@@ -704,10 +704,10 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
 
   const dense = density === "dense";
   const range = info.range;
-  // The fader's own scale (fader-scale.ts): the Core's taper on a measured range,
+  // The fader's own scale (fader-scale.ts): the Core's taper on a measured component kind and range,
   // else linear in dB from -60 (or the allowlist's minimum) to the allowlist's
   // maximum, the Core's minimum at the bottom stop.
-  const scale = faderScale(range, info.limits);
+  const scale = faderScale(info.componentType, range, info.limits);
   const writable = interactive && writeState === "live" && typeof v.value === "number" && scale !== null;
   // The thumb in px, as the mockups draw it: Main 48 x 40 r10, Staff 28 x 24 r6.
   const thumbAlong = dense ? 24 : 40;

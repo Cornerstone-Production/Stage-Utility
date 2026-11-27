@@ -1,6 +1,6 @@
 // fader-scale.ts — where a level sits on a Q-SYS fader's travel.
 //
-// On a range with a measured taper (main/types/qsys-taper.ts), the travel is the
+// On a component kind and range with a measured taper (main/types/qsys-taper.ts), the travel is the
 // Core's own: a value sits where the Core's fader puts it, the bottom stop is the
 // Core's minimum and the top its maximum, and the allowlist's limits stop the drag
 // short of them (the limit line sits at the limit's place on that taper).
@@ -33,12 +33,12 @@ export interface FaderScale {
   floor: number;
   /** The highest value the fader writes. Linear: the top of travel. */
   top: number;
-  /** The Core's measured taper for the control's range: travel is its Position. Absent: linear in dB. */
+  /** The Core's measured taper for the control's component kind and range: travel is its Position. Absent: linear in dB. */
   taper?: Taper;
 }
 
-/** The scale for a control's Core range and its allowlist limits; null without a usable range. */
-export function faderScale(range: { min: number; max: number } | null, limits: { min: number | null; max: number | null }): FaderScale | null {
+/** The scale for a control's component Type, Core range and allowlist limits; null without a usable range. */
+export function faderScale(componentType: string | null, range: { min: number; max: number } | null, limits: { min: number | null; max: number | null }): FaderScale | null {
   if (!range) return null;
   const bottom = Math.max(range.min, limits.min ?? range.min);
   const top = Math.min(range.max, limits.max ?? range.max);
@@ -46,7 +46,7 @@ export function faderScale(range: { min: number; max: number } | null, limits: {
   // A top at or under -60 dB would leave no linear part at all; the floor then sits
   // 12 dB under it (one tick), so the travel stays a fader rather than two stops.
   const floor = Math.max(bottom, Math.min(FADER_FLOOR_DB, top - FLOOR_BELOW_TOP_DB));
-  const taper = taperFor(range);
+  const taper = taperFor(componentType, range);
   return taper ? { bottom, floor, top, taper } : { bottom, floor, top };
 }
 

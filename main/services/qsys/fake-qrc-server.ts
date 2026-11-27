@@ -30,6 +30,12 @@ export class FakeQrcServer {
   components = new Map<string, QrcControl[]>();
   /** Each component's Type as GetComponents reports it (`mixer`, `meter2`, ...); "component" when not set. */
   componentTypes = new Map<string, string>();
+  /**
+   * Components whose Position is NOT read from our measured tables: a square-law curve
+   * instead, standing in for a Core whose taper the tables do not know, so a test can
+   * tell the panel's table from the Core's own answer.
+   */
+  offTable = new Set<string>();
   status: QrcStatus = {
     Platform: "Core 110f",
     State: "Active",
@@ -162,21 +168,22 @@ export class FakeQrcServer {
    * a selector plugin's Button N is a radio, so turning one on turns its siblings off.
    */
   private land(component: string, control: QrcControl, value: number | boolean | string): QrcControl[] {
-    this.apply(control, value);
+    this.apply(component, control, value);
     if (!isSelectorButton(control.Name) || !isOn(control.Value)) return [control];
     const cleared = (this.components.get(component) ?? []).filter((c) => c !== control && isSelectorButton(c.Name) && isOn(c.Value));
-    for (const c of cleared) this.apply(c, false);
+    for (const c of cleared) this.apply(component, c, false);
     return [control, ...cleared];
   }
 
-  private apply(control: QrcControl, value: number | boolean | string): void {
+  private apply(component: string, control: QrcControl, value: number | boolean | string): void {
     control.Value = value;
     control.String = typeof value === "number" && control.ValueMin !== undefined ? `${value}dB` : String(value);
     if (typeof value === "number" && control.ValueMin !== undefined && control.ValueMax !== undefined) {
-      // A range a Core's taper was measured on gets that taper's Position, as a Core reports it; any other, linear.
-      const taper = taperFor({ min: control.ValueMin, max: control.ValueMax });
+      // A component kind and range a Core's taper was measured on gets that taper's Position, as a Core reports it; any other, linear.
+      const taper = taperFor(this.componentTypes.get(component) ?? null, { min: control.ValueMin, max: control.ValueMax });
       const span = control.ValueMax - control.ValueMin;
-      control.Position = taper ? positionOf(taper, value) : span > 0 ? (value - control.ValueMin) / span : 0;
+      const linear = span > 0 ? Math.min(1, Math.max(0, (value - control.ValueMin) / span)) : 0;
+      control.Position = this.offTable.has(component) ? linear ** 2 : taper ? positionOf(taper, value) : linear;
     } else if (typeof value === "boolean") control.Position = value ? 1 : 0;
     else if (typeof value === "number") control.Position = value;
   }

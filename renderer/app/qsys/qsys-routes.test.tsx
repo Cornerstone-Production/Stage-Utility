@@ -647,7 +647,7 @@ describe("/qsys/manage", () => {
     await wait(60);
     const rows = [...document.querySelectorAll("[data-qsys-untapered]")].map((n) => [n.getAttribute("data-qsys-untapered"), n.textContent]);
     assert.equal(rows.length, 1, JSON.stringify(rows));
-    assert.equal(rows[0]![0], "-100..20");
+    assert.equal(rows[0]![0], "mixer -100..20");
     assert.match(rows[0]![1] ?? "", /Lobby_Mixer output\.2\.gain/);
     assert.doesNotMatch(rows[0]![1] ?? "", /output\.1\.gain/, "a fader on a measured range was listed");
     cleanup();
@@ -655,7 +655,7 @@ describe("/qsys/manage", () => {
     server.views = [{ ...BOOTH, layout: layoutWith(fader("output.1.gain")) }];
     await open("/qsys/manage");
     await wait(60);
-    assert.match(document.querySelector('[data-qsys-tapers="ok"]')?.textContent ?? "", /Every fader is on a measured range/);
+    assert.match(document.querySelector('[data-qsys-tapers="ok"]')?.textContent ?? "", /Every fader has a measured taper/);
   });
 
   test("a panel's sibling that no panel has is listed, once and by name, and is not an error", async () => {

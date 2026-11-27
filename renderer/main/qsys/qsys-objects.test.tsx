@@ -663,14 +663,14 @@ describe("Q-SYS objects", () => {
   });
 
   test("a drag on a taper starts from the value, not the Core's Position: a touch that has not moved writes nothing", async () => {
-    // A real Core's curve bends between the measured points, so its Position for -50 dB
-    // is not the table's (0.123). Here it reports 0.10; read back through the table that
-    // is about -55 dB, a value nobody chose.
+    // A Core's own Position need not be the table's: for -50 dB the table says 0.1, and
+    // here the Core reports 0.0985; read back through the table that is about -50.6 dB,
+    // a value nobody chose.
     server.values["output.1.gain"] = -50;
-    server.positions["output.1.gain"] = 0.1;
+    server.positions["output.1.gain"] = 0.0985;
     await mount([{ ...FADER, binding: b("output.1.gain") } as LayoutObjectConfig]);
     const fader = q("qsys-fader", "[data-fader]");
-    assert.equal(fader.dataset.travel, "0.1", "at rest the thumb sits where the Core reports it");
+    assert.equal(fader.dataset.travel, "0.0985", "at rest the thumb sits where the Core reports it");
     down(fader, 100);
     move(100); // a move event with no movement, as a resting finger sends
     up(100);

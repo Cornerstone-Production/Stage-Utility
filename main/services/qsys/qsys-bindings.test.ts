@@ -283,6 +283,25 @@ describe("QsysBindings", () => {
     }
   });
 
+  test("a Gain block on the mixer's range is said as unmeasured: the taper is the component kind's, not the range's", async () => {
+    const h = harness();
+    h.setCatalog({
+      ...CATALOG,
+      components: [...CATALOG.components, { name: "Hall_Gain", type: "gain", controls: [{ ...ctl("gain", "Float"), ValueMin: -100, ValueMax: 10 }] }],
+    });
+    h.setEntries([entry("Lobby_Mixer", "output.1.gain"), entry("Hall_Gain", "gain")]);
+    const cap = lines();
+    try {
+      h.setViews([view("p1", obj("f1", fader(bind("Lobby_Mixer", "output.1.gain"))), obj("f2", fader(bind("Hall_Gain", "gain"))))]);
+      await h.b.refresh();
+      assert.deepEqual(cap.out, [
+        "[qsys] no measured taper for gain -100..10; faders on it move linearly in dB, not as the Core's do (Hall_Gain/gain). See /qsys/manage",
+      ]);
+    } finally {
+      cap.restore();
+    }
+  });
+
   test("a fader range with no measured taper is said once, naming its controls; a measured one is not said", async () => {
     const h = harness();
     h.setCatalog({
@@ -296,7 +315,7 @@ describe("QsysBindings", () => {
       await h.b.refresh();
       await h.b.refresh();
       assert.deepEqual(cap.out, [
-        "[qsys] no measured taper for range -100..20; faders on it move linearly in dB, not as the Core's do (Hall_Mixer/output.1.gain). See /qsys/manage",
+        "[qsys] no measured taper for mixer -100..20; faders on it move linearly in dB, not as the Core's do (Hall_Mixer/output.1.gain). See /qsys/manage",
       ]);
     } finally {
       cap.restore();

@@ -16,6 +16,7 @@ beforeEach(async () => {
     { Name: "output.1.gain", Type: "Float", Value: -10, String: "-10.0dB", Position: 0.5, Direction: "Read/Write", ValueMin: -100, ValueMax: 10 },
     { Name: "output.1.mute", Type: "Boolean", Value: false, String: "unmuted", Position: 0, Direction: "Read/Write" },
   ]);
+  fake.componentTypes.set("Lobby_Mixer", "mixer");
   client = await QrcClient.connect("127.0.0.1", await fake.start());
 });
 
@@ -61,6 +62,26 @@ test("a -100..+10 gain reads back the Position a Core reports on its taper: 0 dB
   assert.equal(back[0]!.Position, 0.75);
   const low = (await client.send("Component.Set", { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.gain", Value: -10 }], ResponseValues: true })) as { Position: number }[];
   assert.equal(low[0]!.Position, 0.5);
+});
+
+test("a Gain block reads back a linear Position, and reports its Type; a gain on the mixer's range is not the mixer's curve", async () => {
+  const gain = (min: number, max: number) => [{ Name: "gain", Type: "Float", Value: 0, String: "0dB", Position: 0, Direction: "Read/Write", ValueMin: min, ValueMax: max }];
+  fake.components.set("Hall_Gain", gain(-100, 20));
+  fake.components.set("Side_Gain", gain(-100, 10));
+  fake.componentTypes.set("Hall_Gain", "gain");
+  fake.componentTypes.set("Side_Gain", "gain");
+  const at = async (c: string, Value: number) => ((await client.send("Component.Set", { Name: c, Controls: [{ Name: "gain", Value }], ResponseValues: true })) as { Position: number }[])[0]!.Position;
+  assert.ok(Math.abs((await at("Hall_Gain", 0)) - 100 / 120) < 1e-12);
+  assert.equal(await at("Side_Gain", -45), 0.5, "-100..10 on a Gain block is linear: -45 is halfway");
+  const list = (await client.send("Component.GetComponents")) as { Name: string; Type: string }[];
+  assert.equal(list.find((c) => c.Name === "Hall_Gain")?.Type, "gain");
+  assert.equal(list.find((c) => c.Name === "Lobby_Mixer")?.Type, "mixer");
+});
+
+test("an off-table component reports a Position that is not from our tables", async () => {
+  fake.offTable.add("Lobby_Mixer");
+  const back = (await client.send("Component.Set", { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.gain", Value: -45 }], ResponseValues: true })) as { Position: number }[];
+  assert.equal(back[0]!.Position, 0.25, "square law: (55/110)^2, where the mixer table has -45 near 0.13");
 });
 
 test("a selector plugin's Button N is a radio: pressing one, by Set or at the Core, turns the others off and pushes them", async () => {

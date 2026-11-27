@@ -27,7 +27,7 @@ import { scrub } from "../scrub.js";
 import { viewsStore } from "../views-store.js";
 import { walkLayoutObjects, type LayoutObject, type View } from "../../types/views.js";
 import { addressKey, addressOf, panelKindOf, qsysAddressesOf, slotsOf, type QsysAddress, type QsysSlotRole } from "../../types/qsys.js";
-import { rangeText, untaperedRanges } from "../../types/qsys-taper.js";
+import { kindText, untaperedRanges } from "../../types/qsys-taper.js";
 import { qsysAllowlist, type AllowEntry } from "./qsys-allowlist-store.js";
 import { qsysService, type QsysCatalog } from "./qsys-service.js";
 import { qsysWatch, type WatchPanel } from "./qsys-watch.js";
@@ -238,11 +238,11 @@ export class QsysBindings {
 
   private sayUntapered(views: View[], catalog: QsysCatalog): void {
     for (const r of untaperedRanges(views, catalog)) {
-      const range = rangeText(r);
-      if (this.untapered.has(range)) continue;
-      this.untapered.add(range);
+      const kind = kindText(r);
+      if (this.untapered.has(kind)) continue;
+      this.untapered.add(kind);
       const on = r.controls.map((a) => `${a.component}/${a.control}`).join(", ");
-      console.log(`[qsys] no measured taper for range ${scrub(range)}; faders on it move linearly in dB, not as the Core's do (${scrub(on)}). See /qsys/manage`);
+      console.log(`[qsys] no measured taper for ${scrub(kind)}; faders on it move linearly in dB, not as the Core's do (${scrub(on)}). See /qsys/manage`);
     }
   }
 
