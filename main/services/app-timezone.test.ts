@@ -11,6 +11,8 @@ import {
   zonedMinuteOfDay,
   zonedParts,
   startOfZonedDay,
+  zonedTimeNear,
+  zonedWallTime,
 } from "./app-timezone.js";
 
 // 18:30 America/Chicago on Sunday 2 Aug 2026 — 23:30 UTC the same day.
@@ -122,5 +124,53 @@ describe("startOfZonedDay", () => {
 
   it("refuses an instant, which would be a whole offset out", () => {
     assert.throws(() => startOfZonedDay("2026-01-15T00:00:00Z", "UTC"), /YYYY-MM-DD/);
+  });
+});
+
+describe("zonedWallTime", () => {
+  const iso = (ms: number) => new Date(ms).toISOString();
+
+  it("reads a wall time on a date in the zone, to the second", () => {
+    assert.equal(iso(zonedWallTime("2026-11-22", 18, 15, 33, "America/Chicago")), "2026-11-23T00:15:33.000Z");
+    assert.equal(iso(zonedWallTime("2026-07-15", 9, 0, 0, "America/Chicago")), "2026-07-15T14:00:00.000Z");
+  });
+
+  it("takes the first of the two readings on a fall-back date", () => {
+    // 1 Nov 2026: 01:30 happens at 06:30Z (CDT) and again at 07:30Z (CST).
+    assert.equal(iso(zonedWallTime("2026-11-01", 1, 30, 0, "America/Chicago")), "2026-11-01T06:30:00.000Z");
+  });
+
+  it("lands just past the skipped hour on a spring-forward date", () => {
+    // 8 Mar 2026: 02:30 never happens in Chicago; the clocks go 01:59 -> 03:00.
+    const t = zonedWallTime("2026-03-08", 2, 30, 0, "America/Chicago");
+    assert.equal(zonedDateKey(t, "America/Chicago"), "2026-03-08");
+    assert.equal(zonedParts(t, "America/Chicago").hour, 3);
+  });
+});
+
+describe("zonedTimeNear", () => {
+  const iso = (ms: number) => new Date(ms).toISOString();
+  // 23:50 Chicago on Sat 21 Nov 2026.
+  const LATE = Date.parse("2026-11-22T05:50:00Z");
+
+  it("puts a time past midnight on the next day when that is nearer", () => {
+    assert.equal(iso(zonedTimeNear(LATE, 0, 10, 0, "America/Chicago")), "2026-11-22T06:10:00.000Z");
+  });
+
+  it("keeps a time before midnight on the anchor's own day", () => {
+    assert.equal(iso(zonedTimeNear(LATE, 23, 40, 0, "America/Chicago")), "2026-11-22T05:40:00.000Z");
+  });
+
+  it("goes back a day when that is nearer", () => {
+    // 00:10 Chicago on the 22nd, corrected to 23:55: the evening before.
+    const justAfter = Date.parse("2026-11-22T06:10:00Z");
+    assert.equal(iso(zonedTimeNear(justAfter, 23, 55, 0, "America/Chicago")), "2026-11-22T05:55:00.000Z");
+  });
+
+  it("answers in the zone it is given, not the one it runs in", () => {
+    // The same anchor and reading in two zones: 19:00 in Chicago is 01:00Z
+    // nearest the anchor; 19:00 in UTC is the previous evening's.
+    assert.equal(iso(zonedTimeNear(LATE, 19, 0, 0, "America/Chicago")), "2026-11-22T01:00:00.000Z");
+    assert.equal(iso(zonedTimeNear(LATE, 19, 0, 0, "UTC")), "2026-11-21T19:00:00.000Z");
   });
 });

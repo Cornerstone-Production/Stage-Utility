@@ -10,7 +10,7 @@ import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useStageState } from "../../main/use-stage-state";
 import { ClockIcon, ChevronRightIcon, DownloadIcon, DropletIcon } from "lucide-react";
 
-import { invoke, onNotification } from "../../lib/api";
+import { invoke, onNotification, type ApiError } from "../../lib/api";
 import { logToServer } from "../../lib/client-log";
 import { useFailedReads } from "../../lib/use-failed-reads";
 import { useServerNow } from "@renderer/lib/server-clock";
@@ -35,6 +35,8 @@ import { TrendsCard } from "./history-trends/trends-card";
 import { useHistoryShown, type RowSpl } from "./history-shown";
 import { trendClock, type TrendClock, type TrendRecording } from "./history-trends/trends";
 import { appZoneOf } from "../../lib/app-zone";
+import { fromZonedTimeInput, toZonedTimeInput } from "../../lib/zoned-time-input";
+import { hostTimeZone, type TimeZone } from "@main/services/app-timezone";
 import {
   summarize,
   fmtDur,
@@ -173,47 +175,9 @@ function dayGroupId(day: string): string {
   return `history-day-${day}`;
 }
 
-/** ISO → local "HH:MM" for a <input type="time">, or "" if absent/invalid. */
-function toTimeInput(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-}
-/** Local "HH:MM" on the record's service date → ISO, or undefined if blank/invalid. */
-function fromTimeInput(serviceDate: string, hhmm: string): string | undefined {
-  if (!hhmm) return undefined;
-  const d = new Date(`${serviceDate}T${hhmm}:00`);
-  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
-}
-
-/** ISO → local "HH:MM:SS", for an item field. Seconds, unlike the service window
- *  above: an item's whole point is its DURATION, and a minute-resolution field
- *  cannot say "two minutes" about something that started at 20:15:33. */
-function toItemTimeInput(iso: string | null): string {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-}
-
-/**
- * Local "HH:MM[:SS]" on the same local DAY as `anchorIso` → ISO.
- *
- * Anchored on the item's OWN recorded stamp rather than the record's
- * serviceDate, so an item that ran after midnight keeps its own date instead of
- * being dragged back to the day the service started on.
- */
-function fromItemTimeInput(anchorIso: string | null, hhmmss: string): string | undefined {
-  if (!hhmmss) return undefined;
-  const anchor = anchorIso ? new Date(anchorIso) : null;
-  if (!anchor || Number.isNaN(anchor.getTime())) return undefined;
-  const [h, m, sec] = hhmmss.split(":");
-  const d = new Date(anchor);
-  d.setHours(Number(h), Number(m), Number(sec ?? 0), 0);
-  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
-}
+/** Half a day, in ms: where an End field's anchor sits after the start, so the
+ *  end resolves to the first reading of that time after the service began. */
+const HALF_DAY_MS = 12 * 3_600_000;
 
 /** A row's identity in the edit-times form. An item can run twice in one record,
  *  so the id alone would stack two rows' fields on top of each other. */
@@ -610,6 +574,11 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   const [editingTimes, setEditingTimes] = useState(false);
   const [editStart, setEditStart] = useState("");
   const [editEnd, setEditEnd] = useState("");
+  /** The zone the open form was filled in, and so the zone it is read back in.
+   *  Pinned when the form opens: stage state landing mid-edit would otherwise
+   *  read an untouched field in a different zone from the one that filled it,
+   *  and an untouched field would count as a change. */
+  const [editZone, setEditZone] = useState<TimeZone>(() => hostTimeZone());
   /** Per-row time fields, keyed by rowKey(), holding ONLY what the operator has
    *  typed. A row with no entry renders from the record, so a save (or another
    *  operator's edit arriving over SSE) drops through without clobbering a row
@@ -1289,22 +1258,59 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       else toast.error("Couldn't copy the report");
     }
     function startEditTimes() {
-      setEditStart(toTimeInput(det.startedAt));
-      setEditEnd(toTimeInput(det.endedAt));
+      // In the APP's zone, the one the server dates the service in. This
+      // browser's own zone put an evening service a day out whenever its
+      // calendar had rolled past the app's, and the stamps it sent back moved
+      // the whole service a day.
+      setEditZone(zone);
+      setEditStart(toZonedTimeInput(det.startedAt, zone));
+      setEditEnd(toZonedTimeInput(det.endedAt, zone));
       setItemTimeDraft({}); // rows render from the record until they are typed in
       setEditingTimes(true);
     }
-    async function saveTimes() {
+    /**
+     * Send only the fields the operator changed.
+     *
+     * A field that still reads what it was filled with is not an edit. Sending it
+     * back anyway is how pressing Save on an untouched form re-windowed a
+     * service, and a re-window can trim recorded data. A blank field means
+     * "leave it", as it always has.
+     *
+     * The start resolves to the day nearest the recorded start; the end to the
+     * first reading of its time after the start, so a service that ran past
+     * midnight ends on the next day.
+     */
+    async function saveTimes(trim = false) {
+      const z = editZone;
+      const recordedStart = Date.parse(det.startedAt);
+      const startedAt = editStart !== toZonedTimeInput(det.startedAt, z)
+        ? fromZonedTimeInput(editStart, recordedStart, z)
+        : undefined;
+      const startMs = startedAt ? Date.parse(startedAt) : recordedStart;
+      const endedAt = editEnd !== toZonedTimeInput(det.endedAt, z)
+        ? fromZonedTimeInput(editEnd, Number.isFinite(startMs) ? startMs + HALF_DAY_MS : Date.parse(det.endedAt ?? ""), z)
+        : undefined;
+      if (!startedAt && !endedAt) {
+        setEditingTimes(false);
+        return;
+      }
       try {
-        await invoke("history:editWindow", {
-          serviceKey: det.serviceKey,
-          startedAt: fromTimeInput(det.serviceDate, editStart),
-          endedAt: fromTimeInput(det.serviceDate, editEnd),
-        });
+        await invoke("history:editWindow", { serviceKey: det.serviceKey, startedAt, endedAt, ...(trim ? { trim } : {}) });
         setEditingTimes(false);
         setReloadKey((k) => k + 1);
         toast.success("Service times updated");
       } catch (e) {
+        // A window that would delete recorded data is refused until the operator
+        // says it is meant. The refusal names what would go.
+        if ((e as ApiError).code === "trims-data" && !trim) {
+          if (await confirm({
+            title: "Delete what falls outside?",
+            message: errorMessage(e),
+            confirmLabel: "Trim",
+            destructive: true,
+          })) await saveTimes(true);
+          return;
+        }
         toast.error(`Couldn't update times: ${errorMessage(e)}`);
       }
     }
@@ -1392,9 +1398,16 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
         toast.error(`Merge failed: ${errorMessage(e)}`);
       }
     }
+    /** An item stamp as its field shows it: seconds, unlike the service window
+     *  above, because an item's whole point is its DURATION and a
+     *  minute-resolution field cannot say "two minutes" about something that
+     *  started at 20:15:33. In the form's pinned zone, like the window's. A
+     *  typed time resolves to the day nearest the stamp it corrects, so an item
+     *  that ran after midnight keeps its own date. */
+    const itemTimeInput = (iso: string | null) => toZonedTimeInput(iso, editZone, { seconds: true });
     /** The values a row's two fields show: what has been typed, else the record. */
     function draftFor(it: ServiceTimelineItem): { start: string; end: string } {
-      return itemTimeDraft[rowKey(it)] ?? { start: toItemTimeInput(it.startedAt), end: toItemTimeInput(it.endedAt) };
+      return itemTimeDraft[rowKey(it)] ?? { start: itemTimeInput(it.startedAt), end: itemTimeInput(it.endedAt) };
     }
     function setDraft(it: ServiceTimelineItem, patch: Partial<{ start: string; end: string }>) {
       const key = rowKey(it);
@@ -1403,7 +1416,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     function itemTimesDirty(it: ServiceTimelineItem): boolean {
       const d = itemTimeDraft[rowKey(it)];
       if (!d) return false;
-      return d.start !== toItemTimeInput(it.startedAt) || d.end !== toItemTimeInput(it.endedAt);
+      return d.start !== itemTimeInput(it.startedAt) || d.end !== itemTimeInput(it.endedAt);
     }
 
     /**
@@ -1443,8 +1456,8 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
        */
       const field = (typed: string, recorded: string | null) => {
         if (!typed) return null;
-        if (recorded != null && typed === toItemTimeInput(recorded)) return null;
-        return fromItemTimeInput(recorded ?? it.startedAt, typed) ?? null;
+        if (recorded != null && typed === itemTimeInput(recorded)) return null;
+        return fromZonedTimeInput(typed, Date.parse(recorded ?? it.startedAt), editZone) ?? null;
       };
       const startedAt = field(d.start, wasStart);
       const endedAt = field(d.end, wasEnd);
@@ -1597,11 +1610,17 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               End
               <input type="time" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} className="rounded-md border border-line-strong bg-field px-2 py-1 font-mono tabular-nums text-caption1 text-fg" />
             </label>
-            <Button variant="accent" size="small" onClick={saveTimes}>Save</Button>
+            {/* Said only when it differs: the rundown's read-only times are still
+                in this browser's zone, and two columns of times an hour or a
+                day apart with nothing to say why reads as a fault. */}
+            {editZone !== hostTimeZone() && (
+              <span className="self-center text-caption2 text-fg-muted">Times in {editZone}</span>
+            )}
+            <Button variant="accent" size="small" onClick={() => void saveTimes()}>Save</Button>
             <Button variant="transparent" size="small" onClick={() => setEditingTimes(false)}>Cancel</Button>
             <Button variant="transparent" size="small" onClick={recalc} tooltip="Re-derive peak/min from samples without changing the window">Recalculate</Button>
             <span className="text-caption2 text-fg-muted flex-1 min-w-[14rem]">
-              Trims attendance samples + SPL/timing items outside the window and recomputes peak, min, and durations. Applies to all three records for this service. Each item's own Started and Ended are editable in the table below — save a row to correct it, Reset to put the recorded times back; neighbouring items do not move. <strong className="font-medium text-fg">Rebuild from raw</strong>, in the header above, goes further: it discards the stored timing/sound/attendance summaries and derives them again from the archived rows, keeping your item corrections — and merges this service's baptism sessions in from their own raw rows, updating or adding but never deleting.
+              Trims attendance samples + SPL/timing items outside the window and recomputes peak, min, and durations — asking first when that would delete any. Applies to all three records for this service. Each item's own Started and Ended are editable in the table below — save a row to correct it, Reset to put the recorded times back; neighbouring items do not move. <strong className="font-medium text-fg">Rebuild from raw</strong>, in the header above, goes further: it discards the stored timing/sound/attendance summaries and derives them again from the archived rows, keeping your item corrections — and merges this service's baptism sessions in from their own raw rows, updating or adding but never deleting.
             </span>
           </div>
         )}
