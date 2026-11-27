@@ -11,7 +11,7 @@
 // identifier shape before it is repeated.
 
 import { readCapped } from "../capped-download.js";
-import { isRecord } from "../is-record.js";
+import { isRecord } from "../../types/is-record.js";
 import { scrub } from "../scrub.js";
 
 /**

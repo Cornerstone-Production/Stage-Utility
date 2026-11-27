@@ -12,7 +12,7 @@ import { isPcoId } from "../pco-path.js";
 import { isPcoPersonId } from "../pco-person-id.js";
 import { isAllowedPhotoUrl } from "../photo-cache.js";
 import { zonedDateKey } from "../app-timezone.js";
-import { isRecord } from "../is-record.js";
+import { isRecord } from "../../types/is-record.js";
 import {
   MAX_THEME_NAME,
   MAX_THEME_PROMPT,

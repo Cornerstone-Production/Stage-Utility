@@ -28,7 +28,7 @@
 import { screensListViews } from "./home-view.js";
 import { refuse } from "./restore-check.js";
 import { viewShownInSidebar, viewSurface, type View } from "../types/views.js";
-import { isRecord } from "./is-record.js";
+import { isRecord } from "../types/is-record.js";
 
 export type SidebarSectionKind = "top" | "consoles" | "pages";
 

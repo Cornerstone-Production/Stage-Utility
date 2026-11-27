@@ -65,13 +65,14 @@ describe("the console rail's icon", () => {
     assert.doesNotMatch(ICON, /color:\s*(DEFAULT_TINT|"var\()/, "a fallback colour here overrides the row");
   });
 
-  test("opens on the GLYPH, and the row's own menu never opens over it", () => {
+  test("rail.tsx wires every menu through useContextMenuTrigger, one handler each", () => {
     // The icon menu is the glyph's. A right-click anywhere else on the row opens
     // the ROW's menu (Hide, Move to, Customize sidebar…), which customizing the
     // sidebar added; before that, the row had no menu and this guard said so.
-    // What must hold now is that the two never both open: the glyph stops its
-    // right-click before it reaches the row.
-    assert.match(ICON, /onContextMenu=\{\(e\) => \{\s*e\.stopPropagation\(\);\s*trigger\.onContextMenu\(e\);/);
+    // What must hold now is that the two never both open. That is behaviour, not
+    // source text, and is guarded in app/sidebar-rail.test.tsx ("a right-click on
+    // a console's glyph opens its icon menu and not the row's"). What is read off
+    // the source here is only how rail.tsx wires its own menus.
     assert.match(
       RAIL,
       /import\s*\{[^}]*\buseContextMenuTrigger\b[^}]*\}\s*from\s*["']\.\.\/components\/ui\/context-menu-trigger["']/,

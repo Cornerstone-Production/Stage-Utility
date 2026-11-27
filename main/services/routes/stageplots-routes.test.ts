@@ -87,6 +87,20 @@ async function plot(venueId: string, name = "Standard", backgroundId?: string) {
   return r.json as { id: string };
 }
 
+/** A published venue's secret, as the store holds it: no answer a browser gets carries it, but GET …/link. */
+async function storedSecret(id: string): Promise<string> {
+  const secret = (await stageplotsStore.get()).venues.find((v) => v.id === id)?.publish?.secret;
+  assert.ok(secret, `venue ${id} is not published`);
+  return secret;
+}
+
+/** Publish a venue through its route, and answer the secret it was published under. */
+async function publishVenue(id: string): Promise<string> {
+  const r = await call("POST", `/api/stageplots/venues/${id}/publish`);
+  assert.equal(r.status, 200, r.body);
+  return storedSecret(id);
+}
+
 async function filesIn(dir: string): Promise<string[]> {
   return fs.readdir(path.join(TMP, dir)).catch(() => []);
 }
@@ -1278,10 +1292,51 @@ describe("publishing: POST /api/stageplots/venues/:id/publish and the rest", () 
   };
   const landingOn = (page: { hub: { landing: string | null } }) => (page.hub.landing === null ? null : (JSON.parse(page.hub.landing) as { venues: { name: string; secret: string; plots: number }[] }));
 
+  test("no secret is in GET /api/stageplots, a stageplots:updated frame or any answer: GET …/link alone carries it", async () => {
+    const { parsePublishUrl } = await import("../servicecue-publish-rules.js");
+    await withPage(async (page) => {
+      const origin = parsePublishUrl(page.origin);
+      assert.ok(origin.ok);
+      const id = await venueWithPlot();
+      const plotId = (await stageplotsStore.get()).venues.find((v) => v.id === id)!.plotIds[0]!;
+      await settled();
+      frames.length = 0;
+      const answers: [string, unknown][] = [];
+      const answer = async (method: string, p: string, body?: unknown) => {
+        const r = await call(method, p, body);
+        assert.equal(r.status, 200, `${method} ${p}: ${r.body}`);
+        answers.push([`${method} ${p}`, r.json]);
+      };
+      await answer("POST", `/api/stageplots/venues/${id}/publish`);
+      const secret = await storedSecret(id);
+      assert.match(secret, /^[A-Za-z0-9_-]{43}$/, "the store holds no secret to look for");
+      // Both ways a frame is made: the publisher's own writes, and a route's save.
+      const fromPublisher = frames.length;
+      assert.ok(fromPublisher > 0, "the publisher's own save broadcast nothing");
+      await answer("PATCH", `/api/stageplots/venues/${id}`, { notes: "Side door" });
+      assert.ok(frames.length > fromPublisher, "the route's save broadcast nothing");
+      await answer("POST", `/api/stageplots/venues/${id}/default`, { plotId });
+      await answer("POST", `/api/stageplots/venues/${id}/listed`, { listed: true });
+      await answer("POST", `/api/stageplots/venues/${id}/publish-now`);
+      await settled();
+      const get = await call("GET", "/api/stageplots");
+      assert.equal((get.json as View).venues[0]?.publish?.origin, origin.origin, "the venue is not shown as published at all");
+      const seen: [string, unknown][] = [["GET /api/stageplots", get.json], ...frames.map((f, i): [string, unknown] => [`stageplots:updated frame ${i + 1} of ${frames.length}`, f]), ...answers];
+      for (const [what, body] of seen) assert.equal(JSON.stringify(body).includes(secret), false, `${what} carries the secret`);
+      // The manage page's own read.
+      const link = await call("GET", `/api/stageplots/venues/${id}/link`);
+      assert.deepEqual(link.json, { url: `${origin.origin}/stageplots/${secret}` });
+      assert.equal(link.headers["Cache-Control"], "no-store", "the link may be cached, and outlive a regenerate");
+      await answer("POST", `/api/stageplots/venues/${id}/unpublish`);
+      assert.deepEqual((await call("GET", `/api/stageplots/venues/${id}/link`)).json, { url: null });
+      assert.equal((await call("GET", "/api/stageplots/venues/v-000000000000/link")).status, 404);
+    });
+  });
+
   test("a listed venue is on its page's landing list, names and links only, and the list follows every change to it", async () => {
     await withPage(async (page) => {
       const id = await venueWithPlot();
-      const secret = ((await call("POST", `/api/stageplots/venues/${id}/publish`)).json as { publish: { secret: string } }).publish.secret;
+      const secret = await publishVenue(id);
       await settled();
       assert.deepEqual(landingOn(page)?.venues ?? [], [], "a venue was listed before it was asked");
       let r = await call("POST", `/api/stageplots/venues/${id}/listed`, { listed: true });
@@ -1296,10 +1351,9 @@ describe("publishing: POST /api/stageplots/venues/:id/publish and the rest", () 
       // A regenerate lists the new link, still listed.
       r = await call("POST", `/api/stageplots/venues/${id}/regenerate`);
       assert.equal(r.status, 200, r.body);
-      const fresh = (r.json as { publish: { secret: string; listed: boolean } }).publish;
-      assert.equal(fresh.listed, true, "the regenerate dropped the listing");
+      assert.equal((r.json as { publish: { listed: boolean } }).publish.listed, true, "the regenerate dropped the listing");
       await settled();
-      assert.deepEqual(landingOn(page), { venues: [{ name: "Main Auditorium", secret: fresh.secret, plots: 2 }] });
+      assert.deepEqual(landingOn(page), { venues: [{ name: "Main Auditorium", secret: await storedSecret(id), plots: 2 }] });
       // Unpublished: off the list.
       await call("POST", `/api/stageplots/venues/${id}/unpublish`);
       await settled();
@@ -1416,9 +1470,9 @@ describe("publishing: POST /api/stageplots/venues/:id/publish and the rest", () 
 
       const r = await call("POST", `/api/stageplots/venues/${id}/publish`);
       assert.equal(r.status, 200, JSON.stringify(r.json));
-      const secret = (r.json as { publish: { secret: string } }).publish.secret;
+      const secret = await storedSecret(id);
       assert.deepEqual(page.hub.stagePlotKeys(secret).sort().map((k) => k.split("/")[0]), ["index", "plot"]);
-      assert.equal((frames.at(-1) as View).venues[0]!.publish?.secret, secret, "the published venue was not broadcast");
+      assert.equal((frames.at(-1) as View).venues[0]!.publish?.origin, parsed.origin, "the published venue was not broadcast");
       assert.equal((await call("POST", `/api/stageplots/venues/${id}/publish`)).status, 409, "published twice");
 
       // A saved change reaches the page through the app's own broadcaster and the publisher's
@@ -1441,8 +1495,7 @@ describe("publishing: POST /api/stageplots/venues/:id/publish and the rest", () 
       assert.equal(page.hub.stagePlotKeys(secret).length, 0);
 
       // Published again, then deleted: the link goes with it.
-      const again = await call("POST", `/api/stageplots/venues/${id}/publish`);
-      const second = (again.json as { publish: { secret: string } }).publish.secret;
+      const second = await publishVenue(id);
       const del = await call("DELETE", `/api/stageplots/venues/${id}`);
       assert.deepEqual([del.status, del.json], [200, { ok: true }]);
       assert.equal(page.hub.stagePlotKeys(second).length, 0, "the deleted venue's link is still live");
@@ -1465,7 +1518,7 @@ describe("publishing: POST /api/stageplots/venues/:id/publish and the rest", () 
       await servicecuePublishStore.save({ enabled: false, url: parsed.origin });
       await savePublishToken(parsed.origin, TOKEN);
       const id = await venueWithPlot();
-      const secret = ((await call("POST", `/api/stageplots/venues/${id}/publish`)).json as { publish: { secret: string } }).publish.secret;
+      const secret = await publishVenue(id);
       await forgetPublishToken();
       const del = await call("DELETE", `/api/stageplots/venues/${id}`);
       assert.equal(del.status, 200);
@@ -1570,7 +1623,7 @@ describe("the page address changing under published venues", () => {
     await savePublishToken(pa.origin, TOKEN);
     const v = (await call("POST", "/api/stageplots/venues", { name: "Main room", kind: "home" })).json as { id: string };
     await call("POST", "/api/stageplots/plots", { venueId: v.id, name: "Standard" });
-    const first = ((await call("POST", `/api/stageplots/venues/${v.id}/publish`)).json as { publish: { secret: string } }).publish.secret;
+    const first = await publishVenue(v.id);
     // The Public link card's save, through its own route, then everything it set off.
     const save = async (body: { url?: string; token?: string }) => {
       const r = await callRoute(serviceCuePublishRoutes, "/api/servicecue/publish", { method: "POST", body });

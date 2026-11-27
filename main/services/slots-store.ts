@@ -52,7 +52,7 @@ import { scrub } from "./scrub.js";
 import { DataStore } from "./data-store.js";
 import { announceSlotsSaved } from "./boards-changed.js";
 import { assertSafeKey, isSafeKey } from "./safe-key.js";
-import { isRecord } from "./is-record.js";
+import { isRecord } from "../types/is-record.js";
 import { asArray, asObject, checked, refuse, required } from "./restore-check.js";
 
 /** v2 -> v3: a single `teamPositionName` + `notesStartsWith` becomes a `positions`

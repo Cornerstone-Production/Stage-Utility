@@ -1,7 +1,7 @@
 // doc-helpers.ts — reading the stage plots document, shared by /stageplots and
 // its editor.
 
-import type { BackgroundView, Plot, StagePlotsView, Venue } from "@main/types/stageplots";
+import type { BackgroundView, Plot, StagePlotsView, VenueView } from "@main/types/stageplots";
 
 import { cn } from "../../lib/cn";
 
@@ -24,7 +24,7 @@ export function tabClass(selected: boolean): string {
  * else its first.
  */
 export function selectedPlot(
-  venue: Venue | null,
+  venue: VenueView | null,
   plots: readonly Plot[],
   pick: { venueId: string; plotId: string } | null,
   preferId: string | null = null,
@@ -40,7 +40,7 @@ export function selectedPlot(
 }
 
 /** Home venues first, then offsite, each in the order they were added. */
-export function venueGroups(venues: readonly Venue[]): { label: string; venues: Venue[] }[] {
+export function venueGroups(venues: readonly VenueView[]): { label: string; venues: VenueView[] }[] {
   return [
     { label: "Home", venues: venues.filter((v) => v.kind === "home") },
     { label: "Offsite", venues: venues.filter((v) => v.kind === "offsite") },
@@ -48,7 +48,7 @@ export function venueGroups(venues: readonly Venue[]): { label: string; venues: 
 }
 
 /** A venue's plots, in its tab order. */
-export function plotsOf(doc: StagePlotsView, venue: Venue): Plot[] {
+export function plotsOf(doc: StagePlotsView, venue: VenueView): Plot[] {
   const byId = new Map(doc.plots.map((p) => [p.id, p]));
   return venue.plotIds.map((id) => byId.get(id)).filter((p): p is Plot => p !== undefined);
 }
@@ -58,7 +58,7 @@ export function backgroundOf(doc: StagePlotsView, plot: Plot | null | undefined)
 }
 
 /** The segment a venue's own address ends in: its address by name, or its id until it has one. */
-export function venueSegment(venue: Venue): string {
+export function venueSegment(venue: VenueView): string {
   return venue.slug ?? venue.id;
 }
 
@@ -68,12 +68,12 @@ export const STAGEPLOTS_SHARED_PATH = "/stageplots";
 export const STAGEPLOTS_MANAGE_PATH = "/stageplots/manage";
 
 /** A venue's own address: under /stageplots (the crew's, chromeless) unless `base` is the app's /stageplots/manage. */
-export function venuePath(venue: Venue, base: string = STAGEPLOTS_SHARED_PATH): string {
+export function venuePath(venue: VenueView, base: string = STAGEPLOTS_SHARED_PATH): string {
   return `${base}/${encodeURIComponent(venueSegment(venue))}`;
 }
 
 /** The venue `/stageplots/<segment>` opens: the one whose id, address or old address it is. */
-export function venueAt(venues: readonly Venue[], segment: string): Venue | null {
+export function venueAt(venues: readonly VenueView[], segment: string): VenueView | null {
   return venues.find((v) => v.id === segment) ?? venues.find((v) => v.slug === segment || v.oldSlugs.includes(segment)) ?? null;
 }
 

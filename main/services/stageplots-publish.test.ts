@@ -86,6 +86,8 @@ interface Harness {
   /** Change the document as a route would, and broadcast it. */
   edit: (fn: (doc: StagePlotsDoc) => StagePlotsDoc) => Promise<void>;
   venue: () => Promise<Venue>;
+  /** Stop the publisher and start another on the same store, page and seams: a restart. */
+  restart: () => Promise<void>;
 }
 
 let open: Harness | null = null;
@@ -127,6 +129,9 @@ async function harness(
     client?: (t: { origin: string; token: string }) => unknown;
     patchRetry?: { firstMs: number; maxMs: number };
     landingRetry?: { firstMs: number; maxMs: number };
+    republishRetry?: { firstMs: number; maxMs: number };
+    /** Hand every write of the publisher's back to it as a stageplots:updated, as the app's broadcaster does. */
+    echo?: boolean;
   } = {},
 ): Promise<Harness> {
   const page = await startPage();
@@ -141,7 +146,7 @@ async function harness(
   let listener: (channel: string) => void = () => undefined;
   let targetCalls = 0;
   const target = (opts.target as () => Promise<never>) ?? (async () => ({ ok: true, origin: parsed.origin, token: TOKEN }));
-  const publisher = new StagePlotsPublisher({
+  const deps: ConstructorParameters<typeof StagePlotsPublisher>[0] = {
     target: () => {
       targetCalls++;
       return target();
@@ -154,13 +159,18 @@ async function harness(
       return structuredClone(patch.file);
     },
     timeZone: () => "America/Chicago",
-    onSaved: (d) => saved.push(d),
+    onSaved: (d) => {
+      saved.push(d);
+      if (opts.echo) listener("stageplots:updated");
+    },
     listen: (cb) => (listener = cb),
     debounceMs: 30,
     ...(opts.client ? { client: opts.client as never } : {}),
     ...(opts.patchRetry ? { patchRetry: opts.patchRetry } : {}),
     ...(opts.landingRetry ? { landingRetry: opts.landingRetry } : {}),
-  });
+    ...(opts.republishRetry ? { republishRetry: opts.republishRetry } : {}),
+  };
+  const publisher = new StagePlotsPublisher(deps);
   publisher.start();
   const h: Harness = {
     page,
@@ -176,6 +186,11 @@ async function harness(
       listener("stageplots:updated");
     },
     venue: async () => (await stageplotsStore.get()).venues.find((v) => v.id === "v-1")!,
+    restart: async () => {
+      await h.publisher.stop();
+      h.publisher = new StagePlotsPublisher(deps);
+      h.publisher.start();
+    },
   };
   open = h;
   return h;
@@ -240,6 +255,36 @@ describe("the landing list", () => {
       for (const m of q) m.mock.restore();
     }
   };
+
+  test("a burst of changes while the page is down is one send at a time and one more after it, not one each", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    await quietly(() => h.publisher.setListed("v-1", true));
+    await h.publisher.settle();
+    // The page fails every list; the first send is held out until the whole burst is saved.
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    let first = true;
+    h.page.respond = async (req) => {
+      if (req.path !== LANDING) return h.page.worker(req);
+      if (first) {
+        first = false;
+        await held;
+      }
+      return { status: 500, body: "" };
+    };
+    const mark = h.page.requests.length;
+    const sendsNow = () => h.page.requests.slice(mark).filter((r) => r.path === LANDING).length;
+    await quietly(async () => {
+      // Six renames: each a different list, all saved while the first send is out.
+      for (let i = 0; i < 6; i++) await h.edit((d) => ({ ...d, venues: d.venues.map((v) => ({ ...v, name: `Main room ${i}` })) }));
+      await waitFor(() => sendsNow() === 1, "the first send to go out");
+      release();
+      await h.publisher.settle();
+    });
+    assert.equal(sendsNow(), 2, `${sendsNow()} landing sends for one burst of changes`);
+    h.page.respond = (req) => h.page.worker(req);
+  });
 
   test("a send whose answer was lost goes again, even when the list is back to what the page was sent before it", async () => {
     const h = await harness();
@@ -788,6 +833,284 @@ describe("republishing on a change", () => {
   });
 });
 
+describe("a republish the page did not take", () => {
+  const rename = (h: Harness, name: string) => h.edit((d) => ({ ...d, plots: d.plots.map((p) => (p.id === "p-0" ? { ...p, name, version: p.version + 1 } : p)) }));
+  const plotName = async (h: Harness) => (JSON.parse((await visit(h.page, (await h.venue()).publish!.secret, "plot/p-0")).body) as PublishedPlot).name;
+  /** The page answers every StagePlots request 503 while `down` is true. */
+  const flaky = (h: Harness) => {
+    const state = { down: false };
+    h.page.respond = (req) => (state.down && SP.test(req.path) ? { status: 503, body: "" } : h.page.worker(req));
+    return state;
+  };
+  const quietly = async <T,>(run: () => Promise<T>): Promise<T> => {
+    const q = [mock.method(console, "warn", () => undefined), mock.method(console, "log", () => undefined)];
+    try {
+      return await run();
+    } finally {
+      for (const m of q) m.mock.restore();
+    }
+  };
+
+  test("is sent again on the next change, though nothing of this venue changed since", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    await h.publisher.settle();
+    const page = flaky(h);
+    page.down = true;
+    await quietly(async () => {
+      await rename(h, "Renamed");
+      await h.publisher.settle();
+    });
+    assert.ok((await h.venue()).publish!.lastError, "the failure is not on the card");
+    page.down = false;
+    // The next change, to nothing this venue shows: a patch save no point links.
+    await quietly(async () => {
+      h.hear("patch:updated");
+      await h.publisher.settle();
+    });
+    assert.equal(await plotName(h), "Renamed", "the change the page did not take was never sent again");
+    assert.equal((await h.venue()).publish!.lastError, null, "the card still shows the failure");
+  });
+
+  test("while the page stays down it is tried once per wait, never in a loop through its own last error, and goes once the page is back", async () => {
+    const h = await harness(venueDoc(), { echo: true, republishRetry: { firstMs: 400, maxMs: 400 } });
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    await h.publisher.settle();
+    const page = flaky(h);
+    page.down = true;
+    const mark = h.page.requests.length;
+    const tries = () => spRequests({ ...h.page, requests: h.page.requests.slice(mark) } as Receiver).filter((q) => q.method === "PUT" && q.key === "plot/p-0").length;
+    await quietly(async () => {
+      await rename(h, "Renamed");
+      await waitFor(() => tries() === 1, "the first try");
+      const saves = h.saved.length;
+      // Inside the wait: its own last error, broadcast back to it, sets off nothing.
+      await new Promise((r) => setTimeout(r, 250));
+      assert.equal(tries(), 1, "the page was tried again before the wait, through the publisher's own write");
+      assert.ok(h.saved.length <= saves + 1, "the publisher kept writing while the page was down");
+      // After the wait: tried again, once.
+      await waitFor(() => tries() === 2, "the try after the wait");
+      page.down = false;
+      await waitFor(() => tries() === 3, "the try once the page is back");
+      await h.publisher.settle();
+    });
+    assert.equal(await plotName(h), "Renamed");
+    assert.equal((await h.venue()).publish!.lastError, null);
+    // Gone: nothing more is tried.
+    const after = h.page.requests.length;
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(h.page.requests.length, after, "the page was tried again after it took the send");
+  });
+
+  test("a Public link saved for the same page (its token fixed) sends what the page did not take", async () => {
+    let token = "w".repeat(40);
+    const h = await harness();
+    const o = parsePublishUrl(h.page.origin);
+    assert.ok(o.ok);
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    await h.publisher.settle();
+    (h.publisher as unknown as { deps: { target: () => Promise<unknown> } }).deps.target = async () => ({ ok: true, origin: o.origin, token });
+    token = "x".repeat(40);
+    await quietly(async () => {
+      await rename(h, "Renamed");
+      await h.publisher.settle();
+    });
+    assert.match((await h.venue()).publish!.lastError?.message ?? "", /./, "a wrong token did not fail the send");
+    const wrong = token;
+    token = TOKEN;
+    await quietly(async () => {
+      await h.publisher.pageSaved({ origin: o.origin, token: wrong }, o.origin);
+      await h.publisher.settle();
+    });
+    assert.equal(await plotName(h), "Renamed", "the token fixed sent nothing");
+    assert.equal((await h.venue()).publish!.lastError, null);
+  });
+
+  test("a Public link set up again after it was cleared (no page before the save) sends what waited", async () => {
+    const h = await harness();
+    const o = parsePublishUrl(h.page.origin);
+    assert.ok(o.ok);
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    await h.publisher.settle();
+    const deps = (h.publisher as unknown as { deps: { target: () => Promise<unknown> } }).deps;
+    deps.target = async () => ({ ok: false, message: "Set up the public link first." });
+    await quietly(async () => {
+      await rename(h, "Renamed");
+      await h.publisher.settle();
+    });
+    assert.equal((await h.venue()).publish!.lastError?.message, "Set up the public link first.");
+    deps.target = async () => ({ ok: true, origin: o.origin, token: TOKEN });
+    await quietly(async () => {
+      await h.publisher.pageSaved(null, o.origin);
+      await h.publisher.settle();
+    });
+    assert.equal(await plotName(h), "Renamed");
+    assert.equal((await h.venue()).publish!.lastError, null);
+  });
+
+  test("a restart sends every published venue again, a change saved in the wait before it included", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    await h.publisher.settle();
+    // Saved, and the server stops inside the wait, before the change is sent.
+    await rename(h, "Renamed");
+    await h.restart();
+    await quietly(() => h.publisher.settle());
+    assert.equal(await plotName(h), "Renamed", "the change saved before the restart never reached the page");
+  });
+
+  test("a restart sends a venue the page did not take before it", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    await h.publisher.settle();
+    const page = flaky(h);
+    page.down = true;
+    await quietly(async () => {
+      await rename(h, "Renamed");
+      await h.publisher.settle();
+    });
+    page.down = false;
+    await h.restart();
+    await quietly(() => h.publisher.settle());
+    assert.equal(await plotName(h), "Renamed");
+    assert.equal((await h.venue()).publish!.lastError, null);
+  });
+});
+
+describe("a republish around a missing page, a restore and a start", () => {
+  const rename = (h: Harness, name: string) => h.edit((d) => ({ ...d, plots: d.plots.map((p) => (p.id === "p-0" ? { ...p, name, version: p.version + 1 } : p)) }));
+  const quietly = async <T,>(run: () => Promise<T>): Promise<T> => {
+    const q = [mock.method(console, "warn", () => undefined), mock.method(console, "log", () => undefined)];
+    try {
+      return await run();
+    } finally {
+      for (const m of q) m.mock.restore();
+    }
+  };
+  const targetOf = (h: Harness) => (h.publisher as unknown as { deps: { target: () => Promise<unknown> } }).deps;
+
+  test("a change made with no page set up, then undone, leaves no stale error once the page is set up again", async () => {
+    const h = await harness();
+    const o = parsePublishUrl(h.page.origin);
+    assert.ok(o.ok);
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    await h.publisher.settle();
+    targetOf(h).target = async () => ({ ok: false, message: "Set up the public link first." });
+    await quietly(async () => {
+      await rename(h, "Renamed");
+      await h.publisher.settle();
+      await rename(h, "Plot 0");
+      await h.publisher.settle();
+    });
+    assert.ok((await h.venue()).publish!.lastError, "no error was left to clear, so this tests nothing");
+    targetOf(h).target = async () => ({ ok: true, origin: o.origin, token: TOKEN });
+    await quietly(async () => {
+      await h.publisher.pageSaved(null, o.origin);
+      await h.publisher.settle();
+    });
+    assert.equal((await h.venue()).publish!.lastError, null, "stale error stays after the page is set up again");
+  });
+
+  test("a restore that gives way sends what the page did not take while it held", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    await h.publisher.settle();
+    let down = true;
+    h.page.respond = (req) => (down && SP.test(req.path) ? { status: 503, body: "" } : h.page.worker(req));
+    await quietly(async () => {
+      await rename(h, "Renamed");
+      await h.publisher.settle();
+    });
+    const resume = await h.publisher.pause();
+    down = false;
+    await quietly(async () => {
+      resume();
+      await h.publisher.settle();
+    });
+    const secret = (await h.venue()).publish!.secret;
+    assert.equal((JSON.parse((await visit(h.page, secret, "plot/p-0")).body) as PublishedPlot).name, "Renamed", "the change waited for the next change or the retry a minute on");
+  });
+
+  test("a venue no longer published leaves the failing count, so the next failure waits the first wait again", async () => {
+    const doc = venueDoc(1, 0);
+    doc.venues.push({ id: "v-2", name: "Chapel", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: ["p-9"], defaultPlotId: "p-9" });
+    doc.plots.push({ id: "p-9", venueId: "v-2", name: "Chapel plot", backgroundId: null, bgFade: 0, items: [], version: 1 });
+    const h = await harness(doc, { republishRetry: { firstMs: 1000, maxMs: 8000 } });
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    assert.ok((await h.publisher.publish("v-2")).ok);
+    await h.publisher.settle();
+    h.page.respond = (req) => (SP.test(req.path) && req.method === "PUT" ? { status: 503, body: "" } : h.page.worker(req));
+    const lines: string[] = [];
+    const spies = (["log", "warn"] as const).map((level) => mock.method(console, level, (...a: unknown[]) => void lines.push(a.map(String).join(" "))));
+    try {
+      await rename(h, "Renamed");
+      await h.publisher.settle();
+      // A restore takes v-1's link away, queuing it for removal as a restore over it does, and the retry comes due.
+      const gone = (await h.venue()).publish!;
+      await stageplotsStore.update((d) => ({
+        ...d,
+        venues: d.venues.map((v) => (v.id === "v-1" ? { ...v, publish: undefined } : v)),
+        pendingRemovals: [...d.pendingRemovals, { secret: gone.secret, origin: gone.origin, since: "2026-11-13T10:00:00.000Z", reason: "restored over" }],
+      }));
+      await new Promise((r) => setTimeout(r, 1100));
+      await h.publisher.settle();
+      await h.edit((d) => ({ ...d, plots: d.plots.map((p) => (p.id === "p-9" ? { ...p, name: "Chapel renamed", version: p.version + 1 } : p)) }));
+      await h.publisher.settle();
+    } finally {
+      for (const sp of spies) sp.mock.restore();
+    }
+    const retries = lines.filter((l) => l.includes("the page did not take"));
+    assert.deepEqual(
+      retries.map((l) => l.replace(/^.*\] /, "")),
+      ["1 published venue the page did not take is sent again in 1 s, and on every change before that", "1 published venue the page did not take is sent again in 1 s, and on every change before that"],
+    );
+  });
+
+  test("a start with no page set up says nothing and leaves no error on a venue that did not change", async () => {
+    const doc = venueDoc(1, 0);
+    const o = { origin: "https://page.example" };
+    doc.venues[0]!.publish = { secret: `${"Q".repeat(42)}E`, origin: o.origin, publishedAt: "2026-11-13T10:00:00.000Z", lastError: null, publishedImages: [], unpublishedImages: [], listed: false };
+    const lines: string[] = [];
+    const spies = (["log", "warn", "error"] as const).map((level) => mock.method(console, level, (...a: unknown[]) => void lines.push(a.map(String).join(" "))));
+    let h: Harness;
+    try {
+      h = await harness(doc, { target: async () => ({ ok: false, message: "Set up the public link first." }) });
+      await h.publisher.settle();
+      await new Promise((r) => setTimeout(r, 50));
+      await h.publisher.settle();
+    } finally {
+      for (const sp of spies) sp.mock.restore();
+    }
+    assert.ok(h.targetCalls() > 0, "the start never looked for a page, so this tests nothing");
+    assert.deepEqual(lines.filter((l) => l.includes("could not be republished")), []);
+    assert.equal((await h.venue()).publish!.lastError, null);
+    await stageplotsStore.update((d) => ({ ...d, venues: d.venues.map((v) => ({ ...v, publish: undefined })) }));
+  });
+});
+
+describe("when the link was made (linkAt)", () => {
+  test("is set by a publish and a regenerate, kept by every republish, and read as publishedAt from a state saved before it", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    await h.publisher.settle();
+    const first = (await h.venue()).publish!;
+    assert.equal(first.linkAt, first.publishedAt);
+    await new Promise((r) => setTimeout(r, 5));
+    await h.edit((d) => ({ ...d, plots: d.plots.map((p) => (p.id === "p-0" ? { ...p, name: "Renamed", version: p.version + 1 } : p)) }));
+    await h.publisher.settle();
+    const republished = (await h.venue()).publish!;
+    assert.notEqual(republished.publishedAt, first.publishedAt, "nothing was republished, so this tests nothing");
+    assert.equal(republished.linkAt, first.linkAt, "a republish moved linkAt, so every open Publish card reads the link again");
+    await new Promise((r) => setTimeout(r, 5));
+    assert.ok((await h.publisher.regenerate("v-1")).ok);
+    assert.notEqual((await h.venue()).publish!.linkAt, first.linkAt, "a regenerate kept the old link's time");
+    const { linkAt: _linkAt, ...older } = (await h.venue()).publish!;
+    const doc = await stageplotsStore.get();
+    const read = checkStagePlotsDoc({ ...doc, venues: doc.venues.map((v) => ({ ...v, publish: older })) });
+    assert.equal(read.venues[0]!.publish!.linkAt, older.publishedAt);
+  });
+});
+
 describe("what goes wrong in the background", () => {
   test("a republish that throws (settings unreadable) is logged on [stageplots] and never escapes as an unhandled rejection", async () => {
     let throwNow = false;
@@ -842,6 +1165,18 @@ describe("taking back what went up", () => {
       const m = SP.exec(req.path);
       return m && m[1] !== keep && m[2] === "index" && req.method === "PUT" ? { status: 500, body: "" } : h.page.worker(req);
     });
+
+  test("a 404 after the page took the backgrounds is no Worker from before StagePlots: what went up is taken back", async () => {
+    const h = await harness(venueDoc(2, 2));
+    h.page.respond = (req) => {
+      const m = SP.exec(req.path);
+      return m && req.method === "PUT" && m[2]?.startsWith("plot/") ? { status: 404, body: "" } : h.page.worker(req);
+    };
+    assert.equal((await h.publisher.publish("v-1")).ok, false);
+    assert.ok(spRequests(h.page).some((q) => q.method === "PUT" && q.key?.startsWith("image/")), "no background went up, so this tests nothing");
+    assert.equal(h.page.hub.stageplots.size, 0, "the backgrounds the page took are left on it under a secret nothing knows");
+    assert.deepEqual(await pending(), []);
+  });
 
   test("a publish that fails at the index takes back the backgrounds and plots it had put up", async () => {
     const h = await harness(venueDoc(2, 2));
@@ -1471,6 +1806,15 @@ describe("pending removals: a secret is never forgotten while it may be live", (
     return o.origin;
   };
 
+  test("Remove now does not count a publish in flight, which the card does not show, as a link left", async () => {
+    const h = await harness();
+    const o = parsePublishUrl(h.page.origin);
+    assert.ok(o.ok);
+    await stageplotsStore.update((d) => ({ ...d, pendingRemovals: [{ secret: `${"F".repeat(42)}E`, origin: o.origin, since: "2026-11-13T10:00:00.000Z", reason: "publishing" }] }));
+    assert.deepEqual(await h.publisher.removePending(), { removed: 0, left: 0, waiting: 0 });
+    await stageplotsStore.update((d) => ({ ...d, pendingRemovals: [] }));
+  });
+
   test("a failed take-back leaves the secret queued, shown, and removed by Remove now once the page answers", async () => {
     const { stagePlotsView } = await import("./stageplots-files.js");
     const h = await harness(venueDoc(2, 2));
@@ -2001,6 +2345,39 @@ describe("linked connection points on the public page", () => {
     await h.publisher.settle();
     const plot = JSON.parse((await visit(h.page, s1, "plot/p-0")).body) as PublishedPlot;
     assert.deepEqual(plot.items.find((it) => it.id === "c-sb1")!.patch!.channels.map((c) => c.path), ["SB-1/A1", "SB-1/A2", "SB-1/9"]);
+  });
+
+  test("a patch whose overrides and plan entries are not objects still publishes, and republishes, the channels it can read", async () => {
+    const { h, s1 } = await twoVenues();
+    const f = h.patch.file! as unknown as { sheets: Record<string, unknown>[] };
+    // What POST /api/patch lets through: it checks only that `sheets` is a list.
+    f.sheets[0]!.variants = [
+      { id: "var-week", name: "Week", overrides: { "rack-SENTINEL-ID:in:9": null, "rack-SENTINEL-ID:in:3": { label: "Keys", path: [{ deviceId: "sb1-SENTINEL-ID", connector: "9" }] }, odd: "text" } },
+      { id: "var-null", name: "Null", overrides: null },
+    ];
+    f.sheets[0]!.assignments = { byServiceType: { "st-1": "var-null" }, byPlan: { "plan-week": { variantId: "var-week", tweaks: { "rack-SENTINEL-ID:in:8": null, odd: 7 } }, "plan-null": null } };
+    h.plan.planId = "plan-week";
+    h.plan.serviceTypeId = "st-1";
+    const errors: string[] = [];
+    const spy = mock.method(console, "error", (...a: unknown[]) => void errors.push(a.map(String).join(" ")));
+    try {
+      h.hear("stage:state-changed");
+      await h.publisher.settle();
+      const now = await h.publisher.publishNow("v-1");
+      assert.equal(now.ok, true, now.ok ? "" : now.error);
+    } finally {
+      spy.mock.restore();
+    }
+    assert.deepEqual(errors, [], "publishing threw on the malformed patch");
+    const plot = JSON.parse((await visit(h.page, s1, "plot/p-0")).body) as PublishedPlot;
+    assert.deepEqual(plot.items.find((it) => it.id === "c-sb1")!.patch!.channels.map((c) => c.path), ["SB-1/A1", "SB-1/A2", "SB-1/9"]);
+    // A plan whose entry is null, under a service type whose variant has no overrides: the default patch.
+    h.plan.planId = "plan-null";
+    h.hear("stage:state-changed");
+    await h.publisher.settle();
+    assert.deepEqual(errors, []);
+    const after = JSON.parse((await visit(h.page, s1, "plot/p-0")).body) as PublishedPlot;
+    assert.deepEqual(after.items.find((it) => it.id === "c-sb1")!.patch!.channels.map((c) => c.path), ["SB-1/A1", "SB-1/A2"]);
   });
 
   test("an unreadable patch publishes linked points unlinked with their last names, said once on [stageplots]", async () => {

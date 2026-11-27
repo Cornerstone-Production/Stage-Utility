@@ -294,7 +294,8 @@ selected item.
   the empty plot for **Paste here**, **Add here** (every palette item, placed where
   you clicked), **Undo**, **Redo** and **Fit the whole plot**. Arrange moves an item
   within its layer only: a zone brought to the front stays under the shapes and
-  gear (see [Item types](#item-types)).
+  gear (see [Item types](#item-types)). A callout moves past other text but never
+  past another callout, so it keeps its number.
 - **Copy and paste** use the editor's own clipboard, not the system's: a copy
   pastes into any plot, in any venue, in this browser, in another tab of it too.
   Each paste of one copy lands a little further down and right than the last; the
@@ -526,6 +527,13 @@ The page shows the plot each venue had for the followed plan when it was last pu
 and republishes when the plan moves, so it follows the week as `/stageplots` does. Dates
 are in the app's time zone.
 
+A change the page does not take (it is down, or its token is wrong) stays the venue's last
+error and is sent again: on the next change of any kind, after a minute and then longer
+(up to every fifteen) while the page keeps failing, and when the Public link is saved, so
+fixing the token sends it. A restart sends every published venue again, so a change that
+failed before it, or was saved in the moment before it, is not left behind; a venue with
+linked points waits until the patch can be read.
+
 A [linked connection point](#patch-link) is published as its device's name and colour and
 the channels a tap lists, resolved when it is sent. Of the patch the page gets only that:
 the sheet's name, and for each channel its console channel, its source or destination, and
@@ -587,7 +595,13 @@ more than a working plot (hundreds of items with long input lists). A background
 is listed as not yet published, with that reason.
 
 The secret is in `stageplots.json` and so in config backups: anyone holding a backup can
-open the venue's link. A restore merges the backup's links with the live ones so that none
+open the venue's link. It never reaches a browser with the document: `GET /api/stageplots`
+and `stageplots:updated`, which the crew's `/stageplots` reads, leave it out, and the
+Publish card reads the link on its own, on demand, uncached. The app has no login on
+the LAN, so any device there can still ask for the link: keeping it off the crew's page
+keeps it off a shared tablet, not out of reach of the network.
+
+A restore merges the backup's links with the live ones so that none
 is left live and unknown here and none that was revoked comes back: a link both hold stays
 published; another server's links stay with it, unless this box replaces that server; and
 every live link the restore does not keep is queued as an [old link](#old-links) and
@@ -643,7 +657,7 @@ address and the old one that still opens it), old addresses dropped, and every
 address refused and why. Publishing logs each publish (with how
 many plots and backgrounds, and any background not yet published and why), each
 republish that sent something, each Publish now, regenerate and unpublish, every one
-that failed and why, every one refused before anything was sent (an unknown venue, one
+that failed and why, how long until a republish the page did not take is tried again, every one refused before anything was sent (an unknown venue, one
 published or not, no page set up, too many old links waiting), each old link queued for
 removal, removed, failing (once) or waiting for its page (once), what went up before a
 failure that could not be taken back, and each venue moved to a new page. The secret is
@@ -652,10 +666,10 @@ out unlinked) and again when it can, and each plot sent with linked points that 
 unlinked names them and why (the device is gone, or the sheet cannot be read).
 The editor logs a draft it could not keep (once, until it is kept again, and then that it is), one it could not delete, one it could not send as the page closed, and a failed read of the drafts.
 A page that cannot read the plots logs that too, so does one that cannot read the patch
-sheet for its linked points, so does a print whose
-background did not load, and so does a page that finds Planning Center
-unreachable and falls back to each venue's default, and again when it can be
-read once more. See [Updates and logs](../ops/updates-and-logs.md).
+sheet for its linked points, and so does a print whose
+background did not load. Planning Center becoming unreachable, which makes
+`/stageplots` show each venue's default plot, is the server's `[plans]` line, once,
+not one from every page open on it. See [Updates and logs](../ops/updates-and-logs.md).
 
 ## API
 

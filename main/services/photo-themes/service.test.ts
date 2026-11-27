@@ -142,6 +142,15 @@ describe("generating", () => {
     assert.equal(photoThemes.state().themes[0]!.people[0]!.pending?.reason, "OpenAI answered with something that is not an image");
   });
 
+  it("an answer over the 12 MB the store allows fails the person with the reason, though it is a real PNG", async () => {
+    const theme = await themed([person("1")]);
+    const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(12 * 1024 * 1024)]);
+    fake.edit = () => ({ status: 200, body: { data: [{ b64_json: png.toString("base64") }] } });
+    await generated();
+    assert.equal(statusOf(theme.id, "1"), "failed");
+    assert.equal(photoThemes.state().themes[0]!.people[0]!.pending?.reason, "OpenAI answered with something that is not an image");
+  });
+
   it("counts for the Generate button only the people a Generate would send", async () => {
     await themed([person("1"), { personId: "2", name: "Person 2", photoUrl: "https://example.com/avatar.jpg" }, { personId: "3", name: "Person 3", photoUrl: null }]);
     assert.equal((await photoThemes.planPeople(PLAN, TYPE)).toGenerate, 1);

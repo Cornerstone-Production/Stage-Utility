@@ -15,7 +15,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
-import { STAGEPLOT_LIMITS, type Background, type BackgroundView, type StagePlotsDoc, type StagePlotsView } from "../types/stageplots.js";
+import { STAGEPLOT_LIMITS, type Background, type BackgroundView, type StagePlotsDoc, type StagePlotsView, type Venue, type VenueView } from "../types/stageplots.js";
 import { getUserDataPath } from "./app-paths.js";
 import { errorMessage, isNotFound } from "./errors.js";
 import { scrub } from "./scrub.js";
@@ -55,10 +55,20 @@ export function stagePlotImageUrl(hash: string, ext: StagePlotImageExt): string 
   return `/${STAGEPLOT_IMAGE_DIR}/${hash}.${ext}`;
 }
 
-/** A source raster's bytes, for a re-conversion, or null when it is missing. */
 /** A background as the API serves it, with the URLs of its converted image and its source. */
 export function backgroundView(b: Background): BackgroundView {
   return { ...b, url: stagePlotImageUrl(b.converted.hash, "webp"), sourceUrl: stagePlotImageUrl(b.source.hash, b.source.ext) };
+}
+
+/**
+ * A venue as a browser gets it: its publish state without the secret. GET /api/stageplots and
+ * stageplots:updated reach the crew's chromeless /stageplots too, and a link they carried would
+ * be a public page anyone holding that tablet could open; only GET …/venues/:id/link answers it.
+ */
+export function venueView(v: Venue): VenueView {
+  if (!v.publish) return v;
+  const { secret: _secret, ...publish } = v.publish;
+  return { ...v, publish };
 }
 
 /** The document as GET /api/stageplots and every stageplots:updated frame carry it. */
@@ -70,7 +80,7 @@ export function stagePlotsView(
   return {
     ...(notice ? { notice } : {}),
     ...(landing ? { landing } : {}),
-    venues: doc.venues,
+    venues: doc.venues.map(venueView),
     plots: doc.plots,
     backgrounds: doc.backgrounds.map(backgroundView),
     overrides: doc.overrides,
@@ -86,6 +96,7 @@ export async function readStagePlotImage(hash: string): Promise<Buffer | null> {
   return (await readImage(STAGEPLOT_IMAGE_DIR, `${hash}.webp`))?.data ?? null;
 }
 
+/** A source raster's bytes, for a re-conversion, or null when it is missing. */
 export async function readStagePlotSource(hash: string, ext: "png" | "jpg"): Promise<Buffer | null> {
   return (await readImage(STAGEPLOT_IMAGE_DIR, `${hash}.${ext}`))?.data ?? null;
 }

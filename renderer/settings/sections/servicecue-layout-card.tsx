@@ -5,11 +5,11 @@
 // and a preview of it against the plan the page previews with.
 
 import { CheckIcon, ChevronDownIcon, CopyIcon, LockIcon, MinusCircleIcon, PinIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode, type Ref } from "react";
+import { useRef, type ReactNode, type Ref } from "react";
 
 import { Button, ErrorNote, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tooltip } from "../../components/ui";
 import { cn } from "../../lib/cn";
-import { copyText } from "../../lib/clipboard";
+import { useCopyFeedback } from "../../lib/use-copy-feedback";
 import { serviceCueUrl } from "../../main/servicecue-index-view";
 import { Grip, TrayChip, useCarried, useLifted, useLiftedOrder, useTrayOn, type DragItem } from "./servicecue-drag";
 import { useNameDraft } from "../../lib/use-name-draft";
@@ -364,15 +364,9 @@ function RowColor({ layout: l, roles, onUpdate }: { layout: ServiceCueLayout; ro
 function CardFooter({ layout: l, source: p, views }: { layout: ServiceCueLayout; source: PreviewSource; views: LayoutCardProps["views"] }) {
   const typeName = p.types.find((t) => t.id === p.typeId)?.name;
   const path = typeName ? serviceCueUrl(typeName, l.id, l.slug) : `/servicecue/<service type>/${l.slug ?? l.id}`;
-  const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(timer.current), []);
+  const { state: copy, copy: copyAddress } = useCopyFeedback();
   const users = views ? layoutUsers(l, views) : null;
-  const onCopy = async () => {
-    setCopy((await copyText(`${window.location.origin}${path}`)) ? "copied" : "failed");
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => setCopy("idle"), 1600);
-  };
+  const onCopy = () => copyAddress(`${window.location.origin}${path}`);
   return (
     <div
       data-layout-foot={l.id}

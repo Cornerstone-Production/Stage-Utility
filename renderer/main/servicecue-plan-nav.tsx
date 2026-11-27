@@ -38,7 +38,7 @@ export interface ServiceCuePlanNavProps {
   following: boolean;
   /** What to call the current plan when the list does not carry it. */
   fallbackLabel: string | null;
-  timeZone: string | null;
+  timeZone: string;
   /** A plan to browse to, or null for "back to live". */
   onSelect: (planId: string | null) => void;
   /** A pasted link whose plan belongs to another service type. */
@@ -199,7 +199,7 @@ function PlanList({
   groupLabel: string | null;
   currentPlanId: string | null;
   followedPlanId: string | null;
-  timeZone: string | null;
+  timeZone: string;
   onChoose: (planId: string) => void;
 }) {
   // Open on the current plan, not the top of the list.

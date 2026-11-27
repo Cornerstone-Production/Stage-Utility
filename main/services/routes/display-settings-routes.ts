@@ -7,7 +7,7 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { errorMessage } from "../errors.js";
-import { isStringList } from "../is-record.js";
+import { isStringList } from "../../types/is-record.js";
 import { type RouteCtx, json, error, readBody } from "./context.js";
 import { hostNames } from "../host-names.js";
 import { refuseUnansweredHost } from "./host-name-routes.js";

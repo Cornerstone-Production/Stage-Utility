@@ -35,11 +35,15 @@ export interface CustomizeValue {
   draft: SidebarArrangement | null;
   consoles: SidebarConsoles;
   /**
-   * Save a change. Null (an edit that broke a rule) does nothing. `said` is
-   * toasted; with `undoable` it carries an Undo, which a newer change retires,
-   * so an Undo only ever puts back the change it was offered for.
+   * Save a change, given as a function of the arrangement it lands on so that
+   * one made while another is saving builds on it. Null from it (an edit that
+   * broke a rule) does nothing. `said` is toasted once it has saved; with
+   * `undoable` it carries an Undo, which a newer change retires, so an Undo only
+   * ever puts back the change it was offered for.
    */
-  apply: (next: ResolvedSidebar | null, said?: string, undoable?: boolean) => void;
+  apply: (change: (r: ResolvedSidebar) => ResolvedSidebar | null, said?: string, undoable?: boolean) => void;
+  /** Add an empty section at the end; its id once saved, or null if it was not. */
+  addSection: () => Promise<string | null>;
   /** List a console in the sidebar, or take it out, through its own switch. */
   setConsoleShown: (id: string, shown: boolean, said?: string) => void;
   /** Hide a page or a console, saying so with an Undo. Advanced says why not. */
@@ -69,6 +73,7 @@ export const CustomizeContext = createContext<CustomizeValue>({
   draft: null,
   consoles: EMPTY_CONSOLES,
   apply: noop,
+  addSection: async () => null,
   setConsoleShown: noop,
   hide: noop,
   drag: null,
