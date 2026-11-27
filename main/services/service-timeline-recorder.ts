@@ -9,22 +9,24 @@
 // startedAt from PCO live_start_at).
 //
 // The record lifecycle — which occurrence is open, when to start or close one, the
-// debounced write, forget() — lives in ServiceRecorder, shared with the SPL and
-// attendance recorders. Only the item timing below is specific to this one.
+// debounced write, forget() — lives in ServiceRecorder, and the per-item tick it
+// shares with the SPL recorder in ItemRecorder. Only the item timing below is
+// specific to this one.
 
-import type { PcoLiveDTO, ServiceTimeline } from "../types/stage.js";
+import type { ServiceTimeline, ServiceTimelineItem } from "../types/stage.js";
 import { broadcastTimeline } from "./history-item-times.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
-import { serviceRunning, shouldRecordLive } from "./live-service-gate.js";
 import { scrub } from "./scrub.js";
 import {
-  ServiceRecorder,
+  ItemRecorder,
   SERVICE_GAP_MS,
-  closeTimelineItem,
   closeTimelineItems,
   isStepBackTo,
   itemLiveSinceMs,
   lastItemEntry,
+  liveItemTitle,
+  plannedLengthSec,
+  type LiveItemTick,
   type NewRecordContext,
   type RecorderStore,
 } from "./service-recorder.js";
@@ -42,78 +44,48 @@ function fmtCarryoverDuration(ms: number): string {
   return hours >= 1 ? `${hours}h ${mins}m` : `${mins}m`;
 }
 
-class ServiceTimelineRecorder extends ServiceRecorder<ServiceTimeline> {
+class ServiceTimelineRecorder extends ItemRecorder<ServiceTimeline> {
   protected readonly label = "service-timeline-recorder";
   protected readonly store: RecorderStore<ServiceTimeline> = serviceTimelineStore;
   protected readonly persistDebounceMs = 4000;
-
-  private lastItemId: string | null = null;
-  private nextSequence = 0;
 
   protected createRecord(ctx: NewRecordContext): ServiceTimeline {
     return { ...ctx, endedAt: null, items: [] };
   }
 
-  /** Told by ensureRecord's split — see publishClosed's doc on the base class. */
+  /** Told by ensureRecord's split and closeIfOpen — see publishClosed's doc on the base class. */
   protected override publishClosed(record: ServiceTimeline): void {
     broadcastTimeline(record);
   }
 
-  protected override onRecordEstablished(): void {
-    // Continue the stored sequence rather than restarting it — a resumed record
-    // would otherwise reissue numbers already in use.
-    this.nextSequence = (this.current?.items ?? []).reduce((m, it) => Math.max(m, it.sequence), -1) + 1;
-    this.lastItemId = null; // re-detect the live item on the next tick
+  /** Each closed run gets its length: the boot-time close uses the same closer. */
+  protected closeItems(items: ServiceTimelineItem[], endIso: string): void {
+    closeTimelineItems(items, endIso);
   }
 
-  /** Called by the live-poller after each pco:live broadcast. */
-  async onLiveTick(live: PcoLiveDTO | null): Promise<void> {
-    if (!live || this.busy) return;
-    this.busy = true;
-    try {
-      // `currentItemId` is re-tested here purely so TypeScript narrows it; the
-      // recording policy itself lives entirely in shouldRecordLive.
-      const open = this.current != null && this.current.endedAt == null;
-      if (live.currentItemId && serviceRunning(live) && shouldRecordLive(live, open)) {
-        const gapSinceLive = this.lastLiveAt === 0 ? Infinity : Date.now() - this.lastLiveAt;
-        this.lastLiveAt = Date.now();
-        await this.ensureRecord(live, gapSinceLive);
-        if (!this.current) return;
-        if (this.current.endedAt) this.current.endedAt = null; // resumed after a lull
-        // Only mutate on an item transition — between transitions nothing changes.
-        if (live.currentItemId !== this.lastItemId) {
-          this.finalizePrevItem(); // close the OUTGOING item (this.lastItemId)
-          this.lastItemId = live.currentItemId;
-          this.openItem(live); // create/reopen the now-current item
-          broadcastTimeline(this.current);
-          this.schedulePersist();
-        }
-      } else if (this.current && !this.current.endedAt) {
-        // Left "item" mode — service ended or the next service's preservice began.
-        // Close the open record so consumers stop showing it as live. Self-healing:
-        // an item going live above reopens it.
-        this.finalizeRecord();
-        this.lastItemId = null;
-        await this.saveClosed(this.current);
-        broadcastTimeline(this.current);
-      }
-    } finally {
-      this.busy = false;
-    }
+  protected recordTick(live: LiveItemTick, record: ServiceTimeline): void {
+    // Only mutate on an item transition — between transitions nothing changes.
+    if (live.currentItemId === this.lastItemId) return;
+    this.finalizePrevItem(); // close the OUTGOING item (this.lastItemId)
+    this.lastItemId = live.currentItemId;
+    this.openItem(live); // create/reopen the now-current item
+    broadcastTimeline(record);
+    this.schedulePersist();
   }
 
   /** Open (or reopen) the current item — snapshot planned length + actual start. */
-  private openItem(live: PcoLiveDTO): void {
-    if (!this.current || !live.currentItemId) return;
+  private openItem(live: LiveItemTick): void {
+    const record = this.current;
+    if (!record) return;
     const id = live.currentItemId;
-    const title = live.label ?? live.currentItemTitle ?? "";
-    const planned = typeof live.lengthSec === "number" && live.lengthSec > 0 ? live.lengthSec : null;
+    const title = liveItemTitle(live);
+    const planned = plannedLengthSec(live);
     const liveStartMs = live.liveStartAt ? Date.parse(live.liveStartAt) : NaN;
     // Shared with the SPL recorder, so the two cannot answer "is this the same
     // run" differently about the same live service.
     const goingLiveAtMs = itemLiveSinceMs(live);
     // The LAST entry for this id, not the first: an item can run more than once.
-    const item = lastItemEntry(this.current.items, id);
+    const item = lastItemEntry(record.items, id);
     if (item && isStepBackTo(item, goingLiveAtMs)) {
       // Operator stepped back to an earlier item — reopen it.
       if (title) item.title = title;
@@ -142,10 +114,10 @@ class ServiceTimelineRecorder extends ServiceRecorder<ServiceTimeline> {
     // that started within the gap is unchanged.
     let startedAt = live.liveStartAt ?? new Date().toISOString();
     let counted: boolean | undefined;
-    const recordStartMs = Date.parse(this.current.startedAt);
+    const recordStartMs = Date.parse(record.startedAt);
     if (Number.isFinite(liveStartMs) && Number.isFinite(recordStartMs) && recordStartMs - liveStartMs > SERVICE_GAP_MS) {
       const carriedMs = recordStartMs - liveStartMs;
-      startedAt = this.current.startedAt;
+      startedAt = record.startedAt;
       counted = false;
       console.log(
         `[service-timeline] "${scrub(title)}" had been live in Planning Center for ` +
@@ -153,7 +125,7 @@ class ServiceTimelineRecorder extends ServiceRecorder<ServiceTimeline> {
           `carried over from an earlier session, not counted`,
       );
     }
-    this.current.items.push({
+    record.items.push({
       itemId: id,
       title,
       sequence: this.nextSequence++,
@@ -164,23 +136,6 @@ class ServiceTimelineRecorder extends ServiceRecorder<ServiceTimeline> {
       preService: live.beforeServiceStart === true, // pre-service default (position-based)
       counted,
     });
-  }
-
-  /** Close the outgoing item (this.lastItemId) and compute its actual duration. */
-  private finalizePrevItem(): void {
-    if (!this.current || !this.lastItemId) return;
-    // The LAST entry for the id — the run that was actually on air. `find` would
-    // close an earlier run of the same item and leave the live one open forever.
-    const prev = lastItemEntry(this.current.items, this.lastItemId);
-    if (prev && !prev.endedAt) closeTimelineItem(prev, new Date().toISOString());
-  }
-
-  /** Close every open item, then let the base stamp the record's end once. */
-  protected override finalizeRecord(): void {
-    // One clock read for the items AND the record's own end, as before.
-    const iso = new Date().toISOString();
-    if (this.current) closeTimelineItems(this.current.items, iso);
-    super.finalizeRecord(iso);
   }
 }
 

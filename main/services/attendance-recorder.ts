@@ -53,7 +53,7 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
     };
   }
 
-  /** Told by ensureRecord's split — see publishClosed's doc on the base class. */
+  /** Told by ensureRecord's split and closeIfOpen — see publishClosed's doc on the base class. */
   protected override publishClosed(record: ServiceAttendance): void {
     broadcast("attendance:history", record);
   }
@@ -76,7 +76,7 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
   /** What (if anything) to sample this tick — see attendance-phase.ts. */
   private classify(live: PcoLiveDTO): Phase | null {
     return classifyPhase(live, {
-      hasOpenRecord: this.current != null && this.current.endedAt == null,
+      hasOpenRecord: this.getOpenRecord() != null,
       endedAt: this.current?.endedAt ?? null,
       heldServiceStartedAt: this.current?.serviceStartedAt ?? null,
       preMs: this.preMs,
@@ -112,20 +112,16 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
         // Nothing to sample. Close any record left open (mode dropped with no end
         // header, before the cooldown branch can tag it) so it stops reading as live;
         // the next tick's cooldown check then resumes it as "post".
-        if (this.current && !this.current.endedAt) {
-          this.finalizeRecord();
-          await this.saveClosed(this.current);
-          broadcast("attendance:history", this.current);
-        }
+        await this.closeIfOpen();
         return;
       }
 
-      const gapSinceLive = this.lastLiveAt === 0 ? Infinity : Date.now() - this.lastLiveAt;
-      // The gap is measured between ticks of a RUNNING service, as the SPL and
-      // timeline recorders measure it. Counting the parked ticks past SERVICE
-      // END too made this recorder alone hold the finished service open when the
-      // next one began, and sample the next service into it.
-      if (serviceRunning(live)) this.lastLiveAt = Date.now();
+      // Ticks of a RUNNING service, as the SPL and timeline recorders count
+      // them (see noteLiveTick). Counting the parked ticks past SERVICE END too
+      // made this recorder alone hold the finished service open when the next
+      // one began, and sample the next service into it. A "pre" tick in
+      // preservice mode, the arrival ramp, is not counted either.
+      const gapSinceLive = this.noteLiveTick(serviceRunning(live));
 
       // Establish the record for pre/service; "post" only ever samples into the
       // record we just ended (never spins up a new one for an emptying room).

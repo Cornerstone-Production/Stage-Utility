@@ -23,7 +23,7 @@
 
 import type { PcoLiveDTO, ServiceTimelineItem } from "../types/stage.js";
 import { clockOf } from "./app-timezone.js";
-import { serviceDateKey } from "./live-service-gate.js";
+import { serviceDateKey, serviceRunning, shouldRecordLive } from "./live-service-gate.js";
 import { scrub, scrubError } from "./scrub.js";
 import { stageController } from "./stage-controller.js";
 
@@ -129,6 +129,24 @@ export function isStepBackTo(entry: RecordedItem, goingLiveAtMs: number): boolea
 export function itemLiveSinceMs(live: { liveStartAt: string | null }): number {
   const parsed = live.liveStartAt ? Date.parse(live.liveStartAt) : NaN;
   return Number.isFinite(parsed) ? parsed : Date.now();
+}
+
+/** A live tick with a plan item on air. */
+export type LiveItemTick = PcoLiveDTO & { currentItemId: string };
+
+/**
+ * The live item's name, as both item-shaped records write it. `live.label` alone
+ * is not it: PCO reports an item live with no label often enough, and the SPL
+ * recorder then wrote the numeric ITEM ID into the archive row as the title —
+ * two records naming the same item two different things.
+ */
+export function liveItemTitle(live: PcoLiveDTO): string {
+  return live.label ?? live.currentItemTitle ?? "";
+}
+
+/** The live item's planned length in seconds, or null when the plan gives none. */
+export function plannedLengthSec(live: PcoLiveDTO): number | null {
+  return typeof live.lengthSec === "number" && live.lengthSec > 0 ? live.lengthSec : null;
 }
 
 /**
@@ -297,6 +315,17 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
   }
 
   /**
+   * The record this recorder is writing, or null once it has closed.
+   *
+   * `current` alone is not that: it is kept after the close, on purpose (the
+   * attendance taper and every resume read it), so a test for its presence
+   * answered with Sunday's record for the rest of the week.
+   */
+  getOpenRecord(): T | null {
+    return this.current != null && this.current.endedAt == null ? this.current : null;
+  }
+
+  /**
    * One service's record: this recorder's own in-memory copy while that
    * service is still recording, else the store's. The store lags an open
    * record by up to one debounced persist (schedulePersist), so a service
@@ -314,8 +343,8 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    * does not come through here, so a recording is never stopped by it.
    */
   async getRecord(serviceKey: string): Promise<T | null> {
-    const live = this.current;
-    if (live?.serviceKey === serviceKey && live.endedAt == null) return live;
+    const live = this.getOpenRecord();
+    if (live?.serviceKey === serviceKey) return live;
     const unsaved = this.unsaved.get(serviceKey);
     if (unsaved) return unsaved;
     await this.store.assertReadable(serviceKey);
@@ -338,8 +367,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    * routes refuse instead, so there is nothing to lose.
    */
   isRecording(serviceKey: string): boolean {
-    if (this.currentKey !== serviceKey || !this.current) return false;
-    if (this.current.endedAt) return false;
+    if (this.currentKey !== serviceKey || !this.getOpenRecord()) return false;
     return this.lastLiveAt !== 0 && Date.now() - this.lastLiveAt < SERVICE_GAP_MS;
   }
 
@@ -384,6 +412,40 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    */
   protected finalizeRecord(iso = new Date().toISOString()): void {
     if (this.current && !this.current.endedAt) this.current.endedAt = iso;
+  }
+
+  /**
+   * The gap since the last tick of a running service (Infinity before the
+   * first), and this tick counted when `running`.
+   *
+   * The gap is what tells the same service from the next one when the new
+   * occurrence has no start time (shouldHoldThroughServiceTimeChange), so all
+   * three recorders must count the same ticks: those of a running service,
+   * never the ticks parked past SERVICE END.
+   */
+  protected noteLiveTick(running: boolean): number {
+    const now = Date.now();
+    const gap = this.lastLiveAt === 0 ? Infinity : now - this.lastLiveAt;
+    if (running) this.lastLiveAt = now;
+    return gap;
+  }
+
+  /**
+   * Close the open record because the service stopped: finalize, save, publish.
+   * Returns false when nothing was open.
+   *
+   * The one close for "Planning Center left the service" — the mode dropped out
+   * of item, or the plan went past SERVICE END. Self-healing: an item going live
+   * again reopens the record.
+   */
+  protected async closeIfOpen(): Promise<boolean> {
+    const open = this.getOpenRecord();
+    if (!open) return false;
+    const gen = this.generation;
+    this.finalizeRecord();
+    await this.saveClosed(open);
+    if (gen === this.generation) this.publishClosed(open); // not a record deleted while it saved
+    return true;
   }
 
   protected schedulePersist(): void {
@@ -712,5 +774,85 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     this.inheritedAiring = priorAiring;
     this.captureOpeningItem(live);
     this.onRecordEstablished();
+  }
+}
+
+/** An item-shaped record's entries, as ItemRecorder needs to see them. */
+interface SequencedItem extends RecordedItem {
+  sequence: number;
+}
+
+/**
+ * The two recorders that keep one entry per plan item run: SPL and the timeline.
+ *
+ * They had the same tick, character for character: the gate, the gap, the
+ * establish, the reopen after a lull, the close on leaving the service, the
+ * sequence seed and the close of the outgoing item. What differs is what a tick
+ * records, and how an item closes, which is the same closer the boot-time close
+ * in reconcile-records.ts uses for that kind of record.
+ */
+export abstract class ItemRecorder<T extends ServiceRecord & { items: SequencedItem[] }> extends ServiceRecorder<T> {
+  /** The item on air at the last recorded tick; its entry is closed when it changes. */
+  protected lastItemId: string | null = null;
+  protected nextSequence = 0;
+
+  /** Close these entries at `endIso`. */
+  protected abstract closeItems(items: T["items"][number][], endIso: string): void;
+
+  /** Record one tick of a running service into the open record. */
+  protected abstract recordTick(live: LiveItemTick, record: T): void;
+
+  /**
+   * May this tick be recorded? Two rules from live-service-gate.ts, not one:
+   * serviceRunning (on an item, and not parked past SERVICE END) and
+   * shouldRecordLive (the latch, then the start window). The `currentItemId`
+   * test is serviceRunning's own; repeated so the type narrows.
+   */
+  protected recordsLiveItem(live: PcoLiveDTO): live is LiveItemTick {
+    return !!live.currentItemId && serviceRunning(live) && shouldRecordLive(live, this.getOpenRecord() != null);
+  }
+
+  /** Called by the live-poller after each pco:live broadcast. */
+  async onLiveTick(live: PcoLiveDTO | null): Promise<void> {
+    if (!live || this.busy) return;
+    this.busy = true;
+    try {
+      if (this.recordsLiveItem(live)) {
+        await this.ensureRecord(live, this.noteLiveTick(true));
+        if (!this.current) return;
+        if (this.current.endedAt) this.current.endedAt = null; // resumed after a lull
+        this.recordTick(live, this.current);
+      } else if (await this.closeIfOpen()) {
+        this.lastItemId = null;
+      }
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  protected override onRecordEstablished(): void {
+    // Continue the sequence of the record as resumed, not as stored: SPL's
+    // rebuild can hold items the stored copy never got, and seeding from the
+    // short list would reissue sequences already in use.
+    this.nextSequence = (this.current?.items ?? []).reduce((m, it) => Math.max(m, it.sequence), -1) + 1;
+    this.lastItemId = null; // re-detect the live item on the next tick
+  }
+
+  /**
+   * Close the outgoing item (lastItemId). The LAST entry for the id — the run
+   * that was actually on air. `find` would close an earlier run of the same
+   * item and leave the live one open forever.
+   */
+  protected finalizePrevItem(): void {
+    if (!this.current || !this.lastItemId) return;
+    const prev = lastItemEntry(this.current.items, this.lastItemId);
+    if (prev && !prev.endedAt) this.closeItems([prev], new Date().toISOString());
+  }
+
+  /** Close every open item, then let the base stamp the record's end once —
+   *  one clock read for both. */
+  protected override finalizeRecord(iso = new Date().toISOString()): void {
+    if (this.current) this.closeItems(this.current.items, iso);
+    super.finalizeRecord(iso);
   }
 }
