@@ -21,10 +21,11 @@
 // few real milliseconds and counting one call cannot: a 4 s retry gives one too.
 
 import assert from "node:assert/strict";
-import { describe, it, beforeEach, afterEach, type TestContext } from "node:test";
+import { describe, it, beforeEach, afterEach, after } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { advance, fakeTime, settle } from "./fixtures/live-poller-clock.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-poller-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -57,21 +58,7 @@ function fetchLiveSucceeds(): void {
   };
 }
 
-/** Let a tick's awaits run. setImmediate is not one of the faked timers. */
-const settle = () => new Promise((r) => setImmediate(r));
-
-/** Fake timers and clock for one case; node:test restores them when it ends. */
-function fakeTime(t: TestContext): void {
-  t.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"], now: Date.UTC(2026, 8, 20, 15) });
-}
-
-/** Advance fake time a second at a time, letting each tick that falls due finish. */
-async function advance(t: TestContext, ms: number): Promise<void> {
-  for (let left = ms; left > 0; left -= 1_000) {
-    t.mock.timers.tick(Math.min(1_000, left));
-    await settle();
-  }
-}
+after(() => fs.rm(TMP, { recursive: true, force: true }));
 
 describe("live-poller auth backoff", () => {
   beforeEach(() => {
@@ -109,7 +96,7 @@ describe("live-poller auth backoff", () => {
     await settle();
 
     // The other regression: at the 4 s idle cadence this wrote a line per tick
-    // until /log held nothing else. Seventy-four idle intervals go by unasked…
+    // until /log held nothing else. Nothing is asked until the backoff is due…
     await advance(t, AUTH_RETRY_MS - 1_000);
     assert.equal(calls, 1, `an auth failure must not be retried at the ${IDLE_MS / 1000} s idle cadence`);
     // …and then it asks again, because a backoff is not a stop.

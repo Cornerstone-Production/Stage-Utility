@@ -16,10 +16,11 @@
 // broadcasts nothing until its fetch resolves.
 
 import assert from "node:assert/strict";
-import { describe, it, beforeEach, afterEach, type TestContext } from "node:test";
+import { describe, it, beforeEach, afterEach } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fakeTime as fakeClock, settle } from "./fixtures/live-poller-clock.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-keepalive-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -68,22 +69,9 @@ function fetchHangs(): void {
   };
 }
 
-const settle = () => new Promise((r) => setImmediate(r));
-
-/**
- * Fake timers with a fake clock, each case an hour after the last.
- *
- * Date must be mocked too: the keepalive compares Date.now() against when it
- * last pushed, so with a real clock only the FIRST tick ever gets through and
- * the interval would look right while delivering one frame. The hour between
- * cases is because the poller is a module singleton — its last-broadcast stamp
- * survives into the next case, and a real clock leaves it moments in the past.
- */
-let base = Date.UTC(2026, 8, 17, 12, 0, 0);
-function fakeClock(t: TestContext): void {
-  base += 3_600_000;
-  t.mock.timers.enable({ apis: ["setInterval", "setTimeout", "Date"], now: base });
-}
+// fakeClock mocks Date too: the keepalive compares Date.now() against when it
+// last pushed, so with a real clock only the FIRST tick ever gets through and
+// the interval would look right while delivering one frame.
 
 describe("live-poller clock keepalive", () => {
   beforeEach(() => {
