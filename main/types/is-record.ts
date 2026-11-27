@@ -1,9 +1,10 @@
 // is-record.ts — "is this a plain object I can read fields off": the guard for
 // JSON from a file or a request, where an array or null is a malformed value
-// rather than an object.
+// rather than an object, and isStringList for a list of names.
 //
-// Four modules each wrote this same line; one now, so a fifth reader of
-// untrusted JSON imports it instead of writing it again.
+// Lives in main/types, not main/services: the ServiceCue Worker imports it from
+// validate.ts, and a type module never imports from services.
+// One definition: a reader of untrusted JSON imports it instead of writing it again.
 
 export function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);

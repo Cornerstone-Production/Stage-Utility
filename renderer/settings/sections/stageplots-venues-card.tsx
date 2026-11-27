@@ -18,7 +18,7 @@ import { Button } from "../../components/ui/button";
 import { confirm } from "../../components/ui/confirm-dialog";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
 import { useContextMenuState, useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
-import { copyText } from "../../lib/clipboard";
+import { useCopyFeedback } from "../../lib/use-copy-feedback";
 import { useRouterHandle } from "../../lib/use-search-param";
 import { cn } from "../../lib/cn";
 import { useResyncOn } from "../../lib/use-resync-on";
@@ -50,15 +50,11 @@ export function VenuesCard({
   drafted?: ReadonlySet<string>;
 }) {
   const [error, setError] = useState<string | null>(null);
-  /** What Copy its address did: copied, or the address to copy by hand. */
-  const [copied, setCopied] = useState<string | null>(null);
+  // The status is for reading once, so it stays up longer than a button label: it goes after a few seconds.
+  const { state: copyState, copiedText, copy: copyToClipboard } = useCopyFeedback(COPIED_MS);
+  const copied =
+    copyState === "copied" ? `Copied ${copiedText}` : copyState === "failed" ? `Copy this address by hand: ${copiedText}` : null;
   const { menu, open: openMenu, close: closeMenu } = useContextMenuState();
-  // The status is for reading once: it goes after a few seconds.
-  useEffect(() => {
-    if (!copied) return;
-    const t = setTimeout(() => setCopied(null), COPIED_MS);
-    return () => clearTimeout(t);
-  }, [copied]);
   const cardRef = useRef<HTMLElement>(null);
   const router = useRouterHandle();
   const focusName = () => {
@@ -102,10 +98,7 @@ export function VenuesCard({
 
   const address = (v: VenueView) => `${window.location.origin}${venuePath(v)}`;
   const copyAddress = (v: VenueView) => {
-    const byHand = () => setCopied(`Copy this address by hand: ${address(v)}`);
-    void copyText(address(v))
-      .then((ok) => (ok ? setCopied(`Copied ${address(v)}`) : byHand()))
-      .catch(byHand);
+    void copyToClipboard(address(v));
   };
   const menuFor = (v: VenueView): ContextMenuItem[] => [
     {

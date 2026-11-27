@@ -6,6 +6,7 @@
 // says about that (the collapsed summary, the tray of what is not in a layout, the
 // confirms, the notice) is built here, so a test can read it without a page.
 
+import { firstFree } from "@main/services/first-free";
 import { layoutNameKey } from "@main/services/servicecue-slug";
 import type { ServiceCueLayout } from "../../../main/types/pco.js";
 import type { CategoryRole } from "../../../main/types/servicecue-roles.js";
@@ -158,10 +159,7 @@ export function newLayout(list: readonly ServiceCueLayout[], id: string): Servic
 /** "<name> copy", then "<name> copy 2" … whichever no layout is called, as the server compares names. */
 export function copyName(name: string, list: readonly ServiceCueLayout[]): string {
   const taken = new Set(list.map((l) => layoutNameKey(l.name)));
-  const base = `${name} copy`;
-  let out = base;
-  for (let n = 2; taken.has(layoutNameKey(out)); n++) out = `${base} ${n}`;
-  return out;
+  return firstFree(`${name} copy`, (s) => taken.has(layoutNameKey(s)), (b, n) => `${b} ${n}`);
 }
 
 /** The list with a copy of layout `id` right after it, under a free name and its own address. */

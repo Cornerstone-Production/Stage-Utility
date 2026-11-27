@@ -57,11 +57,6 @@ export const PUBLIC_STALE_AFTER_MS = 2 * 60 * 1000;
 
 // ── Ids ───────────────────────────────────────────────────────────────────────
 
-/** Is this a plain object: not null, not an array. */
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 const ID = /^\d{1,20}$/;
 
 /** A Planning Center id: digits only. The only shape a service type or plan id has. */

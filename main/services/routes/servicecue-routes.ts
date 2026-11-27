@@ -17,7 +17,7 @@ import { toCsv } from "../patch-export-csv.js";
 import { toXlsx } from "../patch-export-xlsx.js";
 import { servicecuePublisher } from "../servicecue-publisher-instance.js";
 import { LayoutNameRefused } from "../servicecue-slug.js";
-import { isRecord } from "../is-record.js";
+import { isRecord } from "../../types/is-record.js";
 import { scrub } from "../scrub.js";
 
 export async function serviceCueRoutes(c: RouteCtx): Promise<void> {

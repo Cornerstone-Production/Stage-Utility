@@ -25,8 +25,9 @@ import {
   type VenuePublish,
 } from "../types/stageplots.js";
 import { DataStore } from "./data-store.js";
+import { firstFree } from "./first-free.js";
 import { errorMessage } from "./errors.js";
-import { isRecord } from "./is-record.js";
+import { isRecord } from "../types/is-record.js";
 import { asArray, asObject, checked, refuse, required, textList, uniqueIds } from "./restore-check.js";
 import { scrub } from "./scrub.js";
 import { fitToHeight, plotHeight, sortPending } from "./stageplots-doc.js";
@@ -172,12 +173,10 @@ export function slugFromName(name: string, taken: (slug: string) => boolean): st
       .slice(0, STAGEPLOT_LIMITS.slugChars)
       .replace(/-+$/, "") || "venue";
   const usable = (s: string) => venueSlugProblem(s) === null && !taken(s);
-  if (usable(base)) return base;
-  for (let n = 2; ; n++) {
+  return firstFree(base, (s) => !usable(s), (b, n) => {
     const suffix = `-${n}`;
-    const s = `${base.slice(0, STAGEPLOT_LIMITS.slugChars - suffix.length).replace(/-+$/, "")}${suffix}`;
-    if (usable(s)) return s;
-  }
+    return `${b.slice(0, STAGEPLOT_LIMITS.slugChars - suffix.length).replace(/-+$/, "")}${suffix}`;
+  });
 }
 
 /** What each limit says when it is reached, for a save and a restore alike. */

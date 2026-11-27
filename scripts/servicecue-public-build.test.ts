@@ -141,7 +141,6 @@ describe("what is in the bundle", () => {
       "renderer/settings/sections/plan-date-label.ts",
       "renderer/settings/sections/plan-switcher-step.ts",
       "renderer/settings/sections/plan-switcher.tsx",
-      "renderer/settings/sections/slots-target-pill.tsx",
     ]);
   });
 

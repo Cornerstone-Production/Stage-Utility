@@ -9,7 +9,7 @@
 // A bare `return` means "handled, stop" (see RouteCtx).
 
 import { type RouteCtx, json, error, readBody } from "./context.js";
-import { isRecord } from "../is-record.js";
+import { isRecord } from "../../types/is-record.js";
 import { scrub } from "../scrub.js";
 import { readSlotsTarget, INVALID_TARGET, TARGET_ERROR } from "../slots-target-body.js";
 import type { SlotsTarget } from "../slots-store.js";

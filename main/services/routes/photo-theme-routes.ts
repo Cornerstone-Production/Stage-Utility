@@ -31,7 +31,7 @@
 import type http from "node:http";
 
 import { storedImageHeaders } from "../image-files.js";
-import { isRecord } from "../is-record.js";
+import { isRecord } from "../../types/is-record.js";
 import { isPcoId } from "../pco-path.js";
 import { isPersonId, isPlanId, isThemeId, sortDate } from "../photo-themes/book.js";
 import { PhotoThemeRefused, photoThemes } from "../photo-themes/service.js";

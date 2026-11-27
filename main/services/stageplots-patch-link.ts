@@ -19,7 +19,7 @@ import {
   type PlotItem,
   type PublishedItem,
 } from "../types/stageplots.js";
-import { isRecord } from "./is-record.js";
+import { isRecord } from "../types/is-record.js";
 import { readSheetShape } from "./patch-shape.js";
 import { resolvePatch } from "./patch-resolve.js";
 

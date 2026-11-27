@@ -8,7 +8,7 @@
 // that is not registered is a store nobody can reason about.
 
 import { DataStore } from "./data-store.js";
-import { isRecord, isStringList } from "./is-record.js";
+import { isRecord, isStringList } from "../types/is-record.js";
 import type { ReleaseSection } from "./update/release-notes.js";
 
 /** The release the operator has not yet acknowledged. */

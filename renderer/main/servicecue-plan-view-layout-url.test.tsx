@@ -56,7 +56,7 @@ const RUNDOWN: ServiceCueRundownDTO = {
   items: [],
   noteCategories: [],
   serviceTimes: [],
-  timeZone: null,
+  timeZone: "UTC",
   isActivePlan: false,
   isDefaultPlan: true,
 };
