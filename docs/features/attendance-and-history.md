@@ -793,7 +793,10 @@ unreachable, not that the room emptied.
 Recording covers more than the service proper. Sampling starts during the arrival
 ramp — the lead window before the service time, default 60 minutes — and continues
 through a taper after the last item, also 60 minutes by default, so the curve shows
-the room emptying. Both windows are set in Advanced → Schedule.
+the room emptying. Both windows are set in Advanced → Schedule. The taper ends
+with its window even while Planning Center stays on an item past the plan's
+SERVICE END header; at 0, nothing is sampled after the reading taken as the
+service closes.
 
 Only the service proper feeds peak, low, average and last; the ramp and taper
 would otherwise drag those figures toward an empty room — far enough that an

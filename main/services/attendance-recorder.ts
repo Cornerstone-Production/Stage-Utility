@@ -14,7 +14,7 @@ import { sampleArchive } from "./archive/sample-archive.js";
 import { attendanceStore } from "./attendance-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { sensourceService } from "./sensource-service.js";
-import { classifyPhase, type Phase } from "./attendance-phase.js";
+import { classifyPhase, inTaper, type Phase } from "./attendance-phase.js";
 import { ServiceRecorder, type NewRecordContext, type RecorderStore } from "./service-recorder.js";
 
 /** Minimum gap between recorded trend points (attendance changes slowly). */
@@ -93,9 +93,7 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
    */
   isSampling(): boolean {
     if (!this.current) return false;
-    if (!this.current.endedAt) return true;
-    const ended = Date.parse(this.current.endedAt);
-    return Number.isFinite(ended) && Date.now() - ended <= this.postMs;
+    return !this.current.endedAt || inTaper(this.current.endedAt, this.postMs);
   }
 
   /** Called by the live-poller after each pco:live broadcast. */
