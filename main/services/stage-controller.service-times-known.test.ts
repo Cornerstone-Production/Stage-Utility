@@ -134,10 +134,10 @@ describe("serviceTimesKnown", () => {
   });
 });
 
-// The server's own updater (shouldAutoApply) asks the same question, but falls back
-// on the cached service windows rather than waiting for Planning Center: a long
-// outage must not hold every update.
-describe("shouldAutoApply while the live state is unknown", () => {
+// The server's own updater (shouldAutoApply) waits out the cached service windows
+// whether or not Planning Center answers, and does not wait for Planning Center
+// itself: a long outage must not hold every update.
+describe("shouldAutoApply and the cached service windows", () => {
   const now = new Date();
   beforeEach(() => {
     ctl.pcoAppId = "app";
@@ -162,9 +162,9 @@ describe("shouldAutoApply while the live state is unknown", () => {
     await assert.rejects(() => stageController.fetchLive(), /429/);
   }
 
-  it("waits inside a cached service window", async (t) => {
+  it("waits inside a cached service window, whether the live state is known or not", async (t) => {
     serviceWindow.setWindows([{ open: now.getTime() - 60_000, close: now.getTime() + 3_600_000 }]);
-    assert.equal(stageController.shouldAutoApply(1, now).apply, true, "a current reading of nothing live, at the chosen hour");
+    assert.deepEqual(stageController.shouldAutoApply(1, now), { apply: false, why: "window" }, "a current reading of nothing live let it restart inside the window");
     await liveReadFails(t);
     assert.deepEqual(stageController.shouldAutoApply(1, now), { apply: false, why: "window" });
   });

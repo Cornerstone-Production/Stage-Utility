@@ -1,14 +1,23 @@
 // auto-apply-gate.ts — whether the server installs an update on its own right now.
 //
 // The server's own updater runs at the hour (and day) the operator chose, and
-// never during a service. "During a service" is service-activity.ts's answer,
-// the one the update lock reads: Planning Center in an item, or a recorder still
-// open. When Planning Center's reading is not current (Planning Center is not
-// answering, or has not answered since boot), a service may have gone live since,
-// so the gate falls back on the service windows computed from the cached plans:
-// inside one, it waits; outside one, the scheduled hour is as safe as it was.
-// Waiting for Planning Center itself would hold every update for as long as an
-// outage, or bad credentials, lasted.
+// never near a service. Two things hold it:
+//
+//   - a service under way: service-activity.ts's answer, the one the update lock
+//     reads (Planning Center in an item, or a recorder still open);
+//   - the service window: the time around a rehearsal or service, worked out
+//     from the cached plans (service-window.ts), the same window the Mac helpers'
+//     updates and the page deploy wait out. Whether Planning Center's live
+//     reading is current does not matter: an unattended restart minutes before
+//     a service, or between two, is what this is for, and Planning Center reports
+//     nothing live then.
+//
+// Outside a window, with nothing under way, the scheduled hour applies, even while
+// Planning Center is not answering: waiting for it would hold every update for as
+// long as an outage, or bad credentials, lasted.
+//
+// The operator's Update now is not this gate: it holds only while a service is
+// under way, and can be overridden.
 //
 // Pure: stage-controller.ts gathers the inputs. The settings it reads come
 // through migrateAutoUpdate, here so its tests call the real one.
@@ -23,16 +32,14 @@ export interface AutoApplyInput {
   updating: boolean;
   /** A service is under way (service-activity.ts): a Planning Center item, or a recorder still open. */
   serviceLive: boolean;
-  /** That reading is current: true without Planning Center or a followed plan. */
-  liveKnown: boolean;
   /** When the cached service window open now closes, or null outside one. */
   windowUntil: number | null;
   /** `now` in the app's time zone. */
   now: Pick<ZonedParts, "weekday" | "hour">;
 }
 
-/** "window": waiting only because the live state is unknown and a cached window is
- *  open, the one decline worth a log line; the rest are the schedule doing its job. */
+/** "window": the scheduled hour fell inside a service window, the one decline worth a
+ *  log line; the rest are the schedule doing its job. */
 export type AutoApplyDecision = { apply: true } | { apply: false; why: "off" | "schedule" | "live" | "window" };
 
 export function autoApplyDecision(input: AutoApplyInput): AutoApplyDecision {
@@ -41,7 +48,7 @@ export function autoApplyDecision(input: AutoApplyInput): AutoApplyDecision {
   if (cfg.dayOfWeek != null && now.weekday !== cfg.dayOfWeek) return { apply: false, why: "schedule" };
   if (now.hour !== cfg.hour) return { apply: false, why: "schedule" };
   if (input.serviceLive) return { apply: false, why: "live" };
-  if (!input.liveKnown && input.windowUntil !== null) return { apply: false, why: "window" };
+  if (input.windowUntil !== null) return { apply: false, why: "window" };
   return { apply: true };
 }
 

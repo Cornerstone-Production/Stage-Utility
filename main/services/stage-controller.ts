@@ -57,7 +57,7 @@ import {
 import { plural } from "./plural.js";
 import { createHash, randomUUID } from "crypto";
 import { scrub, scrubError } from "./scrub.js";
-import { appTimeZone, hostTimeZone, isValidTimeZone, setAppTimeZone, startOfZonedDay, zonedDateKey, zonedParts } from "./app-timezone.js";
+import { appTimeZone, clockOf, hostTimeZone, isValidTimeZone, setAppTimeZone, startOfZonedDay, zonedDateKey, zonedParts } from "./app-timezone.js";
 import { buildGrid, gridWindow, monthAnchor } from "./calendar-grid.js";
 import { errorMessage } from "./errors.js";
 import { serviceRunning, shouldRecordLive } from "./live-service-gate.js";
@@ -3784,9 +3784,12 @@ export class StageController {
       const status = await updater.checkForUpdate();
     // Once per available release, and only if somebody is connected to hear it.
     await announceIfNew(updater.getStatus());
-      const decision = this.shouldAutoApply(status.behind, new Date());
+      const now = new Date();
+      const decision = this.shouldAutoApply(status.behind, now);
+      // Once per scheduled hour that falls in a window: the tick is hourly, and only the scheduled hour reaches this.
       if (!decision.apply && decision.why === "window") {
-        console.log("[stage-controller] auto-update waits: Planning Center's live state is unknown and a planned service window is open; it tries again at the next scheduled time");
+        const until = serviceWindow.activeUntil(now.getTime());
+        console.log(`[stage-controller] auto-update waits: a planned service window is open until ${clockOf(until ?? now.getTime()).slice(0, 5)}; it tries again at the next scheduled time`);
       }
       if (decision.apply) {
         console.log("[stage-controller] auto-update window — applying update");
@@ -3800,15 +3803,14 @@ export class StageController {
   }
 
   /** Auto-apply gate: enabled + something to pull + inside the scheduled
-   *  day/hour window + not mid-service, falling back on the cached service
-   *  windows while the live state is unknown (auto-apply-gate.ts). */
+   *  day/hour + no service under way + outside every cached service window
+   *  (auto-apply-gate.ts). */
   shouldAutoApply(behind: number, now: Date): AutoApplyDecision {
     return autoApplyDecision({
       cfg: this.state.autoUpdate,
       behind,
       updating: updater.phase === "updating",
       serviceLive: this.serviceActivity().active,
-      liveKnown: this.liveKnown(),
       windowUntil: serviceWindow.activeUntil(now.getTime()),
       // The APP's zone. On a UTC host "Monday 03:00" fires at 22:00 Sunday in
       // Chicago — i.e. an unattended restart in the middle of an evening service.

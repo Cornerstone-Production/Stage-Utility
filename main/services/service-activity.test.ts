@@ -121,10 +121,17 @@ describe("whether a service is under way, as every restart and deploy asks it", 
     await allSay(false, "a countdown two days ahead");
   });
 
-  it("is not, for the countdown minutes before the start: nothing is on air until the first item", async (t) => {
+  it("minutes before the start, the auto-update still waits: inside the service window, not because a service is under way", async (t) => {
     quiet(t);
     ctl.lastLive = COUNTDOWN_MINUTES_AHEAD;
-    await allSay(false, "a countdown minutes ahead");
+    // Nothing is on air yet: the update lock, and so Update now, has nothing to name.
+    assert.deepEqual(serviceActivity(), { active: false, reasons: [] });
+    // The window the plan's times open around the service: the scheduled auto-update waits it out.
+    serviceWindow.setWindows([{ open: NOW.getTime() - 60 * 60_000, close: NOW.getTime() + 3 * 60 * 60_000 }]);
+    assert.deepEqual(stageController.shouldAutoApply(1, NOW), { apply: false, why: "window" }, "the auto-update would restart the server minutes before a service");
+    // Outside every window, the scheduled hour applies.
+    serviceWindow.setWindows([{ open: NOW.getTime() + 2 * DAY, close: NOW.getTime() + 2 * DAY + 3 * 60 * 60_000 }]);
+    assert.deepEqual(stageController.shouldAutoApply(1, NOW), { apply: true });
   });
 
   it("is not, with nothing live and no record open", async (t) => {
