@@ -148,6 +148,95 @@ test("the fake survives an unparseable request and a refused group add keeps its
   );
 });
 
+test("the fake answers a group add or a Set whose Controls is not a list with an error, and keeps serving", async () => {
+  const c = await connect();
+  await assert.rejects(
+    c.send("ChangeGroup.AddComponentControl", { Id: "g", Component: { Name: "Lobby_Mixer" } }),
+    (err: unknown) => err instanceof QrcError && err.code === -32602,
+  );
+  await assert.rejects(
+    c.send("Component.Set", { Name: "Lobby_Mixer", Controls: { Name: "gain", Value: 0 } }),
+    (err: unknown) => err instanceof QrcError && err.code === -32602,
+  );
+  await c.send("NoOp");
+});
+
+test("the fake's ChangeGroup.Remove is named-controls only, like the Core's: a Component form removes nothing", async () => {
+  const c = await connect();
+  const pushes: unknown[] = [];
+  c.onNotification((method, params) => {
+    if (method === "ChangeGroup.Poll") pushes.push(params);
+  });
+  await c.send("ChangeGroup.AddComponentControl", { Id: "g", Component: { Name: "Lobby_Mixer", Controls: [{ Name: "gain" }] } });
+  await c.send("ChangeGroup.Remove", { Id: "g", Component: { Name: "Lobby_Mixer", Controls: [{ Name: "gain" }] } });
+  pushes.length = 0;
+  fake.setControl("Lobby_Mixer", "gain", -3);
+  await c.send("NoOp");
+  assert.equal(pushes.length, 1, "a component control left the group through Remove, which QRC does not document");
+});
+
+test("AutoPoll results repeated as replies to the AutoPoll id arrive as ChangeGroup.Poll, with no warning", async () => {
+  fake.autoPollForm = "reply";
+  const c = await connect();
+  const pushes: unknown[] = [];
+  c.onNotification((method, params) => {
+    if (method === "ChangeGroup.Poll") pushes.push(params);
+  });
+  const warn = mock.method(console, "warn", () => {});
+  try {
+    await c.send("ChangeGroup.AddComponentControl", { Id: "g", Component: { Name: "Lobby_Mixer", Controls: [{ Name: "gain" }] } });
+    const first = (await c.send("ChangeGroup.AutoPoll", { Id: "g", Rate: 0.1 })) as { Changes: { Value: unknown }[] };
+    assert.deepEqual(first.Changes.map((ch) => ch.Value), [-10], "the first AutoPoll reply carries the add's resend");
+    fake.setControl("Lobby_Mixer", "gain", -3);
+    fake.setControl("Lobby_Mixer", "gain", -4);
+    await c.send("NoOp");
+    assert.deepEqual(pushes, [
+      { Id: "g", Changes: [{ Component: "Lobby_Mixer", Name: "gain", Value: -3, String: "-3dB", Position: 97 / 120 }] },
+      { Id: "g", Changes: [{ Component: "Lobby_Mixer", Name: "gain", Value: -4, String: "-4dB", Position: 96 / 120 }] },
+    ]);
+    assert.deepEqual(warn.mock.calls.map((x) => String(x.arguments[0])), []);
+  } finally {
+    warn.mock.restore();
+  }
+});
+
+test("an unmatched reply that is not a change-group push warns once per id", async () => {
+  const rawPort = await rawServer((s) => {
+    const reply = (id: number) => s.write(`${JSON.stringify({ jsonrpc: "2.0", id, result: true })}\0`);
+    for (let i = 0; i < 5; i++) reply(999);
+    reply(998);
+    s.write(`${JSON.stringify({ jsonrpc: "2.0", method: "Done" })}\0`);
+  });
+  const c = await QrcClient.connect("127.0.0.1", rawPort);
+  clients.push(c);
+  const warn = mock.method(console, "warn", () => {});
+  try {
+    await new Promise<void>((resolve) => c.onNotification((m) => m === "Done" && resolve()));
+    assert.deepEqual(
+      warn.mock.calls.map((x) => String(x.arguments[0])),
+      ["[qsys] ignoring QRC message with no matching request (id 999)", "[qsys] ignoring QRC message with no matching request (id 998)"],
+    );
+  } finally {
+    warn.mock.restore();
+  }
+});
+
+test("a Core cycling unmatched reply ids is bounded: eight ids speak, then one shared line", async () => {
+  const rawPort = await rawServer((s) => {
+    for (let id = 1000; id < 1300; id++) s.write(`${JSON.stringify({ jsonrpc: "2.0", id, result: true })}\0`);
+    s.write(`${JSON.stringify({ jsonrpc: "2.0", method: "Done" })}\0`);
+  });
+  const c = await QrcClient.connect("127.0.0.1", rawPort);
+  clients.push(c);
+  const warn = mock.method(console, "warn", () => {});
+  try {
+    await new Promise<void>((resolve) => c.onNotification((m) => m === "Done" && resolve()));
+    assert.equal(warn.mock.calls.length, 9, "a Core cycling ids wrote a line per id");
+  } finally {
+    warn.mock.restore();
+  }
+});
+
 test("an error response rejects with QrcError carrying the code", async () => {
   const c = await connect();
   fake.failNext("Component.Set", 8);

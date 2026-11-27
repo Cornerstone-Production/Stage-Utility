@@ -117,6 +117,8 @@ const EXPECTED_CONFIG = [
   // themselves ride in the snapshot's images (photo-theme-images/).
   "photo-themes.json",
   "presets.json",
+  // The Q-SYS controls a panel may write, and their limits: safety policy the operator set.
+  "qsys-allowlist.json",
   "rosstalk-settings.json",
   "rosstalk-targets.json",
   // The operator's own colours, kept from the picker.
@@ -154,6 +156,8 @@ const EXPECTED_RUNTIME = [
   "host-names-seen.json",
   // The day's stage messages: an observation, cleared nightly.
   "messages.json",
+  // Every Q-SYS write a panel asked for, and what came of it.
+  "qsys-write-log.json",
   "service-timeline.json",
   "signals.json",
   "spl-history.json",

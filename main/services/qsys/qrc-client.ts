@@ -5,6 +5,7 @@
 // (WebSocket) transport can replace this class without touching callers.
 
 import net from "node:net";
+import { OutageLog } from "../repeat-log.js";
 import { scrub, scrubError } from "../scrub.js";
 
 export interface QrcTransport {
@@ -36,6 +37,12 @@ const DEFAULT_TIMEOUT_MS = 5000;
  */
 export const MAX_MESSAGE_BYTES = 32 * 1024 * 1024;
 
+/** A change-group push in reply form: `result: { Id, Changes: [...] }`. */
+function isChangeGroupResult(result: unknown): result is { Id: string; Changes: unknown[] } {
+  const r = result as { Id?: unknown; Changes?: unknown } | null;
+  return !!r && typeof r === "object" && typeof r.Id === "string" && Array.isArray(r.Changes);
+}
+
 interface Pending {
   method: string;
   resolve: (value: unknown) => void;
@@ -53,6 +60,9 @@ export class QrcClient implements QrcTransport {
   private readonly closeHandlers: ((err: Error | null) => void)[] = [];
   private closed = false;
   private closeError: Error | null = null;
+  /** Unmatched reply ids, by id: each is news once, then a reminder per 15 minutes;
+   *  past eight in a run they share one bucket, so a Core cycling ids cannot flood the log. */
+  private readonly unmatched = new OutageLog();
 
   private constructor(
     private readonly socket: net.Socket,
@@ -172,16 +182,26 @@ export class QrcClient implements QrcTransport {
         p.reject(new QrcError(`QRC ${p.method}: ${String(error.message ?? "error")}`, Number.isFinite(code) ? code : -1));
       });
     } else if (typeof msg.method === "string" && msg.id === undefined) {
-      for (const cb of this.notificationHandlers) {
-        try {
-          cb(msg.method, msg.params);
-        } catch (err) {
-          console.warn(`[qsys] QRC notification handler for ${scrub(msg.method)} threw: ${scrubError(err)}`);
-        }
-      }
+      this.notify(msg.method, msg.params);
+    } else if (!msg.error && isChangeGroupResult(msg.result)) {
+      // QSC's reference shows AutoPoll results as replies that repeat the AutoPoll
+      // request's id; after the first, nothing is pending for it. Delivered as the
+      // notification form, so callers handle one shape.
+      this.notify("ChangeGroup.Poll", msg.result);
     } else {
       // Also what a reply arriving after its request timed out looks like.
-      console.warn(`[qsys] ignoring QRC message with no matching request (id ${scrub(msg.id)})`);
+      const d = this.unmatched.fail("unmatched", String(msg.id), Date.now());
+      if (d.log) console.warn(`[qsys] ignoring QRC message with no matching request (id ${scrub(msg.id)})${scrub(d.note)}`);
+    }
+  }
+
+  private notify(method: string, params: unknown): void {
+    for (const cb of this.notificationHandlers) {
+      try {
+        cb(method, params);
+      } catch (err) {
+        console.warn(`[qsys] QRC notification handler for ${scrub(method)} threw: ${scrubError(err)}`);
+      }
     }
   }
 

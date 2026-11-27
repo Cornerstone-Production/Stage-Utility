@@ -2,8 +2,8 @@
 //
 // Owns what QrcClient deliberately does not: Logon, the 30 s keepalive, status,
 // reconnect with backoff, and the component/control catalog. `transport`,
-// `getCatalog`, `onCatalog` and `refreshCatalog` are the seam the Q-SYS panels of
-// a later release build on; nothing in this release calls them outside tests.
+// `getCatalog`, `onCatalog` and `refreshCatalog` are the seam the watch
+// (qsys-watch.ts), checked writes (qsys-write.ts) and the /api/qsys routes build on.
 // Nothing here ever calls a method that changes the design.
 
 import { errorMessage } from "../errors.js";
@@ -11,7 +11,7 @@ import { StatusIntegration } from "../integration-base.js";
 import { scrub } from "../scrub.js";
 import { QrcClient, QrcError, type QrcTransport } from "./qrc-client.js";
 import type { QrcComponent, QrcControl, QrcStatus } from "./qrc-types.js";
-import type { QsysSettings } from "./qsys-settings.js";
+import { QSYS_DEFAULT_RATES, type QsysMeterRates, type QsysSettings } from "./qsys-settings.js";
 
 /** The Core drops a connection after 60 s of silence; ping at half that. */
 const KEEPALIVE_MS = 30_000;
@@ -128,6 +128,14 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
 
   get transport(): QrcTransport | null {
     return this.wrapped;
+  }
+
+  /** The configured meter rates. A change reconfigures (and so reconnects) the service. */
+  get meterRates(): QsysMeterRates {
+    return {
+      volunteerMeterHz: this.settings?.volunteerMeterHz ?? QSYS_DEFAULT_RATES.volunteerMeterHz,
+      staffMeterHz: this.settings?.staffMeterHz ?? QSYS_DEFAULT_RATES.staffMeterHz,
+    };
   }
 
   getStatus(): QsysStatusDto {

@@ -39,6 +39,7 @@
 // keep goes out if it is no longer wanted; and a list of what to keep is forgotten, with what it may
 // have removed, so both go again.
 
+import { backoffMs } from "./backoff.js";
 import { addBroadcastListener } from "./broadcaster.js";
 import { errorMessage } from "./errors.js";
 import { plural } from "./plural.js";
@@ -134,10 +135,8 @@ export const DEFAULT_TIMINGS: PublisherTimings = {
   requestTimeoutMs: PUBLISH_REQUEST_TIMEOUT_MS,
 };
 
-/** How long to wait after `failures` failures in a row: 5 s, 10 s, 20 s … up to the ceiling. */
-export function backoffMs(failures: number, minMs: number, maxMs: number): number {
-  return Math.min(maxMs, minMs * 2 ** Math.max(0, failures - 1));
-}
+// backoffMs moved to backoff.ts when the Q-SYS watch needed it; re-exported for this file's callers.
+export { backoffMs };
 
 // ── What the publisher reads ─────────────────────────────────────────────────
 

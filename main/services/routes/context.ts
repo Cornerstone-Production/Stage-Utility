@@ -49,6 +49,15 @@ export type RouteModule = (c: RouteCtx) => Promise<void>;
  *  saves nothing worth the work. */
 export const GZIP_MIN_BYTES = 8 * 1024;
 
+/**
+ * The request's peer address, or "unknown" without a socket. Optional all the
+ * way down: a route that throws while working out who asked has turned a
+ * rate limit or a log entry into an outage.
+ */
+export function remoteAddressOf(req: http.IncomingMessage): string {
+  return req.socket?.remoteAddress ?? "unknown";
+}
+
 export function json(res: http.ServerResponse, data: unknown, status = 200): void {
   // A second reply is a BUG, but it must not be a fatal one.
   //

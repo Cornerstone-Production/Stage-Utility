@@ -756,6 +756,25 @@ described by its hint.
 | POST | `/api/photo-themes/plans/:planId/approve-all` | `{people: [{personId, file}]}`, the ready edits that were shown, at most 500, each person once. Approves each that is still that file, waiting for review and made for this plan; an edit that landed after they were shown is left for review. `{approved, skipped}`, `skipped` naming the person ids left. `409` when none of them could be approved |
 | GET | `/api/photo-themes/images/:file` | A stored edit, ready or approved, served immutable with the stored-image policy. `404` for a name that is not one |
 
+### Q-SYS
+
+The Core connection, its catalog, the [allowlist](../integrations/qsys.md#allowlist-and-limits)
+and writes. None of these is PIN-gated, writes included: restrict the server's port to
+staff and panel devices. A `component` or `control` is 1 to 256 characters with no
+control characters.
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/qsys/status` | `{connected, state, designName, isEmulator, catalogAt, writable}`. `state` is `connected`, `reconnecting` or `offline`; `writable` is true while connected with the catalog read and, after a (re)connect or a new design, once the Core has resent the values of every control Stage Utility watches |
+| GET | `/api/qsys/catalog` | `{designCode, components}`, each component `{name, type, controls}` as the Core reported them. `503` while not connected |
+| POST | `/api/qsys/catalog/refresh` | Read every component and control again. Answers the catalog; `503` while not connected, `502` when the read fails (the reason is on `/log`) |
+| GET | `/api/qsys/allowlist` | `{entries, invalid}`, each entry `{component, control, label, min, max, confirm}`. `invalid` is a sentence saying why the stored file is refused (and enforced as empty), or `null` |
+| PUT | `/api/qsys/allowlist` | `{entries}`: replace the whole list. `label` up to 120 characters on one line; `min` and `max` both numbers (`min` not above `max`) or both `null`; `confirm` `none` or `hold`; each address once; at most 1000 entries. `400` naming the first entry at fault, with nothing saved. While the stored file is invalid, `409` unless the body also has `replaceInvalid: true`, which keeps the invalid file beside the new one |
+| POST | `/api/qsys/allowlist/export` | The allowlist file: `{format: "stage-utility-qsys-allowlist", version: 1, entries}` |
+| POST | `/api/qsys/allowlist/import` | An allowlist file, as export answers it. Replaces the list; `400` for a file of another format or version, or any entry that breaks a rule, keeping the old list; `409` over an invalid stored file, as PUT (`replaceInvalid: true` in the file's object). Answers `{entries}` |
+| POST | `/api/qsys/write` | `{component, control, value, panelId?, final?}`: `value` a number, `true`/`false` or text, `panelId` a panel id or `null`, `final` `false` for a write in the middle of a gesture (a drag), which is recorded in the write log only if refused. `400` for a body of the wrong shape, `413` past 16 KB. Otherwise `200` with `{ok: true, value, string, position?, clamped}` (the Core's value after the write) or `{ok: false, reason, message}`, `reason` one of `not-allowed`, `not-in-design`, `read-only`, `no-range`, `offline`, `bad-value`, `core-error`. A refused write is never sent later |
+| GET | `/api/qsys/write-log` | `{entries, saveError}`: the last 2000 writes, newest first, each `{at, panelId, device, remote, component, control, from, to, result}` (`remote` the request's address alone), and for a refusal made before sending that repeated, `repeats` and `lastAt`. `saveError` is a fixed sentence while the log cannot be saved (the reason is on `/log`), or `null` |
+
 ## Channels
 
 `GET /api/events` is one stream carrying everything, filtered per connection.

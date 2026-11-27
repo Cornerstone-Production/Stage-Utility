@@ -1,7 +1,8 @@
 # Q-SYS integration
 
-Connects to a Q-SYS Core over QRC (JSON-RPC over TCP, default port 1710) and
-reads the design's components and controls.
+Connects to a Q-SYS Core over QRC (JSON-RPC over TCP, default port 1710), reads
+the design's components and controls, and writes the values of the controls on
+its [allowlist](#allowlist-and-limits).
 
 ## How it works
 
@@ -15,7 +16,8 @@ reads the design's components and controls.
 - When the Core reports a new design (a different design code, as after a redeploy
   or a Core restart), the catalog is read again. A second change reported while
   that read runs is read after it.
-- The integration never calls a method that changes the design.
+- The integration never calls a method that changes the design. It writes control
+  values only, and only to allowlisted controls.
 
 The card's row shows the state: connected with the design name, reconnecting, or
 the reason it could not connect. `/log` shows the decisions, tagged `[qsys]`; see
@@ -61,9 +63,91 @@ Q-SYS Designer in **Emulate** answers QRC on the machine it runs on, port 1710.
 Point **Core host** at that machine to try the integration with no Core. The
 status reports `emulator` so it is not mistaken for a live Core.
 
+## Allowlist and limits
+
+Writes go through [`POST /api/qsys/write`](../reference/api.md#q-sys) and reach only
+the controls on the allowlist. Nothing is on it by default. In this release the
+allowlist is set over the API, with `PUT /api/qsys/allowlist` or an allowlist file
+import; there is no page for it yet. Every write is checked by the server.
+
+| Field | Meaning |
+|---|---|
+| component, control | The control's address: the component's Code Name and the control's name. |
+| label | A name for the control. Up to 120 characters on one line. |
+| min, max | The value range a numeric write may reach, in the control's own units (dB for a gain). Both set, or both empty. |
+| confirm | `none` or `hold`. Stored with the entry and exported with it; nothing in this release reads it yet. |
+
+- A numeric control is writable only with a range on its entry. With `min` and
+  `max` empty it is refused (`no-range`).
+- A value outside the range is clamped to it, and the clamp is logged.
+- Booleans (mute, switch) and triggers (buttons) carry no range. A trigger is fired
+  with `true`.
+- A text control takes any text up to 1024 characters. It is not checked against
+  the control's choices: allowlist a text control only if any text is safe to send.
+- A value of the wrong type is refused (`bad-value`): text or `true` to a gain, a
+  number to a mute or a text control, a number that is not finite.
+- A control the Core reports as read-only (direction `Read`, as a meter) is refused
+  (`read-only`), allowlisted or not.
+- An allowlisted control the running design does not have, as after a redeploy that
+  removed it, is refused (`not-in-design`) without anything being sent.
+- A write is refused (`offline`) while the Core is offline or reconnecting, and
+  after a reconnect (or a new design) until the Core has resent the current values
+  of every control Stage Utility watches. Nothing is watched in this release, so
+  writes resume once the catalog is read. A refused write is dropped, never queued
+  and sent later: only a fresh write sends again.
+- Every write asks the Core for the resulting value in the same call
+  (`Component.Set` with `ResponseValues`). The caller gets the Core's value back; a
+  value that differs from the one sent is logged.
+
+The allowlist is saved with the server's config and carried by a config backup. It
+also exports and imports as its own file (format `stage-utility-qsys-allowlist`,
+version 1), never inside a view bundle: it is safety policy, and is reviewed on its
+own. An import, a save or a restore that breaks any rule above (a duplicate address,
+`min` above `max`, half a range, an unknown `confirm`) is refused whole, naming the
+first entry at fault, and the list already saved is kept.
+
+A stored allowlist file that breaks a rule (edited by hand, or written by a build
+with other rules) is enforced as an empty list, so nothing is writable, and the
+reason is logged. `GET /api/qsys/allowlist` says why in `invalid`. A save or an
+import over it is refused (`409`) unless the request carries `replaceInvalid: true`;
+then the invalid file is kept beside it as `qsys-allowlist.json.invalid-<time>`
+before the new list is saved. Nothing deletes that copy.
+
+The allowlist, its limits and the write route are not PIN-gated: anyone who can reach
+the server can change them. Restrict the server's port to staff and panel devices.
+
+## Write log
+
+Every write gesture is one entry in a rolling log of the last 2000
+(`qsys-write-log.json`, not carried by a config backup; read it at
+`GET /api/qsys/write-log`). A drag sends many writes: the client marks every one but
+the last `final: false`. Those are checked and sent but recorded only if refused, and
+the last is recorded with the value it landed on. A client that never sends a last
+write leaves no entry for a drag. A clamp or a read-back mismatch is logged to `/log`
+on the same rule.
+
+Each entry holds when, the panel id the client sent, the device (its address and
+user agent), the control, the value before, the value sent (after clamping) and the
+result: `ok`, `clamped`, `mismatch`, or the reason it was refused (`not-allowed`,
+`not-in-design`, `read-only`, `no-range`, `offline`, `bad-value`, `core-error`). The
+value before is the Core's value when the gesture started (its first write from that
+address, panel and control, within 10 seconds of the next), as Stage Utility last read
+it; it is empty when nothing watches the control, which in this release is always. A
+successful write goes to the write log, not `/log`.
+
+A refusal made before anything was sent (every reason but `core-error`) that repeats
+one already recorded (the same address, panel, control and reason, within a minute of
+the last) is counted on that entry (`repeats`, `lastAt`) rather than added, so a
+client looping on a refused write cannot push real entries out of the log. The
+address is the request's own, not its user agent, which a client can change at will.
+A write that reached the Core, including a `core-error` that may have landed, always
+keeps its own entry and value.
+
 ## What it never does
 
-It reads the design. It never calls a method that changes the design: no components are added, no designs loaded, no Core settings changed.
+It never calls a method that changes the design: no components are added, no designs
+loaded, no Core settings changed. It writes the values of allowlisted controls and
+nothing else.
 
 ## Troubleshooting
 
@@ -79,6 +163,32 @@ Look at `/log` and filter for `[qsys]`.
 | `connected to <design> (<n> components, emulator=<bool>)` | Connected and the catalog is read. Few or no components usually means Script Access is not set where it is needed, or no design is running. |
 | `design changed, refreshing catalog` | The Core reports a new design code, as after a redeploy or a Core restart. |
 | `a QRC message passed <n> bytes without a terminator, dropping the connection` | One message from the Core ran past 32 MiB without ending. Real designs stay far under that; the service reconnects, and if this repeats, the address is probably not a Q-SYS Core. |
-| `ignoring QRC message with no matching request (id <n>)` | A reply arrived for a request that had already given up after 5 seconds. Occasional lines mean a busy Core or network; a steady stream means replies are consistently slow. |
+| `ignoring QRC message with no matching request (id <n>)` | A reply arrived for a request that had already given up after 5 seconds. Occasional lines mean a busy Core or network; a steady stream means replies are consistently slow. Each id is logged once, then every 15 minutes with a count; past eight ids they share one line. |
 | `ignoring unparseable QRC message: <reason>` | The Core sent something that is not JSON. If it was a reply, its request fails 5 seconds later as timed out. |
 | `QRC notification handler for <method> threw: <reason>`, `QRC close handler threw: <reason>`, `catalog listener threw: <reason>` | A bug in this app's handling of a message from the Core. The connection carries on; report the line. |
+| `write refused (<reason>): <why>` | A write was refused. Before anything was sent: `not-allowed`, `not-in-design`, `read-only`, `no-range`, `offline`, `bad-value`; by the Core, or because the connection dropped mid-write: `core-error`. The write log has the device and panel. A refusal checked before sending is logged once per address, then once a minute with ` — still failing after <n> attempts (<m> min)`; past eight addresses they share one line. `offline` is logged once per connection state (none, or each new connection) and starts over once writes are possible again. `core-error` is logged every time. |
+| `write to <component>/<control> clamped from <a> to <b>` | A write asked for a value outside the allowlist range. |
+| `read-back mismatch on <component>/<control>: sent <a>, the Core holds <b>` | The Core holds a different value than the one written, as when a control limits or steps its own value. |
+| `allowlist saved: <n> entries`, `allowlist imported: <n> entries` | The allowlist was replaced. |
+| `allowlist save refused: <why>`, `allowlist import refused: <why>` | An allowlist broke a rule, or the stored file is invalid and the request did not say `replaceInvalid`; the saved list is unchanged. |
+| `qsys-allowlist.json is not a valid allowlist (<why>); nothing is writable, and it is kept until a save says it replaces it` | The stored file breaks a rule, so every write is refused `not-allowed`. Fix the file and restart, or save a list with `replaceInvalid: true`. |
+| `kept the invalid allowlist as qsys-allowlist.json.invalid-<time> before replacing it` | A save replaced an invalid stored file; the old file is beside it in the data directory. |
+| `could not read the write log; entries are in memory only: <reason>` | The write log file exists but cannot be read. Writes still go through; the log holds only what happens from now, and is not saved over the unreadable file. |
+| `could not save the write log; entries since are in memory only` | The write log file cannot be written. Writes still go through; `/api/qsys/write-log` reports `saveError`. Logged once per run of failures. |
+| `write log saved again` | A save succeeded after failures. |
+| `catalog refresh failed: <reason>` | A catalog refresh asked for over the API failed. |
+| `watching <n> values, <n> volunteer meters, <n> staff meters` | What the Core is asked to report. Logged on connect and when it changes; in this release it is always 0, since only the Q-SYS panels of a later release ask to watch controls. |
+| `design changed, rebuilding change groups` | A new design: the watched controls are set up again, and writes wait until their values are read. |
+
+The lines below are about watching controls, which only the Q-SYS panels of a later
+release ask for. This release does not write them.
+
+| Line or message | Meaning |
+|---|---|
+| `change group update failed: <reason>; retrying in <n> s` | The Core refused a change to what is watched. Retried after 1 s, doubling to 30 s. |
+| `rebuilding change groups after a failed update` | A retry after the line above. |
+| `change group <id> was not on the Core (<reason>)` | Removing a watch the Core no longer had; harmless. |
+| `<component>/<control> is on panel <id> but not in the Core's design; not watched` | A panel names a control the design lacks. |
+| `the Core would not watch <component> (<controls>): <reason>; not watched` | The Core refused to report these controls. The rest are watched and writes carry on. |
+| `the Core has not resent the values of <groups> <n> s after Invalidate; asking again, and writes wait` | After a reconnect the Core has not sent the current values; writes stay refused until it does. It is asked again after 10 s, then 20 s, doubling to 5 minutes, one line each time. |
+|

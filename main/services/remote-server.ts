@@ -104,6 +104,7 @@ import { videoProxyRoutes } from "./routes/video-proxy-routes.js";
 import { messagesRoutes } from "./routes/messages-routes.js";
 import { homeRoutes } from "./routes/home-routes.js";
 import { photoThemeRoutes } from "./routes/photo-theme-routes.js";
+import { qsysRoutes } from "./routes/qsys-routes.js";
 import { photoThemes } from "./photo-themes/service.js";
 import { PHOTO_THEMES_CHANNEL } from "../types/photo-themes.js";
 import { messagesService } from "./messages-service.js";
@@ -170,6 +171,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   hostNameRoutes,
   stageplotsRoutes,
   photoThemeRoutes,
+  qsysRoutes,
 ] as const;
 
 /**

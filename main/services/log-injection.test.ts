@@ -164,6 +164,17 @@ const REQUEST_FACING = [
   // PRODCOM_DEBUG frame and the error text ProdCom sends back, all off its socket
   // or REST replies.
   "prodcom-service.ts",
+  // Its save and refusal lines quote the reason an allowlist from PUT
+  // /api/qsys/allowlist or an imported file was refused, naming its addresses.
+  "qsys/qsys-allowlist-store.ts",
+  // Its skip line names a panel id and a control address, both saved into a View
+  // over HTTP; the rest is fixed group names, counts and what the Core said back.
+  "qsys/qsys-watch.ts",
+  // Its lines report its own file's read and save failures (a filesystem error).
+  "qsys/qsys-write-log.ts",
+  // Its refusal, clamp and mismatch lines name the control address and value
+  // posted to /api/qsys/write, and what the Core answered.
+  "qsys/qsys-write.ts",
   // Names a wireless connection or a feed out of a restored bundle, which
   // POST /api/config/import takes from anyone on the LAN.
   "restore-credentials.ts",
@@ -210,6 +221,8 @@ const REQUEST_FACING = [
   "routes/plan-routes.ts",
   "routes/preset-routes.ts",
   "routes/proxy-routes.ts",
+  // Its one line is a failed catalog refresh, what the Core or the socket said.
+  "routes/qsys-routes.ts",
   "routes/rosstalk-routes.ts",
   "routes/route-harness.ts",
   // Logs nothing: it reads a creation body and answers a failure.
@@ -591,6 +604,14 @@ function requestFacingFiles(): string[] {
     path.join(HERE, "plan-export.ts"),
     // Off a ProdCom socket or REST reply; see REQUEST_FACING.
     path.join(HERE, "prodcom-service.ts"),
+    // A panel id and control address saved into a View over HTTP; see REQUEST_FACING.
+    // An allowlist refusal quotes addresses from an HTTP body or an imported file.
+    path.join(HERE, "qsys/qsys-allowlist-store.ts"),
+    path.join(HERE, "qsys/qsys-watch.ts"),
+    // Only its own file's failures; scanned rather than excused, so a later line naming an entry is held to scrub().
+    path.join(HERE, "qsys/qsys-write-log.ts"),
+    // The address and value posted to /api/qsys/write, on every refusal, clamp and mismatch line.
+    path.join(HERE, "qsys/qsys-write.ts"),
     // Its one summary line names the serviceKey the replay was handed, which
     // arrives verbatim in an HTTP body wherever a baptism rebuild is triggered
     // — the same exposure history-edit.ts carries.
