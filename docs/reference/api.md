@@ -12,7 +12,8 @@ or more is gzipped when the request sends `Accept-Encoding: gzip`, as every
 browser does; one that does not ask gets it plain.
 
 Failures answer `{error}` with the status that says whose problem it is: `400`
-for a body or query the caller got wrong, `409` for something the server cannot
+for a body or query the caller got wrong (a body that is not JSON is a `400` on every route that
+takes one), `409` for something the server cannot
 do right now (editing a service that is recording), `413` for an over-limit
 body, and `502` for a read that only failed because Planning Center could not be
 reached — every `/api/pco/*` read, plus `/api/service-types`, `/api/plans`,
