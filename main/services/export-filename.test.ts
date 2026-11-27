@@ -7,7 +7,7 @@ import * as path from "node:path";
 import { describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { attachmentDisposition, safeFilename } from "./export-filename.js";
+import { attachmentDisposition, datedExportFilename, filenameSlug, safeFilename } from "./export-filename.js";
 
 describe("attachmentDisposition", () => {
   test("names a server-built download", () => {
@@ -26,6 +26,16 @@ describe("attachmentDisposition", () => {
 
   test("a 255-character name is still a name", () => {
     assert.equal(safeFilename("x".repeat(255)), "x".repeat(255));
+  });
+});
+
+describe("filenameSlug", () => {
+  test("a name cut at the length cap does not end on a hyphen", () => {
+    // 59 letters, then a space: the cut at 60 landed on the hyphen the space
+    // became, and the dated name read "...a--2026-08-17.json".
+    const slug = filenameSlug(`${"a".repeat(59)} b`);
+    assert.equal(slug, "a".repeat(59));
+    assert.doesNotMatch(datedExportFilename("stage-utility-view", `${"a".repeat(59)} b`, new Date("2026-08-17T12:00:00Z")), /--/);
   });
 });
 

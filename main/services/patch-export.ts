@@ -170,10 +170,8 @@ export function exportFilename(
   ext: string,
   at: number = Date.now(),
 ): string {
-  // The shared slug, which also caps its length: a name past 255 bytes is
-  // refused by some filesystems and by attachmentDisposition. A name that
-  // slugifies to nothing reads "patch" here, where the other exports drop the
-  // segment, because the sheet name is the file's only label.
+  // The shared slug, for its length cap. "patch" where the other exports drop
+  // an empty segment: the sheet name is this file's only label.
   const slug = (s: string) => filenameSlug(s) || "patch";
   // The app's zone, not the server's clock. toISOString() here dated a file
   // exported at 22:35 in Chicago as the NEXT day, which is how you end up with

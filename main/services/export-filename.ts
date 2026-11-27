@@ -14,7 +14,8 @@ import { zonedDateKey } from "./app-timezone.js";
  * a path component at 255 bytes.
  */
 export function filenameSlug(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60);
+  // Trimmed again after the cut, which can land on the hyphen a space became.
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60).replace(/-+$/, "");
 }
 
 /** `<prefix>-<slug>-2026-08-17.json`, or `<prefix>-2026-08-17.json` for an empty slug.
