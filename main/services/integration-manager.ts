@@ -1840,11 +1840,7 @@ class IntegrationManager {
       // the operator to save credentials that were sitting safely in secrets.bin.
       // Saving one thing must not be able to fail on how long a different thing
       // takes.
-      void this.verifyPcoCredentials()
-        .then((ok) => (ok ? stageController.refresh() : undefined))
-        .catch((err) => {
-          console.error("[integration-manager] post-save PCO refresh failed", scrubError(err));
-        });
+      this.verifyPcoThenRefresh();
     }
 
     await this.applyIntegration(id);
@@ -1881,9 +1877,7 @@ class IntegrationManager {
     // "PCO not configured" until a restart.
     if (id === "planning-center" && enabled) {
       await this.applyPcoCredentials();
-      void this.verifyPcoCredentials()
-        .then((ok) => (ok ? stageController.refresh() : undefined))
-        .catch((err: unknown) => console.warn("[integration-manager] Planning Center check after turning it on failed", scrubError(err)));
+      this.verifyPcoThenRefresh();
     }
 
     await this.applyIntegration(id);
@@ -2630,6 +2624,17 @@ class IntegrationManager {
    *
    * @returns true when PCO accepted the credentials.
    */
+  // Background: the caller has already answered. verifyPcoCredentials() puts its own
+  // failure on the tile, so what can still throw here is the refresh, and the log
+  // line is the only place left to report it.
+  private verifyPcoThenRefresh(): void {
+    void this.verifyPcoCredentials()
+      .then((ok) => (ok ? stageController.refresh() : undefined))
+      .catch((err: unknown) => {
+        console.error("[integration-manager] Planning Center refresh after its check failed", scrubError(err));
+      });
+  }
+
   private async verifyPcoCredentials(): Promise<boolean> {
     const appId = await this.getPcoAppId();
     const secret = await this.getPcoSecret();
