@@ -20,7 +20,9 @@ import {
   channelHasSubscribers,
   channelInDemand,
 } from "./broadcaster.js";
+import { DEFAULT_SETTLE_MS, OutageLog } from "./repeat-log.js";
 import { serviceWindow } from "./service-window.js";
+import { backoffMs, cleared } from "./timers.js";
 
 /** Connection state as reported to the Integrations panel. */
 export type ConnState = "connected" | "error" | "disconnected";
@@ -29,11 +31,40 @@ export type ConnState = "connected" | "error" | "disconnected";
  *  A subclass can raise it via `reconnectBaseMs` (ProPresenter waits 5s). */
 const RECONNECT_BASE_MS = 3000;
 
+/** The fixed reconnect ceiling of an OUTPUT (RossTalk, TSL); see reconnectCeilingMs. */
+export const OUTPUT_RECONNECT_CEILING_MS = 30_000;
+
+/** The one key this integration's outage log keeps its run under. */
+const OUTAGE_KEY = "connection";
+
 export abstract class ConnectionLifecycle {
   protected running = false;
 
+  /**
+   * Which run of this integration is current. Bumped by every stop(); capture
+   * it (`const run = this.run`) before an await and ask `current(run)` after it.
+   *
+   * `running` cannot answer that. restart() is stop() then start() in the same
+   * tick, so `running` goes false and back to true while a read against the OLD
+   * host is still in flight; the read resumes, sees `running`, and acts for the
+   * new host. A failure wrote "Can't reach <old host>" on the new host's row,
+   * blanked its displays and replaced its healthy poll timer with a back-off; a
+   * success was published as the new box's state. PVP, ProPresenter and OBS
+   * each carried a guard of their own for it, and REAPER, Resi, YouTube and
+   * Smaart did not.
+   */
+  private runId = 0;
+
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
+  /**
+   * This integration's outage, so a failure is said once per OUTAGE — see
+   * noteOutage. One run at a time, under one key; a kind per distinct line.
+   */
+  private readonly connectionOutages = new OutageLog();
+  /** Re-asks whether a recovery has held, for an integration whose success is
+   *  a single event (a socket that connects and stays up). See noteHealthy. */
+  private settleTimer: ReturnType<typeof setTimeout> | null = null;
   private onConn: ((state: ConnState, message: string | null) => void) | null = null;
   private reported: ConnState | null = null;
   /** The message that went WITH `reported`. Kept beside it because a state that
@@ -66,6 +97,30 @@ export abstract class ConnectionLifecycle {
     return RECONNECT_BASE_MS;
   }
 
+  /**
+   * A fixed ceiling on the back-off, or null for the shared window-aware cap.
+   *
+   * For an OUTPUT (RossTalk, TSL). Nothing subscribes to one, so the shared cap
+   * reads it as dormant all week and stretches a retry toward 30 minutes: a
+   * switcher powered on mid-week would sit unreachable that long. Both used to
+   * get their ceiling by overriding scheduleReconnect with a private counter,
+   * which left `reconnectAttempt` at 0 for good, so every retry looked like the
+   * first failure. A number here keeps the deliberate ceiling and the one
+   * counter.
+   */
+  protected get reconnectCeilingMs(): number | null {
+    return null;
+  }
+
+  /**
+   * Let the event loop exit with a retry still queued. RossTalk's sockets are
+   * unref'd so an idle output never holds the process open, and its pending
+   * reconnect has to be too, or a shutdown (or a test run) waits for it.
+   */
+  protected get unrefReconnect(): boolean {
+    return false;
+  }
+
   setConnectionListener(cb: (state: ConnState, message: string | null) => void): void {
     this.onConn = cb;
   }
@@ -74,6 +129,11 @@ export abstract class ConnectionLifecycle {
     if (this.running || !this.configured) return;
     this.running = true;
     this.reconnectAttempt = 0;
+    // A start is a fresh look: nothing learned about the old target or the old
+    // credentials is true of the new ones, and a run carried across would
+    // swallow the first line of the next outage.
+    this.connectionOutages.forget();
+    this.connectionOutages.settleAfter(this.outageSettleMs);
     this.begin();
   }
 
@@ -88,14 +148,28 @@ export abstract class ConnectionLifecycle {
   }
 
   stop(): void {
+    this.runId++;
     this.running = false;
     this.clearReconnect();
+    this.clearSettle();
     this.teardown();
   }
 
   protected restart(): void {
     this.stop();
     if (this.configured) this.start();
+  }
+
+  /** The current run, to capture before an await. See `runId`. */
+  protected get run(): number {
+    return this.runId;
+  }
+
+  /** Is the run that captured `run` still the one this integration is on? False
+   *  once it has been stopped, restarted or reconfigured. Checked after every
+   *  await, on the failure side as well as the success side. */
+  protected current(run: number): boolean {
+    return this.running && run === this.runId;
   }
 
   /**
@@ -143,14 +217,82 @@ export abstract class ConnectionLifecycle {
     this.reportedMessage = null;
   }
 
-  /** Attempts since the last success — 0 means "first failure", which the
-   *  services use to log once and then stay quiet while backing off. */
-  protected get attempt(): number {
-    return this.reconnectAttempt;
-  }
+  // NOTE: there is deliberately no `attempt` getter any more.
+  //
+  // It was read by twelve copies of `if (this.attempt === 0) console.warn(...)`.
+  // The counter resets on every success, so an upstream that flaps made every
+  // failure a fresh "first failure" and wrote a line per flap, indefinitely —
+  // the rule repeat-log.ts records costing 3,527 lines in five days. Say a
+  // failure through noteOutage instead; without the getter the old gate does
+  // not compile.
 
+  /** The connection is answering: forgive the back-off, and let the outage log
+   *  see the recovery. Call it on a success, as every integration already did. */
   protected resetBackoff(): void {
     this.reconnectAttempt = 0;
+    this.noteHealthy();
+  }
+
+  /**
+   * Say a failure, once per outage: the first failure of a run is news, the same
+   * failure again is not, a run that goes on is reminded every 15 minutes with
+   * its attempt count, and a recovery is said once it has held (repeat-log.ts).
+   *
+   * @param line what an operator reads, without the `[tag]` — the tag is this
+   *   integration's. Appended with the reminder's tail when there is one.
+   * @param kind what makes two failures DIFFERENT problems. Defaults to the line
+   *   itself; pass something stable when the line carries text that varies per
+   *   attempt, so the variation is not mistaken for news.
+   */
+  protected noteOutage(line: string, kind: string = line): void {
+    this.clearSettle();
+    const said = this.connectionOutages.fail(OUTAGE_KEY, kind, Date.now());
+    if (said.log) console.warn(`[${this.log}] ${line}${said.note}`);
+  }
+
+  /**
+   * A success, for the outage log. Ends the run once no failure has followed it
+   * for the settle window, which is what keeps a flapping upstream one outage.
+   *
+   * Every integration calls resetBackoff() only on the success that ends a run
+   * of failures (a poller on its first good poll, a socket on connect), so
+   * nothing asks again after it. The timer does, when the window has passed;
+   * a failure in between cancels it (noteOutage), and so do a retry and stop().
+   */
+  private noteHealthy(): void {
+    if (!this.connectionOutages.failing(OUTAGE_KEY)) return;
+    // Never asked on the success itself: OutageLog measures from the last
+    // FAILURE, so after a retry gap as long as the window the first success
+    // would be "recovered" at once and the next failure a fresh outage.
+    this.clearSettle();
+    this.settleTimer = setTimeout(() => {
+      this.settleTimer = null;
+      if (this.running) this.sayRecovered();
+    }, this.outageSettleMs);
+    // A recovery line must not hold the process open.
+    this.settleTimer.unref();
+  }
+
+  /**
+   * How long a recovery must go without a failure before the outage is over.
+   *
+   * Longer than the slowest interval this integration polls at, or every flap
+   * is a recovery and a fresh outage, two lines where the old gate wrote one.
+   * The default is two minutes; an integration that can poll slower than a
+   * minute (Resi and YouTube when idle, Scores between games) says so.
+   */
+  protected get outageSettleMs(): number {
+    return DEFAULT_SETTLE_MS;
+  }
+
+  /** Ask the outage log whether the run is over, and say so if it is. */
+  private sayRecovered(): void {
+    const said = this.connectionOutages.ok(OUTAGE_KEY, Date.now());
+    if (said.log) console.log(`[${this.log}] reachable again${said.note}`);
+  }
+
+  private clearSettle(): void {
+    this.settleTimer = cleared(this.settleTimer);
   }
 
   // NOTE: there is deliberately no `hasSubscribers` here any more.
@@ -184,6 +326,9 @@ export abstract class ConnectionLifecycle {
    */
   protected scheduleReconnect(): void {
     if (!this.running) return;
+    // A retry means the connection did not hold, whether or not a failure was
+    // said first (a socket the far end closes cleanly says none).
+    this.clearSettle();
     this.scheduleIn(this.nextReconnectDelayMs());
   }
 
@@ -197,10 +342,12 @@ export abstract class ConnectionLifecycle {
    * peeked at.
    */
   protected nextReconnectDelayMs(): number {
-    const delay = serviceWindow.capDelayMs(
-      this.reconnectBaseMs * 2 ** this.reconnectAttempt,
-      channelHasSubscribers(this.channel),
-    );
+    const ceiling = this.reconnectCeilingMs;
+    const failures = this.reconnectAttempt + 1;
+    const delay =
+      ceiling === null
+        ? serviceWindow.capDelayMs(backoffMs(failures, this.reconnectBaseMs), channelHasSubscribers(this.channel))
+        : backoffMs(failures, this.reconnectBaseMs, ceiling);
     this.reconnectAttempt++;
     return delay;
   }
@@ -214,13 +361,11 @@ export abstract class ConnectionLifecycle {
     if (!this.running) return;
     this.clearReconnect();
     this.reconnectTimer = setTimeout(() => void this.connect(), delayMs);
+    if (this.unrefReconnect) this.reconnectTimer.unref();
   }
 
   protected clearReconnect(): void {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.reconnectTimer = cleared(this.reconnectTimer);
   }
 }
 

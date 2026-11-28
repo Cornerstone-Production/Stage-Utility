@@ -22,7 +22,7 @@ import { promisify } from "node:util";
 import { errorMessage, isNotFound } from "../errors.js";
 import { OutageLog } from "../repeat-log.js";
 import { scrub } from "../scrub.js";
-import { cleared } from "../timers.js";
+import { backoffMs, cleared } from "../timers.js";
 import { relayDir } from "./acquire.js";
 import { RelayLogWatcher } from "./relay-log.js";
 
@@ -33,7 +33,7 @@ const execFileAsync = promisify(execFile);
  *  gives up" behavior; a spawn always follows, just no sooner than a minute
  *  apart. */
 export function restartDelayMs(attempt: number): number {
-  return Math.min(60_000, 1000 * 2 ** attempt);
+  return backoffMs(attempt + 1, 1000, 60_000);
 }
 
 /** How long a child must run, uninterrupted, before it counts as healthy
