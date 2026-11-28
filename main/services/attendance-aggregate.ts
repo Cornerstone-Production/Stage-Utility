@@ -110,7 +110,7 @@ export function alignAttendance(into: AttendanceFrame, from: AttendanceFrame): A
     base = intoBase;
     frames = "unknown";
   } else {
-    base = intoList.length ? intoBase : (fromBase ?? intoBase);
+    base = intoList.length ? intoBase : fromBase;
   }
 
   const shifted = (list: AttendanceSample[], n: number) =>

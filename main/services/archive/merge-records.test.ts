@@ -428,3 +428,24 @@ test("the raw daily total takes the later, larger figure", () => {
   const b = boxRecord(10, 30, 7, () => 300);
   assert.equal(mergeAttendanceRecord(a, b).record.totalAttendance, rawAt(30));
 });
+
+test("this box's own sample that is not a number is carried as it is, never shifted or counted", () => {
+  // A record taken whole by an earlier import is this box's own from then on.
+  const a = boxRecord(10, 15, 0, () => 300); // baseline 520
+  a.samples[1] = { ...a.samples[1]!, attendance: "12" as unknown as number };
+  const b = boxRecord(0, 12, 7, () => 300); // baseline 500
+
+  const out = mergeAttendanceRecord(a, b).record;
+
+  const carried = out.samples!.find((s) => s.t === a.samples[1]!.t) as unknown as { attendance: unknown };
+  assert.equal(carried.attendance, "12", "a string attendance was shifted into a longer string");
+  assert.equal(out.samples!.length, a.samples.length + b.samples.length, "this box's own sample was dropped");
+  assert.equal(out.peakAttendance, rawAt(15) - 500);
+  assert.ok(Number.isFinite(out.lastAttendance) && Number.isFinite(out.minOccupancy), "a figure was poisoned");
+});
+
+test("an incoming recording placed onto an empty record of this box keeps its own baseline, not this box's", () => {
+  const a = { ...boxRecord(0, 0, 0, () => 300), samples: [] };
+  const b = { ...boxRecord(5, 10, 7, () => 300), attendanceBaseline: null };
+  assert.equal(mergeAttendanceRecord(a, b).record.attendanceBaseline, null);
+});
