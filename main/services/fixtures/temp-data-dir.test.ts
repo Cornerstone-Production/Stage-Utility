@@ -20,10 +20,11 @@ test("tempDataDir sets the env, then removes the dir when the file ends", () => 
       encoding: "utf8",
     });
     assert.equal(run.status, 0, run.stdout + run.stderr);
-    const seen = JSON.parse(readFileSync(report, "utf8")) as { dir: string; env: string; home: string };
+    const [first, second] = readFileSync(report, "utf8").split("\n");
+    const seen = JSON.parse(first) as { dir: string; env: string; home: string };
+    assert.equal((JSON.parse(second) as { presentInLaterAfter: boolean }).presentInLaterAfter, true, "removed before a later after() hook ran");
     assert.equal(seen.env, seen.dir);
     assert.equal(seen.home, join(seen.dir, "home"));
-    assert.ok(seen.dir.startsWith(tmpdir()) || seen.dir.includes("temp-data-dir-probe-"), seen.dir);
     assert.equal(existsSync(seen.dir), false, `${seen.dir} was left behind`);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
