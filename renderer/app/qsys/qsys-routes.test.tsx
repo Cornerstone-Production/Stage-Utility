@@ -622,6 +622,9 @@ describe("/qsys/manage", () => {
     assert.ok(document.querySelector('[data-qsys-panel="zone-one"]'));
   });
 
+  // Not unit-tested: that the hover Edit pill sits clear of the header's address and kind
+  // text. That is layout (jsdom loads no stylesheet and measures every box as 0); it was
+  // checked in a browser by comparing the two boxes.
   test("in the shell, a panel's header carries its address and kind", async () => {
     await open("/qsys/manage/zone-1");
     assert.match(document.querySelector("[data-qsys-shell-note]")?.textContent ?? "", /\/qsys\/zone-1.*Volunteer panel/);

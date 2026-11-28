@@ -99,10 +99,13 @@ export function QsysManagePanelRoute() {
       </div>
     );
   }
+  const editable = canEditInPlace(view, "shell");
   return (
-    <InPlaceEditFrame editable={canEditInPlace(view, "shell")} onEdit={() => setEditingFor(view.id)}>
+    // The panel's status strip (h-10, address and kind) runs along the top. The pill sits inside it, at the
+    // right, and the strip leaves that end clear, so it covers none of the strip's text.
+    <InPlaceEditFrame editable={editable} onEdit={() => setEditingFor(view.id)} cornerClass="top-2">
       <div className="min-h-0 flex-1">
-        <QsysPanelSurface view={view} settingsLink inShell />
+        <QsysPanelSurface view={view} settingsLink inShell reserveEdit={editable} />
       </div>
     </InPlaceEditFrame>
   );
