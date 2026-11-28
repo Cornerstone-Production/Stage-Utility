@@ -63,11 +63,19 @@ export class PatchLinksNotUpdated extends Error {
   }
 }
 
-/** What a saved patch owes others before it is announced: `before` is the file it replaced. */
-type SavedHook = (before: PatchFile, after: PatchFile) => Promise<void>;
+/**
+ * What a saved patch owes others before it is announced. `before` is the files it replaced, oldest
+ * first: the one this save replaced, preceded by the one an earlier save whose follower failed
+ * replaced (a retry still stamps the devices that save removed).
+ */
+type SavedHook = (before: readonly PatchFile[], after: PatchFile) => Promise<void>;
 
 class PatchStore {
   private savedHooks: SavedHook[] = [];
+  /** The patch the oldest save with a failed follower replaced, until a save's followers all succeed. Held in memory: a restart forgets it. */
+  private unfollowed: PatchFile | null = null;
+  /** The last file save() stored, for a reader that must not act on a patch older than one just saved. */
+  private lastSaved: PatchFile | null = null;
 
   /** Run, awaited, after every save and before patch:updated goes out. A hook that throws is said on [patch], and save() throws PatchLinksNotUpdated once the patch is stored and announced. */
   onSaved(hook: SavedHook): void {
@@ -122,6 +130,11 @@ class PatchStore {
     return this.read(raw);
   }
 
+  /** The newer of `read` and the last file this process saved: a read made before a save is overtaken by it. */
+  newest(read: PatchFile): PatchFile {
+    return this.lastSaved && this.lastSaved.updatedAt > read.updatedAt ? this.lastSaved : read;
+  }
+
   /**
    * Replace the whole patch file, stamping updatedAt, and broadcast it on patch:updated.
    * Returns the saved file, or throws PatchLinksNotUpdated when the patch is saved and a follower failed. The broadcast is here and not in a route because every saver
@@ -135,15 +148,19 @@ class PatchStore {
       before = prev;
       return next;
     });
+    this.lastSaved = next;
+    const replaced = this.read(before);
+    const befores = this.unfollowed ? [this.unfollowed, replaced] : [replaced];
     let failed: unknown = null;
     for (const hook of this.savedHooks) {
       try {
-        await hook(this.read(before), next);
+        await hook(befores, next);
       } catch (err) {
         console.error(`[patch] a follower of the saved patch failed: ${scrub(errorMessage(err))}`);
         failed ??= err;
       }
     }
+    this.unfollowed = failed === null ? null : befores[0]!;
     broadcast("patch:updated", next);
     if (failed !== null) throw new PatchLinksNotUpdated(failed);
     return next;

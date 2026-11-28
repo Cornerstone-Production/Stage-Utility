@@ -70,13 +70,13 @@ export function broadcastStagePlots(doc: StagePlotsDoc): void {
 }
 
 // A linked point keeps the last name and colour its device had. The patch is what changes them,
-// so each patch save writes them onto the stored points: against the patch it replaced first (a
-// device this save removes is stamped as it was), then against the new one (a device that is
-// still there is stamped as it now is). A plot's version is not bumped.
-patchStore.onSaved(async (before, after) => {
+// so each patch save writes them onto the stored points: against the patches it replaced first,
+// oldest first (a device this save removes is stamped as it was), then against the new one (a
+// device that is still there is stamped as it now is). A plot's version is not bumped.
+patchStore.onSaved(async (befores, after) => {
   let changed = false;
   const next = await stageplotsStore.update((doc) => {
-    const stamped = stampDoc(stampDoc(doc, { ok: true, file: before }), { ok: true, file: after });
+    const stamped = [...befores, after].reduce((d, file) => stampDoc(d, { ok: true, file }), doc);
     changed = stamped !== doc;
     return stamped;
   });

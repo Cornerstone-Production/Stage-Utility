@@ -15,7 +15,7 @@ process.env.STAGE_UTILITY_DATA = TMP;
 const { callRoute } = await import("./route-harness.js");
 const { stageplotsRoutes } = await import("./stageplots-routes.js");
 const { stageplotsStore } = await import("../stageplots-store.js");
-const { patchStore } = await import("../patch-store.js");
+const { patchStore, PatchLinksNotUpdated } = await import("../patch-store.js");
 await import("../stageplots-publish-instance.js");
 type PatchFile = import("../../types/patch.js").PatchFile;
 
@@ -137,5 +137,95 @@ describe("an editor's older draft saved after a patch save", () => {
     assert.equal(r.status, 200, r.body);
     const it = (await stageplotsStore.get()).plots.find((p) => p.id === plotId)!.items[0]!;
     assert.deepEqual([it.label, it.patchLink], ["Mine", undefined]);
+  });
+});
+
+describe("the edges of keeping a last name", () => {
+  const stale = (plotId: string, name: string) =>
+    stageplotsStore.update((doc) => ({
+      ...doc,
+      plots: doc.plots.map((p) => (p.id === plotId ? { ...p, items: p.items.map((it) => ({ ...it, label: name, color: null, patchLink: { ...it.patchLink!, lastName: name, lastColor: null } })) } : p)),
+    }));
+  const draftPut = async (plotId: string, name: string) => {
+    const plot = (await stageplotsStore.get()).plots.find((p) => p.id === plotId)!;
+    const it = { ...plot.items[0]!, label: name, color: null, patchLink: { ...plot.items[0]!.patchLink!, lastName: name, lastColor: null } };
+    return call("PUT", `/api/stageplots/plots/${plotId}/items`, { version: plot.version, items: [it] });
+  };
+
+  test("a patch save between a plot save's read of the patch and its write is not overwritten with the old name", async () => {
+    const plotId = await linkedPlot("Old Box");
+    await patchStore.save(patchOf([{ id: "sb1", name: "Drum Box" }]));
+    const real = patchStore.loadStrict.bind(patchStore);
+    let raced = false;
+    patchStore.loadStrict = async () => {
+      const old = await real();
+      if (!raced) {
+        raced = true;
+        await patchStore.save(patchOf([{ id: "sb1", name: "Snare Box" }]));
+      }
+      return old;
+    };
+    try {
+      const r = await draftPut(plotId, "Old Box");
+      assert.equal(r.status, 200, r.body);
+    } finally {
+      patchStore.loadStrict = real;
+    }
+    assert.ok(raced);
+    assert.equal((await stored(plotId)).lastName, "Snare Box", "the plot save resolved against the patch it read before the patch save");
+  });
+
+  test("a plot saved while the patch cannot be read keeps the stored names and says so on [stageplots]", async () => {
+    const plotId = await linkedPlot("Old Box");
+    await patchStore.save(patchOf([{ id: "sb1", name: "Drum Box" }]));
+    const real = patchStore.loadStrict.bind(patchStore);
+    patchStore.loadStrict = async () => {
+      throw new Error("patch.json was damaged");
+    };
+    const lines: string[] = [];
+    const warn = console.warn;
+    console.warn = (...a: unknown[]) => void lines.push(a.map(String).join(" "));
+    try {
+      const r = await draftPut(plotId, "Old Box");
+      assert.equal(r.status, 200, r.body);
+    } finally {
+      patchStore.loadStrict = real;
+      console.warn = warn;
+    }
+    assert.equal((await stored(plotId)).lastName, "Drum Box");
+    assert.ok(lines.some((l) => l.startsWith("[stageplots]") && l.includes("could not be read") && l.includes("patch.json was damaged")), lines.join(" / "));
+  });
+
+  test("a retry after a failed follower still stamps the device the failed save removed", async () => {
+    const plotId = await linkedPlot("Old Box");
+    await patchStore.save(patchOf([{ id: "sb1", name: "Mid Box", color: "#e5484d" }]));
+    await stale(plotId, "Old Box");
+    const real = stageplotsStore.update.bind(stageplotsStore);
+    stageplotsStore.update = () => Promise.reject(new Error("disk full"));
+    const quiet = console.error;
+    console.error = () => undefined;
+    try {
+      await assert.rejects(patchStore.save(patchOf([])), PatchLinksNotUpdated);
+    } finally {
+      stageplotsStore.update = real;
+      console.error = quiet;
+    }
+    assert.equal((await stored(plotId)).lastName, "Old Box", "the failed save stamped anyway");
+    await patchStore.save(patchOf([]));
+    const s = await stored(plotId);
+    assert.deepEqual([s.lastName, s.lastColor], ["Mid Box", "#e5484d"]);
+  });
+
+  test("two devices that swap names in one save: each point follows its own device by id", async () => {
+    const v = (await call("POST", "/api/stageplots/venues", { name: "Swap", kind: "home", notes: "" })).json as { id: string };
+    const p = (await call("POST", "/api/stageplots/plots", { venueId: v.id, name: "Standard" })).json as { id: string; version: number };
+    const point = (id: string, deviceId: string, name: string) => ({ id, type: "conn", x: 10, y: 10, w: 40, h: 30, rotation: 0, label: name, color: null, notes: "", inputs: [], patchLink: { sheetId: "main", deviceId, lastName: name, lastColor: null } });
+    const r = await call("PUT", `/api/stageplots/plots/${p.id}/items`, { version: p.version, items: [point("a", "dev-a", "Alpha"), point("b", "dev-b", "Bravo")] });
+    assert.equal(r.status, 200, r.body);
+    await patchStore.save(patchOf([{ id: "dev-a", name: "Alpha" }, { id: "dev-b", name: "Bravo" }]));
+    await patchStore.save(patchOf([{ id: "dev-a", name: "Bravo", color: "#e5484d" }, { id: "dev-b", name: "Alpha" }]));
+    await patchStore.save(patchOf([]));
+    const items = (await stageplotsStore.get()).plots.find((x) => x.id === p.id)!.items;
+    assert.deepEqual(items.map((it) => [it.id, it.patchLink!.lastName, it.patchLink!.lastColor]), [["a", "Bravo", "#e5484d"], ["b", "Alpha", null]]);
   });
 });
