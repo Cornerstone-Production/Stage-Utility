@@ -128,7 +128,18 @@ export function ConsoleRoute() {
  * A console's page, full bleed, with Edit in its top-right corner. Shared with a
  * Q-SYS panel in the shell (/qsys/manage/<slug>), which edits in place the same way.
  */
-export function InPlaceEditFrame({ editable, onEdit, children }: { editable: boolean; onEdit: () => void; children: ReactNode }) {
+export function InPlaceEditFrame({
+  editable,
+  onEdit,
+  children,
+  cornerClass = "top-3",
+}: {
+  editable: boolean;
+  onEdit: () => void;
+  children: ReactNode;
+  /** Where the Edit pill sits down from the top, as a Tailwind `top-` class: below a header the content carries. */
+  cornerClass?: string;
+}) {
   const [nearCorner, setNearCorner] = useState(false);
   return (
     // FULL BLEED. The shell gutters its content, so the console sat inset with a
@@ -167,7 +178,7 @@ export function InPlaceEditFrame({ editable, onEdit, children }: { editable: boo
         //
         // Always visible where there is no hover at all, and while focused, so a
         // touch screen and a keyboard both keep a way in.
-        <div className="pointer-events-none absolute right-3 top-3">
+        <div className={cn("pointer-events-none absolute right-3", cornerClass)}>
           <span
             className={cn(
               "inline-block rounded-md transition-opacity",

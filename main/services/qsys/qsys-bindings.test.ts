@@ -37,14 +37,15 @@ const ctl = (Name: string, Type: string, Direction = "Read/Write") => ({
   String: "0",
   Position: 0,
   Direction,
-  ...(Type === "Float" ? { ValueMin: -100, ValueMax: 20 } : {}),
+  // A mixer gain's range as a Core reports it, which has a measured taper.
+  ...(Type === "Float" ? { ValueMin: -100, ValueMax: 10 } : {}),
 });
 
 const CATALOG: QsysCatalog = {
   designCode: "d1",
   components: [
-    { name: "Lobby_Mixer", type: "gain", controls: [ctl("gain", "Float"), ctl("mute", "Boolean"), ctl("locked", "Float", "Read"), ctl("norange", "Float")] },
-    { name: "Zone 1", type: "meter", controls: [ctl("meter_1", "Float", "Read")] },
+    { name: "Lobby_Mixer", type: "mixer", controls: [ctl("output.1.gain", "Float"), ctl("output.1.mute", "Boolean"), ctl("locked", "Float", "Read"), ctl("norange", "Float")] },
+    { name: "Zone 1", type: "meter2", controls: [ctl("meter.1", "Float", "Read")] },
   ],
 };
 
@@ -67,23 +68,23 @@ const meter = (b: ReturnType<typeof bind> | null): LayoutObjectConfig => ({ type
 
 describe("checkBindings", () => {
   test("reports a renamed component as missing-component", () => {
-    const v = view("p1", obj("f1", fader(bind("Lobby_Mixer_Old", "gain"))));
-    assert.deepEqual(checkBindings([v], CATALOG, allowMap(entry("Lobby_Mixer_Old", "gain"))), [
-      { panelId: "p1", objectId: "f1", address: bind("Lobby_Mixer_Old", "gain"), problem: "missing-component" },
+    const v = view("p1", obj("f1", fader(bind("Lobby_Mixer_Old", "output.1.gain"))));
+    assert.deepEqual(checkBindings([v], CATALOG, allowMap(entry("Lobby_Mixer_Old", "output.1.gain"))), [
+      { panelId: "p1", objectId: "f1", address: bind("Lobby_Mixer_Old", "output.1.gain"), problem: "missing-component" },
     ]);
   });
 
   test("reports a control the component lacks as missing-control", () => {
-    const v = view("p1", obj("m1", meter(bind("Zone 1", "meter_9"))));
+    const v = view("p1", obj("m1", meter(bind("Zone 1", "meter.9"))));
     assert.deepEqual(checkBindings([v], CATALOG, allowMap()).map((r) => r.problem), ["missing-control"]);
   });
 
   test("a fader bound to a non-allowlisted control is not-allowed; a meter on the same control is fine", () => {
-    const v = view("p1", obj("f1", fader(bind("Lobby_Mixer", "gain"))), obj("m1", meter(bind("Lobby_Mixer", "gain"))));
+    const v = view("p1", obj("f1", fader(bind("Lobby_Mixer", "output.1.gain"))), obj("m1", meter(bind("Lobby_Mixer", "output.1.gain"))));
     assert.deepEqual(checkBindings([v], CATALOG, allowMap()), [
-      { panelId: "p1", objectId: "f1", address: bind("Lobby_Mixer", "gain"), problem: "not-allowed" },
+      { panelId: "p1", objectId: "f1", address: bind("Lobby_Mixer", "output.1.gain"), problem: "not-allowed" },
     ]);
-    assert.deepEqual(checkBindings([v], CATALOG, allowMap(entry("Lobby_Mixer", "gain"))), []);
+    assert.deepEqual(checkBindings([v], CATALOG, allowMap(entry("Lobby_Mixer", "output.1.gain"))), []);
   });
 
   test("a write object on a read-only control, or a number with no range, is read-only", () => {
@@ -106,37 +107,37 @@ describe("checkBindings", () => {
   });
 
   test("a boolean with no range is writable", () => {
-    const v = view("p1", obj("mu", { type: "qsys-mute", binding: bind("Lobby_Mixer", "mute") }));
-    assert.deepEqual(checkBindings([v], CATALOG, allowMap(entry("Lobby_Mixer", "mute", { min: null, max: null }))), []);
+    const v = view("p1", obj("mu", { type: "qsys-mute", binding: bind("Lobby_Mixer", "output.1.mute") }));
+    assert.deepEqual(checkBindings([v], CATALOG, allowMap(entry("Lobby_Mixer", "output.1.mute", { min: null, max: null }))), []);
   });
 
   test("an indicator only has to exist; a strip's name and meter are read, its gain and mute written", () => {
     const strip = obj("s", {
       type: "qsys-strip",
-      name: bind("Lobby_Mixer", "gain"),
+      name: bind("Lobby_Mixer", "output.1.gain"),
       label: "x",
-      gain: bind("Lobby_Mixer", "gain"),
-      mute: bind("Lobby_Mixer", "mute"),
-      meter: bind("Zone 1", "meter_1"),
+      gain: bind("Lobby_Mixer", "output.1.gain"),
+      mute: bind("Lobby_Mixer", "output.1.mute"),
+      meter: bind("Zone 1", "meter.1"),
     });
-    const withIndicator = obj("b", { type: "qsys-button", binding: { ...bind("Lobby_Mixer", "mute"), indicator: bind("Zone 1", "meter_1") }, label: "x", hold: false });
-    const report = checkBindings([view("p", strip, withIndicator)], CATALOG, allowMap(entry("Lobby_Mixer", "gain"), entry("Lobby_Mixer", "mute", { min: null, max: null })));
+    const withIndicator = obj("b", { type: "qsys-button", binding: { ...bind("Lobby_Mixer", "output.1.mute"), indicator: bind("Zone 1", "meter.1") }, label: "x", hold: false });
+    const report = checkBindings([view("p", strip, withIndicator)], CATALOG, allowMap(entry("Lobby_Mixer", "output.1.gain"), entry("Lobby_Mixer", "output.1.mute", { min: null, max: null })));
     assert.deepEqual(report, []);
     // Take the writes off the allowlist: gain, mute and the button's own control fail; name, meter and indicator do not.
     assert.deepEqual(
       checkBindings([view("p", strip, withIndicator)], CATALOG, allowMap()).map((r) => `${r.objectId} ${r.address.control} ${r.problem}`),
-      ["s gain not-allowed", "s mute not-allowed", "b mute not-allowed"],
+      ["s output.1.gain not-allowed", "s output.1.mute not-allowed", "b output.1.mute not-allowed"],
     );
   });
 
   test("objects nested in a container are checked, and unbound ones are skipped", () => {
-    const inner = obj("f", fader(bind("Gone", "gain")));
+    const inner = obj("f", fader(bind("Gone", "output.1.gain")));
     const v = view("p", obj("box", { type: "container" } as LayoutObjectConfig, [inner, obj("u", fader(null))]));
     assert.deepEqual(checkBindings([v], CATALOG, allowMap()).map((r) => r.objectId), ["f"]);
   });
 
   test("with no catalog there is nothing to check against", () => {
-    assert.deepEqual(checkBindings([view("p", obj("f", fader(bind("Gone", "gain"))))], null, allowMap()), []);
+    assert.deepEqual(checkBindings([view("p", obj("f", fader(bind("Gone", "output.1.gain"))))], null, allowMap()), []);
   });
 });
 
@@ -200,22 +201,22 @@ describe("slotsOf: every binding of every Q-SYS object, and its role", () => {
 describe("panelsFromViews", () => {
   test("a view with Q-SYS objects is a panel, addresses deduped; a view without is not", () => {
     const panels = panelsFromViews([
-      view("a", obj("f", fader(bind("Lobby_Mixer", "gain"))), obj("m", meter(bind("Lobby_Mixer", "gain")))),
+      view("a", obj("f", fader(bind("Lobby_Mixer", "output.1.gain"))), obj("m", meter(bind("Lobby_Mixer", "output.1.gain")))),
       view("b", obj("x", { type: "container" } as LayoutObjectConfig)),
     ]);
-    assert.deepEqual(panels, [{ id: "a", kind: "staff", addresses: [bind("Lobby_Mixer", "gain")] }]);
+    assert.deepEqual(panels, [{ id: "a", kind: "staff", addresses: [bind("Lobby_Mixer", "output.1.gain")] }]);
   });
 
   test("a panel's own kind picks its meter rate, and a panel with nothing on it yet is still a panel", () => {
     const block = (kind: "volunteer" | "staff", slug: string) => ({ kind, slug, siblings: [], returnAfterMin: 5 });
     const panels = panelsFromViews([
-      { ...view("v", obj("f", fader(bind("Lobby_Mixer", "gain")))), qsys: block("volunteer", "zone-1") },
-      { ...view("s", obj("f", fader(bind("Lobby_Mixer", "gain")))), qsys: block("staff", "zone-1-staff") },
+      { ...view("v", obj("f", fader(bind("Lobby_Mixer", "output.1.gain")))), qsys: block("volunteer", "zone-1") },
+      { ...view("s", obj("f", fader(bind("Lobby_Mixer", "output.1.gain")))), qsys: block("staff", "zone-1-staff") },
       { ...view("e"), qsys: block("volunteer", "empty") },
     ]);
     assert.deepEqual(panels, [
-      { id: "v", kind: "volunteer", addresses: [bind("Lobby_Mixer", "gain")] },
-      { id: "s", kind: "staff", addresses: [bind("Lobby_Mixer", "gain")] },
+      { id: "v", kind: "volunteer", addresses: [bind("Lobby_Mixer", "output.1.gain")] },
+      { id: "s", kind: "staff", addresses: [bind("Lobby_Mixer", "output.1.gain")] },
       { id: "e", kind: "volunteer", addresses: [] },
     ]);
   });
@@ -223,8 +224,8 @@ describe("panelsFromViews", () => {
 
 describe("writeAddressesOf", () => {
   test("only the controls a panel writes: a strip's gain and mute, not its name, meter or an indicator", () => {
-    const strip = { type: "qsys-strip", name: bind("M", "name"), label: "", gain: bind("M", "gain"), mute: { ...bind("M", "mute"), indicator: bind("M", "led") }, meter: bind("M", "meter") } as LayoutObjectConfig;
-    assert.deepEqual(writeAddressesOf(view("p", obj("s", strip), obj("m", meter(bind("M", "meter2"))), obj("f", fader(bind("M", "gain"))))), [bind("M", "gain"), bind("M", "mute")]);
+    const strip = { type: "qsys-strip", name: bind("M", "name"), label: "", gain: bind("M", "output.1.gain"), mute: { ...bind("M", "output.1.mute"), indicator: bind("M", "led") }, meter: bind("M", "meter") } as LayoutObjectConfig;
+    assert.deepEqual(writeAddressesOf(view("p", obj("s", strip), obj("m", meter(bind("M", "meter2"))), obj("f", fader(bind("M", "output.1.gain"))))), [bind("M", "output.1.gain"), bind("M", "output.1.mute")]);
   });
 });
 
@@ -266,17 +267,56 @@ describe("QsysBindings", () => {
     const h = harness();
     const cap = lines();
     try {
-      h.setViews([view("p1", obj("f1", fader(bind("Gone", "gain"))))]);
+      h.setViews([view("p1", obj("f1", fader(bind("Gone", "output.1.gain"))))]);
       await h.b.refresh();
-      assert.deepEqual(cap.out, ["[qsys] binding: p1/f1 missing-component (Gone/gain)"]);
+      assert.deepEqual(cap.out, ["[qsys] binding: p1/f1 missing-component (Gone/output.1.gain)"]);
       await h.b.refresh();
       assert.equal(cap.out.length, 1, "an unchanged report logged again");
-      h.setViews([view("p1", obj("f1", fader(bind("Gone", "gain"))), obj("f2", fader(bind("Lobby_Mixer", "gain"))))]);
+      h.setViews([view("p1", obj("f1", fader(bind("Gone", "output.1.gain"))), obj("f2", fader(bind("Lobby_Mixer", "output.1.gain"))))]);
       await h.b.refresh();
-      assert.deepEqual(cap.out.slice(1), ["[qsys] binding: p1/f2 not-allowed (Lobby_Mixer/gain)"]);
+      assert.deepEqual(cap.out.slice(1), ["[qsys] binding: p1/f2 not-allowed (Lobby_Mixer/output.1.gain)"]);
       h.setViews([]);
       await h.b.refresh();
       assert.equal(cap.out.at(-1), "[qsys] binding check: every binding resolves");
+    } finally {
+      cap.restore();
+    }
+  });
+
+  test("a Gain block on the mixer's range is said as unmeasured: the taper is the component kind's, not the range's", async () => {
+    const h = harness();
+    h.setCatalog({
+      ...CATALOG,
+      components: [...CATALOG.components, { name: "Hall_Gain", type: "gain", controls: [{ ...ctl("gain", "Float"), ValueMin: -100, ValueMax: 10 }] }],
+    });
+    h.setEntries([entry("Lobby_Mixer", "output.1.gain"), entry("Hall_Gain", "gain")]);
+    const cap = lines();
+    try {
+      h.setViews([view("p1", obj("f1", fader(bind("Lobby_Mixer", "output.1.gain"))), obj("f2", fader(bind("Hall_Gain", "gain"))))]);
+      await h.b.refresh();
+      assert.deepEqual(cap.out, [
+        "[qsys] no measured taper for gain -100..10; faders on it move linearly in dB, not as the Core's do (Hall_Gain/gain). See /qsys/manage",
+      ]);
+    } finally {
+      cap.restore();
+    }
+  });
+
+  test("a fader range with no measured taper is said once, naming its controls; a measured one is not said", async () => {
+    const h = harness();
+    h.setCatalog({
+      ...CATALOG,
+      components: [...CATALOG.components, { name: "Hall_Mixer", type: "mixer", controls: [{ ...ctl("output.1.gain", "Float"), ValueMin: -100, ValueMax: 20 }] }],
+    });
+    h.setEntries([entry("Lobby_Mixer", "output.1.gain"), entry("Hall_Mixer", "output.1.gain")]);
+    const cap = lines();
+    try {
+      h.setViews([view("p1", obj("f1", fader(bind("Lobby_Mixer", "output.1.gain"))), obj("f2", fader(bind("Hall_Mixer", "output.1.gain"))))]);
+      await h.b.refresh();
+      await h.b.refresh();
+      assert.deepEqual(cap.out, [
+        "[qsys] no measured taper for mixer -100..20; faders on it move linearly in dB, not as the Core's do (Hall_Mixer/output.1.gain). See /qsys/manage",
+      ]);
     } finally {
       cap.restore();
     }
@@ -286,7 +326,7 @@ describe("QsysBindings", () => {
     const h = harness();
     const cap = lines();
     try {
-      h.setViews([view("p1", obj("x\n[qsys] FORGED", fader(bind("Gone", "gain"))))]);
+      h.setViews([view("p1", obj("x\n[qsys] FORGED", fader(bind("Gone", "output.1.gain"))))]);
       await h.b.refresh();
       assert.equal(cap.out.length, 1);
       // eslint-disable-next-line no-control-regex
@@ -300,20 +340,20 @@ describe("QsysBindings", () => {
     const h = harness();
     const cap = lines();
     try {
-      h.setViews([view("p1", obj("f1", fader(bind("Lobby_Mixer", "gain"))))]);
+      h.setViews([view("p1", obj("f1", fader(bind("Lobby_Mixer", "output.1.gain"))))]);
       h.b.start();
       h.b.start();
       await h.b.refresh();
-      assert.deepEqual(h.set.at(-1), [{ id: "p1", kind: "staff", addresses: [bind("Lobby_Mixer", "gain")] }]);
+      assert.deepEqual(h.set.at(-1), [{ id: "p1", kind: "staff", addresses: [bind("Lobby_Mixer", "output.1.gain")] }]);
       const startedWith = h.set.length;
       assert.deepEqual(problems(h.b), ["not-allowed"]);
 
-      h.setEntries([entry("Lobby_Mixer", "gain")]);
+      h.setEntries([entry("Lobby_Mixer", "output.1.gain")]);
       h.on.allow();
       await h.b.refresh();
       assert.deepEqual(answer(h.b), [], "an allowlist save did not rerun the check");
 
-      h.setViews([view("p2", obj("f", fader(bind("Lobby_Mixer", "mute"))))]);
+      h.setViews([view("p2", obj("f", fader(bind("Lobby_Mixer", "output.1.mute"))))]);
       h.on.views();
       await h.b.refresh();
       assert.deepEqual((h.set.at(-1) as { id: string }[]).map((p) => p.id), ["p2"], "a views save did not rebuild the panels");
@@ -341,7 +381,7 @@ describe("QsysBindings", () => {
     const h = harness();
     const cap = lines();
     try {
-      h.setViews([view("p1", obj("f1", fader(bind("Gone", "gain"))))]);
+      h.setViews([view("p1", obj("f1", fader(bind("Gone", "output.1.gain"))))]);
       await h.b.refresh();
       assert.equal(problems(h.b).length, 1);
       h.setCatalog(null);
@@ -366,7 +406,7 @@ describe("QsysBindings", () => {
         onCatalog: () => {},
         loadViews: async () => {
           if (broken) throw new Error("views.json unreadable");
-          return [view("p1", obj("f1", fader(bind("Gone", "gain"))))];
+          return [view("p1", obj("f1", fader(bind("Gone", "output.1.gain"))))];
         },
         loadAllow: async () => [],
         onViewsSaved: () => {},
@@ -392,7 +432,7 @@ describe("QsysBindings", () => {
     const h = harness();
     await h.b.settled();
     assert.deepEqual(h.set, [], "settled() ran a check");
-    h.setViews([view("p1", obj("f1", fader(bind("Gone", "gain"))))]);
+    h.setViews([view("p1", obj("f1", fader(bind("Gone", "output.1.gain"))))]);
     const run = h.b.refresh();
     await h.b.settled();
     assert.equal(problems(h.b).length, 1, "settled() returned before the run finished");
@@ -432,7 +472,7 @@ describe("two writers converge", () => {
   let watch: InstanceType<typeof QsysWatch>;
   const named = new Set<string>();
   const sent: { channel: string; changes: QrcChange[] }[] = [];
-  const GAIN = bind("Lobby_Mixer", "gain");
+  const GAIN = bind("Lobby_Mixer", "output.1.gain");
   /** This test's watch hears subscription changes from here, not the shared broadcaster. */
   let subscriptionListeners: (() => void)[] = [];
   const subscriptionsChanged = () => {
@@ -454,13 +494,13 @@ describe("two writers converge", () => {
     sent.length = 0;
     fake = new FakeQrcServer();
     fake.components.set("Lobby_Mixer", [
-      { Name: "gain", Type: "Float", Value: -10, String: "-10dB", Position: 0.5, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
+      { Name: "output.1.gain", Type: "Float", Value: -10, String: "-10dB", Position: 0.5, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
     ]);
     const port = await fake.start();
     svc = new QsysService();
     subscriptionListeners = [];
     watch = new QsysWatch(svc, (cb) => void subscriptionListeners.push(cb));
-    await qsysAllowlist.replace([entry("Lobby_Mixer", "gain", { min: -100, max: 20 })]);
+    await qsysAllowlist.replace([entry("Lobby_Mixer", "output.1.gain", { min: -100, max: 20 })]);
     const settings: QsysSettings = { host: "127.0.0.1", port, user: "", enabled: true, volunteerMeterHz: 10, staffMeterHz: 20 };
     svc.configure(settings, null);
     for (let i = 0; i < 200000 && !svc.transport; i++) await new Promise((r) => setImmediate(r));
@@ -485,13 +525,13 @@ describe("two writers converge", () => {
     // Not the real views store: reading it here would cache it, and "the real views
     // store" below needs it unread.
     writer.loadViews = async () => [];
-    const wrote = await writer.write({ component: "Lobby_Mixer", control: "gain", value: -5, panelId: "p", device: "ipad", remote: "192.0.2.10" });
+    const wrote = await writer.write({ component: "Lobby_Mixer", control: "output.1.gain", value: -5, panelId: "p", device: "ipad", remote: "192.0.2.10" });
     assert.equal(wrote.ok, true);
     await settle();
     assert.equal(watch.current([GAIN]).get(addressKey(GAIN))?.Value, -5, "the iPad's write did not reach the cache");
 
     sent.length = 0;
-    fake.setControl("Lobby_Mixer", "gain", -2);
+    fake.setControl("Lobby_Mixer", "output.1.gain", -2);
     await settle();
     assert.deepEqual(sent.map((s) => s.changes.map((c) => c.Value)), [[-2]], "the UCI's value was not broadcast");
     assert.equal(watch.current([GAIN]).get(addressKey(GAIN))?.Value, -2, "the cache kept the iPad's value");

@@ -17,11 +17,17 @@
 //
 // The report is logged only when it changes: one `[qsys] binding:` line for each
 // problem that was not in the last report.
+//
+// The same run says, once per range for the life of the process, which control
+// ranges a fader or a strip's level is bound to with no measured Q-SYS taper
+// (types/qsys-taper.ts): such a fader moves linearly in dB, not as the Core's own
+// fader does. /qsys/manage lists them from the same rule.
 
 import { scrub } from "../scrub.js";
 import { viewsStore } from "../views-store.js";
 import { walkLayoutObjects, type LayoutObject, type View } from "../../types/views.js";
 import { addressKey, addressOf, panelKindOf, qsysAddressesOf, slotsOf, type QsysAddress, type QsysSlotRole } from "../../types/qsys.js";
+import { kindText, untaperedRanges } from "../../types/qsys-taper.js";
 import { qsysAllowlist, type AllowEntry } from "./qsys-allowlist-store.js";
 import { qsysService, type QsysCatalog } from "./qsys-service.js";
 import { qsysWatch, type WatchPanel } from "./qsys-watch.js";
@@ -158,6 +164,8 @@ export class QsysBindings {
   /** The last run could not read the views or the allowlist (or none has run): there is no report to serve. */
   private failed = true;
   private logged = new Set<string>();
+  /** Ranges already said to have no measured taper: one line each, ever. */
+  private untapered = new Set<string>();
   /** The catalog the logged lines were said against: a new one (a reconnect, a redeploy) says them again. */
   private loggedFor: QsysCatalog | null = null;
   private running: Promise<void> | null = null;
@@ -217,6 +225,7 @@ export class QsysBindings {
         }
         this.report = checkBindings(views, catalog, new Map(entries.map((e) => [addressKey(e), e])));
         this.say(catalog);
+        this.sayUntapered(views, catalog);
       } catch (err) {
         // No report rather than a stale one: the route answers 503 with the reason
         // until a run succeeds. The watch keeps the panels it last had.
@@ -224,6 +233,16 @@ export class QsysBindings {
         this.report = [];
         console.warn(`[qsys] binding check could not run: ${scrub(err instanceof Error ? err.message : err)}`);
       }
+    }
+  }
+
+  private sayUntapered(views: View[], catalog: QsysCatalog): void {
+    for (const r of untaperedRanges(views, catalog)) {
+      const kind = kindText(r);
+      if (this.untapered.has(kind)) continue;
+      this.untapered.add(kind);
+      const on = r.controls.map((a) => `${a.component}/${a.control}`).join(", ");
+      console.log(`[qsys] no measured taper for ${scrub(kind)}; faders on it move linearly in dB, not as the Core's do (${scrub(on)}). See /qsys/manage`);
     }
   }
 

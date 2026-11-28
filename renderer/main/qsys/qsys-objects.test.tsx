@@ -8,8 +8,10 @@
 // NOT unit-tested here, and checked in a browser instead: how the objects LOOK.
 // jsdom loads no stylesheet and lays nothing out, so every CSS variable is "" and
 // every box is 0x0. The fader's track length is stubbed below so a drag has a
-// scale; the thumb's place, the meter's colour bands and the limit line are
-// verified by driving a real page. States are asserted through `data-state`,
+// scale. Where the thumb and the limit line sit along the travel is asserted from
+// the fader's data-travel and data-limit-at, which their styles are drawn from;
+// the pixels they land on, and the meter's colour bands, are verified by driving
+// a real page. States are asserted through `data-state`,
 // `aria-pressed` and the words on the controls, which are what those looks are
 // chosen from.
 //
@@ -42,9 +44,11 @@ type LayoutObjectConfig = import("@main/types/views").LayoutObjectConfig;
 
 after(() => unmountAndTeardown(cleanup, teardown));
 
-// jsdom has no layout: give every element a 200 px box so a drag has a scale.
+// jsdom has no layout: give every element a 240 px box so a drag has a scale. A
+// standard fader's 40 px thumb then travels 200 px, the length a drag is measured
+// against, so 20 px of finger is a tenth of the travel.
 (window.HTMLElement.prototype as { getBoundingClientRect: () => unknown }).getBoundingClientRect = () => ({
-  x: 0, y: 0, top: 0, left: 0, right: 200, bottom: 200, width: 200, height: 200,
+  x: 0, y: 0, top: 0, left: 0, right: 240, bottom: 240, width: 240, height: 240,
 });
 
 const MIX = "Lobby_Mixer";
@@ -60,18 +64,20 @@ const CATALOG = {
         { Name: "gain", Type: "Float", ValueMin: -100, ValueMax: 20 },
         { Name: "mute", Type: "Boolean" },
         { Name: "meter", Type: "Float", ValueMin: -100, ValueMax: 20 },
-        { Name: "load_1", Type: "Trigger" },
+        { Name: "load.1", Type: "Trigger" },
         { Name: "save", Type: "Trigger" },
         { Name: "zone_name", Type: "Text" },
         // On the Core, not on the allowlist.
         { Name: "gain_free", Type: "Float", ValueMin: -100, ValueMax: 20 },
         { Name: "mute_free", Type: "Boolean" },
-        { Name: "load_free", Type: "Trigger" },
+        { Name: "load.free", Type: "Trigger" },
         // A momentary (Boolean on a button), and a level the Core says is read-only.
         { Name: "talk", Type: "Boolean" },
         { Name: "level_ro", Type: "Float", Direction: "Read", ValueMin: -100, ValueMax: 20 },
         // Numeric-typed, but it lists its choices; allowlisted with no range.
         { Name: "src", Type: "Float", Choices: ["Mic", "Laptop"] },
+        // A mixer output gain on the range whose taper is measured (-100..+10 dB).
+        { Name: "output.1.gain", Type: "Float", ValueMin: -100, ValueMax: 10 },
       ] as { Name: string; Type: string; ValueMin?: number; ValueMax?: number; Direction?: string; Choices?: string[] }[],
     },
   ],
@@ -81,11 +87,12 @@ const ALLOW = {
   entries: [
     { component: MIX, control: "gain", label: "", min: -100, max: 0, confirm: "none" },
     { component: MIX, control: "mute", label: "", min: null, max: null, confirm: "none" },
-    { component: MIX, control: "load_1", label: "", min: null, max: null, confirm: "none" },
+    { component: MIX, control: "load.1", label: "", min: null, max: null, confirm: "none" },
     { component: MIX, control: "save", label: "", min: null, max: null, confirm: "none" },
     { component: MIX, control: "talk", label: "", min: null, max: null, confirm: "none" },
     { component: MIX, control: "level_ro", label: "", min: -100, max: 20, confirm: "none" },
     { component: MIX, control: "src", label: "", min: null, max: null, confirm: "none" },
+    { component: MIX, control: "output.1.gain", label: "", min: -100, max: 0, confirm: "none" },
   ],
 };
 
@@ -103,6 +110,8 @@ interface Server {
   allowFails: boolean;
   catalog: typeof CATALOG;
   values: Record<string, unknown>;
+  /** The Position a values read reports per control, where the test gives one. */
+  positions: Record<string, number>;
   /** What a write answers; the default lands it as sent. */
   answer: (body: Record<string, unknown>) => unknown;
   writes: { body: Record<string, unknown>; at: number }[];
@@ -136,7 +145,8 @@ function freshServer(): Server {
     holdReads: null,
     allowFails: false,
     catalog: CATALOG,
-    values: { gain: -20, mute: false, meter: -30, load_1: 0, save: 0, zone_name: "Zone 1", gain_free: -10, mute_free: false, load_free: 0, talk: false, level_ro: -5, src: "Mic" },
+    positions: {},
+    values: { gain: -20, mute: false, meter: -30, "load.1": 0, save: 0, zone_name: "Zone 1", gain_free: -10, mute_free: false, "load.free": 0, talk: false, level_ro: -5, src: "Mic" },
     answer: (body) => ({ ok: true, value: body.value, string: String(body.value), clamped: false }),
     writes: [],
     reads: 0,
@@ -171,7 +181,13 @@ const f = stubFetchWithLog((url, init) => {
     const answer = () =>
       ok({
         ready: server.ready,
-        values: Object.entries(server.values).map(([control, value]) => ({ component: MIX, control, value, string: String(value) })),
+        values: Object.entries(server.values).map(([control, value]) => ({
+          component: MIX,
+          control,
+          value,
+          string: String(value),
+          ...(server.positions[control] !== undefined ? { position: server.positions[control] } : {}),
+        })),
         ...(server.catalogAt !== undefined ? { catalogAt: server.catalogAt } : {}),
       });
     const hold = server.holdReads;
@@ -271,8 +287,12 @@ function up(clientY: number) {
 function stream(upNow: boolean) {
   act(() => __sseFallback.noteStream(upNow));
 }
-function push(channel: string, changes: { control: string; value: unknown }[]) {
-  act(() => FakeEventSource.last!.push(channel, { changes: changes.map((c) => ({ Component: MIX, Name: c.control, Value: c.value, String: String(c.value) })) }));
+function push(channel: string, changes: { control: string; value: unknown; position?: number }[]) {
+  act(() =>
+    FakeEventSource.last!.push(channel, {
+      changes: changes.map((c) => ({ Component: MIX, Name: c.control, Value: c.value, String: String(c.value), ...(c.position !== undefined ? { Position: c.position } : {}) })),
+    }),
+  );
 }
 
 /** Every Q-SYS object type, sorted, one per line, each bound to a control the fixture has. */
@@ -282,8 +302,8 @@ const EVERY: LayoutObjectConfig[] = [
   { type: "qsys-label", binding: b("zone_name"), text: "" },
   { type: "qsys-meter", binding: b("meter"), form: "bar" },
   { type: "qsys-mute", binding: b("mute") },
-  { type: "qsys-presets", items: [{ label: "One", binding: b("load_1") }] },
-  { type: "qsys-selector", items: [{ label: "A", binding: b("load_1") }] },
+  { type: "qsys-presets", items: [{ label: "One", binding: b("load.1") }] },
+  { type: "qsys-selector", items: [{ label: "A", binding: b("load.1") }] },
   { type: "qsys-status" },
   { type: "qsys-strip", name: null, label: "Lead", gain: b("gain"), mute: b("mute"), meter: b("meter") },
   { type: "qsys-switch", binding: b("mute"), label: "Thing" },
@@ -421,8 +441,27 @@ describe("Q-SYS objects", () => {
     assert.equal(btn.textContent, "Mute", "a UCI unmuting it is shown");
   });
 
+  test("a mute and a switch read a Boolean as a Core pushes it: 1 and 1.0 on, 0 off, and the hydration's number too", async () => {
+    server.values.mute = 1;
+    await mount([{ type: "qsys-mute", binding: b("mute") }, { type: "qsys-switch", binding: b("mute"), label: "Thing" }]);
+    const btn = q("qsys-mute", "button");
+    const sw = q("qsys-switch", '[role="switch"]');
+    assert.equal(btn.textContent, "Muted", "the hydrated 1 is muted");
+    assert.equal(sw.getAttribute("aria-checked"), "true");
+    push("qsys:values", [{ control: "mute", value: 0 }]);
+    assert.equal(btn.textContent, "Mute");
+    assert.equal(sw.getAttribute("aria-checked"), "false");
+    push("qsys:values", [{ control: "mute", value: 1.0 }]);
+    assert.equal(btn.textContent, "Muted");
+    act(() => {
+      fireEvent.click(btn);
+    });
+    await wait(30);
+    assert.deepEqual(server.writes.map((w) => w.body.value), [false], "a tap on a muted control (1) writes false");
+  });
+
   test("a preset with no readable state renders unlit and flashes on a confirmed write", async () => {
-    await mount([{ type: "qsys-presets", items: [{ label: "One", binding: b("load_1") }] }]);
+    await mount([{ type: "qsys-presets", items: [{ label: "One", binding: b("load.1") }] }]);
     const btn = q("qsys-presets", "button");
     assert.equal(btn.getAttribute("aria-pressed"), "false");
     act(() => {
@@ -443,11 +482,11 @@ describe("Q-SYS objects", () => {
   });
 
   test("a preset lights from its indicator, and only from it", async () => {
-    server.values.match_1 = 0;
-    await mount([{ type: "qsys-presets", items: [{ label: "One", binding: { ...b("load_1"), indicator: b("match_1") } }] }]);
+    server.values["match.1"] = 0;
+    await mount([{ type: "qsys-presets", items: [{ label: "One", binding: { ...b("load.1"), indicator: b("match.1") } }] }]);
     const btn = q("qsys-presets", "button");
     assert.equal(btn.getAttribute("aria-pressed"), "false");
-    push("qsys:values", [{ control: "match_1", value: 1 }]);
+    push("qsys:values", [{ control: "match.1", value: 1 }]);
     assert.equal(btn.getAttribute("aria-pressed"), "true");
   });
 
@@ -581,6 +620,79 @@ describe("Q-SYS objects", () => {
     assert.equal(server.writes.at(-1)!.body.value, 0);
   });
 
+  test("a fader on a measured range follows the Q-SYS taper: the Core's Position, a drag along it, the limit at its place", async () => {
+    const TAPERED: LayoutObjectConfig = { ...FADER, binding: b("output.1.gain") } as LayoutObjectConfig;
+    server.values["output.1.gain"] = 0;
+    server.positions["output.1.gain"] = 0.75;
+    await mount([TAPERED]);
+    const fader = q("qsys-fader", "[data-fader]");
+    assert.equal(fader.dataset.travel, "0.75", "0 dB sits at 0.75 of the travel, as on a Q-SYS fader");
+    assert.equal(Number(fader.dataset.limitAt).toFixed(3), "0.750", "the allowlist's 0 dB limit sits at 0 dB's place on the taper");
+    // A Core Position between the table's points is drawn as the Core reports it.
+    push("qsys:values", [{ control: "output.1.gain", value: -10, position: 0.4987 }]);
+    assert.equal(fader.dataset.travel, "0.4987");
+    assert.equal(dbText(), "-10.0");
+    // A drag starts from -10 dB's place on the table (0.5), not the Core's 0.4987: 17 px up of 200 is +0.085, on the taper about -6 dB.
+    down(fader, 100);
+    move(83);
+    up(83);
+    await wait(30);
+    const wrote = server.writes.at(-1)!.body.value as number;
+    assert.ok(Math.abs(wrote - -6.06) < 0.1, `a drag of 0.085 travel from -10 dB wrote ${wrote}, not about -6 dB as the taper puts it`);
+    // Up past the limit: the drag stops at 0 dB, the value the server enforces.
+    server.answer = (body) => ({ ok: true, value: body.value, string: String(body.value), position: 0.75, clamped: false });
+    down(fader, 150);
+    move(0);
+    up(0);
+    await wait(30);
+    assert.equal(server.writes.at(-1)!.body.value, 0, "a drag past the limit wrote past it");
+  });
+
+  test("a drag keeps the thumb under the finger: a finger moving a quarter of the thumb's travel moves it a quarter", async () => {
+    // 0 dB at 0.75 of the travel on the taper; a quarter down is 0.5, which is -10 dB.
+    server.values["output.1.gain"] = 0;
+    server.positions["output.1.gain"] = 0.75;
+    await mount([{ ...FADER, binding: b("output.1.gain") } as LayoutObjectConfig]);
+    const fader = q("qsys-fader", "[data-fader]");
+    down(fader, 100);
+    move(150); // 50 px of the thumb's 200 px travel (the 240 px track less the 40 px thumb)
+    assert.equal(fader.dataset.travel, "0.5", "the thumb moved a different distance from the finger");
+    up(150);
+    await wait(30);
+    assert.equal(server.writes.at(-1)!.body.value, -10);
+  });
+
+  test("a drag on a taper starts from the value, not the Core's Position: a touch that has not moved writes nothing", async () => {
+    // A Core's own Position need not be the table's: for -50 dB the table says 0.1, and
+    // here the Core reports 0.0985; read back through the table that is about -50.6 dB,
+    // a value nobody chose.
+    server.values["output.1.gain"] = -50;
+    server.positions["output.1.gain"] = 0.0985;
+    await mount([{ ...FADER, binding: b("output.1.gain") } as LayoutObjectConfig]);
+    const fader = q("qsys-fader", "[data-fader]");
+    assert.equal(fader.dataset.travel, "0.0985", "at rest the thumb sits where the Core reports it");
+    down(fader, 100);
+    move(100); // a move event with no movement, as a resting finger sends
+    up(100);
+    await wait(30);
+    assert.deepEqual(server.writes.map((w) => w.body.value), [], "a touch that did not move wrote a value");
+    down(fader, 100);
+    move(99); // one pixel up
+    up(99);
+    await wait(30);
+    const wrote = server.writes.at(-1)?.body.value as number;
+    assert.ok(wrote > -50 && wrote < -48, `one pixel up from -50 dB wrote ${wrote}, not a little above -50`);
+  });
+
+  test("a fader on a range with no measured taper stays linear in dB and ignores the Core's Position", async () => {
+    server.positions.gain = 0.9;
+    await mount([FADER]);
+    const fader = q("qsys-fader", "[data-fader]");
+    // -20 dB on the linear -60..0 travel (the allowlist's 0 dB is its top) is 2/3.
+    assert.equal(Number(fader.dataset.travel).toFixed(4), (2 / 3).toFixed(4));
+    assert.equal(fader.dataset.limitAt, "1", "the limit is the top of a linear travel");
+  });
+
   test("in the editor (not interactive) nothing writes", async () => {
     await mount([FADER, { type: "qsys-mute", binding: b("mute") }], { interactive: false });
     down(q("qsys-fader", "[data-fader]"), 100);
@@ -668,6 +780,18 @@ describe("Q-SYS objects", () => {
     assert.ok(drawnPct(bar) > 99, `above the fader's top is the top, drew ${bar.style.transform}`);
   });
 
+  test("a strip's meter on a tapered fader follows the taper, so it lines up with the fader", async () => {
+    // output.1.gain is -100..+10 (a measured taper); -10 dB sits at 0.5 there, where linear -60..0 would put it at 0.83.
+    server.values.meter = -10;
+    server.values["output.1.gain"] = -10;
+    await mount([{ type: "qsys-strip", name: null, label: "Lead", gain: b("output.1.gain"), mute: null, meter: b("meter") }]);
+    const bar = q("qsys-strip", "[data-meter-bar]");
+    assert.ok(Math.abs(drawnPct(bar) - 50) < 0.01, `-10 dB on the taper drew ${bar.style.transform}`);
+    push("qsys:meters:staff", [{ control: "meter", value: 0 }]);
+    await wait(250);
+    assert.ok(Math.abs(drawnPct(bar) - 75) < 0.01, `0 dB on the taper drew ${bar.style.transform}`);
+  });
+
   test("a meters-only strip has no fader to follow and uses the standalone window", async () => {
     await mount([{ type: "qsys-strip", name: null, label: "Room", gain: null, mute: null, meter: b("meter") }]);
     const bar = q("qsys-strip", "[data-meter-bar]");
@@ -751,11 +875,11 @@ const UNBOUND: LayoutObjectConfig[] = [
 
 /** Every writing type, bound to controls the Core has but the allowlist does not. Sorted. */
 const NOT_ALLOWED: LayoutObjectConfig[] = [
-  { type: "qsys-button", binding: b("load_free"), label: "Go", hold: false },
+  { type: "qsys-button", binding: b("load.free"), label: "Go", hold: false },
   { type: "qsys-fader", binding: b("gain_free"), orientation: "vertical", showDb: true, steps: true, stepDb: 3 },
   { type: "qsys-mute", binding: b("mute_free") },
-  { type: "qsys-presets", items: [{ label: "Free", binding: b("load_free") }] },
-  { type: "qsys-selector", items: [{ label: "Free", binding: b("load_free") }] },
+  { type: "qsys-presets", items: [{ label: "Free", binding: b("load.free") }] },
+  { type: "qsys-selector", items: [{ label: "Free", binding: b("load.free") }] },
   { type: "qsys-strip", name: null, label: "Free", gain: b("gain_free"), mute: b("mute_free"), meter: null },
   { type: "qsys-switch", binding: b("mute_free"), label: "Free" },
 ];

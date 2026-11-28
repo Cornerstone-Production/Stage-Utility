@@ -1,24 +1,25 @@
-// The fader's scale: linear in dB from -60 (or the allowlist's minimum) to the top,
-// the Core's minimum at the bottom stop. Pure arithmetic; the thumb that draws it is
-// checked in a browser.
+// The fader's scale: the Core's measured taper for a component kind and range that has one; otherwise
+// linear in dB from -60 (or the allowlist's minimum) to the top, the Core's minimum
+// at the bottom stop. Pure arithmetic; the thumb that draws it is checked in a
+// browser.
 
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-import { FADER_FLOOR_DB, TICK_MARKS_DB, atBottom, faderScale, stepFrom, travelOf, valueAt } from "./fader-scale.js";
+import { FADER_FLOOR_DB, TICK_MARKS_DB, atBottom, faderScale, limitAt, meterLevel, stepFrom, travelOf, valueAt } from "./fader-scale.js";
 
 const GAIN = { min: -100, max: 20 };
 
 test("-60 dB to the allowlist's maximum, the Core's minimum at the bottom stop", () => {
-  assert.deepEqual(faderScale(GAIN, { min: -100, max: 12 }), { bottom: -100, floor: -60, top: 12 });
-  assert.deepEqual(faderScale(GAIN, { min: null, max: null }), { bottom: -100, floor: -60, top: 20 }, "no limits: the Core's range");
-  assert.deepEqual(faderScale(GAIN, { min: -40, max: 0 }), { bottom: -40, floor: -40, top: 0 }, "a higher allowlist minimum is the floor");
+  assert.deepEqual(faderScale("mixer", GAIN, { min: -100, max: 12 }), { bottom: -100, floor: -60, top: 12 });
+  assert.deepEqual(faderScale("mixer", GAIN, { min: null, max: null }), { bottom: -100, floor: -60, top: 20 }, "no limits: the Core's range");
+  assert.deepEqual(faderScale("mixer", GAIN, { min: -40, max: 0 }), { bottom: -40, floor: -40, top: 0 }, "a higher allowlist minimum is the floor");
   assert.equal(FADER_FLOOR_DB, -60);
-  assert.equal(faderScale(null, { min: null, max: null }), null);
+  assert.equal(faderScale(null, null, { min: null, max: null }), null);
 });
 
 test("travel is linear in dB above the floor; below it everything sits at the bottom stop", () => {
-  const s = faderScale(GAIN, { min: -100, max: 12 })!;
+  const s = faderScale("mixer", GAIN, { min: -100, max: 12 })!;
   assert.equal(travelOf(s, 12), 1);
   assert.equal(travelOf(s, -60), 0);
   assert.equal(travelOf(s, -80), 0);
@@ -32,14 +33,14 @@ test("travel is linear in dB above the floor; below it everything sits at the bo
 });
 
 test("the tick marks fall evenly on the scale", () => {
-  const s = faderScale(GAIN, { min: -100, max: 12 })!;
+  const s = faderScale("mixer", GAIN, { min: -100, max: 12 })!;
   const at = TICK_MARKS_DB.filter((t) => t >= s.floor && t <= s.top).map((t) => travelOf(s, t));
   assert.equal(at.length, 7);
   for (let i = 1; i < at.length; i++) assert.ok(Math.abs(at[i - 1] - at[i] - 1 / 6) < 1e-9, `marks ${i - 1} and ${i} are not 1/6 apart`);
 });
 
 test("a step stays on the scale: up from below the floor goes to the floor, down from the floor to the bottom", () => {
-  const s = faderScale(GAIN, { min: -100, max: 0 })!;
+  const s = faderScale("mixer", GAIN, { min: -100, max: 0 })!;
   assert.equal(stepFrom(s, -20, 1, 3), -17);
   assert.equal(stepFrom(s, -1, 1, 3), 0);
   assert.equal(stepFrom(s, -100, 1, 3), -60);
@@ -48,10 +49,50 @@ test("a step stays on the scale: up from below the floor goes to the floor, down
 });
 
 test("a top at or under -60 dB still leaves a fader: the linear part starts 12 dB under it", () => {
-  const s = faderScale(GAIN, { min: -100, max: -70 })!;
+  const s = faderScale("mixer", GAIN, { min: -100, max: -70 })!;
   assert.deepEqual(s, { bottom: -100, floor: -82, top: -70 });
   assert.equal(travelOf(s, -76), 0.5);
-  const tight = faderScale(GAIN, { min: -75, max: -70 })!;
+  const tight = faderScale("mixer", GAIN, { min: -75, max: -70 })!;
   assert.equal(tight.floor, -75, "never under the bottom");
   assert.ok(travelOf(tight, -72.5) > 0 && travelOf(tight, -72.5) < 1);
+});
+
+const OUT = { min: -100, max: 10 };
+
+test("a measured range is the Core's taper: 0 dB at 0.75, the limit at its place, the drag held to the limits", () => {
+  const s = faderScale("mixer", OUT, { min: -100, max: 0 })!;
+  assert.ok(s.taper, "a -100..+10 control has a measured taper");
+  assert.equal(travelOf(s, 0), 0.75);
+  assert.equal(travelOf(s, -10), 0.5);
+  assert.ok(Math.abs(travelOf(s, 7.538) - 0.95) < 1e-12, "a value past the limit is still drawn where the Core has it");
+  assert.equal(limitAt(s, OUT), 0.75, "the 0 dB limit sits at 0 dB's place on the taper");
+  assert.equal(valueAt(s, 0.5), -10);
+  assert.equal(valueAt(s, 0.9), 0, "the finger past the limit writes the limit");
+  assert.equal(valueAt(s, 0), -100);
+  assert.ok(atBottom(s, -100), "the Core's minimum reads -inf");
+  assert.equal(limitAt(faderScale("mixer", OUT, { min: null, max: null })!, OUT), null, "no limit short of the Core's own top, no line");
+  const raised = faderScale("mixer", OUT, { min: -40, max: 0 })!;
+  assert.equal(valueAt(raised, 0), -40, "the drag stops at the allowlist's minimum");
+  assert.ok(!atBottom(raised, -40), "a raised minimum is not -inf");
+});
+
+test("a strip's meter on a tapered fader lines up with it", () => {
+  const s = faderScale("mixer", OUT, { min: -100, max: 0 })!;
+  assert.equal(meterLevel({ value: -10, position: null }, s), 0.5);
+  assert.equal(meterLevel({ value: -120, position: null }, s), 0);
+});
+
+test("an unmeasured range keeps the linear scale; its limit is the top of travel", () => {
+  const s = faderScale("mixer", GAIN, { min: -100, max: 0 })!;
+  assert.equal(s.taper, undefined);
+  assert.equal(limitAt(s, GAIN), 1);
+  assert.equal(travelOf(s, -30), 0.5);
+});
+
+test("the taper is the component kind's: a Gain block is linear, and a Gain block on a mixer's range does not get the mixer's curve", () => {
+  const gainBlock = faderScale("gain", GAIN, { min: -100, max: 20 })!;
+  assert.ok(gainBlock.taper, "a Gain block's -100..+20 control has a measured taper");
+  assert.ok(Math.abs(travelOf(gainBlock, 0) - 100 / 120) < 1e-12);
+  assert.equal(faderScale("gain", OUT, { min: -100, max: 10 })!.taper, undefined, "a Gain block set to -100..+10 is linear, not the mixer's curve");
+  assert.equal(faderScale(null, OUT, { min: -100, max: 10 })!.taper, undefined, "no component type known: no taper");
 });

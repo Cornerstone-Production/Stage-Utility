@@ -1,15 +1,23 @@
 // fader-scale.ts — where a level sits on a Q-SYS fader's travel.
 //
-// Linear in dB from a floor to the top, as the approved panel mockup draws it
-// (-60 to +12): the floor is -60 dB, or the allowlist's minimum when that is
-// higher, or 12 dB under the top when the top is at or below -60; the top is the
-// allowlist's maximum, or the Core's when there is none.
-// The very bottom of travel is the lowest value the fader may write (the Core's
-// minimum, typically -100 dB, read as "-inf"); everything below the floor sits
-// there. A gain fader spends its travel where people listen, not on -100..-60.
+// On a component kind and range with a measured taper (main/types/qsys-taper.ts), the travel is the
+// Core's own: a value sits where the Core's fader puts it, the bottom stop is the
+// Core's minimum and the top its maximum, and the allowlist's limits stop the drag
+// short of them (the limit line sits at the limit's place on that taper).
 //
-// One scale for the thumb, the drag, the limit line, the tick marks and the
-// slider's aria values, so the thumb never jumps when the Core's answer lands.
+// On any other range, linear in dB from a floor to the top, as the approved panel
+// mockup draws it (-60 to +12): the floor is -60 dB, or the allowlist's minimum
+// when that is higher, or 12 dB under the top when the top is at or below -60; the
+// top is the allowlist's maximum, or the Core's when there is none. The very bottom
+// of travel is the lowest value the fader may write (the Core's minimum, typically
+// -100 dB, read as "-inf"); everything below the floor sits there. A gain fader
+// spends its travel where people listen, not on -100..-60.
+//
+// One scale for the thumb, the drag, the limit line, the tick marks, a strip's
+// meters and the slider's aria values, so the thumb never jumps when the Core's
+// answer lands.
+
+import { positionOf, taperFor, valueOf, type Taper } from "@main/types/qsys-taper";
 
 export const FADER_FLOOR_DB = -60;
 /** With a low top, how far under it the linear part starts. */
@@ -19,22 +27,18 @@ const FLOOR_BELOW_TOP_DB = 12;
 export const TICK_MARKS_DB = [12, 0, -12, -24, -36, -48, -60];
 
 export interface FaderScale {
-  /** The lowest value the fader writes: the bottom of travel. */
+  /** The lowest value the fader writes. Linear: the bottom of travel. */
   bottom: number;
-  /** Where the linear part of travel starts. */
+  /** Linear: where the linear part of travel starts. Both: where the tick marks and a step up from the bottom start. */
   floor: number;
-  /** The top of travel: the highest value the fader writes. */
+  /** The highest value the fader writes. Linear: the top of travel. */
   top: number;
+  /** The Core's measured taper for the control's component kind and range: travel is its Position. Absent: linear in dB. */
+  taper?: Taper;
 }
 
-/** A catalog control's own range: finite, min under max; null when it reports none. The one rule for "has a range". */
-export function rangeOf(c: { ValueMin?: unknown; ValueMax?: unknown }): { min: number; max: number } | null {
-  const { ValueMin: min, ValueMax: max } = c;
-  return typeof min === "number" && typeof max === "number" && Number.isFinite(min) && Number.isFinite(max) && min < max ? { min, max } : null;
-}
-
-/** The scale for a control's Core range and its allowlist limits; null without a usable range. */
-export function faderScale(range: { min: number; max: number } | null, limits: { min: number | null; max: number | null }): FaderScale | null {
+/** The scale for a control's component Type, Core range and allowlist limits; null without a usable range. */
+export function faderScale(componentType: string | null, range: { min: number; max: number } | null, limits: { min: number | null; max: number | null }): FaderScale | null {
   if (!range) return null;
   const bottom = Math.max(range.min, limits.min ?? range.min);
   const top = Math.min(range.max, limits.max ?? range.max);
@@ -42,21 +46,33 @@ export function faderScale(range: { min: number; max: number } | null, limits: {
   // A top at or under -60 dB would leave no linear part at all; the floor then sits
   // 12 dB under it (one tick), so the travel stays a fader rather than two stops.
   const floor = Math.max(bottom, Math.min(FADER_FLOOR_DB, top - FLOOR_BELOW_TOP_DB));
-  return { bottom, floor, top };
+  const taper = taperFor(componentType, range);
+  return taper ? { bottom, floor, top, taper } : { bottom, floor, top };
 }
 
-/** 0..1 along the travel for value `v`. */
+/** 0..1 along the travel for value `v`. On a taper, the Core's Position for it, past the limits too. */
 export function travelOf(s: FaderScale, v: number): number {
+  if (s.taper) return positionOf(s.taper, v);
   if (v >= s.top) return 1;
   if (v <= s.floor) return 0;
   return (v - s.floor) / (s.top - s.floor);
 }
 
-/** The value at `n` (0..1) along the travel; the bottom stop is the bottom value. */
+/** The value at `n` (0..1) along the travel; the bottom stop is the bottom value. On a taper, held to the limits. */
 export function valueAt(s: FaderScale, n: number): number {
+  if (s.taper) return Math.min(s.top, Math.max(s.bottom, valueOf(s.taper, n)));
   if (n <= 0) return s.bottom;
   if (n >= 1) return s.top;
   return s.floor + n * (s.top - s.floor);
+}
+
+/**
+ * Where the allowlist's top limit is drawn, 0..1, or null when there is none to
+ * draw: the limit is the Core's own maximum. Linear: the top of travel. On a taper:
+ * the limit's own place on it.
+ */
+export function limitAt(s: FaderScale, range: { max: number }): number | null {
+  return s.top < range.max ? travelOf(s, s.top) : null;
 }
 
 /** At the bottom stop, below the linear part: drawn "-inf", as the mockup does. */

@@ -37,7 +37,7 @@ import { addressKey, choicesOf, isReadOnlyDirection, type PanelKind, type QsysAd
 import { toast } from "../../components/ui/toast";
 import { getStreamStatus, invoke, onNotification, onStreamStatusChange, streamClientId, whenSubscribed } from "../../lib/api";
 import { logToServer } from "../../lib/client-log";
-import { rangeOf } from "./fader-scale";
+import { rangeOf } from "@main/types/qsys-taper";
 import { MeterAnimator, type MeterSink } from "./meter-tween";
 
 export type { WriteResult };
@@ -63,11 +63,13 @@ export interface QsysValue extends QsysReading {
 export interface QsysControlInfo {
   /** The Core's Type ("Float", "Boolean", "Trigger", …); "" until the catalog is read. */
   type: string;
+  /** The Type of the control's component ("mixer", "gain", …), which picks the fader's taper; null until the catalog is read. */
+  componentType: string | null;
   /** The Core's own range; null when it reports none or the catalog is not read. */
   range: { min: number; max: number } | null;
   /** The choices a combo box offers, when the Core lists them. */
   choices: string[] | null;
-  /** False when the Core reports the control read-only (Direction "Read"). */
+  /** False when the Core reports the control read-only (Direction "Read" or "Read Only"; isReadOnlyDirection). */
   writable: boolean;
   /** On the allowlist: writable at all. */
   allowed: boolean;
@@ -119,7 +121,7 @@ type ValuesAnswer = {
 type AllowAnswer = { entries: { component: string; control: string; min: number | null; max: number | null; confirm: "none" | "hold" }[] };
 type CatalogAnswer = {
   designCode: string;
-  components: { name: string; controls: { Name: string; Type: string; Direction?: string; ValueMin?: number; ValueMax?: number; Choices?: unknown }[] }[];
+  components: { name: string; type?: string; controls: { Name: string; Type: string; Direction?: string; ValueMin?: number; ValueMax?: number; Choices?: unknown }[] }[];
 };
 type StatusPush = { connected?: unknown; state?: unknown; catalogAt?: unknown; configured?: unknown };
 
@@ -336,7 +338,7 @@ export class QsysPanel {
 
   control(a: QsysAddress | null): QsysControlInfo {
     const k = a ? addressKey(a) : "";
-    const base = this.info.get(k) ?? { type: "", range: null, choices: null, writable: true };
+    const base = this.info.get(k) ?? { type: "", componentType: null, range: null, choices: null, writable: true };
     const entry = this.allow?.get(k);
     return {
       ...base,
@@ -507,6 +509,7 @@ export class QsysPanel {
       for (const ctl of comp.controls) {
         info.set(addressKey({ component: comp.name, control: ctl.Name }), {
           type: String(ctl.Type ?? ""),
+          componentType: comp.type ?? null,
           range: rangeOf(ctl),
           choices: choicesOf(ctl),
           writable: !isReadOnlyDirection(ctl.Direction),
@@ -807,7 +810,7 @@ export function useQsysPanelContext(): QsysPanel | null {
 }
 
 const UNAVAILABLE: QsysValue = { value: null, string: "", position: null, state: "unavailable" };
-const NO_CONTROL: QsysControlInfo = { type: "", range: null, choices: null, writable: false, allowed: false, limits: { min: null, max: null }, hold: false };
+const NO_CONTROL: QsysControlInfo = { type: "", componentType: null, range: null, choices: null, writable: false, allowed: false, limits: { min: null, max: null }, hold: false };
 const NO_PANEL: QsysPanelState = { live: false, connection: "offline", epoch: 0, core: null, configured: null, stream: false };
 
 /** One control's value as the Core last reported it, and whether input is open. */

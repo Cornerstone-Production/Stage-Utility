@@ -10,7 +10,7 @@
 // Every read here can fail on its own; each says so where its section is, and
 // on /log, rather than leaving a section that looks empty and clean.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "@tanstack/react-router";
 
 import {
@@ -23,6 +23,7 @@ import {
   findPanelBySlug,
   isQsysPanel,
   isQsysSlug,
+  kindOf,
   qsysSlugFromName,
   qsysSlugsOf,
   siblingsOf,
@@ -35,12 +36,16 @@ import {
 } from "@main/types/qsys";
 import type { View } from "@main/types/views";
 import { walkLayoutObjects } from "@main/types/views";
+import { allowEntryFor } from "@main/types/qsys-allow-entry";
+import { kindText, untaperedRanges, type TaperCatalog, type UntaperedRange } from "@main/types/qsys-taper";
 import { errorMessage } from "@main/services/errors";
 import { Button, Callout, Checkbox, DialogContent, DialogDescription, DialogRoot, DialogTitle, Input, NumberInput, Radio, RadioGroup, Switch, confirm } from "../../components/ui";
 import { invoke } from "../../lib/api";
 import { logReadFailure, logToServer } from "../../lib/client-log";
 import { useRead, type ReadState } from "../../lib/use-read";
 import { canEditInPlace } from "../../editor/can-edit";
+import { QsysCoreBrowser, allowKey } from "../../editor/qsys-core-browser";
+import { downloadJson } from "../mic-slots/download";
 import { AppLink } from "../app-link";
 import { cn } from "../../lib/cn";
 import { ConsoleEditor, InPlaceEditFrame } from "../console-route";
@@ -96,10 +101,13 @@ export function QsysManagePanelRoute() {
       </div>
     );
   }
+  const editable = canEditInPlace(view, "shell");
   return (
-    <InPlaceEditFrame editable={canEditInPlace(view, "shell")} onEdit={() => setEditingFor(view.id)}>
+    // The panel's status strip (h-10, address and kind) runs along the top. The pill sits inside it, at the
+    // right, and the strip leaves that end clear, so it covers none of the strip's text.
+    <InPlaceEditFrame editable={editable} onEdit={() => setEditingFor(view.id)} cornerClass="top-2">
       <div className="min-h-0 flex-1">
-        <QsysPanelSurface view={view} settingsLink inShell />
+        <QsysPanelSurface view={view} settingsLink inShell reserveEdit={editable} />
       </div>
     </InPlaceEditFrame>
   );
@@ -114,13 +122,15 @@ export function QsysManageRoute() {
   const { status, failed: statusFailed } = useQsysStatus();
   const [allow, allowTook] = useAllowlist();
   const bindings = useBindings(views, allow, status);
+  const catalog = useTaperCatalog(status);
 
   return (
     <div className="flex flex-col gap-6 pb-8">
       <PanelsSection views={views} panels={panels} bindings={bindings} />
       <ConnectionSection status={status} failed={statusFailed} />
-      <AllowlistSection allow={allow} took={allowTook} panels={panels} connected={status?.connected === true} />
+      <AllowlistSection allow={allow} took={allowTook} panels={panels} connected={status?.connected === true} catalog={catalog} />
       <BindingsSection bindings={bindings} views={views} />
+      <TapersSection views={views} read={catalog} />
       <Section title="Staff PIN" hint="A volunteer panel's way into Stage Utility. It keeps curious taps out; the network is still the real boundary.">
         <PinSection />
       </Section>
@@ -689,11 +699,14 @@ function AllowlistSection({
   took,
   panels,
   connected,
+  catalog,
 }: {
   allow: AllowState;
   took: (a: AllowRead) => void;
   panels: View[];
   connected: boolean;
+  /** The Core's controls, to tell which listed ones are not numeric. */
+  catalog: Tapers;
 }) {
   /** The operator's edits, and the list (and revision) they were made on: a save
    *  names that revision, so it can never land over a list nobody here has seen. */
@@ -707,6 +720,20 @@ function AllowlistSection({
   const saved = current?.entries ?? [];
   const entries = draft?.entries ?? saved;
   const dirty = draft !== null;
+  const importInput = useRef<HTMLInputElement>(null);
+  /** The listed controls the Core says are not numbers, by what they are: a limit means nothing on them. */
+  const nonNumeric = useMemo(() => {
+    const m = new Map<string, string>();
+    if (catalog.state !== "ok") return m;
+    for (const comp of catalog.catalog.components) {
+      for (const c of comp.controls) {
+        const kind = kindOf(c);
+        if (kind !== "number") m.set(allowKey(comp.name, c.Name), kind === "boolean" ? "on-off" : kind);
+      }
+    }
+    return m;
+  }, [catalog]);
+  const onList = useMemo(() => new Set(entries.map((e) => allowKey(e.component, e.control))), [entries]);
 
   const editTo = (next: AllowEntry[]) => setDraft({ entries: next, base: draft?.base ?? { entries: saved, rev: current?.rev ?? "" } });
   const edit = (i: number, change: Partial<AllowEntry>) => editTo(entries.map((e, j) => (j === i ? { ...e, ...change } : e)));
@@ -779,6 +806,65 @@ function AllowlistSection({
     }
   }
 
+  /** One control picked from the Core: an unsaved row at the Core's own range, to tighten before saving. */
+  function addControl(b: { component: string; control: string } | null, _legend?: string, c?: { ValueMin?: number; ValueMax?: number }) {
+    if (!b) return;
+    editTo([...entries, allowEntryFor(b.component, { Name: b.control, ...c })]);
+    setMessage(null);
+  }
+
+  async function exportList() {
+    setMessage(null);
+    try {
+      downloadJson("qsys-allowlist.json", await invoke("qsys:exportAllowlist"));
+    } catch (err) {
+      logToServer("qsys", `exporting the allowlist failed: ${errorMessage(err)}`);
+      setMessage({ tone: "error", text: `Couldn't export the allowlist: ${errorMessage(err)}` });
+    }
+  }
+
+  async function importFile(file: File) {
+    setMessage(null);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await file.text());
+    } catch (err) {
+      logToServer("qsys", `an allowlist import was refused: the file is not JSON (${errorMessage(err)})`);
+      setMessage({ tone: "error", text: "That file is not JSON, so nothing was imported." });
+      return;
+    }
+    const ok = await confirm({
+      title: "Replace the allowlist?",
+      message: "The list on this server is replaced by the file's. A control that is not in the file is no longer writable by any panel.",
+      confirmLabel: "Replace the list",
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const r = await invoke<{ entries: AllowEntry[]; rev: string }>("qsys:importAllowlist", { file: parsed, rev: current?.rev || undefined });
+      took(r);
+      setMessage({ tone: "ok", text: `Imported ${r.entries.length} control${r.entries.length === 1 ? "" : "s"}.` });
+    } catch (err) {
+      if ((err as { code?: string }).code === "rev-changed") {
+        // The list moved since this page read it: read it again, so a second try names the
+        // revision that is stored now instead of 409-ing until a reload.
+        logToServer("qsys", "an allowlist import was stopped: the list changed since this page read it; the page shows it as it is now");
+        try {
+          took(await invoke<AllowRead>("qsys:allowlist"));
+          setMessage({ tone: "error", text: "Nothing was imported: the list was changed somewhere else. It is shown as it is now; choose the file again to replace it." });
+        } catch (readErr) {
+          logReadFailure("qsys", "the allowlist for /qsys/manage", readErr);
+          setMessage({ tone: "error", text: "Nothing was imported: the list was changed somewhere else, and it could not be read again. Reload the page." });
+        }
+        return;
+      }
+      logToServer("qsys", `an allowlist import was refused: ${errorMessage(err)}`);
+      setMessage({ tone: "error", text: `Nothing was imported: ${errorMessage(err)}` });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function addPanel(p: View) {
     setBusy(true);
     setMessage(null);
@@ -809,6 +895,30 @@ function AllowlistSection({
           </Button>
         </div>
       )}
+      <div className="flex flex-wrap items-center gap-2" data-qsys-allowlist-actions>
+        <div className="w-56" data-qsys-add-control>
+          <QsysCoreBrowser kind="any" writable={false} value={null} onChange={addControl} label="Add a control" placeholder="Add a control" clearable={false} disabled={busy || !connected} exclude={onList} />
+        </div>
+        <Button size="small" variant="transparent" disabled={busy || dirty} onClick={() => void exportList()}>
+          Export
+        </Button>
+        <Button size="small" variant="transparent" disabled={busy || dirty} onClick={() => importInput.current?.click()}>
+          Import
+        </Button>
+        <input
+          ref={importInput}
+          type="file"
+          accept="application/json,.json"
+          aria-label="Allowlist file to import"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (file) void importFile(file);
+          }}
+        />
+      </div>
+      {!connected && <p className="text-caption1 text-fg-muted">Adding a control needs the Core connected: the controls and their ranges come from it.</p>}
       {panels.length > 0 && (
         <div className="flex flex-wrap gap-2" data-qsys-add-panel>
           {panels.map((p) => (
@@ -819,7 +929,7 @@ function AllowlistSection({
         </div>
       )}
       {panels.length > 0 && !connected && <p className="text-caption1 text-fg-muted">Adding a panel's controls needs the Core connected: their limits come from it.</p>}
-      {dirty && <p className="text-caption1 text-fg-muted">Save or discard your edits before adding a panel's controls.</p>}
+      {dirty && <p className="text-caption1 text-fg-muted">Save or discard your edits before adding a panel's controls, exporting or importing a file.</p>}
       {current && entries.length === 0 && <p className="text-footnote text-fg-muted">Nothing is on the list, so no panel can change anything.</p>}
       {entries.length > 0 && (
         <div className="overflow-x-auto rounded-xl border border-line bg-surface">
@@ -839,12 +949,20 @@ function AllowlistSection({
                   <td className="px-3 py-2 font-mono text-fg">
                     {e.component} <span className="text-fg-muted">{e.control}</span>
                   </td>
-                  <td className="px-3 py-2">
-                    <NumberInput aria-label={`Min for ${e.component} ${e.control}`} value={e.min} onChange={(min) => edit(i, { min })} onUnset={() => edit(i, { min: null })} className="w-36" />
-                  </td>
-                  <td className="px-3 py-2">
-                    <NumberInput aria-label={`Max for ${e.component} ${e.control}`} value={e.max} onChange={(max) => edit(i, { max })} onUnset={() => edit(i, { max: null })} className="w-36" />
-                  </td>
+                  {nonNumeric.has(allowKey(e.component, e.control)) ? (
+                    <td colSpan={2} className="px-3 py-2 text-footnote text-fg-muted" data-qsys-allow-kind>
+                      {nonNumeric.get(allowKey(e.component, e.control))} control, no limits
+                    </td>
+                  ) : (
+                    <>
+                      <td className="px-3 py-2">
+                        <NumberInput aria-label={`Min for ${e.component} ${e.control}`} value={e.min} onChange={(min) => edit(i, { min })} onUnset={() => edit(i, { min: null })} className="w-36" />
+                      </td>
+                      <td className="px-3 py-2">
+                        <NumberInput aria-label={`Max for ${e.component} ${e.control}`} value={e.max} onChange={(max) => edit(i, { max })} onUnset={() => edit(i, { max: null })} className="w-36" />
+                      </td>
+                    </>
+                  )}
                   <td className="px-3 py-2">
                     <Switch aria-label={`Hold to confirm ${e.component} ${e.control}`} checked={e.confirm === "hold"} onCheckedChange={(on) => edit(i, { confirm: on ? "hold" : "none" })} />
                   </td>
@@ -914,6 +1032,63 @@ function AllowlistSection({
           {message.text}
         </p>
       )}
+    </Section>
+  );
+}
+
+// ── Fader tapers ─────────────────────────────────────────────────────────────
+
+type Tapers = { state: "loading" | "offline" } | { state: "failed"; message: string } | { state: "ok"; catalog: TaperCatalog };
+
+/** The Core's catalog, read again on each new one (catalogAt), for the taper list. */
+function useTaperCatalog(status: Status | null): Tapers {
+  const connected = status?.connected === true;
+  const key = connected ? String(status?.catalogAt ?? "") : null;
+  const [answer, setAnswer] = useState<{ key: string; read: Tapers } | null>(null);
+  useEffect(() => {
+    if (key === null) return;
+    let live = true;
+    invoke<TaperCatalog>("qsys:catalog").then(
+      (catalog) => live && setAnswer({ key, read: { state: "ok", catalog } }),
+      (err: unknown) => {
+        logReadFailure("qsys", "the Core's catalog for the fader tapers on /qsys/manage", err);
+        if (live) setAnswer({ key, read: { state: "failed", message: `The Core's controls could not be read: ${errorMessage(err)}` } });
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [key]);
+  if (key === null) return { state: "offline" };
+  return answer?.key === key ? answer.read : { state: "loading" };
+}
+
+/**
+ * The component types and ranges of faders with no measured Q-SYS taper (main/types/qsys-taper.ts): a fader
+ * on one moves linearly in dB, not as the Core's own does. Listed so the range can
+ * be measured and added; the server logs each once, from the same rule.
+ */
+function TapersSection({ views, read }: { views: View[]; read: Tapers }) {
+  const ranges: UntaperedRange[] = read.state === "ok" ? untaperedRanges(views, read.catalog) : [];
+  return (
+    <Section title="Fader tapers" hint="A fader on a kind of component and control range whose Q-SYS taper has been measured sits and moves exactly as the Core's own fader does. Any other moves linearly in dB.">
+      <div data-qsys-tapers={read.state}>
+        {read.state === "loading" && <p className="text-footnote text-fg-muted">Reading the Core…</p>}
+        {read.state === "offline" && <p className="text-footnote text-fg-muted">Connect a Core to check the faders&apos; tapers.</p>}
+        {read.state === "failed" && <Callout tone="warn">{read.message}</Callout>}
+        {read.state === "ok" && ranges.length === 0 && <p className="text-footnote text-fg-muted">Every fader has a measured taper.</p>}
+        {read.state === "ok" && ranges.length > 0 && (
+          <ul className="flex flex-col divide-y divide-line rounded-xl border border-line bg-surface">
+            {ranges.map((r) => (
+              <li key={kindText(r)} data-qsys-untapered={kindText(r)} className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 px-3 py-2 text-footnote">
+                <span className="font-mono font-medium text-fg">{kindText(r)}</span>
+                <span className="text-warn-11">No measured taper: moves linearly in dB</span>
+                <span className="font-mono text-fg-muted">{r.controls.map((a) => `${a.component} ${a.control}`).join(", ")}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </Section>
   );
 }

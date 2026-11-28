@@ -49,12 +49,14 @@ export type QsysDensity = "standard" | "dense";
 export type PanelKind = "volunteer" | "staff";
 
 /**
- * A control the Core reports as read-only (QRC `Direction: "Read"`). The one rule
- * for it: the writer refuses such a control before sending, and a panel draws an
- * object that writes it as Unavailable.
+ * A control the Core reports as read-only: QRC `Direction` `Read`, or `Read Only`
+ * (the spelling read from a Core in Emulate; the exact literal is unconfirmed, so
+ * `ReadOnly` and any case count too). A writable control reports `Read/Write`. The
+ * one rule for it: the writer refuses such a control before sending, and a panel
+ * draws an object that writes it as Unavailable.
  */
 export function isReadOnlyDirection(direction: unknown): boolean {
-  return /^read$/i.test(String(direction ?? "").trim());
+  return /^read(\s*only)?$/i.test(String(direction ?? "").trim());
 }
 
 /** The parts of a QRC control the rules below read. */
@@ -76,15 +78,35 @@ export function choicesOf(c: QsysControlFacts): string[] | null {
 export type QsysControlKind = "boolean" | "trigger" | "text" | "number";
 
 /**
+ * A Core value read as on or off: the one rule for whether a Boolean is on,
+ * wherever a mute, a switch, a lit button or a release decides from it. A Core
+ * sends a Boolean as true/false (GetControls) or as 1/0 (Component.Get, change
+ * groups, with String "true"/"false"), so true and any finite number but 0 are
+ * on; as text, only "true", "1" and "on" (any case, trimmed), never "1.0".
+ * Anything else is off. Value only, never String: a mute's String is
+ * "muted"/"unmuted".
+ */
+export function isOn(v: unknown): boolean {
+  if (typeof v === "boolean") return v;
+  if (typeof v === "number") return Number.isFinite(v) && v !== 0;
+  if (typeof v === "string") return /^(true|1|on)$/i.test(v.trim());
+  return false;
+}
+
+/**
  * Which rules a control's writes follow. Fails closed: anything not positively a
- * boolean, trigger or text control is numeric, so it is range-checked. The Type
- * strings the Core reports are on the spec's "verify in Emulate" list; the
- * value's own type backs them up. The writer and the editor's Core browser both ask here.
+ * boolean, trigger or text control is numeric, so it is range-checked. A Core
+ * reports Type `Boolean`, `Float`, `Integer`, `Text`, `Trigger` and `State Trigger`
+ * (a snapshot's `load.N`, whose Value is 0, or 2 for the loaded snapshot): any
+ * Type naming a trigger is one, whatever its value. A Boolean's value may come as
+ * true/false (GetControls) or 1/0 (Component.Get, change groups); before the Type
+ * is known, a true/false value says Boolean. The writer and the editor's Core
+ * browser both ask here.
  */
 export function kindOf(c: QsysControlFacts): QsysControlKind {
   const type = String(c.Type ?? "");
+  if (/trigger/i.test(type)) return "trigger";
   if (/^bool/i.test(type) || typeof c.Value === "boolean") return "boolean";
-  if (/^trigger/i.test(type)) return "trigger";
   if (/^(text|string)$/i.test(type)) return "text";
   return "number";
 }
@@ -108,14 +130,29 @@ export function isWritable(c: QsysControlFacts, entry: { min: number | null; max
   return unwritableReason(c, entry, viaChoices) === null;
 }
 
+/** The levels on a meter component: meter2's `meter.N`, `peak.N` and `rms.N` (Float, read-only). */
+const METER_LEVEL_NAME = /^(meter|peak|rms)\.\d+$/i;
+
+/** A meter component (a Core reports meter2's Type as `meter2`): its controls are levels and their settings, never a fader's level. */
+export const isMeterComponent = (componentType: string): boolean => /^meter/i.test(componentType);
+
 /**
- * A meter: a control on a meter component (meter2 and kin), or a control named
- * `meter...`. Which component types the Core reports for meters is one of the
- * spec's "verify in Emulate" items; the name rule covers meter2's `meter_1`.
+ * A meter. On a meter component (a Core reports meter2's Type as `meter2`), only
+ * its levels, `meter.N`, `peak.N` and `rms.N`: its `select` choice, `hold.time`
+ * and the rest are settings, not meters. On any other component, a control whose
+ * name or Type starts with `meter` (`meter.3` on a mixer).
  */
 export function isMeterControl(componentType: string, control: { Name: string; Type: string }): boolean {
-  return /^meter/i.test(componentType) || /^meter/i.test(control.Name) || /^meter/i.test(control.Type);
+  if (isMeterComponent(componentType)) return METER_LEVEL_NAME.test(control.Name);
+  return /^meter/i.test(control.Name) || /^meter/i.test(control.Type);
 }
+
+/**
+ * A selector plugin's button: it lists `Button 1`..`Button 100` whatever its
+ * configured count, and its names come only from Component.Get's Legend. The
+ * catalog read and the editor's Core browser both ask here.
+ */
+export const isSelectorButton = (name: string): boolean => /^Button \d+$/.test(name);
 
 /** A map key for an address. NUL cannot appear in a Code Name or a control name. */
 export function addressKey(a: QsysAddress): string {

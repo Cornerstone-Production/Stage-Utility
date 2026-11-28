@@ -41,11 +41,11 @@ const settings = (over: Partial<QsysSettings> = {}): QsysSettings => ({
   ...over,
 });
 
-const GAIN: QsysAddress = { component: "Lobby_Mixer", control: "gain" };
-const MUTE: QsysAddress = { component: "Lobby_Mixer", control: "mute" };
-const METER: QsysAddress = { component: "Zone 1", control: "meter_1" };
-const METER2: QsysAddress = { component: "Zone 1", control: "meter_2" };
-const ZONE_GAIN: QsysAddress = { component: "Zone 1", control: "gain" };
+const GAIN: QsysAddress = { component: "Lobby_Mixer", control: "output.1.gain" };
+const MUTE: QsysAddress = { component: "Lobby_Mixer", control: "output.1.mute" };
+const METER: QsysAddress = { component: "Zone 1", control: "meter.1" };
+const METER2: QsysAddress = { component: "Zone 1", control: "meter.2" };
+const ZONE_GAIN: QsysAddress = { component: "Zone 1", control: "output.1.gain" };
 
 before(() => {
   mock.timers.enable({ apis: ["setTimeout"] });
@@ -61,13 +61,13 @@ beforeEach(async () => {
   sent.length = 0;
   fake = new FakeQrcServer();
   fake.components.set("Lobby_Mixer", [
-    { Name: "gain", Type: "Float", Value: -10, String: "-10dB", Position: 0.5, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
-    { Name: "mute", Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read/Write" },
+    { Name: "output.1.gain", Type: "Float", Value: -10, String: "-10dB", Position: 0.5, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
+    { Name: "output.1.mute", Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read/Write" },
   ]);
   fake.components.set("Zone 1", [
-    { Name: "gain", Type: "Float", Value: 0, String: "0dB", Position: 0.8, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
-    { Name: "meter_1", Type: "Float", Value: -40, String: "-40dB", Position: 0.5, Direction: "Read" },
-    { Name: "meter_2", Type: "Float", Value: -50, String: "-50dB", Position: 0.4, Direction: "Read" },
+    { Name: "output.1.gain", Type: "Float", Value: 0, String: "0dB", Position: 0.8, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
+    { Name: "meter.1", Type: "Float", Value: -40, String: "-40dB", Position: 0.5, Direction: "Read" },
+    { Name: "meter.2", Type: "Float", Value: -50, String: "-50dB", Position: 0.4, Direction: "Read" },
   ]);
   port = await fake.start();
   subscriptionListeners = [];
@@ -153,19 +153,19 @@ for (const form of ["notify", "reply"] as const) {
       await watch.recompute();
       assert.equal(methods().filter((m) => m.startsWith("ChangeGroup.")).length, 0, "nothing is open, yet a change group was touched");
       await open("a");
-      assert.deepEqual(membership(), ["Lobby_Mixer/gain@values"]);
+      assert.deepEqual(membership(), ["Lobby_Mixer/output.1.gain@values"]);
       await open("b");
-      assert.deepEqual(membership(), ["Lobby_Mixer/gain@values", "Lobby_Mixer/mute@values"]);
+      assert.deepEqual(membership(), ["Lobby_Mixer/output.1.gain@values", "Lobby_Mixer/output.1.mute@values"]);
     });
 
     test("closing the last panel that uses a control removes it; no panels = groups cleared, no AutoPoll", async () => {
       await connect();
       watch.setPanels([panel("a", "staff", GAIN, MUTE, METER), panel("b", "staff", GAIN)]);
       await open("a", "b");
-      assert.deepEqual(membership(), ["Lobby_Mixer/gain@values", "Lobby_Mixer/mute@values", "Zone 1/meter_1@meters-staff"]);
+      assert.deepEqual(membership(), ["Lobby_Mixer/output.1.gain@values", "Lobby_Mixer/output.1.mute@values", "Zone 1/meter.1@meters-staff"]);
       assert.equal(watch.current([MUTE]).size, 1);
       await close("a");
-      assert.deepEqual(membership(), ["Lobby_Mixer/gain@values"], "a control no open panel uses is still watched");
+      assert.deepEqual(membership(), ["Lobby_Mixer/output.1.gain@values"], "a control no open panel uses is still watched");
       assert.equal(watch.current([MUTE]).size, 0, "the cache still serves a control nobody watches, which will go stale");
       assert.ok(!methods().includes("ChangeGroup.Remove"), "QRC's Remove is named-controls only; it cannot remove a component control");
       const mark = fake.received.length;
@@ -203,9 +203,9 @@ for (const form of ["notify", "reply"] as const) {
       await connect();
       watch.setPanels([panel("vol", "volunteer", METER), panel("staff", "staff", METER)]);
       await open("vol", "staff");
-      assert.deepEqual(membership(), ["Zone 1/meter_1@meters-staff"]);
+      assert.deepEqual(membership(), ["Zone 1/meter.1@meters-staff"]);
       sent.length = 0;
-      fake.setControl("Zone 1", "meter_1", -12);
+      fake.setControl("Zone 1", "meter.1", -12);
       await settle();
       assert.deepEqual(
         sent.map((s) => s.channel).sort(),
@@ -228,7 +228,7 @@ for (const form of ["notify", "reply"] as const) {
       await open("b");
       assert.deepEqual(
         fake.received.slice(mark).filter((r) => r.method.startsWith("ChangeGroup.")),
-        [{ method: "ChangeGroup.AddComponentControl", params: { Id: "values", Component: { Name: "Lobby_Mixer", Controls: [{ Name: "mute" }] } } }],
+        [{ method: "ChangeGroup.AddComponentControl", params: { Id: "values", Component: { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.mute" }] } } }],
         "adding one control rebuilt more than it added",
       );
     });
@@ -263,16 +263,16 @@ for (const form of ["notify", "reply"] as const) {
       watch.setPanels([panel("vol", "volunteer", GAIN, MUTE, METER), panel("staff", "staff", METER2)]);
       await open("vol", "staff");
       sent.length = 0;
-      fake.setControl("Lobby_Mixer", "gain", -3);
+      fake.setControl("Lobby_Mixer", "output.1.gain", -3);
       await settle();
-      assert.deepEqual(sent, [{ channel: "qsys:values", changes: [{ Component: "Lobby_Mixer", Name: "gain", Value: -3, String: "-3dB", Position: 97 / 120 }] }]);
+      assert.deepEqual(sent, [{ channel: "qsys:values", changes: [{ Component: "Lobby_Mixer", Name: "output.1.gain", Value: -3, String: "-3dB", Position: 97 / 120 }] }]);
       sent.length = 0;
-      fake.setControl("Zone 1", "meter_1", -20);
-      fake.setControl("Zone 1", "meter_2", -30);
+      fake.setControl("Zone 1", "meter.1", -20);
+      fake.setControl("Zone 1", "meter.2", -30);
       await settle();
       assert.deepEqual(
         sent.map((s) => `${s.channel} ${s.changes.map((c) => c.Name).join(",")}`).sort(),
-        ["qsys:meters:staff meter_2", "qsys:meters:volunteer meter_1"],
+        ["qsys:meters:staff meter.2", "qsys:meters:volunteer meter.1"],
       );
       // An Invalidate resends every control; nothing that did not change goes out.
       sent.length = 0;
@@ -280,6 +280,32 @@ for (const form of ["notify", "reply"] as const) {
       await settle();
       assert.deepEqual(sent, [], "an unchanged value was broadcast");
       assert.equal(watch.current([GAIN]).get(addressKey(GAIN))?.Value, -3, "the hydration cache missed a change");
+    });
+
+    test("the empty poll a Core sends on every tick broadcasts nothing and says nothing; a real change still goes out", async () => {
+      await connect();
+      watch.setPanels([panel("vol", "volunteer", GAIN, MUTE, METER), panel("staff", "staff", METER2)]);
+      await open("vol", "staff");
+      const cached = watch.current([GAIN, MUTE, METER, METER2]);
+      sent.length = 0;
+      const log = mock.method(console, "log", () => {});
+      const warn = mock.method(console, "warn", () => {});
+      try {
+        for (let i = 0; i < 200; i++) fake.tick();
+        await settle();
+        assert.equal(sent.length, 0, `an empty poll was broadcast: ${JSON.stringify(sent)}`);
+        assert.deepEqual([...log.mock.calls, ...warn.mock.calls].map((c) => c.arguments.join(" ")), [], "an empty poll wrote a line");
+        assert.deepEqual(watch.current([GAIN, MUTE, METER, METER2]), cached, "an empty poll changed the cache");
+        assert.equal(watch.ready(), true);
+        // The positive control: the same groups still carry a real change.
+        fake.setControl("Lobby_Mixer", "output.1.gain", -3);
+        fake.tick();
+        await settle();
+        assert.deepEqual(sent.map((x) => x.channel), ["qsys:values"]);
+      } finally {
+        log.mock.restore();
+        warn.mock.restore();
+      }
     });
 
     test("a control the Core's catalog lacks is skipped with one [qsys] line, and its component's other controls still watched", async () => {
@@ -290,7 +316,7 @@ for (const form of ["notify", "reply"] as const) {
         watch.setPanels([panel("a", "staff", GAIN, gone)]);
         await open("a");
         await watch.recompute();
-        assert.deepEqual(membership(), ["Lobby_Mixer/gain@values"]);
+        assert.deepEqual(membership(), ["Lobby_Mixer/output.1.gain@values"]);
         const lines = warn.mock.calls.map((c) => String(c.arguments[0])).filter((l) => l.includes("no_such"));
         assert.equal(lines.length, 1, `expected one skip line, got ${JSON.stringify(lines)}`);
         assert.ok(lines[0].startsWith("[qsys]"));
@@ -325,7 +351,7 @@ for (const form of ["notify", "reply"] as const) {
       assert.ok(!after.includes("ChangeGroup.Destroy"), "a Destroy was sent for groups that died with the old connection");
       assert.ok(after.includes("ChangeGroup.AddComponentControl"));
       assert.ok(after.includes("ChangeGroup.Invalidate"), "no Invalidate after a reconnect");
-      assert.deepEqual(membership(), ["Lobby_Mixer/gain@values", "Zone 1/meter_1@meters-staff"]);
+      assert.deepEqual(membership(), ["Lobby_Mixer/output.1.gain@values", "Zone 1/meter.1@meters-staff"]);
       assert.equal(watch.ready(), true);
       assert.equal(watch.current([GAIN]).get(addressKey(GAIN))?.Value, 6, "the value was not re-read after the reconnect");
     });
@@ -369,7 +395,7 @@ for (const form of ["notify", "reply"] as const) {
       await open("a");
       const mark = fake.received.length;
       fake.components.set("Lobby_Mixer", [
-        { Name: "gain", Type: "Float", Value: -20, String: "-20dB", Position: 0.3, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
+        { Name: "output.1.gain", Type: "Float", Value: -20, String: "-20dB", Position: 0.3, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
       ]);
       fake.status = { ...fake.status, DesignCode: "design-2" };
       pushEngineStatus();
@@ -379,7 +405,7 @@ for (const form of ["notify", "reply"] as const) {
       const after = methods(mark);
       assert.ok(after.includes("ChangeGroup.Destroy"), "the old design's groups were left on the Core");
       assert.ok(after.includes("ChangeGroup.Invalidate"), "no Invalidate after a design change");
-      assert.deepEqual(membership(), ["Lobby_Mixer/gain@values"]);
+      assert.deepEqual(membership(), ["Lobby_Mixer/output.1.gain@values"]);
       assert.equal(watch.current([GAIN]).get(addressKey(GAIN))?.Value, -20);
       assert.equal(watch.current([MUTE]).size, 0, "a control the new design lacks is still served from the cache");
       assert.equal(watch.ready(), true);
@@ -432,7 +458,7 @@ for (const form of ["notify", "reply"] as const) {
         const second = watch.recompute();
         assert.equal(first, second);
         await second.catch(() => undefined);
-        assert.deepEqual(membership(), ["Lobby_Mixer/gain@values", "Lobby_Mixer/mute@values"], "the queued pass was dropped with the failed one");
+        assert.deepEqual(membership(), ["Lobby_Mixer/output.1.gain@values", "Lobby_Mixer/output.1.mute@values"], "the queued pass was dropped with the failed one");
       } finally {
         warn.mock.restore();
       }
@@ -478,14 +504,14 @@ for (const form of ["notify", "reply"] as const) {
         watch.setPanels([panel("a", "staff", GAIN)]);
         await until(() => warn.mock.calls.length > 0, "refused Destroy");
         await settle();
-        assert.deepEqual(membership(), ["Lobby_Mixer/gain@values", "Lobby_Mixer/mute@values"], "setup: the refused Destroy left the old group");
+        assert.deepEqual(membership(), ["Lobby_Mixer/output.1.gain@values", "Lobby_Mixer/output.1.mute@values"], "setup: the refused Destroy left the old group");
         // The design changes before the retry timer fires.
         fake.status = { ...fake.status, DesignCode: "design-2" };
         pushEngineStatus();
         await until(() => svc.getCatalog()?.designCode === "design-2", "design refresh");
         await watch.recompute();
         await settle();
-        assert.deepEqual(membership(), ["Lobby_Mixer/gain@values"], "an old-design control stayed in a group nobody tracked");
+        assert.deepEqual(membership(), ["Lobby_Mixer/output.1.gain@values"], "an old-design control stayed in a group nobody tracked");
       } finally {
         warn.mock.restore();
       }
@@ -602,7 +628,7 @@ for (const form of ["notify", "reply"] as const) {
       try {
         await connect();
         await until(() => watch.ready(), "readiness on the fresh connection");
-        assert.deepEqual(membership(), ["Zone 1/gain@values"]);
+        assert.deepEqual(membership(), ["Zone 1/output.1.gain@values"]);
         await watch.recompute();
         subscriptionsChanged();
         await watch.recompute();
@@ -628,7 +654,7 @@ for (const form of ["notify", "reply"] as const) {
       await until(() => watch.ready(), "re-read");
       oldClient.notify("ChangeGroup.Poll", {
         Id: "values",
-        Changes: [{ Component: "Lobby_Mixer", Name: "gain", Value: 99, String: "99dB", Position: 1 }],
+        Changes: [{ Component: "Lobby_Mixer", Name: "output.1.gain", Value: 99, String: "99dB", Position: 1 }],
       });
       assert.equal(watch.current([GAIN]).get(addressKey(GAIN))?.Value, -10, "the old connection's push was cached");
     });
@@ -669,12 +695,34 @@ test("a recompute that joins a run as it finishes still gets its pass", async ()
   }
 });
 
-test("isMeterControl: meter components and controls named meter*", () => {
-  assert.equal(isMeterControl("meter2", { Name: "x", Type: "Float" }), true);
-  assert.equal(isMeterControl("gain", { Name: "meter_1", Type: "Float" }), true);
-  assert.equal(isMeterControl("gain", { Name: "Meter 1", Type: "Float" }), true);
-  assert.equal(isMeterControl("gain", { Name: "gain", Type: "Float" }), false);
+test("isMeterControl: a meter2's levels, not its settings; a control named meter* elsewhere", () => {
+  // A meter2 component's controls as a Core lists them, one per line, sorted.
+  const meter2: [name: string, meter: boolean][] = [
+    ["hold.time", false],
+    ["meter.1", true],
+    ["meter.4", true],
+    ["peak.1", true],
+    ["rms.2", true],
+    ["select", false],
+  ];
+  assert.deepEqual(meter2.map(([n]) => n), meter2.map(([n]) => n).sort());
+  for (const [Name, meter] of meter2) assert.equal(isMeterControl("meter2", { Name, Type: "Float" }), meter, `meter2 ${Name}`);
+  assert.equal(isMeterControl("mixer", { Name: "meter.3", Type: "Float" }), true);
+  assert.equal(isMeterControl("mixer", { Name: "Meter 1", Type: "Float" }), true);
+  assert.equal(isMeterControl("mixer", { Name: "output.1.gain", Type: "Float" }), false);
   assert.equal(isMeterControl("mixer", { Name: "parameter", Type: "Float" }), false);
+});
+
+test("a meter2's levels are watched at the meter rate and its select with the values", async () => {
+  fake.componentTypes.set("Lobby_Meter", "meter2");
+  fake.components.set("Lobby_Meter", [
+    { Name: "meter.1", Type: "Float", Value: -40, String: "-40.0dB", Position: 0.5, Direction: "Read", ValueMin: -120, ValueMax: 20 },
+    { Name: "select", Type: "Integer", Value: 0, String: "Peak", Position: 0, Direction: "Read/Write" },
+  ]);
+  await connect();
+  watch.setPanels([panel("p", "staff", { component: "Lobby_Meter", control: "meter.1" }, { component: "Lobby_Meter", control: "select" })]);
+  await open("p");
+  assert.deepEqual(membership(), ["Lobby_Meter/meter.1@meters-staff", "Lobby_Meter/select@values"]);
 });
 
 // An owed momentary release is sent from onReady (qsys-write.ts): a turn to ready

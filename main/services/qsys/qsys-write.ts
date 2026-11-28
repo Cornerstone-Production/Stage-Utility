@@ -24,7 +24,7 @@ import { viewsStore } from "../views-store.js";
 import { errorMessage } from "../errors.js";
 import { OutageLog } from "../repeat-log.js";
 import { scrub } from "../scrub.js";
-import { addressKey, choicesOf, isWritable, kindOf, panelHasMomentary, panelHasSelectorOn, type QsysControlKind, unwritableReason } from "../../types/qsys.js";
+import { addressKey, choicesOf, isOn, isWritable, kindOf, panelHasMomentary, panelHasSelectorOn, type QsysControlKind, unwritableReason } from "../../types/qsys.js";
 import type { View } from "../../types/views.js";
 
 // The rules live in types/qsys.ts so the editor shares them; re-exported for the server.
@@ -127,10 +127,12 @@ const badValue = (message: string): Refused => ({ ok: false, reason: "bad-value"
 const KINDS: Record<Kind, { check(value: unknown, min: number, max: number, where: string): Checked; same(sent: unknown, got: unknown): boolean }> = {
   boolean: {
     check: (value, _min, _max, where) => (typeof value === "boolean" ? { ok: true, send: value, clamped: false } : badValue(`${where} takes true or false`)),
-    same: (sent, got) => sent === (got === true || got === 1),
+    same: (sent, got) => sent === isOn(got),
   },
   trigger: {
-    // QRC fires a trigger on any Set; 1 is what the reference shows.
+    // QRC fires a trigger on any Set; 1 is what the reference shows. A State Trigger
+    // (a snapshot's load.N) is sent 1 too: it is a trigger to the writer, and whether a
+    // Core loads the snapshot on 1 is on the spec's list to re-check in Emulate.
     check: (value, _min, _max, where) => (value === true || value === 1 ? { ok: true, send: 1, clamped: false } : badValue(`${where} is a trigger; send true`)),
     same: () => true,
   },
@@ -165,6 +167,19 @@ function loggable(v: unknown): unknown {
   if (typeof v === "string") return v.slice(0, MAX_TEXT);
   if (typeof v === "boolean" || (typeof v === "number" && Number.isFinite(v))) return v;
   return null;
+}
+
+type ReadBack = { Name?: unknown; Value?: unknown; String?: unknown; Position?: unknown };
+
+/**
+ * The entry for `control` in a Component.Set reply with ResponseValues. A Core
+ * answers with a bare list of `{ Component, Name, String, Value, Position }`
+ * (Designer 10.0.1 Emulate); the `{ Name, Controls: [...] }` form QSC's page
+ * shows is taken too.
+ */
+export function readBack(reply: unknown, control: string): ReadBack | undefined {
+  const list = Array.isArray(reply) ? reply : (reply as { Controls?: unknown } | null)?.Controls;
+  return Array.isArray(list) ? (list as (ReadBack | null)[]).find((x) => x?.Name === control) ?? undefined : undefined;
 }
 
 function findControl(catalog: QsysCatalog, component: string, control: string): QrcControl | undefined {
@@ -466,7 +481,7 @@ export class QsysWriter {
           if (!c) throw new Error("the Core did not report it");
           return c.Value;
         })();
-    return value === true || value === 1;
+    return isOn(value);
   }
 
   /** Whether a release is owed on the address; for tests and diagnostics. */
@@ -641,10 +656,7 @@ export class QsysWriter {
       const message = `the connection to the Core dropped during the write to ${where}, so it may or may not have landed`;
       return refuse("core-error", message, `${message}: ${errorMessage(err)}`);
     }
-    const controls = (reply as { Controls?: unknown } | null)?.Controls;
-    const back = Array.isArray(controls)
-      ? (controls as { Name?: unknown; Value?: unknown; String?: unknown; Position?: unknown }[]).find((x) => x?.Name === control)
-      : undefined;
+    const back = readBack(reply, control);
     if (!back || !("Value" in back)) {
       lease();
       return refuse("core-error", `the Core did not report ${where} after the write; it may have landed`);

@@ -81,13 +81,20 @@ imported as an allowlist file. Every write is checked by the server.
   `max` empty it is refused (`no-range`).
 - A value outside the range is clamped to it, and the clamp is logged.
 - Booleans (mute, switch) and triggers (buttons) carry no range. A trigger is fired
-  with `true`.
+  with `true`, which reaches the Core as `1`. A control whose Core Type names a
+  trigger is one: `Trigger`, and a snapshot's `load.N`, which a Core reports as
+  `State Trigger`. A snapshot's lit state is its `match.N` (a read-only Boolean),
+  bound as the preset's **Lit by**.
+- A Core reports a Boolean as `true`/`false` in its control list and as `1`/`0` in
+  the values it pushes and reads back; either is on or off alike, on a panel and on
+  the server. Any other number is on unless it is 0; a text value is on only as
+  `true`, `1` or `on`. A write's read-back of `1` for `true` is not a mismatch.
 - A text control takes any text up to 1024 characters. Only a selector's choice
   list is checked against the control's choices (below); anything else may send
   any text, so allowlist a text control only if any text is safe to send.
 - A value of the wrong type is refused (`bad-value`): text or `true` to a gain, a
   number to a mute or a text control, a number that is not finite.
-- A control the Core reports as read-only (direction `Read`, as a meter) is refused
+- A control the Core reports as read-only (direction `Read` or `Read Only`, as a meter) is refused
   (`read-only`), allowlisted or not.
 - An allowlisted control the running design does not have, as after a redeploy that
   removed it, is refused (`not-in-design`) without anything being sent.
@@ -133,9 +140,10 @@ What is offered depends on the field:
 |---|---|
 | Fader and strip level | Numeric controls with a range on the Core, not meters |
 | Mute, switch, momentary button (**Control type** Momentary), **Lit by** | On and off controls |
-| Trigger button, switch pair, preset, selector button, Previous | Triggers |
+| Trigger button, switch pair, preset, Previous | Triggers |
+| Selector button | Triggers, and on and off controls (a selector plugin's `Button N`) |
 | Selector choice list | Controls that list their choices. The field is offered only when the Core reports one |
-| Meter, strip meter | Meter controls (a control, component or type whose name starts `meter`) |
+| Meter, strip meter | Meter controls: on a meter component (`meter2`), its levels `meter.N`, `peak.N` and `rms.N`, not its settings; elsewhere a control whose name or type starts `meter` |
 | Label text, strip name | Text controls |
 
 A field that **writes** is offered only controls that are on the allowlist and that the
@@ -153,6 +161,13 @@ as its own kind: a mute or a switch on a Boolean sends true and false, and a fad
 a numeric control still needs a range. While the saved views cannot be read the
 choices hold for anything but a Boolean.
 
+Controls are listed in number order (`Button 2` before `Button 10`). A selector
+plugin lists `Button 1` to `Button 100` whatever its button count, so each `Button N`
+shows the name the Core draws on it beside it, read with one `Component.Get` per such
+component when the catalog is read; a button with no name shows none. Picking one
+for a selector names its row after it. If the Core will not say the names, the
+buttons are listed by number, the browser says so, and `/log` has a line.
+
 With no Core connected the browser says so and lists nothing; an existing binding
 stays shown and can be cleared. A read that fails for any other reason is logged to
 `/log` as a `[qsys]` line and the browser says it could not read.
@@ -165,11 +180,20 @@ level, mute, meter and second meter fill from the controls named for that channe
 
 | Field | Names tried (`N` the channel, `SIDE` input or output) |
 |---|---|
-| Level | `gain_N`, `SIDE_gain_N`, `SIDE_N_gain` |
-| Mute | `mute_N`, `SIDE_mute_N`, `SIDE_N_mute` |
-| Meter | `meter_N`, `meter_N_1`, `meter_SIDE_N` |
-| Second meter | `meter_N_2` |
-| Name | `label_N`, `name_N`, `text_display_N`, `SIDE_N_label`, `SIDE_N_name` |
+| Level | `SIDE.N.gain` |
+| Mute | `SIDE.N.mute` |
+| Meter | `meter.N` |
+| Second meter | none: bind it by hand |
+| Name | `SIDE.N.label`, then `text.display.N` |
+
+A **Gain block** (a component of type `gain`) is offered as one channel with no
+number: its level fills from `gain` and its mute from `mute`; it has no meter or name.
+If it also has numbered controls (`input.1.gain`), those channels are offered beside it.
+
+These are the names a Core gives a mixer's controls. A crosspoint
+(`input.1.output.2.gain`) is no channel's. A Core's meters are usually on a meter
+component of their own, not on the mixer, so the meter fields mostly stay empty after
+the fill; bind them from that component.
 
 Level and mute fill only with an allowlisted, writable control; the others by the same
 rule the field's own Core browser uses. A field with no match stays empty and the
@@ -212,7 +236,14 @@ and allowlist and checks them afresh. An unreadable views file stops the check, 
 says so.
 
 The same step gives the watch its panels: every View with Q-SYS objects or a panel
-block, the controls its objects read, and its kind. When two people move one fader,
+block, the controls its objects read, and its kind. The controls open panels read are
+watched with QRC change groups: at most three per connection (values, volunteer
+meters, staff meters), each polled by the Core at its rate (`AutoPoll`; a Core in
+Emulate took a 30 ms rate, the highest meter rate, and polled every 15 to 48 ms). The Core sends each group's changes
+as `ChangeGroup.Poll` notifications, every control's value on the first, and an empty
+one on every tick with nothing changed, which is dropped without a broadcast or a
+line. After a reconnect or a new design the groups are built again and `Invalidate`d,
+which makes the Core resend every value on its next poll. When two people move one fader,
 the last write wins, and each panel shows the Core's value after the next poll,
 never its own.
 
@@ -294,6 +325,38 @@ An address no panel has shows "There is no panel here", never a blank page.
 A page that wakes from sleep, or whose connection to Stage Utility drops and comes
 back, reads the Core's current values before it takes a touch, and never sends its
 own values back: only a fresh touch writes.
+
+#### Faders
+
+A fader on a control whose component kind and range have a measured Q-SYS taper
+follows the Core's own fader: its thumb sits at the position the Core reports, as on
+a Q-SYS touch screen (0 dB at three quarters of the travel on a mixer's -100 to
++10 dB output gain), and a drag moves
+along that taper. A drag starts from the value shown, at that value's place on the
+measured table, so a touch that does not move sends nothing; between the measured
+points the table can sit a little off the Core's own curve, and the thumb steps that
+far on the first move. What a drag sends is still a value in dB, so the allowlist's
+limits apply exactly as for any write; the drag stops at them, and the limit line is
+drawn at the limit's place on the taper. The travel above the line is the Core's to
+the top of its range, so a finger can run on past the line while the thumb waits
+there; drawn back, the thumb moves again once the finger reaches it. A strip's meters are drawn on the same
+taper, so they line up with the fader.
+
+The taper belongs to the kind of component as well as the range, because two kinds
+can share a range and fade differently. Measured:
+
+| Component Type | Control range | Taper |
+|---|---|---|
+| `mixer` | -100 to +10 dB | A dense curve, measured every 0.025 of travel. |
+| `gain` (a Gain block) | -100 to +20 dB | Linear: -100 dB at the bottom, +20 dB at the top. |
+
+A Gain block configured -100 to +10 dB is linear and does not get the mixer's curve.
+A fader on any other kind or range moves linearly in dB
+from -60 dB (or the allowlist's minimum) to the allowlist's maximum, with the Core's
+minimum at the bottom stop, and looks no different. Each such kind and range (for example `gain -100..10`) is logged once
+(see [Troubleshooting](#troubleshooting)) and listed on
+[`/qsys/manage`](#the-q-sys-page) so it can be measured: set the control to a series
+of values on a Core and read back each `Position`.
 
 An iPad that opens a panel while Stage Utility is down shows the browser's own error;
 one that already had it open shows the card above. Either way the Core and its wall
@@ -396,6 +459,18 @@ A panel's settings travel in its view bundle (see
   edits, what changed and the list as it is now; **Save the allowlist** stays off
   until **Keep my edits over this list** (after which a save replaces the new list)
   or **Discard my edits**.
+  **Add a control** opens the Core's controls, every one it does not report
+  read-only and that is not already listed, and adds the one you pick as an unsaved
+  row: its label is the component and control (`Lobby_Mixer gain`) and its limits start at the
+  Core's own range (none when the Core reports none, which a number needs before it can
+  be written). A text, on-off or trigger control shows its kind in place of limit boxes.
+  Tighten the limits, then **Save the allowlist**. It needs the Core connected.
+  **Export** downloads the saved list as the allowlist file; **Import** reads one,
+  asks, and replaces the list with it (over the revision the page last read). A file the
+  server refuses is shown as the server said it and the list stays; a refusal is also
+  logged as `[qsys]`. If the list changed elsewhere since the page read it, the page
+  reads it again and the next import goes through. Export and Import are off while there
+  are unsaved edits.
   **Add all controls <panel> uses** adds every control that panel's objects change
   (a fader's level, a mute, a button, a switch, presets, a selector, a strip's gain
   and mute; never a meter, a label or an indicator) that the list lacks, at the
@@ -405,6 +480,9 @@ A panel's settings travel in its view bundle (see
   **Start a new, empty list**, which keeps the old file beside the new one.
 - **Binding check**: each problem with its panel and control, "Every binding
   resolves", "Connect a Core to check the bindings", or why the check could not run.
+- **Fader tapers**: the component types and control ranges faders and strip levels
+  are bound to that have no measured Q-SYS taper, each with its controls, or "Every
+  fader has a measured taper". See [Faders](#faders).
 - **Staff PIN**: whether one is set, and a field to set or change it (four digits,
   never shown back), with **Remove PIN**. With none set, a volunteer panel's
   **Open Stage Utility** does not open the app. See
@@ -573,8 +651,10 @@ Look at `/log` and filter for `[qsys]`.
 | `could not save the write log; entries since are in memory only` | The write log file cannot be written. Writes still go through; `/api/qsys/write-log` reports `saveError`. Logged once per run of failures. |
 | `write log saved again` | A save succeeded after failures. |
 | `catalog refresh failed: <reason>` | A catalog refresh asked for over the API failed. |
+| `could not read the button names of <component>: <reason>; the editor lists its buttons by number` | The Core refused the `Component.Get` that reads a selector plugin's button names. The connection and the catalog are fine; the editor's browser lists its `Button N` controls without names. |
 | `watching <n> values, <n> volunteer meters, <n> staff meters` | What the Core is asked to report. Logged on connect and when it changes; 0 while no panel is open. |
 | `binding: <view>/<object> <problem> (<component>/<control>)` | The binding check found a binding that does not resolve: `missing-component`, `missing-control`, `not-allowed` or `read-only` (see Binding check). Logged when it first appears, not again while it stands. |
+| `no measured taper for <type> <min>..<max>; faders on it move linearly in dB, not as the Core's do (<controls>). See /qsys/manage` | A fader or a strip's level is bound to a control whose component type and range have no measured Q-SYS taper, so it moves linearly in dB rather than as the Core's own fader. Logged once per type and range while the server runs. See [Faders](#faders). |
 | `binding check: every binding resolves` | Every problem the check had reported is fixed. |
 | `binding check could not run: <reason>` | The views or the allowlist could not be read. `GET /api/qsys/bindings` answers `503` (`code` `check-failed`), and `/qsys/manage` says the check could not run, until a check runs again, never an empty (all clear) list. |
 | `staff PIN set by <address>`, `staff PIN removed by <address>; …` | The staff PIN was set, changed or removed from `/qsys/manage` (or `PUT /api/qsys/pin`). |

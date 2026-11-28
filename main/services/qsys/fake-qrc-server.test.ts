@@ -1,0 +1,110 @@
+// The fake Core answers in the shapes a real Core sends (Q-SYS Designer 10.0.1 in
+// Emulate, probed over QRC), so every test written against it exercises them.
+// Each case here is one of those shapes, as raw JSON off the wire.
+
+import assert from "node:assert/strict";
+import { afterEach, beforeEach, test } from "node:test";
+import { FakeQrcServer } from "./fake-qrc-server.js";
+import { QrcClient } from "./qrc-client.js";
+
+let fake: FakeQrcServer;
+let client: QrcClient;
+
+beforeEach(async () => {
+  fake = new FakeQrcServer();
+  fake.components.set("Lobby_Mixer", [
+    { Name: "output.1.gain", Type: "Float", Value: -10, String: "-10.0dB", Position: 0.5, Direction: "Read/Write", ValueMin: -100, ValueMax: 10 },
+    { Name: "output.1.mute", Type: "Boolean", Value: false, String: "unmuted", Position: 0, Direction: "Read/Write" },
+  ]);
+  fake.componentTypes.set("Lobby_Mixer", "mixer");
+  client = await QrcClient.connect("127.0.0.1", await fake.start());
+});
+
+afterEach(async () => {
+  client.close();
+  await fake.stop();
+});
+
+test("Component.Set with ResponseValues answers a bare list naming the component; without it, true", async () => {
+  const back = await client.send("Component.Set", { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.gain", Value: -20 }], ResponseValues: true });
+  assert.ok(Array.isArray(back), `a Core answers a bare list, not ${JSON.stringify(back)}`);
+  assert.equal(back.length, 1);
+  const [entry] = back as Record<string, unknown>[];
+  assert.deepEqual(Object.keys(entry!).sort(), ["Component", "Name", "Position", "String", "Value"]);
+  assert.equal(entry!.Component, "Lobby_Mixer");
+  assert.equal(entry!.Value, -20);
+  assert.equal(await client.send("Component.Set", { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.gain", Value: -30 }] }), true);
+});
+
+test("a Boolean is true/false from GetControls, and 1/0 from Component.Get, a change group and a Set read-back", async () => {
+  const listed = (await client.send("Component.GetControls", { Name: "Lobby_Mixer" })) as { Controls: { Name: string; Value: unknown }[] };
+  assert.equal(listed.Controls.find((c) => c.Name === "output.1.mute")!.Value, false);
+
+  const got = (await client.send("Component.Get", { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.mute" }] })) as { Name: string; Controls: Record<string, unknown>[] };
+  assert.equal(got.Name, "Lobby_Mixer");
+  assert.deepEqual(got.Controls, [{ Name: "output.1.mute", Value: 0, String: "unmuted", Position: 0 }]);
+
+  const pushes: unknown[] = [];
+  client.onNotification((method, params) => {
+    if (method === "ChangeGroup.Poll") pushes.push(params);
+  });
+  await client.send("ChangeGroup.AddComponentControl", { Id: "g", Component: { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.mute" }] } });
+  await client.send("ChangeGroup.AutoPoll", { Id: "g", Rate: 0.03 });
+  const back = (await client.send("Component.Set", { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.mute", Value: true }], ResponseValues: true })) as { Value: unknown }[];
+  assert.equal(back[0]!.Value, 1, "a Set read-back carries a Boolean as a number");
+  for (let i = 0; i < 1000 && pushes.length < 2; i++) await new Promise((r) => setImmediate(r));
+  const values = (pushes as { Changes: { Value: unknown }[] }[]).flatMap((p) => p.Changes.map((c) => c.Value));
+  assert.deepEqual(values, [0, 1], "a change group carries a Boolean as a number");
+});
+
+test("a -100..+10 gain reads back the Position a Core reports on its taper: 0 dB at 0.75", async () => {
+  const back = (await client.send("Component.Set", { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.gain", Value: 0 }], ResponseValues: true })) as { Position: number }[];
+  assert.equal(back[0]!.Position, 0.75);
+  const low = (await client.send("Component.Set", { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.gain", Value: -10 }], ResponseValues: true })) as { Position: number }[];
+  assert.equal(low[0]!.Position, 0.5);
+});
+
+test("a Gain block reads back a linear Position, and reports its Type; a gain on the mixer's range is not the mixer's curve", async () => {
+  const gain = (min: number, max: number) => [{ Name: "gain", Type: "Float", Value: 0, String: "0dB", Position: 0, Direction: "Read/Write", ValueMin: min, ValueMax: max }];
+  fake.components.set("Hall_Gain", gain(-100, 20));
+  fake.components.set("Side_Gain", gain(-100, 10));
+  fake.componentTypes.set("Hall_Gain", "gain");
+  fake.componentTypes.set("Side_Gain", "gain");
+  const at = async (c: string, Value: number) => ((await client.send("Component.Set", { Name: c, Controls: [{ Name: "gain", Value }], ResponseValues: true })) as { Position: number }[])[0]!.Position;
+  assert.ok(Math.abs((await at("Hall_Gain", 0)) - 100 / 120) < 1e-12);
+  assert.equal(await at("Side_Gain", -45), 0.5, "-100..10 on a Gain block is linear: -45 is halfway");
+  const list = (await client.send("Component.GetComponents")) as { Name: string; Type: string }[];
+  assert.equal(list.find((c) => c.Name === "Hall_Gain")?.Type, "gain");
+  assert.equal(list.find((c) => c.Name === "Lobby_Mixer")?.Type, "mixer");
+});
+
+test("an off-table component reports a Position that is not from our tables", async () => {
+  fake.offTable.add("Lobby_Mixer");
+  const back = (await client.send("Component.Set", { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.gain", Value: -45 }], ResponseValues: true })) as { Position: number }[];
+  assert.equal(back[0]!.Position, 0.25, "square law: (55/110)^2, where the mixer table has -45 near 0.13");
+});
+
+test("a selector plugin's Button N is a radio: pressing one, by Set or at the Core, turns the others off and pushes them", async () => {
+  fake.components.set(
+    "Source_Select",
+    [1, 2, 3].map((n) => ({ Name: `Button ${n}`, Type: "Boolean", Value: n === 1, String: String(n === 1), Position: n === 1 ? 1 : 0, Direction: "Read/Write" })),
+  );
+  const on = async () => {
+    const listed = (await client.send("Component.GetControls", { Name: "Source_Select" })) as { Controls: { Name: string; Value: unknown }[] };
+    return listed.Controls.filter((c) => c.Value === true).map((c) => c.Name);
+  };
+  const pushes: { Changes: { Name: string; Value: unknown }[] }[] = [];
+  client.onNotification((method, params) => {
+    if (method === "ChangeGroup.Poll") pushes.push(params as never);
+  });
+  await client.send("ChangeGroup.AddComponentControl", { Id: "g", Component: { Name: "Source_Select", Controls: [{ Name: "Button 1" }] } });
+  await client.send("ChangeGroup.AutoPoll", { Id: "g", Rate: 0.03 });
+
+  await client.send("Component.Set", { Name: "Source_Select", Controls: [{ Name: "Button 3", Value: true }] });
+  assert.deepEqual(await on(), ["Button 3"], "a Set of Button 3 left another button on");
+  for (let i = 0; i < 1000 && pushes.length < 2; i++) await new Promise((r) => setImmediate(r));
+  assert.deepEqual(pushes.flatMap((p) => p.Changes.map((c) => `${c.Name}=${String(c.Value)}`)), ["Button 1=1", "Button 1=0"], "Button 1 going off was not pushed");
+
+  fake.setControl("Source_Select", "Button 2", true);
+  assert.deepEqual(await on(), ["Button 2"], "a press at the Core left another button on");
+});

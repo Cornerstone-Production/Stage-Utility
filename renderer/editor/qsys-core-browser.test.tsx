@@ -21,7 +21,7 @@ const teardown = installDom();
 const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = await import("react");
 const { TooltipProvider } = await import("../components/ui/index.js");
-const { QsysCoreBrowser } = await import("./qsys-core-browser.js");
+const { QsysCoreBrowser, fitsKind } = await import("./qsys-core-browser.js");
 type Binding = import("@main/types/qsys").QsysBinding;
 type Props = import("react").ComponentProps<typeof QsysCoreBrowser>;
 
@@ -49,10 +49,10 @@ const CATALOG = {
         { Name: "mute", Type: "Boolean" },
         { Name: "mute_free", Type: "Boolean" },
         { Name: "mute_ro", Type: "Boolean", Direction: "Read" },
-        { Name: "load_1", Type: "Trigger" },
+        { Name: "load.1", Type: "Trigger" },
         { Name: "zone_name", Type: "Text" },
         { Name: "source", Type: "Text", Choices: ["Mic", "Laptop"] },
-        { Name: "meter_1", Type: "Float", ValueMin: -100, ValueMax: 20 },
+        { Name: "meter.1", Type: "Float", ValueMin: -100, ValueMax: 20 },
       ],
     },
     {
@@ -76,7 +76,7 @@ const ALLOW = {
     entry(MIX, "trim", -10, 10),
     entry(MIX, "mute", null, null),
     entry(MIX, "mute_ro", null, null),
-    entry(MIX, "load_1", null, null),
+    entry(MIX, "load.1", null, null),
     entry(MIX, "source", null, null),
     entry(AMP, "output", -60, 0),
   ],
@@ -144,11 +144,13 @@ describe("the Core browser", () => {
   test("each kind offers what fits it", async () => {
     const cases: [Props["kind"], string[]][] = [
       // numeric with a range from the Core, not a meter
-      ["gain", ["gain", "gain_free", "gain_ro", "gain_nolimit"]],
-      ["trigger", ["load_1"]],
-      ["string", ["zone_name", "source"]],
+      ["gain", ["gain", "gain_free", "gain_nolimit", "gain_ro"]],
+      ["trigger", ["load.1"]],
+      // a selector's button: a trigger, or an on/off control
+      ["press", ["load.1", "mute", "mute_free", "mute_ro"]],
+      ["string", ["source", "zone_name"]],
       ["choice", ["source"]],
-      ["meter", ["meter_1"]],
+      ["meter", ["meter.1"]],
     ];
     for (const [kind, expected] of cases) {
       cleanup();
@@ -156,6 +158,14 @@ describe("the Core browser", () => {
       await into(r, MIX);
       assert.deepEqual(controls(r.container), expected, `kind ${kind}`);
     }
+  });
+
+  test("a meter component's settings are not levels: a meter2's hold.time is offered to nothing that draws a level", () => {
+    const numeric = (Name: string) => ({ Name, Type: "Float", ValueMin: 0, ValueMax: 10 });
+    assert.equal(fitsKind("gain", "meter2", numeric("hold.time")), false, "a meter2's hold.time is offered as a fader");
+    assert.equal(fitsKind("meter", "meter2", numeric("hold.time")), false, "a meter2's hold.time is offered as a meter");
+    assert.equal(fitsKind("meter", "meter2", numeric("meter.1")), true);
+    assert.equal(fitsKind("gain", "mixer", numeric("output.1.gain")), true);
   });
 
   test("a writable object only offers allowlisted controls; read-only objects offer all", async () => {
@@ -174,7 +184,7 @@ describe("the Core browser", () => {
 
     const ro = await open({ kind: "gain", writable: false });
     await into(ro, MIX);
-    assert.deepEqual(controls(ro.container), ["gain", "gain_free", "gain_ro", "gain_nolimit"], "a read object needs no allowlist");
+    assert.deepEqual(controls(ro.container), ["gain", "gain_free", "gain_nolimit", "gain_ro"], "a read object needs no allowlist");
   });
 
   test("a numeric control that lists choices and has no write limits is offered to a choice list, not to a fader", async () => {
@@ -256,6 +266,35 @@ describe("the Core browser", () => {
     // A read object does not need the allowlist at all.
     const ro = await open({ kind: "boolean", writable: false });
     assert.deepEqual(components(ro.container), [MIX, AMP]);
+  });
+
+  test("a selector plugin's buttons are listed in number order, each with the name the Core draws on it", async () => {
+    const SRC = "Lobby_Source";
+    // As the server's catalog carries them: in the Core's text order, Legend from Component.Get.
+    const buttons = [1, 10, 100, 2, 3].map((n) => ({ Name: `Button ${n}`, Type: "Boolean", Legend: n === 1 ? "Stage" : n === 2 ? "Lectern" : "" }));
+    server.catalog = () => ok({ ...CATALOG, components: [...CATALOG.components, { name: SRC, type: "%PLUGIN%_selector", controls: buttons }] });
+    server.allowlist = () => ok({ entries: [...ALLOW.entries, ...buttons.map((b) => entry(SRC, b.Name, null, null))] });
+    const picked: [Binding | null, string | undefined][] = [];
+    const r = mountBrowser({ kind: "press", writable: true, value: null, onChange: (b: Binding | null, legend?: string) => picked.push([b, legend]) } as Props);
+    fireEvent.click(r.getByRole("button", { name: "Control" }));
+    await wait();
+    await into(r as never, SRC);
+    assert.deepEqual(controls(r.container), ["Button 1", "Button 2", "Button 3", "Button 10", "Button 100"]);
+    const legends = [...r.container.querySelectorAll("[data-qsys-control]")].map((n) => n.querySelector("[data-qsys-legend]")?.textContent?.trim() ?? null);
+    assert.deepEqual(legends, ["Stage", "Lectern", null, null, null], "an empty Legend shows nothing");
+    fireEvent.click(r.getByRole("button", { name: /^Button 2 Lectern/ }));
+    await wait();
+    assert.deepEqual(picked, [[{ component: SRC, control: "Button 2" }, "Lectern"]], "the pick carries the Core's name for it");
+  });
+
+  test("a selector whose buttons' names the Core would not say says so, and still lists them", async () => {
+    const SRC = "Lobby_Source";
+    const buttons = [1, 2].map((n) => ({ Name: `Button ${n}`, Type: "Boolean" }));
+    server.catalog = () => ok({ ...CATALOG, components: [...CATALOG.components, { name: SRC, type: "plugin", controls: buttons, legendError: "Unknown control" }] });
+    const r = await open({ kind: "press", writable: false });
+    await into(r, SRC);
+    assert.deepEqual(controls(r.container), ["Button 1", "Button 2"]);
+    assert.match(r.container.textContent ?? "", /did not say these buttons' names/);
   });
 
   test("a read object never fetches the allowlist", async () => {

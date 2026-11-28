@@ -2,7 +2,8 @@
 // Binds 127.0.0.1 on an ephemeral port; no real device is ever contacted.
 
 import net from "node:net";
-import { addressKey, parseAddressKey } from "../../types/qsys.js";
+import { addressKey, isOn, isSelectorButton, parseAddressKey } from "../../types/qsys.js";
+import { positionOf, taperFor } from "../../types/qsys-taper.js";
 import type { QrcChange, QrcControl, QrcStatus } from "./qrc-types.js";
 
 const MAX_CHANGE_GROUPS = 4;
@@ -27,6 +28,14 @@ const key = (component: string, name: string): string => addressKey({ component,
 
 export class FakeQrcServer {
   components = new Map<string, QrcControl[]>();
+  /** Each component's Type as GetComponents reports it (`mixer`, `meter2`, ...); "component" when not set. */
+  componentTypes = new Map<string, string>();
+  /**
+   * Components whose Position is NOT read from our measured tables: a square-law curve
+   * instead, standing in for a Core whose taper the tables do not know, so a test can
+   * tell the panel's table from the Core's own answer.
+   */
+  offTable = new Set<string>();
   status: QrcStatus = {
     Platform: "Core 110f",
     State: "Active",
@@ -40,10 +49,11 @@ export class FakeQrcServer {
   /** When true, requests are recorded and held unanswered until releaseHeld(). */
   holdReplies = false;
   /**
-   * How change-group pushes reach the client. QSC's QRC Commands page shows
-   * AutoPoll results as repeated replies carrying the AutoPoll request's id
-   * ("reply"); community modules handle `ChangeGroup.Poll` notifications
-   * ("notify"). Which one a Core sends is unverified, so the client takes both.
+   * How change-group pushes reach the client. A Core sends `ChangeGroup.Poll`
+   * notifications ("notify", Designer 10.0.1 Emulate), and answers the AutoPoll
+   * request itself with one `true`. QSC's QRC Commands page shows AutoPoll
+   * results as repeated replies carrying the AutoPoll request's id ("reply");
+   * the client takes that form too.
    */
   autoPollForm: "notify" | "reply" = "notify";
   /**
@@ -51,6 +61,12 @@ export class FakeQrcServer {
    * a Core that limits or quantizes a write, so its read-back differs.
    */
   coerceSet: ((component: string, name: string, value: number | boolean | string) => number | boolean | string) | null = null;
+  /**
+   * The shape of a Component.Set reply with ResponseValues. A Core sends a bare
+   * list ("array"); "object" is the `{ Name, Controls }` form QSC's page shows,
+   * which the writer also takes.
+   */
+  setReplyForm: "array" | "object" = "array";
   /** The most change groups any one connection has held at once. */
   maxGroups = 0;
   /** When true, an Invalidate is answered but the values it resends are held until releaseInvalidatePushes(). */
@@ -110,8 +126,7 @@ export class FakeQrcServer {
   setControl(component: string, name: string, value: number | boolean | string): void {
     const control = this.find(component, name);
     if (!control) throw new Error(`fake core has no ${component}/${name}`);
-    this.apply(control, value);
-    this.pushChange(component, control);
+    for (const c of this.land(component, control, value)) this.pushChange(component, c);
   }
 
   /** Answer every request held so far, in order. `holdReplies` is left as it is,
@@ -127,6 +142,18 @@ export class FakeQrcServer {
     for (const push of this.heldPushes.splice(0)) push();
   }
 
+  /**
+   * One AutoPoll tick with nothing changed: a Core sends every polling group an
+   * empty `Changes: []` on every tick (about every 30 ms at the fastest rate).
+   * The fake sends changes the moment they happen instead of on a timer, so a
+   * test calls this to send the empty ticks between them.
+   */
+  tick(): void {
+    for (const session of this.sessions) {
+      for (const [id, group] of session.groups) if (group.rate !== null) this.push(session, id, group, []);
+    }
+  }
+
   /** Push EngineStatus with the current `status` to every connected client. */
   pushStatus(): void {
     for (const session of this.sessions) this.notify(session, "EngineStatus", { ...this.status });
@@ -136,18 +163,39 @@ export class FakeQrcServer {
     return this.components.get(component)?.find((c) => c.Name === name);
   }
 
-  private apply(control: QrcControl, value: number | boolean | string): void {
+  /**
+   * Land `value` on `control` as a Core does, answering every control it changed:
+   * a selector plugin's Button N is a radio, so turning one on turns its siblings off.
+   */
+  private land(component: string, control: QrcControl, value: number | boolean | string): QrcControl[] {
+    this.apply(component, control, value);
+    if (!isSelectorButton(control.Name) || !isOn(control.Value)) return [control];
+    const cleared = (this.components.get(component) ?? []).filter((c) => c !== control && isSelectorButton(c.Name) && isOn(c.Value));
+    for (const c of cleared) this.apply(component, c, false);
+    return [control, ...cleared];
+  }
+
+  private apply(component: string, control: QrcControl, value: number | boolean | string): void {
     control.Value = value;
     control.String = typeof value === "number" && control.ValueMin !== undefined ? `${value}dB` : String(value);
     if (typeof value === "number" && control.ValueMin !== undefined && control.ValueMax !== undefined) {
+      // A component kind and range a Core's taper was measured on gets that taper's Position, as a Core reports it; any other, linear.
+      const taper = taperFor(this.componentTypes.get(component) ?? null, { min: control.ValueMin, max: control.ValueMax });
       const span = control.ValueMax - control.ValueMin;
-      control.Position = span > 0 ? (value - control.ValueMin) / span : 0;
+      const linear = span > 0 ? Math.min(1, Math.max(0, (value - control.ValueMin) / span)) : 0;
+      control.Position = this.offTable.has(component) ? linear ** 2 : taper ? positionOf(taper, value) : linear;
     } else if (typeof value === "boolean") control.Position = value ? 1 : 0;
     else if (typeof value === "number") control.Position = value;
   }
 
+  /**
+   * A control as a change group, Component.Get and a Set read-back carry it. A Core
+   * sends a Boolean there as 1 or 0 (String "true"/"false" as it was), though
+   * GetControls reports the same control as true/false.
+   */
   private change(component: string, c: QrcControl): QrcChange {
-    return { Component: component, Name: c.Name, Value: c.Value, String: c.String, Position: c.Position };
+    const Value = typeof c.Value === "boolean" ? (c.Value ? 1 : 0) : c.Value;
+    return { Component: component, Name: c.Name, Value, String: c.String, Position: c.Position };
   }
 
   private pushChange(component: string, control: QrcControl): void {
@@ -240,15 +288,18 @@ export class FakeQrcServer {
         this.reply(
           session,
           msg.id,
-          [...this.components.keys()].map((Name) => ({ Name, Type: "component", Properties: [] })),
+          [...this.components.keys()].map((Name) => ({ Name, Type: this.componentTypes.get(Name) ?? "component", Properties: [] })),
         );
         return;
       case "Component.GetControls": {
         const controls = this.components.get(String(p.Name));
         if (!controls) return this.fail(session, msg.id, 7, "Unknown component");
-        this.reply(session, msg.id, { Name: p.Name, Controls: controls.map((c) => ({ ...c })) });
+        // GetControls carries no Legend; a Core says a button's name only to Component.Get.
+        this.reply(session, msg.id, { Name: p.Name, Controls: controls.map(({ Legend: _legend, ...c }) => ({ ...c })) });
         return;
       }
+      case "Component.Get":
+        return this.componentGet(session, msg.id, p);
       case "Component.Set":
         return this.componentSet(session, msg.id, p);
       case "ChangeGroup.AddComponentControl":
@@ -287,6 +338,22 @@ export class FakeQrcServer {
     }
   }
 
+  /** `{ Name, Controls: [{ Name }] }` answers `{ Name, Controls: [{ Name, Value, String, Position, Legend? }] }`, Booleans as numbers. */
+  private componentGet(session: Session, id: unknown, p: Record<string, unknown>): void {
+    const name = String(p.Name);
+    const controls = this.components.get(name);
+    if (!controls) return this.fail(session, id, 7, "Unknown component");
+    if (!Array.isArray(p.Controls)) return this.fail(session, id, -32602, "Invalid params: Controls is not a list");
+    const out: Record<string, unknown>[] = [];
+    for (const r of p.Controls as { Name?: unknown }[]) {
+      const control = controls.find((c) => c.Name === r?.Name);
+      if (!control) return this.fail(session, id, 8, "Unknown control");
+      const { Component: _c, ...rest } = this.change(name, control);
+      out.push(control.Legend === undefined ? rest : { ...rest, Legend: control.Legend });
+    }
+    this.reply(session, id, { Name: name, Controls: out });
+  }
+
   private componentSet(session: Session, id: unknown, p: Record<string, unknown>): void {
     const name = String(p.Name);
     const controls = this.components.get(name);
@@ -299,18 +366,15 @@ export class FakeQrcServer {
       if (!control) return this.fail(session, id, 8, "Unknown control");
       targets.push(control);
     }
-    requested.forEach((r, i) => this.apply(targets[i], this.coerceSet ? this.coerceSet(name, r.Name, r.Value) : r.Value));
-    this.reply(
-      session,
-      id,
-      p.ResponseValues
-        ? {
-            Name: name,
-            Controls: targets.map((c) => ({ Name: c.Name, Value: c.Value, String: c.String, Position: c.Position })),
-          }
-        : true,
-    );
-    for (const c of targets) this.pushChange(name, c);
+    const changed = new Set<QrcControl>();
+    requested.forEach((r, i) => {
+      for (const c of this.land(name, targets[i], this.coerceSet ? this.coerceSet(name, r.Name, r.Value) : r.Value)) changed.add(c);
+    });
+    // A Core answers ResponseValues with a bare list, one entry per control set,
+    // each naming its component (Designer 10.0.1 Emulate); without it, `true`.
+    const values = targets.map((c) => this.change(name, c));
+    this.reply(session, id, !p.ResponseValues ? true : this.setReplyForm === "array" ? values : { Name: name, Controls: values });
+    for (const c of changed) this.pushChange(name, c);
   }
 
   private groupAdd(session: Session, id: unknown, p: Record<string, unknown>): void {

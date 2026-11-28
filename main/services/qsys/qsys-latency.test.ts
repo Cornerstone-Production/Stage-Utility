@@ -101,7 +101,7 @@ beforeEach(async () => {
   fake = new FakeQrcServer();
   fake.components.set("Lobby_Mixer", [
     {
-      Name: "gain",
+      Name: "output.1.gain",
       Type: "Float",
       Value: -10,
       String: "-10dB",
@@ -119,7 +119,7 @@ beforeEach(async () => {
   await qsysAllowlist.replace([
     {
       component: "Lobby_Mixer",
-      control: "gain",
+      control: "output.1.gain",
       label: "Gain",
       min: -100,
       max: 0,
@@ -142,7 +142,7 @@ beforeEach(async () => {
     {
       id: "p",
       kind: "staff",
-      addresses: [{ component: "Lobby_Mixer", control: "gain" }],
+      addresses: [{ component: "Lobby_Mixer", control: "output.1.gain" }],
     },
   ]);
   named.add(watchChannel("p"));
@@ -172,7 +172,7 @@ async function until(
 const write = (value: number) =>
   writer.write({
     component: "Lobby_Mixer",
-    control: "gain",
+    control: "output.1.gain",
     value,
     panelId: "p",
     device: "192.0.2.10 Test/1",
@@ -218,7 +218,7 @@ describe("write latency", () => {
       for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
       valuePushes.length = 0;
       const t0 = performance.now();
-      fake.setControl("Lobby_Mixer", "gain", -33);
+      fake.setControl("Lobby_Mixer", "output.1.gain", -33);
       await until(
         () => valuePushes.length > 0,
         "the change on qsys:values",

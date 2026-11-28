@@ -12,6 +12,7 @@ import { scrub } from "../scrub.js";
 import { QrcClient, QrcError, type QrcTransport } from "./qrc-client.js";
 import type { QrcComponent, QrcControl, QrcStatus } from "./qrc-types.js";
 import { QSYS_DEFAULT_RATES, type QsysMeterRates, type QsysSettings } from "./qsys-settings.js";
+import { isSelectorButton } from "../../types/qsys.js";
 
 /** The Core drops a connection after 60 s of silence; ping at half that. */
 const KEEPALIVE_MS = 30_000;
@@ -29,7 +30,38 @@ export interface QsysStatusDto {
 
 export interface QsysCatalog {
   designCode: string;
-  components: { name: string; type: string; controls: QrcControl[] }[];
+  components: {
+    name: string;
+    type: string;
+    controls: QrcControl[];
+    /** The Core refused to say its buttons' names (Component.Get); its `Button N` controls carry no Legend. */
+    legendError?: string;
+  }[];
+}
+
+/**
+ * The names a Core draws on a component's `Button N` controls, which GetControls
+ * does not carry: one Component.Get for all of them, its Legend merged into each.
+ * A refusal from the Core comes back as `legendError`, and the controls carry no
+ * Legend; a lost connection throws, as any catalog read does.
+ */
+async function withLegends(t: QrcTransport, name: string, controls: QrcControl[]): Promise<{ controls: QrcControl[]; legendError?: string }> {
+  const buttons = controls.filter((c) => isSelectorButton(c.Name));
+  if (!buttons.length) return { controls };
+  let reply: unknown;
+  try {
+    reply = await t.send("Component.Get", { Name: name, Controls: buttons.map((c) => ({ Name: c.Name })) });
+  } catch (err) {
+    if (!(err instanceof QrcError)) throw err;
+    console.warn(`[qsys] could not read the button names of ${scrub(name)}: ${scrub(err.message)}; the editor lists its buttons by number`);
+    return { controls, legendError: err.message };
+  }
+  const got = (reply as { Controls?: unknown } | null)?.Controls;
+  const legends = new Map<string, string>();
+  if (Array.isArray(got)) {
+    for (const c of got as { Name?: unknown; Legend?: unknown }[]) if (typeof c?.Name === "string" && typeof c.Legend === "string") legends.set(c.Name, c.Legend);
+  }
+  return { controls: controls.map((c) => (legends.has(c.Name) ? { ...c, Legend: legends.get(c.Name) } : c)) };
 }
 
 const OFFLINE: QsysStatusDto = { connected: false, state: "offline", designName: null, isEmulator: null, catalogAt: null, configured: false };
@@ -334,7 +366,7 @@ export class QsysService extends StatusIntegration<QsysStatusDto> {
     for (const c of list) {
       const reply = (await t.send("Component.GetControls", { Name: c.Name })) as { Controls: QrcControl[] };
       if (!Array.isArray(reply?.Controls)) throw new Error(`the Core's control list for ${scrub(c.Name)} was not a list`);
-      components.push({ name: c.Name, type: c.Type, controls: reply.Controls });
+      components.push({ name: c.Name, type: c.Type, ...(await withLegends(t, c.Name, reply.Controls)) });
     }
     const catalog = { designCode: status.DesignCode, components };
     if (generation !== this.generation) return { status, catalog };

@@ -24,8 +24,11 @@
 // cached; `current()` answers per address. With no group to build (no panel
 // open), there is nothing to read back and readiness follows the catalog.
 //
-// AutoPoll pushes arrive as `ChangeGroup.Poll` notifications, or as repeated
-// replies to the AutoPoll request, which QrcClient hands over in the same shape.
+// AutoPoll pushes arrive as `ChangeGroup.Poll` notifications (a Core's form;
+// the first carries every control's value, and an empty `Changes: []` follows on
+// every tick), or as repeated replies to the AutoPoll request, which QrcClient
+// hands over in the same shape. An empty push is parsed and dropped: no
+// broadcast, no line, nothing cached.
 
 import { backoffMs } from "../backoff.js";
 import { addSubscriptionListener, broadcast, channelNamedByClient } from "../broadcaster.js";
@@ -518,6 +521,7 @@ export class QsysWatch {
     const id = (params as { Id?: unknown } | null)?.Id;
     if (typeof id !== "string" || !(GROUP_IDS as readonly string[]).includes(id)) return;
     const received = this.ingest(id as GroupId, params);
+    if (!received.length) return;
     const missing = this.rereading.get(id as GroupId);
     if (!missing) return;
     for (const k of received) missing.delete(k);
@@ -534,9 +538,11 @@ export class QsysWatch {
    *  panels that show it. Returns the keys it cached. */
   private ingest(id: GroupId, payload: unknown): string[] {
     const changes = (payload as { Changes?: unknown } | null)?.Changes;
-    const group = this.groups.get(id);
     const received: string[] = [];
-    if (!group || !Array.isArray(changes)) return received;
+    // A Core's every tick with nothing changed: the common case, and nothing to do.
+    if (!Array.isArray(changes) || changes.length === 0) return received;
+    const group = this.groups.get(id);
+    if (!group) return received;
     const out = new Map<string, QrcChange[]>();
     for (const c of changes as QrcChange[]) {
       if (!c || typeof c.Component !== "string" || typeof c.Name !== "string") continue;

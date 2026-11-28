@@ -15,7 +15,7 @@ const { FakeQrcServer } = await import("./fake-qrc-server.js");
 const { QsysService } = await import("./qsys-service.js");
 const { QsysWatch, watchChannel } = await import("./qsys-watch.js");
 const { QsysWriter, REFUSAL_LINE_INTERVAL_MS, GESTURE_TIMEOUT_MS, OWED_MAX_ATTEMPTS, OWED_RETRY_MS, isWritable, unwritableReason } = await import("./qsys-write.js");
-const { qsysAllowlist, allowEntryFromCatalog } = await import("./qsys-allowlist-store.js");
+const { qsysAllowlist } = await import("./qsys-allowlist-store.js");
 const { qsysWriteLog, WRITE_LOG_CAP } = await import("./qsys-write-log.js");
 type QsysSettings = import("./qsys-settings.js").QsysSettings;
 type AllowEntry = import("./qsys-allowlist-store.js").AllowEntry;
@@ -27,7 +27,7 @@ type View = import("../../types/views.js").View;
 const MOMENTARY_VIEWS = [
   {
     id: "panel-a",
-    layout: { objects: [{ id: "talk", config: { type: "qsys-button", binding: { component: "Lobby_Mixer", control: "mute" }, label: "Talk", hold: false, press: "momentary" } }] },
+    layout: { objects: [{ id: "talk", config: { type: "qsys-button", binding: { component: "Lobby_Mixer", control: "output.1.mute" }, label: "Talk", hold: false, press: "momentary" } }] },
   },
 ] as unknown as View[];
 const withMomentary = async (): Promise<View[]> => MOMENTARY_VIEWS;
@@ -46,21 +46,23 @@ const subscriptionsChanged = () => {
 
 const settings = (): QsysSettings => ({ host: "127.0.0.1", port, user: "", enabled: true, volunteerMeterHz: 10, staffMeterHz: 20 });
 
-const GAIN: AllowEntry = { component: "Lobby_Mixer", control: "gain", label: "Lobby gain", min: -100, max: 0, confirm: "none" };
-const MUTE: AllowEntry = { component: "Lobby_Mixer", control: "mute", label: "Lobby mute", min: null, max: null, confirm: "hold" };
+const GAIN: AllowEntry = { component: "Lobby_Mixer", control: "output.1.gain", label: "Lobby gain", min: -100, max: 0, confirm: "none" };
+const MUTE: AllowEntry = { component: "Lobby_Mixer", control: "output.1.mute", label: "Lobby mute", min: null, max: null, confirm: "hold" };
 const LEVEL: AllowEntry = { component: "Zone 1", control: "level", label: "Zone level", min: null, max: null, confirm: "none" };
 const CHIME: AllowEntry = { component: "Paging", control: "chime", label: "Chime", min: null, max: null, confirm: "none" };
 /** Read-only on the Core, though allowlisted with a range. */
 const METER: AllowEntry = { component: "Zone 1", control: "meter", label: "Zone meter", min: -100, max: 0, confirm: "none" };
 /** Numeric-typed on the Core, but it lists its choices; allowlisted with no range. */
 const SOURCE: AllowEntry = { component: "Router", control: "source", label: "Source", min: null, max: null, confirm: "none" };
+/** A snapshot load: a State Trigger, allowlisted with no range. */
+const SNAPSHOT: AllowEntry = { component: "Lobby_Snapshots", control: "load.1", label: "Snapshot 1", min: null, max: null, confirm: "none" };
 const SIGN: AllowEntry = { component: "Sign", control: "message", label: "Sign text", min: null, max: null, confirm: "none" };
 /** On the allowlist, not in the design. */
 const GHOST: AllowEntry = { component: "Lobby_Mixer", control: "gone", label: "Gone", min: -10, max: 0, confirm: "none" };
 
 const req = (over: Partial<WriteRequest> = {}): WriteRequest => ({
   component: "Lobby_Mixer",
-  control: "gain",
+  control: "output.1.gain",
   value: -10,
   panelId: "panel-a",
   device: "192.0.2.10 TestBrowser/1.0",
@@ -84,8 +86,8 @@ beforeEach(async () => {
   named.clear();
   fake = new FakeQrcServer();
   fake.components.set("Lobby_Mixer", [
-    { Name: "gain", Type: "Float", Value: -10, String: "-10dB", Position: 0.5, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
-    { Name: "mute", Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read/Write" },
+    { Name: "output.1.gain", Type: "Float", Value: -10, String: "-10dB", Position: 0.5, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
+    { Name: "output.1.mute", Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read/Write" },
   ]);
   // A numeric control the Core reports no range for.
   fake.components.set("Zone 1", [
@@ -95,12 +97,17 @@ beforeEach(async () => {
   fake.components.set("Sign", [{ Name: "message", Type: "Text", Value: "hello", String: "hello", Position: 0, Direction: "Read/Write" }]);
   fake.components.set("Router", [{ Name: "source", Type: "Float", Value: 0, String: "Mic", Position: 0, Direction: "Read/Write", Choices: ["Mic", "Laptop"] } as never]);
   fake.components.set("Paging", [{ Name: "chime", Type: "Trigger", Value: 0, String: "", Position: 0, Direction: "Read/Write" }]);
+  // A snapshot controller as a Core reports it: load.N is a State Trigger, 0 (2 when loaded).
+  fake.components.set("Lobby_Snapshots", [
+    { Name: "load.1", Type: "State Trigger", Value: 0, String: "0", Position: 0, Direction: "Read/Write" },
+    { Name: "match.1", Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read" },
+  ]);
   port = await fake.start();
   svc = new QsysService();
   subscriptionListeners = [];
   watch = new QsysWatch(svc, (cb) => void subscriptionListeners.push(cb));
   writer = new QsysWriter(svc, watch);
-  await qsysAllowlist.replace([GAIN, MUTE, LEVEL, CHIME, GHOST, METER, SIGN, SOURCE]);
+  await qsysAllowlist.replace([GAIN, MUTE, LEVEL, CHIME, GHOST, METER, SIGN, SOURCE, SNAPSHOT]);
 });
 
 afterEach(async () => {
@@ -129,7 +136,7 @@ async function connect(): Promise<void> {
 
 /** Register panel-a on gain and show it, so a change group (and an Invalidate after a reconnect) exists. */
 async function openPanel(): Promise<void> {
-  watch.setPanels([{ id: "panel-a", kind: "staff", addresses: [{ component: "Lobby_Mixer", control: "gain" }] }]);
+  watch.setPanels([{ id: "panel-a", kind: "staff", addresses: [{ component: "Lobby_Mixer", control: "output.1.gain" }] }]);
   named.add(watchChannel("panel-a"));
   subscriptionsChanged();
   await watch.recompute();
@@ -183,7 +190,7 @@ describe("writeControl", () => {
     }
     assert.equal(sets().length, 1);
     const params = sets()[0].params as { Controls: { Name: string; Value: unknown }[] };
-    assert.deepEqual(params.Controls, [{ Name: "gain", Value: 0 }]);
+    assert.deepEqual(params.Controls, [{ Name: "output.1.gain", Value: 0 }]);
     assert.ok(r.ok);
     assert.equal(r.clamped, true);
     assert.equal(r.value, 0);
@@ -193,10 +200,21 @@ describe("writeControl", () => {
   test("writes with ResponseValues and returns the Core's value", async () => {
     await connect();
     const r = await writer.write(req({ value: -20 }));
-    assert.deepEqual(sets()[0].params, { Name: "Lobby_Mixer", Controls: [{ Name: "gain", Value: -20 }], ResponseValues: true });
+    assert.deepEqual(sets()[0].params, { Name: "Lobby_Mixer", Controls: [{ Name: "output.1.gain", Value: -20 }], ResponseValues: true });
     assert.deepEqual(r, { ok: true, value: -20, string: "-20dB", position: 80 / 120, clamped: false });
-    const b = await writer.write(req({ control: "mute", value: true }));
-    assert.deepEqual(b, { ok: true, value: true, string: "true", position: 1, clamped: false });
+    const b = await writer.write(req({ control: "output.1.mute", value: true }));
+    // A Boolean's read-back comes as a number, as Component.Get sends it, and is the value sent.
+    assert.deepEqual(b, { ok: true, value: 1, string: "true", position: 1, clamped: false });
+  });
+
+  test("a read-back in either reply form is the Core's value: the bare list a Core sends, and the Controls object", async () => {
+    await connect();
+    assert.equal(fake.setReplyForm, "array", "the fake must answer as a Core does by default");
+    const a = await writer.write(req({ value: -20 }));
+    assert.equal(a.ok && a.value, -20, `the bare list a Core sends was not read: ${JSON.stringify(a)}`);
+    fake.setReplyForm = "object";
+    const o = await writer.write(req({ value: -30 }));
+    assert.equal(o.ok && o.value, -30, `the Controls form was not read: ${JSON.stringify(o)}`);
   });
 
   test("a read-back that differs from the sent value logs a mismatch", async () => {
@@ -212,7 +230,7 @@ describe("writeControl", () => {
     assert.ok(r.ok, "a write the Core took was reported as failed");
     assert.equal(r.value, -23, "the caller was not given the Core's value");
     assert.ok(
-      warn.lines.some((l) => l.startsWith("[qsys] read-back mismatch on Lobby_Mixer/gain: sent -20, the Core holds -23")),
+      warn.lines.some((l) => l.startsWith("[qsys] read-back mismatch on Lobby_Mixer/output.1.gain: sent -20, the Core holds -23")),
       `no mismatch line: ${warn.lines.join(" | ")}`,
     );
     assert.equal((await qsysWriteLog.list()).entries[0].result, "mismatch");
@@ -303,7 +321,7 @@ describe("writeControl", () => {
         const r = await writer.write(req({ value }));
         assert.equal(r.ok ? null : r.reason, "bad-value", `${String(value)} was not refused`);
       }
-      const r = await writer.write(req({ control: "mute", value: 1 }));
+      const r = await writer.write(req({ control: "output.1.mute", value: 1 }));
       assert.equal(r.ok ? null : r.reason, "bad-value", "a number was written to a boolean");
     } finally {
       warn.restore();
@@ -323,7 +341,7 @@ describe("writeControl", () => {
       warn.restore();
     }
     assert.equal(r.ok ? null : r.reason, "core-error");
-    assert.ok(!r.ok && /the Core refused the write to Lobby_Mixer\/gain/.test(r.message), "the Core's refusal was not named");
+    assert.ok(!r.ok && /the Core refused the write to Lobby_Mixer\/output\.1\.gain/.test(r.message), "the Core's refusal was not named");
     assert.equal(warn.lines.filter((l) => l.startsWith("[qsys] write refused (core-error)")).length, 1);
     const { entries } = await qsysWriteLog.list();
     assert.equal(entries.length - before, 1);
@@ -331,6 +349,13 @@ describe("writeControl", () => {
     assert.equal(entries[0].to, -20);
     await settle();
     assert.equal(sets().length, 1, "a refused write was retried");
+  });
+
+  test("a snapshot's load.N, a State Trigger, is a trigger: no range, true sent as 1", async () => {
+    await connect();
+    const r = await writer.write(req({ component: "Lobby_Snapshots", control: "load.1", value: true }));
+    assert.ok(r.ok, `a State Trigger was refused: ${JSON.stringify(r)}`);
+    assert.deepEqual((sets()[0].params as { Controls: unknown }).Controls, [{ Name: "load.1", Value: 1 }]);
   });
 
   test("a trigger takes no range and is sent as 1", async () => {
@@ -367,7 +392,8 @@ describe("writeControl", () => {
     assert.deepEqual(mine.map((e) => [e.result, e.repeats]), [["not-in-design", 10]], "a drag on a missing control wrote an entry per sample");
   });
 
-  test("a control the Core reports read-only is refused before anything is sent, allowlist or not", async () => {
+  for (const direction of ["Read", "Read Only"]) test(`a control the Core reports read-only (Direction "${direction}") is refused before anything is sent, allowlist or not`, async () => {
+    fake.components.get("Zone 1")!.find((c) => c.Name === "meter")!.Direction = direction;
     await connect();
     const warn = capture("warn");
     try {
@@ -497,7 +523,7 @@ describe("writeControl", () => {
     const [refused, clamped, plain] = entries;
     assert.deepEqual(
       { ...plain, at: 0 },
-      { at: 0, panelId: "panel-a", device: "192.0.2.10 iPad", remote: "192.0.2.10", component: "Lobby_Mixer", control: "gain", from: null, to: -15, result: "ok" },
+      { at: 0, panelId: "panel-a", device: "192.0.2.10 iPad", remote: "192.0.2.10", component: "Lobby_Mixer", control: "output.1.gain", from: null, to: -15, result: "ok" },
     );
     assert.equal(clamped.panelId, null);
     assert.equal(clamped.device, "192.0.2.11 Laptop");
@@ -753,14 +779,14 @@ describe("review round 2", () => {
   test("a gesture's write-log entry says the value the gesture started from, not the last sample", async () => {
     await connect();
     await openPanel();
-    fake.setControl("Lobby_Mixer", "gain", -30);
+    fake.setControl("Lobby_Mixer", "output.1.gain", -30);
     await settle();
     const drag = { remote: "2001:db8::d:1", device: "2001:db8::d:1 Drag" };
     for (const value of [-25, -20, -15]) {
       assert.ok((await writer.write(req({ value, final: false, ...drag }))).ok);
       await settle();
     }
-    assert.equal(watch.current([GAIN]).get("Lobby_Mixer\u0000gain")?.Value, -15, "the drag's samples did not reach the cache");
+    assert.equal(watch.current([GAIN]).get("Lobby_Mixer\u0000output.1.gain")?.Value, -15, "the drag's samples did not reach the cache");
     await writer.write(req({ value: -10, ...drag }));
     const mine = async () => (await qsysWriteLog.list()).entries.filter((e) => e.remote === drag.remote);
     assert.deepEqual((await mine()).map((e) => [e.from, e.to]), [[-30, -10]], "the entry's from was a mid-drag sample");
@@ -775,14 +801,14 @@ describe("review round 2", () => {
     const timed = new QsysWriter(svc, watch, () => clock);
     await connect();
     await openPanel();
-    fake.setControl("Lobby_Mixer", "gain", -30);
+    fake.setControl("Lobby_Mixer", "output.1.gain", -30);
     await settle();
     const remote = (i: number) => `2001:db8::b:${i.toString(16)}`;
     const fromOf = async (r: string) => (await qsysWriteLog.list()).entries.find((e) => e.remote === r)?.from;
 
     // 300 gestures opened at -30 (the cap is 256), then the Core moves to -5.
     for (let i = 0; i < 300; i++) await timed.write(req({ value: -30, final: false, remote: remote(i) }));
-    fake.setControl("Lobby_Mixer", "gain", -5);
+    fake.setControl("Lobby_Mixer", "output.1.gain", -5);
     await settle();
     await timed.write(req({ value: -5, remote: remote(100) }));
     assert.equal(await fromOf(remote(100)), -30, "a gesture in the middle was forgotten");
@@ -792,29 +818,11 @@ describe("review round 2", () => {
     assert.equal(await fromOf(remote(0)), -5, "open gestures are unbounded: the oldest was kept");
 
     await timed.write(req({ value: -5, final: false, remote: "2001:db8::c" }));
-    fake.setControl("Lobby_Mixer", "gain", -7);
+    fake.setControl("Lobby_Mixer", "output.1.gain", -7);
     await settle();
     clock += GESTURE_TIMEOUT_MS;
     await timed.write(req({ value: -5, remote: "2001:db8::c" }));
     assert.equal(await fromOf("2001:db8::c"), -7, "a gesture abandoned past the timeout was still open");
-  });
-});
-
-describe("allowEntryFromCatalog", () => {
-  test("takes the Core's range, and none when the Core reports none", () => {
-    const gain = fake.components.get("Lobby_Mixer")![0];
-    assert.deepEqual(allowEntryFromCatalog(gain, "Lobby_Mixer"), {
-      component: "Lobby_Mixer",
-      control: "gain",
-      label: "Lobby_Mixer gain",
-      min: -100,
-      max: 20,
-      confirm: "none",
-    });
-    const level = fake.components.get("Zone 1")![0];
-    const e = allowEntryFromCatalog(level, "Zone 1");
-    assert.equal(e.min, null);
-    assert.equal(e.max, null);
   });
 });
 
@@ -825,8 +833,8 @@ describe("momentary leases", () => {
   beforeEach(() => {
     writer.loadViews = withMomentary;
   });
-  const press = () => writer.write(req({ control: "mute", value: true, lease: true, cid: "page-1" }));
-  const muteSets = () => sets().filter((s) => (s.params as { Controls: { Name: string }[] }).Controls[0].Name === "mute").map((s) => (s.params as { Controls: { Value: unknown }[] }).Controls[0].Value);
+  const press = () => writer.write(req({ control: "output.1.mute", value: true, lease: true, cid: "page-1" }));
+  const muteSets = () => sets().filter((s) => (s.params as { Controls: { Name: string }[] }).Controls[0].Name === "output.1.mute").map((s) => (s.params as { Controls: { Value: unknown }[] }).Controls[0].Value);
 
   test("renewals keep a press on; without them the server releases it at 2 s, as its own logged write", async () => {
     await connect();
@@ -835,7 +843,7 @@ describe("momentary leases", () => {
       assert.equal((await press()).ok, true);
       for (let i = 0; i < 4; i++) {
         mock.timers.tick(LEASE_RENEW_MS);
-        assert.equal(writer.leases.renew({ component: "Lobby_Mixer", control: "mute" }, "192.0.2.10", "page-1"), true);
+        assert.equal(writer.leases.renew({ component: "Lobby_Mixer", control: "output.1.mute" }, "192.0.2.10", "page-1"), true);
       }
       await settle();
       assert.deepEqual(muteSets(), [true], "released while renewals kept coming");
@@ -850,7 +858,7 @@ describe("momentary leases", () => {
       assert.equal(entry.cause, "lease expired");
       assert.equal(entry.device, "server (lease expired)");
       assert.equal(entry.to, false);
-      assert.ok(warn.lines.some((l) => /\[qsys\] momentary Lobby_Mixer\/mute released by the server/.test(l)), warn.lines.join("\n"));
+      assert.ok(warn.lines.some((l) => /\[qsys\] momentary Lobby_Mixer\/output\.1\.mute released by the server/.test(l)), warn.lines.join("\n"));
     } finally {
       warn.restore();
     }
@@ -880,30 +888,30 @@ describe("momentary leases", () => {
   test("the page's release ends the lease: nothing more is written", async () => {
     await connect();
     await press();
-    await writer.write(req({ control: "mute", value: false }));
+    await writer.write(req({ control: "output.1.mute", value: false }));
     mock.timers.tick(LEASE_EXPIRE_MS * 3);
     await settle();
     assert.deepEqual(muteSets(), [true, false]);
-    assert.equal(writer.leases.has({ component: "Lobby_Mixer", control: "mute" }), false);
+    assert.equal(writer.leases.has({ component: "Lobby_Mixer", control: "output.1.mute" }), false);
   });
 
   test("a renewal from another address does not keep it on; a press that is refused takes no lease", async () => {
     await connect();
     await press();
-    assert.equal(writer.leases.renew({ component: "Lobby_Mixer", control: "mute" }, "198.51.100.7"), false);
+    assert.equal(writer.leases.renew({ component: "Lobby_Mixer", control: "output.1.mute" }, "198.51.100.7"), false);
     writer.leases.clear();
     await qsysAllowlist.replace([GAIN, LEVEL]); // mute off the allowlist
     const r = await press();
     assert.equal(r.ok, false);
-    assert.equal(writer.leases.has({ component: "Lobby_Mixer", control: "mute" }), false);
+    assert.equal(writer.leases.has({ component: "Lobby_Mixer", control: "output.1.mute" }), false);
   });
 });
 
 describe("owed releases and who may take a lease", () => {
-  const MUTE_ADDR = { component: "Lobby_Mixer", control: "mute" };
-  const press = (w = writer) => w.write(req({ control: "mute", value: true, lease: true, cid: "page-1" }));
-  const muteSets = () => sets().filter((s) => (s.params as { Controls: { Name: string }[] }).Controls[0].Name === "mute").map((s) => (s.params as { Controls: { Value: unknown }[] }).Controls[0].Value);
-  const coreMute = () => fake.components.get("Lobby_Mixer")!.find((c) => c.Name === "mute")!.Value;
+  const MUTE_ADDR = { component: "Lobby_Mixer", control: "output.1.mute" };
+  const press = (w = writer) => w.write(req({ control: "output.1.mute", value: true, lease: true, cid: "page-1" }));
+  const muteSets = () => sets().filter((s) => (s.params as { Controls: { Name: string }[] }).Controls[0].Name === "output.1.mute").map((s) => (s.params as { Controls: { Value: unknown }[] }).Controls[0].Value);
+  const coreMute = () => fake.components.get("Lobby_Mixer")!.find((c) => c.Name === "output.1.mute")!.Value;
   beforeEach(() => {
     writer.loadViews = withMomentary;
   });
@@ -937,7 +945,45 @@ describe("owed releases and who may take a lease", () => {
     const entry = (await qsysWriteLog.list()).entries[0];
     assert.equal(entry.cause, "lease owed");
     assert.equal(entry.device, "server (lease owed)");
-    assert.ok(warn.lines.some((l) => /\[qsys\] sending the owed release of Lobby_Mixer\/mute/.test(l)), warn.lines.join("\n"));
+    assert.ok(warn.lines.some((l) => /\[qsys\] sending the owed release of Lobby_Mixer\/output\.1\.mute/.test(l)), warn.lines.join("\n"));
+  });
+
+  test("with the control watched, the 1 a change group carries for on counts as on: the owed release is sent", async () => {
+    const warn = capture("warn");
+    try {
+      await connect();
+      watch.setPanels([{ id: "panel-a", kind: "staff", addresses: [MUTE_ADDR] }]);
+      named.add(watchChannel("panel-a"));
+      subscriptionsChanged();
+      await watch.recompute();
+      await settle();
+      assert.equal((await press()).ok, true);
+      await fake.dropClients();
+      await until(() => svc.transport === null, "disconnect");
+      mock.timers.tick(LEASE_EXPIRE_MS);
+      await until(() => writer.owes(MUTE_ADDR), "the release owed");
+      mock.timers.tick(3_000);
+      await until(() => svc.transport !== null, "reconnected");
+      await until(() => muteSets().length === 2, "the owed release");
+      await settle();
+    } finally {
+      warn.restore();
+    }
+    assert.equal(typeof [...watch.current([MUTE_ADDR]).values()][0]?.Value, "number", "the watch did not hold the Core's number");
+    assert.deepEqual(muteSets(), [true, false]);
+  });
+
+  test("a Boolean's read-back of 1 is the true that was sent: logged ok, no mismatch", async () => {
+    await connect();
+    const warn = capture("warn");
+    try {
+      const r = await writer.write(req({ control: "output.1.mute", value: true }));
+      assert.equal(r.ok && r.value, 1);
+    } finally {
+      warn.restore();
+    }
+    assert.deepEqual(warn.lines.filter((l) => /mismatch/.test(l)), []);
+    assert.equal((await qsysWriteLog.list()).entries[0].result, "ok");
   });
 
   test("an owed release is not sent when the Core reports the control off", async () => {
@@ -945,7 +991,7 @@ describe("owed releases and who may take a lease", () => {
     const log = capture("log");
     try {
       await owedWhileAway();
-      fake.components.get("Lobby_Mixer")!.find((c) => c.Name === "mute")!.Value = false; // turned off at the Core
+      fake.components.get("Lobby_Mixer")!.find((c) => c.Name === "output.1.mute")!.Value = false; // turned off at the Core
       mock.timers.tick(3_000);
       await until(() => svc.transport !== null, "reconnected");
       await until(() => watch.ready(), "re-read");
@@ -956,7 +1002,7 @@ describe("owed releases and who may take a lease", () => {
       log.restore();
     }
     assert.deepEqual(muteSets(), [true], "a release was sent to a control the Core reports off");
-    assert.ok(log.lines.some((l) => /owed release of Lobby_Mixer\/mute not sent/.test(l)));
+    assert.ok(log.lines.some((l) => /owed release of Lobby_Mixer\/output\.1\.mute not sent/.test(l)));
   });
 
   test("another write to the control cancels an owed release", async () => {
@@ -975,7 +1021,7 @@ describe("owed releases and who may take a lease", () => {
       await until(() => held.owes(MUTE_ADDR), "owed");
       mock.timers.tick(3_000);
       await until(() => svc.transport !== null && watch.ready(), "reconnected and re-read");
-      const other = await held.write(req({ control: "mute", value: true, device: "198.51.100.4 Other/1" }));
+      const other = await held.write(req({ control: "output.1.mute", value: true, device: "198.51.100.4 Other/1" }));
       assert.equal(other.ok, true);
       assert.equal(held.owes(MUTE_ADDR), false, "the other write did not cancel the owed release");
       ready();
@@ -1009,7 +1055,7 @@ describe("owed releases and who may take a lease", () => {
     const warn = capture("warn");
     // Its own address: a refusal repeating from one address merges into that address's
     // earlier write-log entry, and later tests read the newest entry.
-    const stranger = () => writer.write(req({ control: "mute", value: true, lease: true, cid: "page-1", device: "198.51.100.9 Other/1" }));
+    const stranger = () => writer.write(req({ control: "output.1.mute", value: true, lease: true, cid: "page-1", device: "198.51.100.9 Other/1" }));
     let r;
     try {
       r = await stranger();
@@ -1020,7 +1066,7 @@ describe("owed releases and who may take a lease", () => {
     assert.equal(r.ok ? null : r.reason, "no-lease");
     assert.deepEqual(muteSets(), [], "a press the server will not hold on was sent");
     assert.equal(writer.leases.has(MUTE_ADDR), false);
-    assert.equal(warn.lines.filter((l) => /write refused \(no-lease\): Lobby_Mixer\/mute was not pressed: panel panel-a has no momentary button/.test(l)).length, 1, warn.lines.join("\n"));
+    assert.equal(warn.lines.filter((l) => /write refused \(no-lease\): Lobby_Mixer\/output\.1\.mute was not pressed: panel panel-a has no momentary button/.test(l)).length, 1, warn.lines.join("\n"));
     // A trigger fires and holds nothing: a lease asked on one is not needed, and it goes.
     assert.equal((await writer.write(req({ component: "Paging", control: "chime", value: true, lease: true, cid: "page-1" }))).ok, true);
   });
@@ -1035,10 +1081,10 @@ describe("owed releases and who may take a lease", () => {
 });
 
 describe("review round 4: a server release never lands after a fresh press", () => {
-  const MUTE_ADDR = { component: "Lobby_Mixer", control: "mute" };
-  const press = (w = writer) => w.write(req({ control: "mute", value: true, lease: true, cid: "page-1" }));
-  const muteSets = () => sets().filter((s) => (s.params as { Controls: { Name: string }[] }).Controls[0].Name === "mute").map((s) => (s.params as { Controls: { Value: unknown }[] }).Controls[0].Value);
-  const coreMute = () => fake.components.get("Lobby_Mixer")!.find((c) => c.Name === "mute")!.Value;
+  const MUTE_ADDR = { component: "Lobby_Mixer", control: "output.1.mute" };
+  const press = (w = writer) => w.write(req({ control: "output.1.mute", value: true, lease: true, cid: "page-1" }));
+  const muteSets = () => sets().filter((s) => (s.params as { Controls: { Name: string }[] }).Controls[0].Name === "output.1.mute").map((s) => (s.params as { Controls: { Value: unknown }[] }).Controls[0].Value);
+  const coreMute = () => fake.components.get("Lobby_Mixer")!.find((c) => c.Name === "output.1.mute")!.Value;
   beforeEach(() => {
     writer.loadViews = withMomentary;
   });
@@ -1113,7 +1159,7 @@ describe("review round 4: a server release never lands after a fresh press", () 
       log.restore();
       w.dispose();
     }
-    assert.ok(log.lines.some((l) => /owed release of Lobby_Mixer\/mute not sent: another write to it came first/.test(l)), log.lines.join("\n"));
+    assert.ok(log.lines.some((l) => /owed release of Lobby_Mixer\/output\.1\.mute not sent: another write to it came first/.test(l)), log.lines.join("\n"));
   });
 
   test("a press sent while a lapsed lease's release waits is not turned off by that release", async () => {
@@ -1137,7 +1183,7 @@ describe("review round 4: a server release never lands after a fresh press", () 
     assert.deepEqual(muteSets(), [true, true], "the lapsed press's release turned off the press after it");
     assert.equal(coreMute(), true);
     assert.equal(writer.leases.has(MUTE_ADDR), true, "the second press lost its lease");
-    assert.ok(log.lines.some((l) => /release of Lobby_Mixer\/mute was not sent: another write to it came first/.test(l)), log.lines.join("\n"));
+    assert.ok(log.lines.some((l) => /release of Lobby_Mixer\/output\.1\.mute was not sent: another write to it came first/.test(l)), log.lines.join("\n"));
   });
 
   test("a press whose answer lands after a later write was sent to the control takes no lease", async () => {
@@ -1145,7 +1191,7 @@ describe("review round 4: a server release never lands after a fresh press", () 
     fake.holdReplies = true;
     const pressing = press();
     await until(() => muteSets().length === 1, "the press sent");
-    const releasing = writer.write(req({ control: "mute", value: false }));
+    const releasing = writer.write(req({ control: "output.1.mute", value: false }));
     await until(() => muteSets().length === 2, "the release sent");
     fake.holdReplies = false;
     fake.releaseHeld();
@@ -1168,10 +1214,10 @@ describe("review round 4: a server release never lands after a fresh press", () 
     }
     assert.equal(r.ok ? null : r.reason, "no-lease");
     assert.deepEqual(muteSets(), [], "an unleasable momentary was pressed on");
-    assert.ok(warn.lines.some((l) => /write refused \(no-lease\): Lobby_Mixer\/mute was not pressed: the saved views could not be read .*disk unreadable/.test(l)), warn.lines.join("\n"));
+    assert.ok(warn.lines.some((l) => /write refused \(no-lease\): Lobby_Mixer\/output\.1\.mute was not pressed: the saved views could not be read .*disk unreadable/.test(l)), warn.lines.join("\n"));
     assert.equal((await qsysWriteLog.list()).entries[0].result, "no-lease");
     // A release (false) needs no lease and still goes.
-    assert.equal((await writer.write(req({ control: "mute", value: false, lease: true }))).ok, true);
+    assert.equal((await writer.write(req({ control: "output.1.mute", value: false, lease: true }))).ok, true);
   });
 
   test("an owed release is dropped, with a line, when the Core comes back with another design", async () => {
@@ -1184,13 +1230,13 @@ describe("review round 4: a server release never lands after a fresh press", () 
       warn.restore();
     }
     assert.deepEqual(muteSets(), [true], "a release owed under one design was sent under another");
-    assert.ok(warn.lines.some((l) => /owed release of Lobby_Mixer\/mute dropped: the Core's design has changed/.test(l)), warn.lines.join("\n"));
+    assert.ok(warn.lines.some((l) => /owed release of Lobby_Mixer\/output\.1\.mute dropped: the Core's design has changed/.test(l)), warn.lines.join("\n"));
   });
 
   test("an owed release is dropped, with a line, when the integration is pointed at another Core", async () => {
     const other = new FakeQrcServer();
     other.components = new Map([...fake.components].map(([k, v]) => [k, v.map((c) => ({ ...c }))]));
-    other.components.get("Lobby_Mixer")!.find((c) => c.Name === "mute")!.Value = true;
+    other.components.get("Lobby_Mixer")!.find((c) => c.Name === "output.1.mute")!.Value = true;
     const otherPort = await other.start();
     const warn = capture("warn");
     try {
@@ -1211,7 +1257,7 @@ describe("review round 4: a server release never lands after a fresh press", () 
       await other.stop();
     }
     assert.equal(other.received.filter((r) => r.method === "Component.Set").length, 0, "a release owed to one Core was sent to another");
-    assert.ok(warn.lines.some((l) => /owed release of Lobby_Mixer\/mute dropped: the Core it was owed to is no longer the one configured/.test(l)), warn.lines.join("\n"));
+    assert.ok(warn.lines.some((l) => /owed release of Lobby_Mixer\/output\.1\.mute dropped: the Core it was owed to is no longer the one configured/.test(l)), warn.lines.join("\n"));
   });
 
   test("an owed release is dropped, with a line, when its control left the allowlist", async () => {
@@ -1224,7 +1270,7 @@ describe("review round 4: a server release never lands after a fresh press", () 
       warn.restore();
     }
     assert.deepEqual(muteSets(), [true]);
-    assert.ok(warn.lines.some((l) => /owed release of Lobby_Mixer\/mute dropped: the control is no longer on the allowlist/.test(l)), warn.lines.join("\n"));
+    assert.ok(warn.lines.some((l) => /owed release of Lobby_Mixer\/output\.1\.mute dropped: the control is no longer on the allowlist/.test(l)), warn.lines.join("\n"));
   });
 
   test("an owed release whose control cannot be read is tried a bounded number of times, then dropped with a line", async () => {
@@ -1246,7 +1292,7 @@ describe("review round 4: a server release never lands after a fresh press", () 
       w.dispose();
     }
     assert.deepEqual(muteSets(), [true]);
-    assert.ok(warn.lines.some((l) => new RegExp(`owed release of Lobby_Mixer/mute dropped: could not read it .*, ${OWED_MAX_ATTEMPTS} times`).test(l)), warn.lines.join("\n"));
+    assert.ok(warn.lines.some((l) => new RegExp(`owed release of Lobby_Mixer/output.1.mute dropped: could not read it .*, ${OWED_MAX_ATTEMPTS} times`).test(l)), warn.lines.join("\n"));
   });
 
   // Two places a settle meets the Core gone: reading whether the control is still on
@@ -1294,7 +1340,7 @@ describe("review round 4: a server release never lands after a fresh press", () 
       }
       assert.deepEqual(muteSets(), [true, false]);
       assert.equal(coreMute(), false, "the release was dropped while the Core kept dropping");
-      assert.ok(!warn.lines.some((l) => /owed release of Lobby_Mixer\/mute dropped/.test(l)), warn.lines.join("\n"));
+      assert.ok(!warn.lines.some((l) => /owed release of Lobby_Mixer\/output\.1\.mute dropped/.test(l)), warn.lines.join("\n"));
     });
   }
 

@@ -13,18 +13,21 @@
 // and never jumps; a pure trigger with no readable state stays unlit and flashes
 // when the Core confirms the write.
 //
-// A fader's thumb, its drag and its limit line all use one scale: the Core's
-// Value, linear over the control's own range (ValueMin..ValueMax from the
-// catalog). The Core's Position follows its own taper, which the page does not
-// know, so a thumb drawn from it would jump at release when the read-back lands.
+// A fader's thumb, its drag and its limit line all use one scale (fader-scale.ts).
+// On a component kind and range whose taper has been measured (main/types/qsys-taper.ts) it is the
+// Core's own: the thumb sits at the Position the Core reports, as on a UCI, a drag
+// moves along that taper and writes the value the table gives for where the finger
+// is, and the limit line sits at the limit's place on it. On any other range it is
+// linear in dB and the Core's Position is not drawn: it follows a taper the page
+// does not know, so a thumb drawn from it would jump when the read-back lands.
 
 import { useEffect, useEffectEvent, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
-import { kindOf, type PanelKind, type QsysAddress, type QsysBinding, type QsysDensity } from "@main/types/qsys";
+import { isOn, kindOf, type PanelKind, type QsysAddress, type QsysBinding, type QsysDensity } from "@main/types/qsys";
 import type { LayoutObjectConfig } from "@main/types/views";
 import { bindGesture, type GestureHandle } from "../../lib/pointer-gesture";
 import { LEASE_EXPIRE_MS, LEASE_RENEW_MS } from "@main/services/qsys/qsys-leases";
-import { atBottom, faderScale, meterLevel, stepFrom, TICK_MARKS_DB, travelOf, valueAt, type FaderScale } from "./fader-scale";
+import { atBottom, faderScale, limitAt as limitOf, meterLevel, stepFrom, TICK_MARKS_DB, travelOf, valueAt, type FaderScale } from "./fader-scale";
 import {
   DRAG_COALESCE_MS,
   QsysPanelContext,
@@ -53,14 +56,6 @@ export const FLASH_MS = 600;
 const AMBER_AT = 0.74;
 const RED_AT = 0.86;
 
-/** A Core value read as on or off. Q-SYS reports booleans as true/false or 1/0. */
-export function truthy(v: unknown): boolean {
-  if (typeof v === "boolean") return v;
-  if (typeof v === "number") return v !== 0;
-  if (typeof v === "string") return /^(true|1|on)$/i.test(v.trim());
-  return false;
-}
-
 /**
  * A Boolean, by the rule the writer and the editor use (kindOf). The catalog's
  * Type decides once read; only before that does the value's own type. Not both:
@@ -82,9 +77,9 @@ function useLit(b: QsysBinding | null | undefined): boolean | null {
   const own = useQsysValue(b ?? null);
   const indicator = useQsysValue(b?.indicator ?? null);
   const info = useQsysControl(b ?? null);
-  if (b?.indicator) return indicator.state === "unavailable" ? null : truthy(indicator.value);
+  if (b?.indicator) return indicator.state === "unavailable" ? null : isOn(indicator.value);
   if (own.state === "unavailable") return null;
-  return isBooleanControl(info, own.value) ? truthy(own.value) : null;
+  return isBooleanControl(info, own.value) ? isOn(own.value) : null;
 }
 
 /** Light for FLASH_MS after `flash()`; for a trigger the Core confirmed. */
@@ -527,7 +522,6 @@ function TriggerButton({
 
 // ── Fader ───────────────────────────────────────────────────────────────────
 
-
 interface FaderProps {
   binding: QsysBinding | null;
   vertical: boolean;
@@ -559,18 +553,24 @@ interface FaderProps {
 function useFaderDrag({
   addr,
   core,
+  corePosition,
   scale,
   writable,
   vertical,
   stepDb,
+  thumbAlong,
 }: {
   addr: QsysAddress | null;
   /** The Core's value, when it is a number. */
   core: number | null;
+  /** The Core's Position for it, when it reported one. Drawn only on a measured taper. */
+  corePosition: number | null;
   scale: FaderScale | null;
   writable: boolean;
   vertical: boolean;
   stepDb: number;
+  /** The thumb's length along the track, in px: the thumb travels the track less this. */
+  thumbAlong: number;
 }) {
   const panel = useQsysPanelContext();
   const { epoch } = useQsysPanelState();
@@ -610,6 +610,9 @@ function useFaderDrag({
   const norm = (x: number) => (scale ? travelOf(scale, x) : 0);
   // What is on screen: the finger's value while a gesture is open, else the Core's.
   const shown = local ?? core;
+  // Where the thumb is: the finger's value on the scale, else the Core's own Position
+  // on a measured taper (the place a UCI draws it), else the Core's value on the scale.
+  const level = local !== null ? norm(local) : core === null ? null : scale?.taper && corePosition !== null ? Math.min(1, Math.max(0, corePosition)) : norm(core);
 
   const snapBack = () => {
     drag.current?.gesture.cancel();
@@ -623,13 +626,20 @@ function useFaderDrag({
     const el = track.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    const length = vertical ? rect.height : rect.width;
+    // The thumb's travel, not the track's: the thumb is drawn from 0 to the track
+    // less its own length, so a finger moving this far moves it end to end and it
+    // stays under the finger.
+    const length = (vertical ? rect.height : rect.width) - thumbAlong;
     // jsdom lays nothing out; a real browser always has a length here.
     if (!(length > 0)) return;
     // From the value on screen, not the Core's last report: after a release the
     // thumb stays where the finger left it until the Core answers, and a second
     // touch in that moment must not jump back to the old value.
-    const startValue = shown;
+    const startValue = Math.round(shown * 100) / 100;
+    // The value's place on the scale, never the Core's Position: on a taper a Core's
+    // Position between the measured points is off the table, and a drag that started
+    // there would write a value the finger never chose with no movement at all. The
+    // thumb steps from the Core's place to the table's on the first move.
     const startNorm = norm(startValue);
     const s = scale!;
     const startAt = vertical ? e.clientY : e.clientX;
@@ -680,7 +690,7 @@ function useFaderDrag({
     void write(addr!, Math.round(next * 100) / 100, { final: true });
   };
 
-  return { track, shown, norm, onPointerDown, step };
+  return { track, shown, level, norm, onPointerDown, step };
 }
 
 /** The arrow keys a slider steps on, and which way. */
@@ -694,27 +704,31 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
 
   const dense = density === "dense";
   const range = info.range;
-  // The fader's own scale (fader-scale.ts): linear in dB from -60 (or the allowlist's
-  // minimum) to the allowlist's maximum, the Core's minimum at the bottom stop.
-  const scale = faderScale(range, info.limits);
+  // The fader's own scale (fader-scale.ts): the Core's taper on a measured component kind and range,
+  // else linear in dB from -60 (or the allowlist's minimum) to the allowlist's
+  // maximum, the Core's minimum at the bottom stop.
+  const scale = faderScale(info.componentType, range, info.limits);
   const writable = interactive && writeState === "live" && typeof v.value === "number" && scale !== null;
-  const { track, shown, norm, onPointerDown, step } = useFaderDrag({
+  // The thumb in px, as the mockups draw it: Main 48 x 40 r10, Staff 28 x 24 r6.
+  const thumbAlong = dense ? 24 : 40;
+  const { track, shown, level: thumbAt, norm, onPointerDown, step } = useFaderDrag({
     addr,
     core: typeof v.value === "number" ? v.value : null,
+    corePosition: v.position,
     scale,
     writable,
     vertical,
     stepDb,
+    thumbAlong,
   });
 
-  const level = shown === null ? (v.position ?? 0) : scale ? norm(shown) : (v.position ?? 0);
-  // The allowlist's limit is the top of travel; marked there when it stops short of the Core's own.
-  const limitAt = scale && range && scale.top < range.max ? 1 : null;
+  const level = thumbAt ?? v.position ?? 0;
+  // The allowlist's limit, marked where it stops short of the Core's own maximum:
+  // the top of a linear travel, or its own place on a taper.
+  const limitAt = scale && range ? limitOf(scale, range) : null;
   const atLimit = scale !== null && shown !== null && limitAt !== null && shown >= scale.top - 1e-6;
   const offline = v.state === "offline";
 
-  // The thumb in px, as the mockups draw it: Main 48 x 40 r10, Staff 28 x 24 r6.
-  const thumbAlong = dense ? 24 : 40;
   const thumbAcross = dense ? 28 : 48;
   const trackWidth = dense ? 4 : 8;
   const limitAcross = dense ? 20 : 32;
@@ -725,6 +739,10 @@ function Fader({ binding, vertical, showDb, steps, stepDb, interactive, name, mu
     <div
       ref={track}
       data-fader
+      // Where the thumb and the limit line are, 0..1 along the travel: what their
+      // styles are drawn from, readable where no layout is (jsdom).
+      data-travel={shown === null ? undefined : level}
+      data-limit-at={limitAt ?? undefined}
       data-at-limit={atLimit || undefined}
       role="slider"
       aria-label={name}
@@ -873,9 +891,11 @@ function MeterBar({ binding, vertical, thin = false, scale = null }: { binding: 
   const bottom = scale?.bottom;
   const floor = scale?.floor;
   const top = scale?.top;
+  // A module constant (qsys-taper.ts), so the same one each render.
+  const taper = scale?.taper;
   useEffect(() => {
     if (!panel) return;
-    const on = bottom !== undefined && floor !== undefined && top !== undefined ? { bottom, floor, top } : null;
+    const on = bottom !== undefined && floor !== undefined && top !== undefined ? { bottom, floor, top, ...(taper ? { taper } : {}) } : null;
     drawn.current = null;
     return panel.addMeterSink({ component, control }, (r) => meterLevel(r, on), {
       draw: (level) => {
@@ -889,7 +909,7 @@ function MeterBar({ binding, vertical, thin = false, scale = null }: { binding: 
         drawn.current = { level, band };
       },
     });
-  }, [panel, component, control, bottom, floor, top, vertical]);
+  }, [panel, component, control, bottom, floor, top, taper, vertical]);
   return (
     <div
       data-meter
@@ -977,7 +997,7 @@ function MuteButton({ binding, interactive, dense = false }: { binding: QsysBind
   const v = useQsysValue(addr);
   const writeState = useQsysWriteState(addr);
   const write = useQsysWrite();
-  const muted = v.state !== "unavailable" && truthy(v.value);
+  const muted = v.state !== "unavailable" && isOn(v.value);
   const canInput = interactive && writeState === "live";
   const look: CSSProperties = {
     borderRadius: dense ? 8 : 12,
@@ -1088,7 +1108,7 @@ function SwitchObject({ c, interactive, ts }: { c: Of<"qsys-switch">; interactiv
   const name = c.label.trim() || (c.binding ?? c.onBinding)?.control || "Switch";
 
   if (c.binding) {
-    const on = own.state !== "unavailable" && truthy(own.value);
+    const on = own.state !== "unavailable" && isOn(own.value);
     const canInput = interactive && ownState === "live";
     return (
       <Frame type={c.type} state={ownState} ts={ts} style={{ alignItems: "center", gap: "0.5em", padding: "0.3em" }}>
@@ -1250,7 +1270,7 @@ function StripObject({ c, interactive, ts }: { c: Of<"qsys-strip">; interactive:
   const dense = c.density === "dense";
   const name = useQsysValue(c.name);
   const mute = useQsysValue(c.mute);
-  const muted = mute.state !== "unavailable" && truthy(mute.value);
+  const muted = mute.state !== "unavailable" && isOn(mute.value);
   const gainState = useQsysWriteState(c.gain, true);
   const muteState = useQsysWriteState(c.mute);
   const meters = [c.meter, c.meter2].filter((m): m is QsysBinding => !!m);

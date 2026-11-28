@@ -28,11 +28,11 @@ after(() => mock.timers.reset());
 beforeEach(async () => {
   fake = new FakeQrcServer();
   fake.components.set("Lobby_Mixer", [
-    { Name: "gain", Type: "Float", Value: -10, String: "-10dB", Position: 0.5, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
-    { Name: "mute", Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read/Write" },
+    { Name: "output.1.gain", Type: "Float", Value: -10, String: "-10dB", Position: 0.5, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
+    { Name: "output.1.mute", Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read/Write" },
   ]);
   fake.components.set("Zone 1", [
-    { Name: "gain", Type: "Float", Value: 0, String: "0dB", Position: 0.8, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
+    { Name: "output.1.gain", Type: "Float", Value: 0, String: "0dB", Position: 0.8, Direction: "Read/Write", ValueMin: -100, ValueMax: 20 },
   ]);
   port = await fake.start();
   svc = new QsysService();
@@ -124,7 +124,7 @@ test("EngineStatus with a new DesignCode triggers refreshCatalog and onCatalog",
   const getComponents = () => fake.received.filter((r) => r.method === "Component.GetComponents").length;
   assert.equal(getComponents(), 1);
   fake.components.set("Hall_Amp", [
-    { Name: "mute", Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read/Write" },
+    { Name: "output.1.mute", Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read/Write" },
   ]);
   fake.status = { ...fake.status, DesignCode: "design-2", DesignName: "Hall Design" };
   fake.pushStatus();
@@ -403,4 +403,45 @@ test("switched off by the integration manager (a bare stop) reads as no Core; a 
   assert.equal(svc.getStatus().configured, false);
   svc.configure(settings(), null);
   assert.equal(svc.getStatus().configured, true, "switched on again");
+});
+
+/** A selector plugin as a Core lists it: Button 1..N whatever its configured count, names only from Component.Get. */
+function selector(): void {
+  fake.components.set("Lobby_Source", [
+    ...[1, 2, 3, 10].map((n) => ({ Name: `Button ${n}`, Type: "Boolean", Value: n === 1, String: String(n === 1), Position: n === 1 ? 1 : 0, Direction: "Read/Write", Legend: n <= 2 ? ["Stage", "Lectern"][n - 1] : "" })),
+    { Name: "Label 1", Type: "Text", Value: "Stage", String: "Stage", Position: 0, Direction: "Read/Write" },
+  ]);
+}
+
+test("a selector's buttons carry the names the Core draws on them, read with one Component.Get", { timeout: 20_000 }, async () => {
+  selector();
+  svc.configure(settings(), null);
+  await until(() => svc.getCatalog() !== null, "catalog");
+  const comp = svc.getCatalog()!.components.find((c) => c.name === "Lobby_Source")!;
+  assert.deepEqual(
+    comp.controls.map((c) => [c.Name, c.Legend]),
+    [["Button 1", "Stage"], ["Button 2", "Lectern"], ["Button 3", ""], ["Button 10", ""], ["Label 1", undefined]],
+  );
+  assert.equal(comp.legendError, undefined);
+  const gets = fake.received.filter((r) => r.method === "Component.Get");
+  assert.equal(gets.length, 1, "one read per selector, none for a component without buttons");
+  assert.deepEqual(gets[0]!.params, { Name: "Lobby_Source", Controls: ["Button 1", "Button 2", "Button 3", "Button 10"].map((Name) => ({ Name })) });
+});
+
+test("a Core that will not say its buttons' names still connects; the component says why, and /log has one line", { timeout: 20_000 }, async () => {
+  selector();
+  fake.failNext("Component.Get", 8);
+  const warn = mock.method(console, "warn", () => {});
+  try {
+    svc.configure(settings(), null);
+    await until(() => svc.getCatalog() !== null, "catalog");
+    const comp = svc.getCatalog()!.components.find((c) => c.name === "Lobby_Source")!;
+    assert.match(comp.legendError ?? "", /forced failure/);
+    assert.ok(comp.controls.every((c) => c.Legend === undefined));
+    const lines = warn.mock.calls.map((c) => String(c.arguments[0])).filter((l) => l.includes("button names"));
+    assert.deepEqual(lines.length, 1, lines.join("\n"));
+    assert.match(lines[0]!, /^\[qsys\] could not read the button names of Lobby_Source/);
+  } finally {
+    warn.mock.restore();
+  }
 });

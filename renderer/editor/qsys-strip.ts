@@ -1,8 +1,9 @@
 // qsys-strip.ts — the channel strip's two editor actions, as pure functions.
 //
 // One-step bind: pick a component and a channel, and the strip's fields are filled
-// from the controls whose names follow the usual convention for that channel
-// (input_3_gain, input_3_mute, meter_3, text_display_3, or output_N_*). Break
+// from the controls whose names follow a Core's convention for that channel
+// (input.3.gain, input.3.mute, input.3.label, meter.3, text.display.3, or
+// output.N.*). Break
 // apart: replace the strip with separate label, fader, meter and mute objects in
 // the same footprint, keeping every binding.
 //
@@ -17,35 +18,29 @@ import type { LayoutObject, LayoutObjectConfig } from "@main/types/views";
 export type StripSlot = "gain" | "meter" | "meter2" | "mute" | "name";
 export type ChannelSide = "" | "input" | "output";
 export interface StripChannel {
-  /** "" for a channel named by number alone (meter_3). */
+  /** "" for a channel named by number alone (meter.3). */
   side: ChannelSide;
   n: number;
 }
 
 /**
- * The control names a slot is looked for under, per channel. `{s}` is the side
- * (input or output) and `{n}` the channel number. A sided template is tried before
- * an unsided one; a template with `{s}` is skipped for a channel that has no side.
- * A meter name must also be one the Core browser's meter rule accepts (it starts
- * with "meter", as meter_N and meter_output_N do), so the one-step fill and the
- * Meter field offer the same controls. One slot after another, one template per line, each slot's lines sorted.
+ * The control names a slot is looked for under, per channel, as a Core names a
+ * mixer's controls: dots between the parts (`input.3.gain`, `output.1.mute`,
+ * `text.display.3`). `{s}` is the side (input or output) and `{n}` the channel
+ * number. A sided template is tried before an unsided one; a template with `{s}`
+ * is skipped for a channel that has no side. A crosspoint (`input.1.output.2.gain`)
+ * is no channel's. A meter name must also be one the Core browser's meter rule
+ * accepts (it starts with "meter"), so the one-step fill and the Meter field offer
+ * the same controls. A Core's meters usually sit on their own meter2 component, so
+ * on a mixer the meter slots mostly stay empty. One table, one template per line,
+ * sorted by slot and then template; no template fills the second meter.
  */
 export const STRIP_TEMPLATES: { slot: StripSlot; template: string }[] = [
-  { slot: "gain", template: "gain_{n}" },
-  { slot: "gain", template: "{s}_gain_{n}" },
-  { slot: "gain", template: "{s}_{n}_gain" },
-  { slot: "meter", template: "meter_{n}" },
-  { slot: "meter", template: "meter_{n}_1" },
-  { slot: "meter", template: "meter_{s}_{n}" },
-  { slot: "meter2", template: "meter_{n}_2" },
-  { slot: "mute", template: "mute_{n}" },
-  { slot: "mute", template: "{s}_mute_{n}" },
-  { slot: "mute", template: "{s}_{n}_mute" },
-  { slot: "name", template: "label_{n}" },
-  { slot: "name", template: "name_{n}" },
-  { slot: "name", template: "text_display_{n}" },
-  { slot: "name", template: "{s}_{n}_label" },
-  { slot: "name", template: "{s}_{n}_name" },
+  { slot: "gain", template: "{s}.{n}.gain" },
+  { slot: "meter", template: "meter.{n}" },
+  { slot: "mute", template: "{s}.{n}.mute" },
+  { slot: "name", template: "text.display.{n}" },
+  { slot: "name", template: "{s}.{n}.label" },
 ];
 
 const nameFor = (template: string, c: StripChannel): string | null => {
@@ -71,7 +66,7 @@ export function channelsOf(names: readonly string[]): StripChannel[] {
       break;
     }
   }
-  // An unsided channel the sided ones already cover (meter_3 beside input_3_gain) is the same channel.
+  // An unsided channel the sided ones already cover (meter.3 beside input.3.gain) is the same channel.
   const out = [...seen.values()];
   const sidedNs = new Set(out.filter((c) => c.side).map((c) => c.n));
   return out
@@ -80,6 +75,12 @@ export function channelsOf(names: readonly string[]): StripChannel[] {
 }
 
 export const channelLabel = (c: StripChannel): string => (c.side ? `${c.side[0]!.toUpperCase()}${c.side.slice(1)} ${c.n}` : `Channel ${c.n}`);
+
+/**
+ * A Gain block (component type `gain`) is one channel with no number: its level is the
+ * control `gain` and its mute the control `mute`. It has no meter or name of its own.
+ */
+export const isGainBlock = (componentType: string, names: readonly string[]): boolean => /^gain$/i.test(componentType) && names.includes("gain");
 
 /** Why a slot stayed empty. */
 export type SlotProblem = "missing" | "not-allowed" | "not-writable" | "wrong-kind";
@@ -121,6 +122,18 @@ export function matchStrip(names: readonly string[], channel: StripChannel, elig
     }
   }
   return out;
+}
+
+/** The strip's fields for a Gain block: level from `gain`, mute from `mute`, the rest empty. The same eligibility rule as matchStrip. */
+export function matchGainBlock(names: readonly string[], eligible: Eligibility): Record<StripSlot, SlotMatch> {
+  const have = new Set(names);
+  const slot = (s: StripSlot, control: string): SlotMatch => {
+    if (!have.has(control)) return { control: null, problem: "missing" };
+    const verdict = eligible(s, control);
+    return verdict === "ok" ? { control, problem: null } : { control: null, problem: verdict };
+  };
+  const none: SlotMatch = { control: null, problem: "missing" };
+  return { gain: slot("gain", "gain"), mute: slot("mute", "mute"), meter: none, meter2: none, name: none };
 }
 
 /** A slot's emptiness, in words for the inspector. */

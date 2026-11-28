@@ -577,6 +577,8 @@ export type IpcChannel =
   | "qsys:bindings"
   | "qsys:catalog"
   | "qsys:checkPin"
+  | "qsys:exportAllowlist"
+  | "qsys:importAllowlist"
   | "qsys:lease"
   | "qsys:panelRepairs"
   | "qsys:panelValues"
@@ -1029,6 +1031,11 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return put<T>("/api/qsys/allowlist", { entries: p.entries, ...(typeof p.rev === "string" ? { rev: p.rev } : {}), ...(p.replaceInvalid === true ? { replaceInvalid: true } : {}) });
     case "qsys:catalog":
       return apiFetch<T>("/api/qsys/catalog");
+    case "qsys:exportAllowlist":
+      return post<T>("/api/qsys/allowlist/export");
+    // The file as read, whole; the revision it replaces rides beside it.
+    case "qsys:importAllowlist":
+      return post<T>("/api/qsys/allowlist/import", { ...(p.file as Record<string, unknown>), ...(typeof p.rev === "string" ? { rev: p.rev } : {}) });
     case "qsys:lease":
       return post<T>("/api/qsys/lease", p);
     case "qsys:panelRepairs":

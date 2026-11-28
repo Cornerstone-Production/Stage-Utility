@@ -25,9 +25,9 @@ const { QsysWriter } = await import("./qsys-write.js");
 const { qsysAllowlist } = await import("./qsys-allowlist-store.js");
 const { qsysWriteLog } = await import("./qsys-write-log.js");
 
-const MUTE = { component: "Lobby_Mixer", control: "mute" };
+const MUTE = { component: "Lobby_Mixer", control: "output.1.mute" };
 const fake = new FakeQrcServer();
-fake.components.set("Lobby_Mixer", [{ Name: "mute", Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read/Write" }]);
+fake.components.set("Lobby_Mixer", [{ Name: "output.1.mute", Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read/Write" }]);
 const svc = new QsysService();
 const watch = new QsysWatch(svc, () => {});
 const writer = new QsysWriter(svc, watch);

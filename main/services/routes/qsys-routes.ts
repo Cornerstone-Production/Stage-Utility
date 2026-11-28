@@ -35,7 +35,7 @@
 import type * as http from "node:http";
 import { errorMessage } from "../errors.js";
 import { oneLine, scrub } from "../scrub.js";
-import { AllowlistRefused, AllowlistRevChanged, AllowlistStoredInvalid, type ChangeOptions, type Saved, allowEntryFromCatalog, isLine, qsysAllowlist, type AllowEntry } from "../qsys/qsys-allowlist-store.js";
+import { AllowlistRefused, AllowlistRevChanged, AllowlistStoredInvalid, type ChangeOptions, type Saved, isLine, qsysAllowlist, type AllowEntry } from "../qsys/qsys-allowlist-store.js";
 import { viewsStore } from "../views-store.js";
 import { qsysSlugRepairs } from "../qsys/qsys-slug-repair.js";
 import { isReadOnlyDirection } from "../../types/qsys.js";
@@ -45,6 +45,7 @@ import { qsysWatch } from "../qsys/qsys-watch.js";
 import { qsysWriter, writeControl } from "../qsys/qsys-write.js";
 import { usableCid } from "../channel-reports.js";
 import { qsysWriteLog } from "../qsys/qsys-write-log.js";
+import { allowEntryFor } from "../../types/qsys-allow-entry.js";
 import { PIN_DIGITS, checkPin, isPin, pinState, setPin } from "../qsys/qsys-pin.js";
 import { type RouteCtx, error, json, readObjectBody, remoteAddressOf } from "./context.js";
 
@@ -150,7 +151,7 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
       const control = components.get(a.component)?.get(a.control);
       if (!control) skipped.push({ ...a, reason: "not-in-design" });
       else if (isReadOnlyDirection(control.Direction)) skipped.push({ ...a, reason: "read-only" });
-      else candidates.push(allowEntryFromCatalog(control, a.component));
+      else candidates.push(allowEntryFor(a.component, control));
     }
     try {
       json(res, { ...(await qsysAllowlist.addMissing(candidates)), skipped });

@@ -3,19 +3,25 @@
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
-import { breakApartStrip, channelsOf, matchStrip, STRIP_TEMPLATES, type Eligibility } from "./qsys-strip.js";
+import { breakApartStrip, channelsOf, isGainBlock, matchGainBlock, matchStrip, STRIP_TEMPLATES, type Eligibility } from "./qsys-strip.js";
 import { isMeterControl } from "@main/types/qsys";
 import type { LayoutObject } from "@main/types/views";
 
-const NAMES = ["input_3_gain", "input_3_mute", "meter_3", "text_display_3", "input_4_gain", "output_1_gain", "output_1_mute", "meter_output_1", "noise"];
+// A mixer's controls as a Core names them (dots between the parts), a meter, and noise.
+const NAMES = ["input.3.gain", "input.3.mute", "input.3.label", "meter.3", "text.display.3", "input.4.gain", "output.1.gain", "output.1.mute", "output.1.label", "input.1.output.2.gain", "noise"];
 const allow: Eligibility = () => "ok";
 
 describe("the strip's name table", () => {
-  test("templates are one per line, and each slot's lines are sorted", () => {
-    const bySlot = new Map<string, string[]>();
-    for (const t of STRIP_TEMPLATES) bySlot.set(t.slot, [...(bySlot.get(t.slot) ?? []), t.template]);
-    for (const [slot, list] of bySlot) assert.deepEqual(list, [...list].sort(), `${slot} templates are not sorted`);
+  test("one table, one template per line, sorted by slot and then template", () => {
+    const keys = STRIP_TEMPLATES.map((t) => `${t.slot} ${t.template}`);
+    assert.deepEqual(keys, [...keys].sort(), "the table is not sorted");
     assert.equal(new Set(STRIP_TEMPLATES.map((t) => t.template)).size, STRIP_TEMPLATES.length, "a template is listed twice");
+  });
+  test("the templates are a Core's channel names, exactly", () => {
+    assert.deepEqual(
+      STRIP_TEMPLATES.map((t) => `${t.slot} ${t.template}`),
+      ["gain {s}.{n}.gain", "meter meter.{n}", "mute {s}.{n}.mute", "name text.display.{n}", "name {s}.{n}.label"],
+    );
   });
 });
 
@@ -39,37 +45,40 @@ describe("channelsOf", () => {
     ]);
   });
   test("a channel known only by number is its own", () => {
-    assert.deepEqual(channelsOf(["meter_7", "mute_7", "unrelated"]), [{ side: "", n: 7 }]);
+    assert.deepEqual(channelsOf(["meter.7", "text.display.7", "unrelated"]), [{ side: "", n: 7 }]);
+  });
+  test("a crosspoint is no channel's, and underscore names a Core does not use are not read", () => {
+    assert.deepEqual(channelsOf(["input.1.output.2.gain", "input_3_gain", "meter_3"]), []);
   });
 });
 
 describe("matchStrip", () => {
-  test("fills every slot from the names a channel follows", () => {
+  test("fills every slot from the names a channel follows, a sided label before the unsided text display", () => {
     const m = matchStrip(NAMES, { side: "input", n: 3 }, allow);
     assert.deepEqual(
       Object.fromEntries(Object.entries(m).map(([k, v]) => [k, v.control])),
-      { gain: "input_3_gain", meter: "meter_3", meter2: null, mute: "input_3_mute", name: "text_display_3" },
+      { gain: "input.3.gain", meter: "meter.3", meter2: null, mute: "input.3.mute", name: "input.3.label" },
     );
     assert.equal(m.meter2.problem, "missing");
   });
-  test("an output channel reads its own names", () => {
+  test("an output channel reads its own names, and a mixer with no meter leaves the meter empty", () => {
     const m = matchStrip(NAMES, { side: "output", n: 1 }, allow);
-    assert.deepEqual([m.gain.control, m.mute.control, m.meter.control], ["output_1_gain", "output_1_mute", "meter_output_1"]);
+    assert.deepEqual([m.gain.control, m.mute.control, m.name.control, m.meter.control], ["output.1.gain", "output.1.mute", "output.1.label", null]);
   });
   test("a write slot with a control that is not eligible stays empty and says why; a read slot is unaffected", () => {
-    const eligible: Eligibility = (slot, name) => (slot === "gain" ? "not-allowed" : slot === "mute" && name === "input_3_mute" ? "not-writable" : "ok");
+    const eligible: Eligibility = (slot, name) => (slot === "gain" ? "not-allowed" : slot === "mute" && name === "input.3.mute" ? "not-writable" : "ok");
     const m = matchStrip(NAMES, { side: "input", n: 3 }, eligible);
     assert.deepEqual([m.gain.control, m.gain.problem], [null, "not-allowed"]);
     assert.deepEqual([m.mute.control, m.mute.problem], [null, "not-writable"]);
-    assert.equal(m.meter.control, "meter_3", "a read slot needs no allowlist");
+    assert.equal(m.meter.control, "meter.3", "a read slot needs no allowlist");
   });
   test("an eligible later template wins over an ineligible earlier one", () => {
-    const names = ["input_3_gain", "gain_3"];
-    const m = matchStrip(names, { side: "input", n: 3 }, (_s, name) => (name === "input_3_gain" ? "not-allowed" : "ok"));
-    assert.equal(m.gain.control, "gain_3");
+    const names = ["input.3.label", "text.display.3"];
+    const m = matchStrip(names, { side: "input", n: 3 }, (_s, name) => (name === "input.3.label" ? "wrong-kind" : "ok"));
+    assert.equal(m.name.control, "text.display.3");
   });
-  test("a channel number does not match a longer one (input_3 is not input_30)", () => {
-    const m = matchStrip(["input_30_gain"], { side: "input", n: 3 }, allow);
+  test("a channel number does not match a longer one (input.3 is not input.30)", () => {
+    const m = matchStrip(["input.30.gain"], { side: "input", n: 3 }, allow);
     assert.equal(m.gain.control, null);
   });
 });
@@ -141,5 +150,22 @@ describe("breakApartStrip", () => {
     const parts = breakApartStrip(strip({ name: null, mute: null, meter: null, meter2: null }), () => "x" + Math.random());
     assert.deepEqual(parts.map((p) => p.config.type), ["qsys-fader"]);
     assert.deepEqual([parts[0]!.x, parts[0]!.y, parts[0]!.w, parts[0]!.h], [0.2, 0.1, 0.1, 0.8]);
+  });
+});
+
+describe("matchGainBlock", () => {
+  const eligible = (verdict: "ok" | "not-allowed"): Eligibility => (slot) => (slot === "mute" ? verdict : "ok");
+  test("a Gain block fills level from gain and mute from mute, and nothing else", () => {
+    const m = matchGainBlock(["gain", "mute"], eligible("ok"));
+    assert.deepEqual([m.gain.control, m.mute.control, m.meter.control, m.name.control], ["gain", "mute", null, null]);
+  });
+  test("a control that is missing or not eligible leaves its slot empty, saying why", () => {
+    assert.equal(matchGainBlock(["gain"], eligible("ok")).mute.problem, "missing");
+    assert.equal(matchGainBlock(["gain", "mute"], eligible("not-allowed")).mute.problem, "not-allowed");
+  });
+  test("only a component of type gain with a gain control is a Gain block", () => {
+    assert.equal(isGainBlock("gain", ["gain", "mute"]), true);
+    assert.equal(isGainBlock("mixer", ["gain", "mute"]), false);
+    assert.equal(isGainBlock("gain", ["mute"]), false);
   });
 });

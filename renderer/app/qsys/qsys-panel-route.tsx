@@ -127,14 +127,28 @@ export function QsysPanelNotFound({ slug, link }: { slug: string; link?: boolean
  * the Q-SYS settings to the "No Q-SYS Core is set up" warning: a staff panel and
  * the shell get one, a volunteer panel does not. `inShell`: the app's context bar
  * already names the page, so the header carries the connection line alone.
+ * `reserveEdit`: in the shell, leave the header's right end clear for the Edit pill
+ * the page lays over it.
  */
-export function QsysPanelSurface({ view, settingsLink = false, inShell = false, device }: { view: View; settingsLink?: boolean; inShell?: boolean; device?: Device }) {
+export function QsysPanelSurface({
+  view,
+  settingsLink = false,
+  inShell = false,
+  reserveEdit = false,
+  device,
+}: {
+  view: View;
+  settingsLink?: boolean;
+  inShell?: boolean;
+  reserveEdit?: boolean;
+  device?: Device;
+}) {
   // The store every object on this panel reads (same id, same kind), held here too so
   // the header and the card follow it.
   const panel = useQsysPanel(view.id, panelKindOf(view));
   return (
     <QsysPanelContext.Provider value={panel}>
-      <PanelFrame view={view} settingsLink={settingsLink} inShell={inShell} device={device} />
+      <PanelFrame view={view} settingsLink={settingsLink} inShell={inShell} reserveEdit={reserveEdit} device={device} />
     </QsysPanelContext.Provider>
   );
 }
@@ -164,13 +178,13 @@ function useConnection(): { line: Line; noCore: boolean; overlay: boolean } {
 
 const DOT: Record<Line["tone"], string> = { ok: "bg-ok-9", warn: "bg-warn-9", danger: "bg-danger-9" };
 
-function PanelFrame({ view, settingsLink, inShell, device }: { view: View; settingsLink: boolean; inShell: boolean; device?: Device }) {
+function PanelFrame({ view, settingsLink, inShell, reserveEdit, device }: { view: View; settingsLink: boolean; inShell: boolean; reserveEdit: boolean; device?: Device }) {
   const { line, noCore, overlay } = useConnection();
   // Keyed by panel and home, so a move to another panel starts the menu and the count afresh.
   const key = `${view.id}:${device?.home.id ?? ""}`;
   return (
     <div className="kiosk-surface relative flex h-full min-h-0 flex-col" data-qsys-panel={view.qsys?.slug ?? view.id}>
-      <header className={cn("flex shrink-0 items-center gap-4 border-b border-line px-6", inShell ? "h-10" : "h-[72px]")}>
+      <header className={cn("flex shrink-0 items-center gap-4 border-b border-line", inShell && reserveEdit ? "pl-6 pr-24" : "px-6", inShell ? "h-10" : "h-[72px]")}>
         <div className="flex min-w-0 grow flex-col gap-0.5">
           {!inShell && <h1 className="truncate text-title2 font-semibold tracking-[-0.01em] text-fg">{view.name}</h1>}
           {/* A live region: a screen reader hears the Core drop, not only the card. */}
