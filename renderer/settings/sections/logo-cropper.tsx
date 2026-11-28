@@ -4,6 +4,7 @@ import { BrandLogo } from "../../components/brand-logo";
 import { Button } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { logToServer } from "../../lib/client-log";
+import { bindGesture, type GestureHandle } from "../../lib/pointer-gesture";
 import { drawableSource } from "../../lib/sized-svg";
 import { errorMessage } from "@main/services/errors";
 import { CHECKER } from "./branding-cards";
@@ -61,7 +62,13 @@ export function LogoCropper({ src, initial, monochrome = false, noun = "logo", s
   const [minScale, setMinScale] = useState(1);
   const [scale, setScale] = useState(1);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const drag = useRef<{ x: number; y: number; ox: number; oy: number } | null>(null);
+  const gesture = useRef<GestureHandle | null>(null);
+  const latest = useRef({ scale, nat });
+  useEffect(() => {
+    latest.current = { scale, nat };
+  });
+  // Let go of the window if the cropper closes mid-pan.
+  useEffect(() => () => gesture.current?.cancel(), []);
 
   // One cropper per image: the caller keys it by `src`, so this never has to reset.
   useEffect(() => {
@@ -133,23 +140,20 @@ export function LogoCropper({ src, initial, monochrome = false, noun = "logo", s
   }
 
   function onPointerDown(e: ReactPointerEvent) {
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    drag.current = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y };
-  }
-
-  function onPointerMove(e: ReactPointerEvent) {
-    if (!drag.current || !nat) return;
-    setOffset(
-      clampOffset(
-        { x: drag.current.ox + (e.clientX - drag.current.x), y: drag.current.oy + (e.clientY - drag.current.y) },
-        scale,
-        nat,
-      ),
-    );
-  }
-
-  function onPointerUp() {
-    drag.current = null;
+    // One pointer, on the window, always ended: a second finger cannot pan the image.
+    const start = { x: e.clientX, y: e.clientY, ox: offset.x, oy: offset.y };
+    if (gesture.current) return;
+    gesture.current = bindGesture(e.currentTarget, e.pointerId, {
+      move: (ev) => {
+        // The zoom and the image as they are NOW: a wheel zoom can land mid-pan.
+        const { scale: s, nat: dims } = latest.current;
+        if (!dims) return;
+        setOffset(clampOffset({ x: start.ox + (ev.clientX - start.x), y: start.oy + (ev.clientY - start.y) }, s, dims));
+      },
+      end: () => {
+        gesture.current = null;
+      },
+    });
   }
 
   function save() {
@@ -189,9 +193,6 @@ export function LogoCropper({ src, initial, monochrome = false, noun = "logo", s
           )}
           style={{ width: VIEWPORT, height: VIEWPORT }}
           onPointerDown={onPointerDown}
-          onPointerMove={onPointerMove}
-          onPointerUp={onPointerUp}
-          onPointerCancel={onPointerUp}
         >
           {nat &&
             (monochrome ? (
