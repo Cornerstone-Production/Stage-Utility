@@ -118,18 +118,22 @@ const AUDIO_VIDEO: ServiceCueLayout[] = [
 ];
 
 test("a refused rename, then a reorder clicked before the refusal arrives: the reorder is kept", async () => {
-  const server = fakeServer(AUDIO_VIDEO, { delayMs: 60 });
+  // Held, not timed: a 60 ms delay let the refusal arrive BEFORE the reorder under
+  // load, the page was already back on "Audio", and the grip named "video" was gone.
+  const server = fakeServer(AUDIO_VIDEO);
   try {
     await mount();
     await openCard("Audio");
     const box = nameBox("Audio");
     fireEvent.change(box, { target: { value: "video" } });
     fireEvent.blur(box);
-    await settle();
+    await eventually(() => assert.equal(server.posts.length, 1, "the rename never went out"));
     // The operator's next move lands while the rename is still on the wire, and the
     // page draws the name being saved.
     moveDown("video");
-    await eventually(() => assert.equal(server.posts.length, 2), 2000);
+    await server.release(); // the refusal
+    await eventually(() => assert.equal(server.posts.length, 2));
+    await server.release(); // the reorder
     await eventually(() => assert.deepEqual(serverNames(server.stored()), ["Video", "Audio"], "the reorder was lost"), 2000);
     await eventually(() => assert.deepEqual(pageNames(), serverNames(server.stored()), "the page holds a list the server does not"), 2000);
     // The second save carried the old name, not the refused one.
