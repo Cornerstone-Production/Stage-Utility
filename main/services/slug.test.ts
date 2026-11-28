@@ -4,9 +4,26 @@
 // archive ids) must come out identical for every name an install could hold.
 
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { after, test } from "node:test";
+
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 
 import { slugText } from "./slug.js";
+
+// The real callers, reached through their exports, so a caller that changes the options it
+// passes is caught. Stores read their data dir on import, so it is an empty one.
+const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-slug-"));
+process.env.STAGE_UTILITY_DATA = TMP;
+process.env.HOME = path.join(TMP, "home");
+const { slugify } = await import("./servicecue-slug.js");
+const { filenameSlug } = await import("./export-filename.js");
+const { feedIdFor } = await import("./video/feed-id.js");
+const { slugFromName } = await import("./stageplots-store.js");
+const { idFor } = await import("./servicecue-roles-store.js");
+const { titleSlug } = await import("./archive/rebuild.js");
+after(() => fs.rm(TMP, { recursive: true, force: true }));
 
 const legacy = {
   servicecue: (s: string) => s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "x",
@@ -30,12 +47,14 @@ test("every caller's slug is byte-identical to its pre-merge copy", () => {
   const rows: string[] = [];
   for (const input of INPUTS) {
     const got = {
-      servicecue: slugText(input, { fallback: "x" }),
-      feed: slugText(input, { fold: "marks", max: 36, fallback: "feed" }),
-      venue: slugText(input, { fold: "combining", max: 60, fallback: "venue" }),
-      role: `role-${slugText(input)}`,
-      archive: slugText(input, { fallback: "untitled" }),
-      filename: slugText(input, { max: 60 }),
+      servicecue: slugify(input),
+      feed: feedIdFor(input, new Set()),
+      venue: slugFromName(input, () => false),
+      role: idFor(input, new Set()),
+      archive: titleSlug(input),
+      filename: filenameSlug(input),
+      // renderer/app/mic-slots/download.ts keeps its own copy (a file another branch is
+      // changing), so this row pins the option set it will move to, not the file.
       layoutFile: slugText(input, { fallback: "layout" }),
     };
     for (const k of Object.keys(got) as (keyof typeof got)[]) {

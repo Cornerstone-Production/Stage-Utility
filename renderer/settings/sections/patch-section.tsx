@@ -149,7 +149,7 @@ export function PatchSection() {
   }
   function addSheet() {
     const id = uid("sheet");
-    const s: PatchSheet = { id, name: firstFreeNumbered("Sheet", (s) => draft!.sheets.some((x) => x.name === s), draft!.sheets.length + 1), kind: "custom", devices: [], endpoints: [], variants: [], assignments: emptyAssignments() };
+    const s: PatchSheet = { id, name: firstFreeNumbered("Sheet", (candidate) => draft!.sheets.some((x) => x.name === candidate), draft!.sheets.length + 1), kind: "custom", devices: [], endpoints: [], variants: [], assignments: emptyAssignments() };
     setDraft((d) => (d ? { ...d, sheets: [...d.sheets, s] } : d));
     switchSheet(id);
   }
@@ -207,7 +207,7 @@ export function PatchSection() {
   };
 
   function newVariant() {
-    const v: PatchVariant = { id: uid("var"), name: firstFreeNumbered("Variant", (s) => sheet.variants.some((x) => x.name === s), sheet.variants.length + 1), overrides: {} };
+    const v: PatchVariant = { id: uid("var"), name: firstFreeNumbered("Variant", (candidate) => sheet.variants.some((x) => x.name === candidate), sheet.variants.length + 1), overrides: {} };
     setVariants([...sheet.variants, v]);
     setEditingVariantId(v.id);
   }

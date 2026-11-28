@@ -222,3 +222,19 @@ test("Add sheet names the new sheet past one that is still there, not after the 
     f.restore();
   }
 });
+
+test("New variant is named past one that is still there, not after the list's length", async () => {
+  const variant = (id: string, name: string) => ({ id, name, overrides: {} });
+  const file: PatchFile = { ...FILE, sheets: [{ ...FILE.sheets[0], variants: [variant("v1", "Variant 1"), variant("v3", "Variant 3")] }] };
+  const f = stubEditable(file, { status: 200, json: file });
+  try {
+    await mountEditable();
+    await press(screen.getByRole("button", { name: /New variant/ }));
+    await press(screen.getByRole("button", { name: "Save" }));
+    await eventually(() => assert.equal(f.posts.length, 1));
+    const names = f.posts[0].file.sheets[0].variants.map((v) => v.name);
+    assert.deepEqual(names, ["Variant 1", "Variant 3", "Variant 4"]);
+  } finally {
+    f.restore();
+  }
+});

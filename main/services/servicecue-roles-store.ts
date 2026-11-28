@@ -32,7 +32,7 @@ export function cleanRoles(roles: readonly unknown[]): CategoryRole[] {
  *  against `taken` with a numeric suffix. A role keeps its id when it is renamed or
  *  loses its category, and two names can reduce to one id ("A&V", "A V"), so the bare
  *  id may already belong to another role. */
-function idFor(name: string, taken: Set<string>): string {
+export function idFor(name: string, taken: Set<string>): string {
   const base = `role-${slugText(name)}`;
   const id = firstFree(base, (s) => taken.has(s));
   taken.add(id);

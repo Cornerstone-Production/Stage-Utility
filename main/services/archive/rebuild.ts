@@ -179,7 +179,7 @@ export type EventRow = ArchiveRow;
  * title, so the next rebuild matches it by title and reuses the same id rather
  * than minting a second one.
  */
-function titleSlug(title: string, run = 0): string {
+export function titleSlug(title: string, run = 0): string {
   const slug = slugText(title, { fallback: "untitled" });
   // The ordinal only appears past the first run, so the common case is
   // unchanged and a second rebuild re-derives the same ids.
