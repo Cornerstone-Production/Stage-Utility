@@ -26,6 +26,15 @@ const CONNECT_TIMEOUT_MS = 10_000;
 // the socket level (setKeepAlive), so this app-level probe only needs to be a
 // slow backstop; halving it trims idle command chatter to each receiver.
 const HEARTBEAT_INTERVAL_MS = 60_000;
+/**
+ * Most characters held while waiting for a frame's closing `>`.
+ *
+ * A real frame is under a few hundred characters; a `GET 0 ALL` dump arrives as
+ * many frames, not one. Without a cap, a peer on 2202 streaming bytes with no `>`
+ * grew the buffer for as long as the socket stayed up and re-split all of it on
+ * every chunk. sse-reader.ts caps every SSE consumer the same way.
+ */
+export const SHURE_MAX_RECEIVE_BUFFER = 64 * 1024;
 
 export abstract class ShureBaseProvider extends DeviceProviderBase implements DeviceProvider {
   abstract readonly id: string;
@@ -38,6 +47,8 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
 
   private socket: net.Socket | null = null;
   private receiveBuffer = "";
+  /** True from a buffer overflow until the `>` that ends the dropped run. */
+  private resyncing = false;
   // Consecutive failed connect attempts, for exponential reconnect back-off.
   private reconnectAttempts = 0;
   // Has this connection already reported a `< REP ERR >`? Reset per socket, so a
@@ -335,6 +346,7 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
     const socket = new net.Socket();
     this.socket = socket;
     this.receiveBuffer = "";
+    this.resyncing = false;
     this.rejectionLogged = false;
 
     socket.setEncoding("utf8");
@@ -391,6 +403,27 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
     const segments = this.receiveBuffer.split(">");
     // Keep the final incomplete segment in the buffer.
     this.receiveBuffer = segments.pop() ?? "";
+
+    // The first `>` after an overflow closes the run that was dropped, so what
+    // precedes it is that run's tail, not a frame. Parsed, it could read as a
+    // real report.
+    if (this.resyncing && segments.length > 0) {
+      segments.shift();
+      this.resyncing = false;
+    }
+
+    // Complete frames are drained first, so the cap bounds one unterminated run,
+    // never a burst of whole frames.
+    if (this.receiveBuffer.length > SHURE_MAX_RECEIVE_BUFFER) {
+      if (!this.resyncing) {
+        console.warn(
+          `[shure:${this.id}] receive buffer passed ${SHURE_MAX_RECEIVE_BUFFER} characters with no frame end; ` +
+            "dropping it and resuming at the next frame",
+        );
+      }
+      this.resyncing = true;
+      this.receiveBuffer = "";
+    }
 
     for (const segment of segments) {
       // Strip leading `<` and any surrounding whitespace.
@@ -519,6 +552,7 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
       this.socket = null;
     }
     this.receiveBuffer = "";
+    this.resyncing = false;
   }
 }
 
