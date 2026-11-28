@@ -12,6 +12,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, test } from "node:test";
+import { captureConsoleDuringAsync } from "./fixtures/capture-console.js";
 
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), "messages-store-"));
 process.env.STAGE_UTILITY_DATA = DATA;
@@ -69,14 +70,12 @@ const FIXTURE = [
 
 fs.writeFileSync(path.join(DATA, "messages.json"), JSON.stringify({ lastClearedDate: "2026-10-07", messages: FIXTURE }));
 
-const warned: string[] = [];
-const realWarn = console.warn;
-console.warn = (...args: unknown[]) => {
-  warned.push(args.map(String).join(" "));
-};
-const { messagesStore } = await import("./messages-store.js");
-const file = await messagesStore.load();
-console.warn = realWarn;
+let loaded!: typeof import("./messages-store.js");
+let file!: Awaited<ReturnType<typeof import("./messages-store.js").messagesStore.load>>;
+const warned = await captureConsoleDuringAsync(["warn"], async () => {
+  loaded = await import("./messages-store.js");
+  file = await loaded.messagesStore.load();
+});
 
 const byId = new Map(file.messages.map((m) => [m.id, m]));
 

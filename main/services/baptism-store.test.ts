@@ -14,6 +14,7 @@ import * as path from "node:path";
 
 import type { BaptismSession } from "../types/stage.js";
 import { captureLog } from "./baptism-save-harness.js";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-baptism-store-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -400,7 +401,7 @@ function internalsOf(): RawStore {
 // one id were counted twice by every reader of listSessions() — the route,
 // and linkBaptisms downstream of it in History.
 describe("listSessions dedupes a session stored twice under one id", () => {
-  it("counts it once, keeping the later finish, and logs once — without touching the file", async () => {
+  it("counts it once, keeping the later finish, and logs once — without touching the file", async (t) => {
     const id = "bap-dup-v1230";
     const earlier = {
       id,
@@ -418,15 +419,8 @@ describe("listSessions dedupes a session stored twice under one id", () => {
     } as unknown as BaptismSession;
 
     const internals = internalsOf();
-    const warnLines: string[] = [];
-    const originalWarn = console.warn;
-    console.warn = (...args: unknown[]) => {
-      if (typeof args[0] === "string" && args[0].startsWith("[baptism]") && args[0].includes("more than once")) {
-        warnLines.push(args[0]);
-      } else {
-        (originalWarn as (...a: unknown[]) => void)(...args);
-      }
-    };
+    const warned = captureConsole(t, "warn");
+    const warnLines = () => warned.filter((l) => l.startsWith("[baptism]") && l.includes("more than once"));
     try {
       await internals.update((file) => ({ ...file, sessions: [earlier, later] }));
 
@@ -434,17 +428,16 @@ describe("listSessions dedupes a session stored twice under one id", () => {
       const mine = all.filter((s) => s.id === id);
       assert.equal(mine.length, 1, "GET /api/baptism/sessions must count this id once, not twice");
       assert.equal(mine[0]!.finishedAt, later.finishedAt, "the later finish wins");
-      assert.equal(warnLines.length, 1, "a stored duplicate must be logged on a tagged line");
+      assert.equal(warnLines().length, 1, "a stored duplicate must be logged on a tagged line");
       // Every History and Baptisms read goes through listSessions(): the same
       // duplicates are announced once, not on every read.
       await baptismStore.listSessions();
-      assert.equal(warnLines.length, 1, "the same duplicates were logged again on the next read");
+      assert.equal(warnLines().length, 1, "the same duplicates were logged again on the next read");
 
       // Read-side only: the raw storage this test wrote is unchanged by that read.
       const raw = (await internals.update((file) => file)) as { sessions: BaptismSession[] };
       assert.equal(raw.sessions.filter((s) => s.id === id).length, 2, "listSessions() must not rewrite or prune the file");
     } finally {
-      console.warn = originalWarn;
       await internals.update((file) => ({ ...file, sessions: file.sessions.filter((s) => s.id !== id) }));
     }
   });

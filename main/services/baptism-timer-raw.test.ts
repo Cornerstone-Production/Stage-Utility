@@ -43,6 +43,7 @@ import { describe, it, beforeEach, afterEach, mock } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { captureConsoleDuring } from "./fixtures/capture-console.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-baptism-raw-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -676,36 +677,28 @@ describe("the no-service warning logs once per session, not once per press", () 
 
   it("warns once across several actions with no service open", async () => {
     rec().current = null; // no open service for the whole session
-    const warnings: unknown[][] = [];
-    const original = console.warn;
-    console.warn = (...args: unknown[]) => {
-      if (typeof args[0] === "string" && args[0].startsWith("[baptism] raw:")) warnings.push(args);
-    };
-    try {
-      baptismTimerService.start();
-      tick(2);
-      baptismTimerService.next();
-      baptismTimerService.pause();
-      baptismTimerService.resume();
-      assert.equal(warnings.length, 1, "one warning for the whole session, not one per press");
-    } finally {
-      console.warn = original;
-    }
+    const rawWarnings = (lines: string[]) => lines.filter((l) => l.startsWith("[baptism] raw:"));
+    const warnings = rawWarnings(
+      captureConsoleDuring(["warn"], () => {
+        baptismTimerService.start();
+        tick(2);
+        baptismTimerService.next();
+        baptismTimerService.pause();
+        baptismTimerService.resume();
+      }),
+    );
+    assert.equal(warnings.length, 1, "one warning for the whole session, not one per press");
 
     // A NEW session gets its own warning — the latch is per-session, not global.
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
-    const warnings2: unknown[][] = [];
-    console.warn = (...args: unknown[]) => {
-      if (typeof args[0] === "string" && args[0].startsWith("[baptism] raw:")) warnings2.push(args);
-    };
-    try {
-      baptismTimerService.start();
-      baptismTimerService.pause();
-      assert.equal(warnings2.length, 1, "a fresh session re-arms its own one-time warning");
-    } finally {
-      console.warn = original;
-    }
+    const warnings2 = rawWarnings(
+      captureConsoleDuring(["warn"], () => {
+        baptismTimerService.start();
+        baptismTimerService.pause();
+      }),
+    );
+    assert.equal(warnings2.length, 1, "a fresh session re-arms its own one-time warning");
   });
 });
 

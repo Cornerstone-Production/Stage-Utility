@@ -11,6 +11,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, test } from "node:test";
+import { captureConsoleDuringAsync } from "./fixtures/capture-console.js";
 
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), "history-milestones-"));
 process.env.STAGE_UTILITY_DATA = DATA;
@@ -32,16 +33,12 @@ fs.writeFileSync(
   ]),
 );
 
-const logged: string[] = [];
-const realLog = console.log;
-console.log = (...args: unknown[]) => {
-  logged.push(args.map(String).join(" "));
-};
-
-const { historyMilestonesStore, partitionMilestones, isCalendarDate, MAX_LABEL_LENGTH } =
-  await import("./history-milestones-store.js");
-await historyMilestonesStore.init();
-console.log = realLog;
+let loaded!: typeof import("./history-milestones-store.js");
+const logged = await captureConsoleDuringAsync(["log"], async () => {
+  loaded = await import("./history-milestones-store.js");
+  await loaded.historyMilestonesStore.init();
+});
+const { historyMilestonesStore, partitionMilestones, isCalendarDate, MAX_LABEL_LENGTH } = loaded;
 
 describe("reading the list", () => {
   test("an entry with a date that cannot be drawn is skipped", () => {

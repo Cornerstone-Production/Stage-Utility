@@ -28,6 +28,7 @@ import { after, before, describe, test } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { captureConsoleDuringAsync } from "./fixtures/capture-console.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "cue-init-validate-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -77,14 +78,7 @@ after(async () => {
 let warnings: string[] = [];
 
 before(async () => {
-  const realWarn = console.warn;
-  warnings = [];
-  console.warn = (...args: unknown[]) => void warnings.push(args.map(String).join(" "));
-  try {
-    await automationEngine.init();
-  } finally {
-    console.warn = realWarn;
-  }
+  warnings = await captureConsoleDuringAsync(["warn"], () => automationEngine.init());
 });
 
 describe("init() runs the write path's own validation over the loaded rules", () => {

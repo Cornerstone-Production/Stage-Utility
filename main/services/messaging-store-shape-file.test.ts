@@ -9,6 +9,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
+import { captureConsoleDuringAsync } from "./fixtures/capture-console.js";
 
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), "messaging-shape-"));
 process.env.STAGE_UTILITY_DATA = DATA;
@@ -19,14 +20,12 @@ fs.writeFileSync(
   JSON.stringify({ version: 3, groups: "Green room", quickMessages: { 0: "Walk now" } }),
 );
 
-const warned: string[] = [];
-const realWarn = console.warn;
-console.warn = (...args: unknown[]) => {
-  warned.push(args.map(String).join(" "));
-};
-const { messagingStore } = await import("./messaging-store.js");
-await messagingStore.init();
-console.warn = realWarn;
+let loaded!: typeof import("./messaging-store.js");
+const warned = await captureConsoleDuringAsync(["warn"], async () => {
+  loaded = await import("./messaging-store.js");
+  await loaded.messagingStore.init();
+});
+const { messagingStore } = loaded;
 
 test("a field that is not a list is named, one that is absent is not, and the read is not clean", () => {
   const lines = warned.filter((l) => l.startsWith("[messages] messaging.json"));
