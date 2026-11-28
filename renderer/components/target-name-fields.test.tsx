@@ -48,8 +48,8 @@ interface Panel {
   reads: Record<string, unknown>;
   /** The rename's PATCH URL. */
   update: string;
-  /** The tag a refused save logs under, where the panel logs one. */
-  logTag?: string;
+  /** The tag a refused save logs under. */
+  logTag: string;
 }
 
 const PANELS: Panel[] = [
@@ -88,6 +88,7 @@ const PANELS: Panel[] = [
       "/api/wireless/meter-rate": { ms: 1000 },
     },
     update: "/api/wireless/connections/w1",
+    logTag: "wireless",
   },
 ];
 
@@ -139,10 +140,10 @@ for (const panel of PANELS) {
         assert.equal(net.writes.length, 1, "the rename was never sent");
         await eventually(() => assert.equal(input.value, panel.saved, "a refused name was left in the field"));
         await eventually(() => assert.match(lastToast(), /That name is taken/));
-        if (panel.logTag) {
-          const tag = panel.logTag;
-          assert.ok(net.logs.some((l) => l.tag === tag && /That name is taken/.test(l.message)), `no [${tag}] line for the refusal: ${JSON.stringify(net.logs)}`);
-        }
+        assert.ok(
+          net.logs.some((l) => l.tag === panel.logTag && /That name is taken/.test(l.message)),
+          `no [${panel.logTag}] line for the refusal: ${JSON.stringify(net.logs)}`,
+        );
       } finally {
         net.restore();
       }
@@ -161,3 +162,28 @@ for (const panel of PANELS) {
     });
   });
 }
+
+// Every other RossTalk write awaited a bare invoke, so a refusal rejected unhandled:
+// no toast and nothing in /log. Remove and Add stand for the four.
+describe("the RossTalk panel's other writes", () => {
+  const panel = PANELS.find((p) => p.name === "RossTalk")!;
+  test("a refused remove or add says why, and logs it", async () => {
+    const f = stubFetchWithLog((url, init) => {
+      if ((init?.method === "DELETE" && url.endsWith("/api/rosstalk/targets/r1")) || (init?.method === "POST" && url.endsWith("/api/rosstalk/targets"))) {
+        return reply(500, { error: "Store is read-only" });
+      }
+      const hit = Object.entries(panel.reads).find(([suffix]) => url.endsWith(suffix));
+      return ok(hit ? hit[1] : {});
+    });
+    try {
+      await mount(panel);
+      fireEvent.click(screen.getByRole("button", { name: "Remove target" }));
+      await eventually(() => assert.match(lastToast(), /Could not remove .*Store is read-only/));
+      fireEvent.click(screen.getByRole("button", { name: /Add target/ }));
+      await eventually(() => assert.match(lastToast(), /Could not add .*Store is read-only/));
+      assert.equal(f.logs.filter((l) => l.tag === "rosstalk" && /Store is read-only/.test(l.message)).length, 2, JSON.stringify(f.logs));
+    } finally {
+      f.restore();
+    }
+  });
+});

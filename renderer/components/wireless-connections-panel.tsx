@@ -3,6 +3,7 @@ import { errorMessage } from "@main/services/errors";
 import { invoke as ipc, onNotification } from "../lib/api";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useNameDraft } from "@renderer/lib/use-name-draft";
+import { logToServer } from "../lib/client-log";
 import { useState, useEffect, type ChangeEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -114,7 +115,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
       onUpdate(next);
       return true;
     } catch (err) {
-      console.error("[WirelessConnectionsPanel:updateName]", err);
+      logToServer("wireless", `could not rename connection ${conn.id}: ${errorMessage(err)}`);
       toast.error(`Failed to rename: ${errorMessage(err)}`);
       return false;
     }

@@ -37,6 +37,22 @@ function TargetBadge({ connection, message }: { connection: ConnectionState; mes
   );
 }
 
+/**
+ * Run one write and answer whether it landed. A failure is toasted and logged under
+ * [rosstalk], never left to reject unhandled, which is what every write on this
+ * panel used to do: no toast, and nothing in /log.
+ */
+async function attempt(verb: string, what: string, fn: () => Promise<void>): Promise<boolean> {
+  try {
+    await fn();
+    return true;
+  } catch (err) {
+    logToServer("rosstalk", `could not ${verb} ${what}: ${errorMessage(err)}`);
+    toast.error(`Could not ${verb} ${what}: ${errorMessage(err)}`);
+    return false;
+  }
+}
+
 function TargetCard({ target, onChanged }: { target: RossTalkTarget; onChanged: () => void }) {
   // A refused rename, or an emptied field, puts the saved name back (useNameDraft).
   const name = useNameDraft(target.name, (renamed) => patch({ name: renamed }));
@@ -51,26 +67,23 @@ function TargetCard({ target, onChanged }: { target: RossTalkTarget; onChanged: 
     setFamily(target.config.family ?? "carbonite");
   });
 
-  /** Resolves false when the save was refused, after saying so. A refusal used to
-   *  reject unhandled: no toast, and the field kept a value the device did not have. */
-  async function patch(patchBody: Record<string, unknown>): Promise<boolean> {
-    try {
+  /** Resolves false when the save was refused, after saying so. The name field puts
+   *  the saved name back then; host, port and family keep what was typed. */
+  function patch(patchBody: Record<string, unknown>): Promise<boolean> {
+    return attempt("save", `target "${target.name}"`, async () => {
       await invoke("rosstalk:updateTarget", { id: target.id, patch: patchBody });
       onChanged();
-      return true;
-    } catch (err) {
-      logToServer("rosstalk", `could not save target ${target.id}: ${errorMessage(err)}`);
-      toast.error(`Failed to save: ${errorMessage(err)}`);
-      return false;
-    }
+    });
   }
 
   async function test() {
     setTesting(true);
     try {
-      const r = await invoke<{ ok: boolean; message?: string }>("rosstalk:test", { id: target.id });
-      if (r.ok) toast.success(r.message ?? "Reachable");
-      else toast.error(r.message ?? "Could not reach the device");
+      await attempt("test", `target "${target.name}"`, async () => {
+        const r = await invoke<{ ok: boolean; message?: string }>("rosstalk:test", { id: target.id });
+        if (r.ok) toast.success(r.message ?? "Reachable");
+        else toast.error(r.message ?? "Could not reach the device");
+      });
     } finally {
       setTesting(false);
     }
@@ -97,10 +110,12 @@ function TargetCard({ target, onChanged }: { target: RossTalkTarget; onChanged: 
           size="small"
           iconOnly
           aria-label="Remove target"
-          onClick={async () => {
-            await invoke("rosstalk:removeTarget", { id: target.id });
-            onChanged();
-          }}
+          onClick={() =>
+            void attempt("remove", `target "${target.name}"`, async () => {
+              await invoke("rosstalk:removeTarget", { id: target.id });
+              onChanged();
+            })
+          }
         >
           <TrashIcon className="size-3.5 text-red-10" />
         </Button>
@@ -211,10 +226,12 @@ export function RossTalkTargetsPanel() {
         </div>
         <Switch
           checked={simulate}
-          onCheckedChange={async (v) => {
-            await invoke("rosstalk:setSimulate", { simulate: v });
-            refresh();
-          }}
+          onCheckedChange={(v) =>
+            void attempt("change", "simulate mode", async () => {
+              await invoke("rosstalk:setSimulate", { simulate: v });
+              refresh();
+            })
+          }
           aria-label="Simulate mode"
         />
       </div>
@@ -233,10 +250,12 @@ export function RossTalkTargetsPanel() {
         <Button
           variant="filled"
           size="small"
-          onClick={async () => {
-            await invoke("rosstalk:addTarget", {});
-            refresh();
-          }}
+          onClick={() =>
+            void attempt("add", "a target", async () => {
+              await invoke("rosstalk:addTarget", {});
+              refresh();
+            })
+          }
         >
           <PlusIcon className="size-3.5" /> Add target
         </Button>
