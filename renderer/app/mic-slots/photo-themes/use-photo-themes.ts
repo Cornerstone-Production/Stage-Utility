@@ -107,6 +107,11 @@ export function usePhotoThemes(plan: PhotoPlan | null) {
   const theme: ThemeDTO | null = useMemo(() => (choice?.themeId ? (state?.themes.find((t) => t.id === choice.themeId) ?? null) : null), [state, choice]);
   /** The plan uses a theme that has an approved photo: the Original | Themed switch is worth showing. */
   const hasApproved = !!theme?.people.some((p) => p.approved);
+  /** What this plan's screens draw in place of Planning Center photos: the switch, the theme and each approved edit. A Mic slots board preview resolves again when it changes. */
+  const shownKey = useMemo(
+    () => `${choice?.show ?? ""}|${theme?.id ?? ""}|${(theme?.people ?? []).flatMap((p) => (p.approved ? [`${p.personId}@${p.approved.approvedAt}`] : [])).join(",")}`,
+    [choice, theme],
+  );
   /** The zone a plan's date is named in: the app's, never this browser's. */
   const timeZone = appZoneOf(useStageState().state);
   /** Generate and Redo can be sent: a key is saved and OpenAI has not rejected it. Nothing else waits for one. */
@@ -182,7 +187,7 @@ export function usePhotoThemes(plan: PhotoPlan | null) {
     [write, reread],
   );
 
-  return { state, stateError: stateQ.error, stateLoading: stateQ.isLoading, choice, theme, hasApproved, canSend, timeZone, reread, write, savePrompt, isBusy };
+  return { state, stateError: stateQ.error, stateLoading: stateQ.isLoading, choice, theme, hasApproved, shownKey, canSend, timeZone, reread, write, savePrompt, isBusy };
 }
 
 export type PhotoThemes = ReturnType<typeof usePhotoThemes>;

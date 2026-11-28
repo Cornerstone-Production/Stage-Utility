@@ -193,6 +193,12 @@ const STATE = () =>
     };
   } else if (path === "/api/plans/upcoming") out = { plans: upcomingPlans, cacheAgeMs: 0 };
   else if (path === "/api/photo-themes" && method === "GET") out = photoState;
+  else if (/^\/api\/photo-themes\/plans\/[^/]+$/.test(path) && method === "PATCH") {
+    // The switch: the server keeps the choice and the next read answers with it.
+    const patch = JSON.parse(body ?? "{}") as { show?: string };
+    photoState = { ...photoState, plans: (photoState.plans as Record<string, unknown>[]).map((c) => ({ ...c, ...(patch.show ? { show: patch.show } : {}) })) };
+    out = photoState;
+  }
   else if (path === "/api/presets" && method === "GET") out = presets;
   else if (path === "/api/integrations/wireless/channels") out = [];
   else if (path === "/api/integrations/wireless/statuses") out = wirelessStatuses;
@@ -1826,6 +1832,29 @@ describe("Theme photos in the top bar", () => {
     photoState = { ...PHOTO_STATE(), themes: [theme([person])], plans: [choice] };
     await mount();
     assert.ok(screen.getByRole("group", { name: /Photos shown on screens/ }));
+  });
+
+  test("the board preview follows the Original | Themed switch: it resolves again when the switch is flipped", async () => {
+    // The resolver answers with themed photos only while the plan shows Themed, so a
+    // preview that does not resolve again keeps drawing the edits after Original.
+    planId = "p1";
+    layouts["b-left"] = [slot("pastor", { link: { kind: "static", label: "Pastor", color: "#888888" } } as Partial<Slot>)];
+    const person = { personId: "9001", name: "Alex", status: "approved", approved: { url: "u", fromPlanId: null, fromDate: null, approvedAt: "", stale: false }, pending: null };
+    const theme = { id: "th-aaaaaaaaaaaa", name: "Christmas", prompt: "p", promptChanged: false, createdAt: "", lastUsedDate: null, keptUntil: "2027-03-20", plans: [], people: [person] };
+    photoState = { ...PHOTO_STATE(), themes: [theme], plans: [{ planId: "p1", serviceTypeId: "st-1", sortDate: null, themeId: "th-aaaaaaaaaaaa", show: "themed" }] };
+    await mount();
+    const settled = async () => {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 300));
+      });
+      await settle();
+    };
+    await settled();
+    const before = posts("/api/views/resolve-slots").length;
+    assert.ok(before > 0, "the preview never resolved");
+    await click(within(screen.getByRole("group", { name: /Photos shown on screens/ })).getByRole("button", { name: "Original" }));
+    await settled();
+    assert.ok(posts("/api/views/resolve-slots").length > before, "the switch went to Original and the preview never asked the server again");
   });
 
   const inspectorState = () => document.querySelector("[data-mic-inspector]")?.getAttribute("data-mic-inspector");

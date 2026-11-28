@@ -269,6 +269,7 @@ export function MicSlotsPage() {
                   active={activeBoardId === b.id}
                   dialogs={dialogs}
                   startRenaming={justMade === b.id}
+                  photosKey={photos.shownKey}
                   onResolved={(id, map) => setResolvedByBoard((prev) => (prev[id] === map ? prev : { ...prev, [id]: map }))}
                 />
               ))}

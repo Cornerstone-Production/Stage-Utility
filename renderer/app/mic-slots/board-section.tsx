@@ -164,6 +164,7 @@ export function BoardSection({
   active,
   dialogs,
   startRenaming,
+  photosKey,
   onResolved,
 }: {
   mic: MicSlots;
@@ -173,13 +174,15 @@ export function BoardSection({
   active: boolean;
   dialogs: BoardDialogs;
   startRenaming?: boolean;
+  /** usePhotoThemes' shownKey: the preview resolves again when what the screens show changes. */
+  photosKey: string;
   /** Hands the page who the resolver put on each slot, for its inspector. */
   onResolved: (boardId: string, resolved: ReadonlyMap<string, Slot>) => void;
 }) {
   const { state } = useStageState();
   const slots = mic.boardsMap[board.id] ?? [];
   const target = mic.serviceTypeId ? { serviceTypeId: mic.serviceTypeId, planId: mic.side === "plan" ? mic.planId : null } : null;
-  const preview = useBoardPreview(slots, target, mic.liveDevices);
+  const preview = useBoardPreview(slots, target, mic.liveDevices, photosKey);
   useEffect(() => onResolved(board.id, preview.resolved), [board.id, preview.resolved, onResolved]);
   const [renaming, setRenaming] = useState(!!startRenaming);
   const name = useNameDraft(board.name, (renamed) => void mic.renameBoard(board.id, renamed));
