@@ -152,8 +152,8 @@ function wallCandidates(wall: number, tz: TimeZone): [number, number] {
  *
  * On a fall-back date the reading happens twice, and this is the first. On a
  * spring-forward date a reading inside the skipped hour never happens at all, and
- * this is the instant the clocks jumped past it, the same choice
- * {@link startOfZonedDay} makes for a skipped midnight.
+ * this is the same reading moved past the gap: 02:30 becomes 03:30, where a
+ * clock nobody had moved forward would have been.
  *
  * @throws if `dateKey` is not a bare YYYY-MM-DD.
  */

@@ -140,11 +140,10 @@ describe("zonedWallTime", () => {
     assert.equal(iso(zonedWallTime("2026-11-01", 1, 30, 0, "America/Chicago")), "2026-11-01T06:30:00.000Z");
   });
 
-  it("lands just past the skipped hour on a spring-forward date", () => {
+  it("moves a reading in the skipped hour past the gap on a spring-forward date", () => {
     // 8 Mar 2026: 02:30 never happens in Chicago; the clocks go 01:59 -> 03:00.
-    const t = zonedWallTime("2026-03-08", 2, 30, 0, "America/Chicago");
-    assert.equal(zonedDateKey(t, "America/Chicago"), "2026-03-08");
-    assert.equal(zonedParts(t, "America/Chicago").hour, 3);
+    // 03:30 CDT, an hour of elapsed time after 01:30 CST.
+    assert.equal(iso(zonedWallTime("2026-03-08", 2, 30, 0, "America/Chicago")), "2026-03-08T08:30:00.000Z");
   });
 });
 

@@ -314,9 +314,10 @@ export class InvalidWindowError extends Error {
  * unchanged.
  *
  * Trimming is what this is for — a capture that kept recording through a parked
- * Stream Buffer is cut back to the service — and it deletes recorded data for
- * good: Rebuild from raw re-derives attendance from these same stored samples,
- * so a dropped sample does not come back. So an edit that would drop anything is
+ * Stream Buffer is cut back to the service — and it deletes recorded data.
+ * Rebuild from raw can re-derive the items from the raw rows, but it
+ * re-derives attendance from these same stored samples, so a dropped sample
+ * does not come back. So an edit that would drop anything is
  * REFUSED unless `trim` says it is meant, and the refusal names what would go.
  * Without that, a browser that sent the window back a day out (its calendar
  * past the app zone's) deleted a whole service on a Save nobody had changed
