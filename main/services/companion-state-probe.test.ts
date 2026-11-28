@@ -43,6 +43,7 @@ import { cuePairs } from "./cue-pairs.js";
 import { CALL_TRIGGER_ID } from "./automation-triggers.js";
 import type { CompanionButton } from "./companion-export.js";
 import type { Rule } from "../types/automation.js";
+import { captureConsoleDuringAsync } from "./fixtures/capture-console.js";
 
 const real = { ...stateProbeDeps };
 
@@ -476,21 +477,16 @@ describe("watching a press", () => {
     assert.equal(parseLearning(writes[0]!.patch).attempts, 1, "the press is still spent");
   });
 
-  test("three presses that learn nothing stop learning, with a line", async () => {
-    const lines: string[] = [];
-    const realWarn = console.warn;
-    console.warn = (...args: unknown[]) => void lines.push(args.map(String).join(" "));
-    try {
+    test("three presses that learn nothing stop learning, with a line", async () => {
+      const lines = await captureConsoleDuringAsync(["warn"], async () => {
       values = new Map([["Rack:status", "Standby"]]);
       let params: Record<string, string | number> = learningOn(["Rack:status"]);
       for (let i = 0; i < 3; i++) {
         notePressForLearning({ ruleId: "id-rack_on", base: "rack", want: "on", params });
         await tick(SETTLE_MS + SETTLE_POLL_MS);
-        params = writes.at(-1)!.patch;
-      }
-    } finally {
-      console.warn = realWarn;
+      params = writes.at(-1)!.patch;
     }
+    });
     assert.equal(writes.length, 3);
     assert.equal(parseLearning(writes[2]!.patch).stopped, "gave-up");
     assert.deepEqual(lines, [
@@ -517,10 +513,7 @@ describe("watching a press", () => {
   });
 
   test("a failed write says what was lost rather than dropping it", async () => {
-    const lines: string[] = [];
-    const realWarn = console.warn;
-    console.warn = (...args: unknown[]) => void lines.push(args.map(String).join(" "));
-    try {
+    const lines = await captureConsoleDuringAsync(["warn"], async () => {
       values = new Map([["Rack:status", "Standby"]]);
       writeFails = "EROFS: read-only file system";
       notePressForLearning({
@@ -532,9 +525,7 @@ describe("watching a press", () => {
       await tick(0);
       values.set("Rack:status", "Active");
       await tick(SETTLE_POLL_MS * 2);
-    } finally {
-      console.warn = realWarn;
-    }
+    });
     assert.deepEqual(writes, []);
     assert.equal(lines.length, 1);
     assert.match(lines[0]!, /^\[cues\] pair rack: could not record what it learned: EROFS/);

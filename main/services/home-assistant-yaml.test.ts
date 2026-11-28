@@ -16,6 +16,7 @@ import { describe, test } from "node:test";
 import { homeAssistantYaml } from "./home-assistant-yaml.js";
 import { CALL_TRIGGER_ID } from "./automation-triggers.js";
 import type { Rule } from "../types/automation.js";
+import { captureConsoleDuring } from "./fixtures/capture-console.js";
 
 const BASE = "http://192.168.1.50:8788";
 
@@ -846,16 +847,11 @@ describe("a pair whose two halves press the SAME button", () => {
 
   /** Generate, and collect the `[cues]` warnings it wrote. */
   function generate(rules: Rule[]): { yaml: string; warnings: string[] } {
-    const warnings: string[] = [];
-    const real = console.warn;
-    console.warn = (...args: unknown[]) => {
-      warnings.push(args.map(String).join(" "));
-    };
-    try {
-      return { yaml: homeAssistantYaml(rules, BASE), warnings };
-    } finally {
-      console.warn = real;
-    }
+    let yaml = "";
+    const warnings = captureConsoleDuring(["warn"], () => {
+      yaml = homeAssistantYaml(rules, BASE);
+    });
+    return { yaml, warnings };
   }
 
   test("a BOUND toggle pair is an ordinary state switch, with the comment that says why", () => {

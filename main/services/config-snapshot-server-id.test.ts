@@ -16,6 +16,7 @@ import { describe, it, afterEach } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-restore-id-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -179,8 +180,7 @@ describe("screen bindings on a restore", () => {
   const theirPi = [{ id: "pi-theirs", token: "", outputId: "display-2", label: "Their Pi", macs: [] }];
   const ourScreens = [{ id: "display-2", name: "Lobby TV", viewId: null }];
   const theirScreens = [{ id: "display-2", name: "Left Mic Display", viewId: null }];
-  const logged: string[] = [];
-  const realLog = console.log;
+  let logged: string[] = [];
 
   async function live(devices: unknown[]) {
     await fs.writeFile(SETTINGS, JSON.stringify({ appName: "Live", serverId: OWN, outputs: ourScreens }), "utf8");
@@ -189,16 +189,15 @@ describe("screen bindings on a restore", () => {
   const bindings = async () => (JSON.parse(await fs.readFile(DEVICES, "utf8")) as { id: string }[]).map((d) => d.id);
 
   afterEach(async () => {
-    console.log = realLog;
-    logged.length = 0;
+    logged = [];
     quiet();
     await fs.rm(SETTINGS, { force: true });
     await fs.rm(DEVICES, { force: true });
   });
 
-  it("KEEPING THIS SERVER'S ID RELEASES ITS BINDINGS: the Lobby Pi does not end up on the config's display-2", async () => {
+  it("KEEPING THIS SERVER'S ID RELEASES ITS BINDINGS: the Lobby Pi does not end up on the config's display-2", async (t) => {
     await live(lobbyPi);
-    console.log = (...a: unknown[]) => logged.push(a.join(" "));
+    logged = captureConsole(t, "log");
     await configSnapshot.apply(
       snapshotOf({ "settings.json": { appName: "Restored", serverId: OTHER, outputs: theirScreens }, "kiosk-devices.json": theirPi }),
       KEEP,
@@ -228,12 +227,12 @@ describe("screen bindings on a restore", () => {
     assert.deepEqual(await bindings(), ["pi-lobby"]);
   });
 
-  it("TAKING ANOTHER SERVER'S ID WITH NO BINDINGS IN THE CONFIG releases this server's", async () => {
+  it("TAKING ANOTHER SERVER'S ID WITH NO BINDINGS IN THE CONFIG releases this server's", async (t) => {
     // The server the config came from never set up a device, so the bundle has no
     // kiosk-devices.json. Its screens still replace this server's, and the Lobby
     // Pi would otherwise land on the config's display-2.
     await live(lobbyPi);
-    console.log = (...a: unknown[]) => logged.push(a.join(" "));
+    logged = captureConsole(t, "log");
     await configSnapshot.apply(
       snapshotOf({ "settings.json": { appName: "Restored", serverId: OTHER, outputs: theirScreens } }),
       REPLACE,
@@ -300,20 +299,18 @@ describe("stage plot links on a restore", () => {
     overrides: [],
   };
   const restoredPublish = async () => (JSON.parse(await fs.readFile(STAGEPLOTS, "utf8")) as typeof published).venues[0]!.publish;
-  const logged: string[] = [];
-  const originalLog = console.log;
+  let logged: string[] = [];
 
   afterEach(async () => {
-    console.log = originalLog;
-    logged.length = 0;
+    logged = [];
     quiet();
     await fs.rm(SETTINGS, { force: true });
     await fs.rm(STAGEPLOTS, { force: true });
   });
 
-  it("KEEPING THIS SERVER'S ID brings the venues back unpublished, and says so", async () => {
+  it("KEEPING THIS SERVER'S ID brings the venues back unpublished, and says so", async (t) => {
     await fs.writeFile(SETTINGS, JSON.stringify({ appName: "Live", serverId: OWN }), "utf8");
-    console.log = (...a: unknown[]) => logged.push(a.join(" "));
+    logged = captureConsole(t, "log");
     await configSnapshot.apply(snapshotOf({ "settings.json": { appName: "Restored", serverId: OTHER }, "stageplots.json": published }), KEEP);
     assert.equal(await restoredPublish(), undefined, "a second server came back publishing the first one's link");
     assert.ok(logged.some((l) => l.includes("[config-snapshot] restore: 1 stage plots venue comes back unpublished")), JSON.stringify(logged));
