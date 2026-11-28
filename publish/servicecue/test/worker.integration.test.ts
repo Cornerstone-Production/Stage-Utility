@@ -71,33 +71,44 @@ before(async () => {
   writeFileSync(path.join(assets, "assets", "readme.txt"), "not a file the build writes");
   writeFileSync(path.join(assets, "favicon.svg"), "<svg xmlns='http://www.w3.org/2000/svg'/>");
   writeFileSync(path.join(assets, "_headers"), "/assets/*\n  X-From: the-headers-file\n\n/favicon.svg\n  X-From: the-headers-file\n");
-  const [port, inspector] = [await freePort(), await freePort()];
-  base = `http://127.0.0.1:${port}`;
-  child = spawn(
-    process.execPath,
-    [
-      path.join(PACKAGE, "node_modules/wrangler/bin/wrangler.js"),
-      "dev",
-      "--ip", "127.0.0.1",
-      "--port", String(port),
-      "--inspector-port", String(inspector),
-      "--assets", assets,
-      "--persist-to", path.join(scratch, "state"),
-      "--var", `PUBLISH_TOKEN:${TOKEN}`,
-      "--var", `MAX_VIEWERS:${MAX_VIEWERS}`,
-      "--var", `MAX_VIEWERS_PER_ADDRESS:${PER_ADDRESS}`,
-      "--var", `VIEWER_IDLE_MS:${IDLE_MS}`,
-    ],
-    { cwd: PACKAGE, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, WRANGLER_SEND_METRICS: "false", WRANGLER_LOG_PATH: path.join(scratch, "logs") } },
-  );
-  child.stdout!.on("data", (d) => (log += d));
-  child.stderr!.on("data", (d) => (log += d));
-  const deadline = Date.now() + 60_000;
-  for (;;) {
-    if (log.includes("Ready on")) break;
-    if (child.exitCode !== null) throw new Error(`wrangler dev exited early:\n${log}`);
-    if (Date.now() > deadline) throw new Error(`wrangler dev was not ready in a minute:\n${log}`);
-    await sleep(100);
+  // freePort() hands back a port it has already closed, so another process (a parallel
+  // test file, another wrangler) can take it before wrangler binds, and wrangler exits
+  // with "Address already in use". The bind is the only race-free check, so a start that
+  // dies on that is retried on fresh ports; any other early exit is a real failure.
+  for (let attempt = 1; ; attempt++) {
+    const [port, inspector] = [await freePort(), await freePort()];
+    base = `http://127.0.0.1:${port}`;
+    log = "";
+    child = spawn(
+      process.execPath,
+      [
+        path.join(PACKAGE, "node_modules/wrangler/bin/wrangler.js"),
+        "dev",
+        "--ip", "127.0.0.1",
+        "--port", String(port),
+        "--inspector-port", String(inspector),
+        "--assets", assets,
+        "--persist-to", path.join(scratch, "state"),
+        "--var", `PUBLISH_TOKEN:${TOKEN}`,
+        "--var", `MAX_VIEWERS:${MAX_VIEWERS}`,
+        "--var", `MAX_VIEWERS_PER_ADDRESS:${PER_ADDRESS}`,
+        "--var", `VIEWER_IDLE_MS:${IDLE_MS}`,
+      ],
+      { cwd: PACKAGE, stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, WRANGLER_SEND_METRICS: "false", WRANGLER_LOG_PATH: path.join(scratch, "logs") } },
+    );
+    const started = child;
+    started.stdout!.on("data", (d) => (log += d));
+    started.stderr!.on("data", (d) => (log += d));
+    const deadline = Date.now() + 60_000;
+    for (;;) {
+      if (log.includes("Ready on")) return;
+      if (started.exitCode !== null) {
+        if (!log.includes("Address already in use") || attempt === 5) throw new Error(`wrangler dev exited early (attempt ${attempt}):\n${log}`);
+        break;
+      }
+      if (Date.now() > deadline) throw new Error(`wrangler dev was not ready in a minute:\n${log}`);
+      await sleep(100);
+    }
   }
 });
 

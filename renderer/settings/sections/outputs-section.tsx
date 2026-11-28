@@ -992,7 +992,8 @@ export function OutputsSection({
         trigger={<span className="hidden" />}
       />
 
-      <div className="flex flex-wrap items-center gap-2">
+      {/* views-list: where Home's "A view of your own" and Getting Started point. */}
+      <div data-flash-id="views-list" className="flex flex-wrap items-center gap-2">
         <Button variant="transparent" size="small" onClick={() => setCreatingView(true)}>
           <PlusIcon className="size-3.5 text-gray-9" />
           New view

@@ -104,6 +104,42 @@ describe("a non-error message reaches the grid", () => {
   });
 });
 
+/** What the badge reads as: its text spans in order, with the gap CSS puts between them. */
+const readAs = (props: Parameters<typeof badgeText>[0]): string => {
+  badgeText(props);
+  return [...document.querySelectorAll("[aria-label] > span")].map((e) => e.textContent).filter(Boolean).join(" ");
+};
+
+describe("a message that opens with the state word does not say it twice", () => {
+  // Test connection stores the server's own answer as the row's message, and the
+  // answers open "Connected to OBS 30.0 ..." / "Connected - found 3 ...", so the
+  // header read "Connected Connected to OBS 30.0".
+  test("a bare 'Connected' adds nothing", () => {
+    assert.equal(readAs({ connection: "connected", message: "Connected" }), "Connected");
+    cleanup();
+    assert.equal(readAs({ connection: "connected", message: "connected." }), "Connected");
+  });
+
+  test("a message that continues the word keeps only the continuation", () => {
+    assert.equal(readAs({ connection: "connected", message: "Connected to OBS 30.0 (obs-websocket 5.5)" }), "Connected to OBS 30.0 (obs-websocket 5.5)");
+    cleanup();
+    assert.equal(readAs({ connection: "connected", message: "Connected — found 3 service type(s)" }), "Connected — found 3 service type(s)");
+  });
+
+  test("the label and the tooltip keep the server's words whole", () => {
+    render(
+      <TooltipProvider>
+        <ConnectionBadge connection={"connected" as never} message="Connected to OBS 30.0" />
+      </TooltipProvider>,
+    );
+    assert.equal(document.querySelector("[aria-label]")?.getAttribute("aria-label"), "Connected to OBS 30.0");
+  });
+
+  test("a word that merely starts the message is not stripped from another state", () => {
+    assert.equal(readAs({ connection: "disconnected", message: "Connected 0 of 3 targets" }), "Disconnected Connected 0 of 3 targets");
+  });
+});
+
 describe("what the badge did before, unchanged", () => {
   test("an error still shows the message INSTEAD of the word", () => {
     const why = "Can't reach 192.0.2.50:1025 — ECONNREFUSED";

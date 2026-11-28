@@ -33,8 +33,13 @@ class TestProdCom extends ProdComService {
   protected override get reconnectMs(): number {
     return 30;
   }
+  /** Short by default so the demotion test sees the watchdog fire. A test about
+   *  anything else sets it long: promotion is one frame, so any stall of the
+   *  event loop longer than this between that frame and the assertion demotes the
+   *  socket and reopens SSE, which is what those tests assert did not happen. */
+  public heartbeatMs = 150;
   protected override get heartbeatTimeoutMs(): number {
-    return 150;
+    return this.heartbeatMs;
   }
   protected override get wsSilenceCheckMs(): number {
     return 5_000; // long: nothing here is testing the ongoing silence check
@@ -148,6 +153,9 @@ describe("connect() never opens a second SSE stream while promoted", () => {
       svc.stop();
       await stub.close();
     });
+    // The watchdog is not what this is about, and it would demote the socket
+    // under a slow machine and reopen SSE for the wrong reason.
+    svc.heartbeatMs = 60_000;
     svc.configure("127.0.0.1", stub.port, null);
 
     await eventually(() => svc.wsOpenNow, "the websocket to open");

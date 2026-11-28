@@ -28,6 +28,12 @@ import { Status } from "./ui";
 import { Loader2Icon, CheckCircle2Icon, XCircleIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 
+/** Whether `message` begins with `word` as a whole word, in any case. */
+function repeatsWord(message: string, word: string): boolean {
+  if (!message.toLowerCase().startsWith(word.toLowerCase())) return false;
+  return !/\w/.test(message.charAt(word.length));
+}
+
 export function ConnectionBadge({
   connection,
   message,
@@ -70,10 +76,17 @@ export function ConnectionBadge({
               tone: "text-fg-muted",
             };
 
-  const full = detail ? `${face.word} — ${detail}` : face.word;
+  // A message that opens with the state word already says it: Test connection
+  // stores the server's own answer here, and those open "Connected to OBS 30.0"
+  // or "Connected — found 3 service type(s)". Beside the word that read
+  // "Connected Connected to OBS 30.0". The word stays and the message loses its
+  // copy of it; a bare "Connected" then adds nothing at all.
+  const repeated = detail !== null && repeatsWord(detail, face.word);
+  const shown = repeated ? detail.slice(face.word.length).replace(/^[\s.!]+/, "") || null : detail;
+  const full = repeated ? (shown ? detail : face.word) : detail ? `${face.word} — ${detail}` : face.word;
   // Only when something can actually be cut off. A tooltip that repeats the two
   // words already on screen is a floating box on every hover over every tile.
-  const tooltip = connection === "error" || detail ? full : null;
+  const tooltip = connection === "error" || shown ? full : null;
 
   return (
     <Tooltip label={tooltip}>
@@ -98,7 +111,7 @@ export function ConnectionBadge({
         >
           {face.word}
         </span>
-        {detail && <span className="text-caption1 text-fg-muted truncate min-w-0">{detail}</span>}
+        {shown && <span className="text-caption1 text-fg-muted truncate min-w-0">{shown}</span>}
       </span>
     </Tooltip>
   );
