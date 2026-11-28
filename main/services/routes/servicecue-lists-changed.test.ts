@@ -1,10 +1,12 @@
 // servicecue:lists, driven through every path that writes the ServiceCue layouts or the
 // category roles, against the real controller and stores in a temp data directory.
 //
-// What is under test: an open ServiceCue screen hears about EVERY save, whichever path made
-// it, and re-reads on it instead of waiting for its timer. The frame comes from each
-// store's after-save hook, so the guard is the exact list below of the paths that were
-// heard: a write path that bypassed the stores would drop out of it.
+// What is under test: an open ServiceCue screen hears about every save THROUGH A STORE, and
+// re-reads on it instead of waiting for its timer. The frame comes from each store's
+// after-save hook, so the guard is that hook: removing it from either store fails the exact
+// list below. A write path that bypassed the stores would not be on the list at all; the two
+// store-level entries only prove the hook is wired, and the seed and import routes reach it
+// through those same store calls.
 //
 // Every id and name is invented.
 
@@ -53,8 +55,8 @@ before(() => setSubscriberCheck(() => true));
 const PATHS: { name: string; run: () => Promise<unknown> }[] = [
   { name: "POST /api/servicecue/layouts", run: () => call("/api/servicecue/layouts", { layouts: [layout("svl-a", "Audio")] }) },
   { name: "POST /api/servicecue/roles", run: () => call("/api/servicecue/roles", { roles: [{ id: "r1", name: "Sound", members: ["Audio"] }] }) },
-  { name: "a layout import (views/import)", run: () => serviceCueLayoutsStore.importLayouts([layout("svl-imported", "Imported")]) },
-  { name: "the role seed (roles/seed, saved through the roles store)", run: () => serviceCueRolesStore.save([{ id: "role-seeded", name: "Seeded", members: ["Seeded"] }]) },
+  { name: "a layout import (the store call views/import makes)", run: () => serviceCueLayoutsStore.importLayouts([layout("svl-imported", "Imported")]) },
+  { name: "the role save the seed makes (roles store)", run: () => serviceCueRolesStore.save([{ id: "role-seeded", name: "Seeded", members: ["Seeded"] }]) },
 ];
 
 describe("servicecue:lists", () => {
@@ -68,8 +70,8 @@ describe("servicecue:lists", () => {
     assert.deepEqual(heard, [
       "POST /api/servicecue/layouts",
       "POST /api/servicecue/roles",
-      "a layout import (views/import)",
-      "the role seed (roles/seed, saved through the roles store)",
+      "a layout import (the store call views/import makes)",
+      "the role save the seed makes (roles store)",
     ]);
   });
 

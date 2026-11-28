@@ -1,9 +1,10 @@
 // servicecue:lists — tells an open ServiceCue screen or rundown page that the layouts or
 // the category roles were saved, so it re-reads them now instead of on its next timer.
 //
-// Announced from each store's after-save hook, the one place every write passes through:
-// the layouts and roles routes, the role seed, a layout import, the migration a load runs,
-// and a config restore. A write path added later cannot forget it.
+// Announced from each store's after-save hook, the one place every write through a store
+// passes: the layouts and roles routes, the role seed, a layout import, the migration a load
+// runs. A write path added later cannot forget it. A config restore writes the files
+// directly and restarts the server instead; the connect burst re-sends the last frame.
 //
 // Only the broadcast is gated on subscribers. The sequence advances on every write, so the
 // frame the connect burst re-sends is exact for a page that subscribes later.

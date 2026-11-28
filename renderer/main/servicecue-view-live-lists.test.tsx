@@ -1,17 +1,17 @@
 // servicecue-view-live-lists.test.tsx — an open ServiceCue screen picks up a layout or role
 // edit when it is SAVED, not on its next timer.
 //
-// The screen used to read its layouts and roles on the rundown's one-minute timer, so a layout
-// edited on /servicecue/presets reached it up to a minute later (a reload showed it at once).
-// The server now says so on `servicecue:lists`, and the screen reads them again on a frame.
-// The timer is left for two things: the rundown, which nothing announces a change to, and the
+// The screen reads its layouts and roles at mount and again on a `servicecue:lists` frame,
+// the server's word that either was saved. The timer serves two things only: the rundown, which nothing announces a change to, and the
 // retry of a layouts or roles read that FAILED (an empty list resolves to ALL columns, so a
 // boot-time failure must not strand the screen there).
 //
 // Driven through the real component with a stubbed fetch and a fake SSE stream a test pushes
 // on; the interval is mocked, so a read the tests see did not wait on a timer unless it ticked
 // one. NOT asserted here, because jsdom lays nothing out: what the columns look like after the
-// swap. That was driven in a browser against a real server. NOTHING BELOW PASSES A DOM NODE AS
+// swap. That was driven in a browser against a real server. Also not covered: that the public
+// page keeps no retry timer (the hook builds one only outside public mode); a test with the
+// public attribute set hung this harness, so a reviewer probed it in the public viewer harness. NOTHING BELOW PASSES A DOM NODE AS
 // AN ASSERT OPERAND.
 
 import { strict as assert } from "node:assert";
@@ -173,6 +173,42 @@ test("a read after a save that fails keeps the last good lists, says nothing on 
     await eventually(() => assert.equal(lines(/the layouts for a ServiceCue view/i), 1, "the layouts failure is on /log, once"));
     assert.equal(lines(/category roles/i), 1, "the roles failure is on /log, once");
     assert.equal(alerts(), "", "the last good lists are still the right ones");
+  } finally {
+    f.restore();
+  }
+});
+
+test("an older read that answers after a newer one does not replace it", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const held: ((v: unknown) => void)[] = [];
+  let roleReads = 0;
+  const f = stubFetchWithLog((url) => {
+    if (isPlumbing(url)) return ok({});
+    if (url.includes("/api/state")) return ok(STATE);
+    if (url.includes("/api/servicecue/layouts")) return ok([{ id: "svl-audio", name: "Audio", order: 0, columnRoles: ["r1"] }]);
+    if (url.includes("/api/servicecue/roles")) {
+      // The first read (mount) answers at once; the two after a save are held.
+      if (roleReads++ === 0) return ok([{ id: "r1", name: "Boot", members: ["Audio"] }]);
+      return new Promise((resolve) => held.push((name) => resolve(ok([{ id: "r1", name, members: ["Audio"] }]))));
+    }
+    if (url.includes("/api/servicecue/rundown")) return ok({ ...RUNDOWN, items: [{ id: "i1", title: "Opening song", itemType: "song", lengthSec: 240, servicePosition: "during", notesByCategory: { Audio: "Mics up" } }], noteCategories: ["Audio"] });
+    if (url.includes("/api/pco/live")) return ok(null);
+    return ok({});
+  });
+  try {
+    await mount();
+    await eventually(() => assert.equal(roleReads, 1));
+    for (const seq of [1, 2]) {
+      await act(async () => FakeEventSource.last?.push("servicecue:lists", { epoch: "e1", seq }));
+      await settle();
+    }
+    await eventually(() => assert.equal(held.length, 2));
+    await act(async () => held[1]!("Newer"));
+    await settle();
+    await act(async () => held[0]!("Older"));
+    await settle();
+    await eventually(() => assert.equal(document.body.textContent?.includes("Newer"), true, "the newer answer is on screen"));
+    assert.equal(document.body.textContent?.includes("Older"), false, "the older answer replaced it");
   } finally {
     f.restore();
   }

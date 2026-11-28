@@ -2,8 +2,8 @@
 // when its layouts or roles cannot be read.
 //
 // Both reads happen at mount and again when the server says the lists were saved (see
-// servicecue-view-live-lists.test.tsx), and a failed one is retried on a timer; a failed read
-// "keeps the last good list". Before the first success there is no good list: the layouts
+// servicecue-view-live-lists.test.tsx); a failed one is retried on a timer and "keeps the last
+// good list". Before the first success there is no good list: the layouts
 // start empty, an empty list resolves to ALL columns, and a monitor set to one
 // department's columns showed every department's notes with nothing on screen
 // to say so. A failure now says so while there is nothing to keep, and only

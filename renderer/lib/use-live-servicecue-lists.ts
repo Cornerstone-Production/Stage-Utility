@@ -3,16 +3,17 @@
 //
 // Read at mount and again whenever they are saved. In the building the server says so on
 // `servicecue:lists`; on the public page the Worker says so on `publish:docs` (the same two
-// docs it serves them as). A page used to read them on its rundown's one-minute timer, so
-// a layout edited on /servicecue/presets reached an open screen up to a minute later.
+// docs it serves them as), and the page keeps no timer of its own: every read there is a
+// request against the Worker's daily allowance.
 //
-// The one thing left on a timer is the RETRY. A read that failed at boot must not leave the
-// page on its empty lists for good, and an empty list resolves to ALL columns: a screen
-// set to one department silently showing every other department's notes. The retry runs
-// only while the last read failed, so a healthy page reads exactly when something changed.
+// In the building the one thing on a timer is the RETRY, and only of a list whose last read
+// failed. A read that failed at boot must not leave the page on its empty lists for good, and
+// an empty list resolves to ALL columns: a screen set to one department silently showing
+// every other department's notes.
 //
-// A frame that is a REPLAY is not the news. A page mounting into an open stream is handed
-// the last one, and has just read for itself.
+// A frame that is a REPLAY is not the news: a page mounting into an open stream is handed the
+// last one, and has just read for itself. Reads are last-wins: a save can follow another
+// before the first read answers, and an older answer landing late must not replace a newer one.
 
 import { useEffect, useState } from "react";
 
@@ -43,52 +44,55 @@ export function useLiveServiceCueLists(
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
-    // Per read: the last one failed. A failure keeps the last good list.
-    let layoutsFailed = false;
-    let rolesFailed = false;
-    const load = () => {
-      invoke<ServiceCueLayout[]>("servicecue:listLayouts")
-        .then((l) => {
-          if (cancelled) return;
-          layoutsFailed = false;
-          setLayouts(l);
-          clear("layouts");
+    // Per list: the last read failed, and which read is the latest started.
+    const failedNow = { layouts: false, roles: false };
+    const latest = { layouts: 0, roles: 0 };
+    const read = <T,>(
+      key: "layouts" | "roles",
+      channel: "servicecue:listLayouts" | "servicecue:listRoles",
+      label: string,
+      apply: (list: T) => void,
+    ) => {
+      const mine = ++latest[key];
+      invoke<T>(channel)
+        .then((list) => {
+          if (cancelled || mine !== latest[key]) return;
+          failedNow[key] = false;
+          apply(list);
+          clear(key);
         })
         .catch((err: unknown) => {
-          if (cancelled) return;
-          layoutsFailed = true;
-          fail("layouts", layoutsWhat, err);
-        });
-      invoke<CategoryRole[]>("servicecue:listRoles")
-        .then((r) => {
-          if (cancelled) return;
-          rolesFailed = false;
-          setRoles(r);
-          clear("roles");
-        })
-        .catch((err: unknown) => {
-          if (cancelled) return;
-          rolesFailed = true;
-          fail("roles", rolesWhat, err);
+          if (cancelled || mine !== latest[key]) return;
+          failedNow[key] = true;
+          fail(key, label, err);
         });
     };
+    const loadLayouts = () => read<ServiceCueLayout[]>("layouts", "servicecue:listLayouts", layoutsWhat, setLayouts);
+    const loadRoles = () => read<CategoryRole[]>("roles", "servicecue:listRoles", rolesWhat, setRoles);
+    const load = () => {
+      loadLayouts();
+      loadRoles();
+    };
     load();
-    // Public: the Worker's doc notices, and nothing on a timer but their own net.
+    // Public: the Worker's doc notices. In the building: the server's frame, and the retry.
     const stopDocs = refreshWhileMounted(load, ["servicecue-layouts", "servicecue-roles"], null);
-    // In the building: the server's frame.
-    const stopFrames = isPublicMode()
-      ? () => {}
-      : onNotification(SERVICECUE_LISTS_CHANNEL, (_payload, replayed) => {
+    const building = !isPublicMode();
+    const stopFrames = building
+      ? onNotification(SERVICECUE_LISTS_CHANNEL, (_payload, replayed) => {
           if (!replayed) load();
-        });
-    const retry = setInterval(() => {
-      if (layoutsFailed || rolesFailed) load();
-    }, LISTS_RETRY_MS);
+        })
+      : () => {};
+    const retry = building
+      ? setInterval(() => {
+          if (failedNow.layouts) loadLayouts();
+          if (failedNow.roles) loadRoles();
+        }, LISTS_RETRY_MS)
+      : null;
     return () => {
       cancelled = true;
       stopDocs();
       stopFrames();
-      clearInterval(retry);
+      if (retry) clearInterval(retry);
     };
   }, [enabled, fail, clear, layoutsWhat, rolesWhat]);
   return { layouts, roles };

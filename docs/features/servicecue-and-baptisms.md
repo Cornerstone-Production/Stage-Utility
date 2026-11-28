@@ -107,7 +107,8 @@ and keeps opening it on reload.
 A saved layout or role reaches every open ServiceCue screen and rundown page at once,
 without a reload: the server announces the save on the shared event stream
 (`servicecue:lists`, no contents on it) and each page reads both lists again. A read that
-failed is retried every minute until it succeeds, and a failure is a line on
+failed is retried every minute until it succeeds (in the building; the public page reads when
+the Worker says a document changed), and a failure is a line on
 [the log](../ops/updates-and-logs.md) tagged `[servicecue]`; the screen says so on itself
 while it has no list to fall back on. The rundown itself is read every minute.
 
