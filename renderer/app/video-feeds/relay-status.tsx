@@ -5,6 +5,7 @@
 // single strip below it. video-feeds-route.tsx renders RelayPill and RelaySwitch directly
 // into its own header row; RelayDetailRow is the strip beneath it.
 
+import { formatBytes } from "@main/services/bytes-format";
 import type { ReactNode } from "react";
 import { Loader2Icon } from "lucide-react";
 
@@ -14,8 +15,6 @@ import { MEDIAMTX_DISK_BYTES, MEDIAMTX_DOWNLOAD_BYTES, MEDIAMTX_VERSION } from "
 import { Switch } from "../../components/ui";
 import { formatClock } from "../../lib/clock-format";
 import { cn } from "../../lib/cn";
-
-const mb = (bytes: number) => Math.round(bytes / 1_000_000);
 
 /** The header pill: the design's "Relay running" style for `running`, and a
  *  quiet/warn/danger tint for every other state — the same tint language
@@ -149,8 +148,8 @@ function relayDetail({
     }
     return (
       <Detail>
-        Turning this on downloads MediaMTX {MEDIAMTX_VERSION}, a {mb(MEDIAMTX_DOWNLOAD_BYTES)} MB download and{" "}
-        {mb(MEDIAMTX_DISK_BYTES)} MB on disk.
+        Turning this on downloads MediaMTX {MEDIAMTX_VERSION}, a {formatBytes(MEDIAMTX_DOWNLOAD_BYTES, { whole: true, decimal: true })} download and{" "}
+        {formatBytes(MEDIAMTX_DISK_BYTES, { whole: true, decimal: true })} on disk.
       </Detail>
     );
   }

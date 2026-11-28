@@ -421,7 +421,7 @@ describe("stage plot routes", () => {
     const saidCap = await warnings(() =>
       callRoute(stageplotsRoutes, "/api/stageplots/backgrounds?name=big.jpg", { method: "POST", raw: new Uint8Array(13 * 1024 * 1024) }).catch(() => null),
     );
-    assert.deepEqual(saidCap, ['[stageplots] upload refused: "big.jpg" is over the 12288 KB cap']);
+    assert.deepEqual(saidCap, ['[stageplots] upload refused: "big.jpg" is over the 12.0 MB cap']);
   });
 
   test("after a damaged stageplots.json, old originals do not block a new PDF", async () => {

@@ -40,6 +40,7 @@ import { selectMask, tokenReason, typedTokenOf } from "./servicecue-token";
 import { KeepPageUpToDate, Note } from "./servicecue-deploy-section";
 import { advancedTabPath } from "./advanced-settings";
 import { byOrder } from "./servicecue-layouts-model";
+import { formatAge } from "../../lib/age-label";
 import type { ServiceCueConfig, ServiceCueLayout, ServiceTypeDTO } from "../../../main/types/pco.js";
 import type {
   PublishProblem,
@@ -65,11 +66,7 @@ const RAISED_BUTTON = "border border-line-strong bg-surface-raised hover:bg-fill
 
 /** How long ago, as the card's facts say it: "8 s", "6 min", "2 h". */
 export function sentAgo(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000));
-  if (s < 60) return `${s} s`;
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m} min`;
-  return `${Math.round(m / 60)} h`;
+  return formatAge(ms / 1000, { seconds: true });
 }
 
 /** The origin an address names, for telling an edit from a re-typing: null when it names none. */

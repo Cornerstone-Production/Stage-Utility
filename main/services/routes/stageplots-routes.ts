@@ -87,6 +87,7 @@
 // leave a plot pointing at a venue or background that is gone.
 
 import { randomBytes } from "node:crypto";
+import { formatBytes } from "../bytes-format.js";
 import type http from "node:http";
 
 import {
@@ -140,7 +141,6 @@ import {
 } from "../stageplots-store.js";
 import { BodyTooLargeError, type RouteCtx, error, json, readObjectBody, readRawBody } from "./context.js";
 
-
 const PREFIX = "/api/stageplots";
 
 /** A refusal raised inside a store update, so the update writes nothing. */
@@ -159,9 +159,6 @@ function newId(prefix: "v" | "p" | "b"): string {
 }
 
 
-function kb(bytes: number): string {
-  return `${Math.round(bytes / 1024)} KB`;
-}
 
 function answer(res: http.ServerResponse, err: Refused): void {
   json(res, { error: err.message, ...err.extra }, err.status);
@@ -771,7 +768,7 @@ async function saveOverride(c: RouteCtx): Promise<void> {
  * after the name, and answered as it is unless `answer` says it better.
  */
 function refuseUpload(name: string, size: number | null, why: string, opts: { status?: number; answer?: string } = {}): never {
-  console.warn(`[stageplots] upload refused: "${scrub(name)}"${size === null ? "" : ` (${scrub(kb(size))})`} ${scrub(why)}`);
+  console.warn(`[stageplots] upload refused: "${scrub(name)}"${size === null ? "" : ` (${scrub(formatBytes(size))})`} ${scrub(why)}`);
   throw new Refused(opts.status ?? 400, opts.answer ?? why);
 }
 
@@ -792,7 +789,7 @@ async function uploadBytes(c: RouteCtx, name: string, cap: number): Promise<Buff
   try {
     raw = await readRawBody(c.req, cap);
   } catch (err) {
-    if (err instanceof BodyTooLargeError) console.warn(`[stageplots] upload refused: "${scrub(name)}" is over the ${scrub(kb(cap))} cap`);
+    if (err instanceof BodyTooLargeError) console.warn(`[stageplots] upload refused: "${scrub(name)}" is over the ${scrub(formatBytes(cap))} cap`);
     throw err;
   }
   return Buffer.from(raw.buffer, raw.byteOffset, raw.byteLength);
@@ -843,7 +840,7 @@ async function uploadPdf(c: RouteCtx): Promise<void> {
     } catch (err) {
       refuseUpload(name, bytes.length, errorMessage(err));
     }
-    console.log(`[stageplots] PDF "${scrub(name)}" kept (${scrub(kb(bytes.length))}); waiting for its page`);
+    console.log(`[stageplots] PDF "${scrub(name)}" kept (${scrub(formatBytes(bytes.length))}); waiting for its page`);
     json(c.res, { originalHash, bytes: bytes.length }, 201);
   });
 }
@@ -885,7 +882,7 @@ async function uploadImage(c: RouteCtx): Promise<void> {
     // The source is re-encoded (2400 px, sRGB), so it is not the upload and not held to its cap:
     // one over what the image store keeps is refused by name here, not a 500 from the store.
     if (source.length > STAGEPLOT_LIMITS.imageBytes) {
-      const why = `is over 12 MB once brought to 2400 px in sRGB (${kb(source.length)}); save it as a JPEG and upload that`;
+      const why = `is over 12 MB once brought to 2400 px in sRGB (${formatBytes(source.length)}); save it as a JPEG and upload that`;
       refuseUpload(name, bytes.length, why, { answer: `the upload ${why}` });
     }
     // The source as stored, 2400 px and no metadata, is a PNG or JPEG upload's original too.
@@ -915,10 +912,10 @@ async function uploadImage(c: RouteCtx): Promise<void> {
     if (!doc) return;
     const from = pdf ? `PDF page ${pdf.page} of ${pdf.pages}` : sniffed.kind.toUpperCase();
     console.log(
-      `[stageplots] background "${scrub(name)}" accepted: ${scrub(from)}, ${scrub(kb(bytes.length))} -> ${scrub(converted.width)}x${scrub(converted.height)} WebP ${scrub(kb(converted.webp.length))}, source kept at ${scrub(kb(source.length))}`,
+      `[stageplots] background "${scrub(name)}" accepted: ${scrub(from)}, ${scrub(formatBytes(bytes.length))} -> ${scrub(converted.width)}x${scrub(converted.height)} WebP ${scrub(formatBytes(converted.webp.length))}, source kept at ${scrub(formatBytes(source.length))}`,
     );
     if (converted.webp.length >= CONVERTED_MAX_BYTES) {
-      console.warn(`[stageplots] background "${scrub(name)}" is ${scrub(kb(converted.webp.length))} even at the lowest quality; kept`);
+      console.warn(`[stageplots] background "${scrub(name)}" is ${scrub(formatBytes(converted.webp.length))} even at the lowest quality; kept`);
     }
   });
 }
@@ -961,7 +958,7 @@ async function updateBackground(c: RouteCtx, id: string): Promise<void> {
       (d) => backgroundView(d.backgrounds.find((x) => x.id === id)!),
     );
     if (doc && converted) {
-      console.log(`[stageplots] background ${scrub(id)} re-converted with clean-up ${scrub(body.cleanup ? "on" : "off")}: ${scrub(kb(converted.bytes))}`);
+      console.log(`[stageplots] background ${scrub(id)} re-converted with clean-up ${scrub(body.cleanup ? "on" : "off")}: ${scrub(formatBytes(converted.bytes))}`);
       await tidyStagePlotFiles(stageplotsStore);
     }
   });

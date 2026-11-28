@@ -240,6 +240,7 @@ describe("what is in the bundle", () => {
       // Intl and nothing else.
       "main/services/app-timezone.ts",
       "main/services/clamp.ts",
+      "main/services/duration-format.ts",
       "main/services/errors.ts",
       // The address a layout is found under, shared with the server that assigns it.
       "main/services/servicecue-slug.ts",

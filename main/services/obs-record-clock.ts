@@ -16,6 +16,7 @@
 // PURE, and takes `now` rather than reading a clock, so every case is testable.
 
 import type { ObsStatusDTO } from "../types/live.js";
+import { formatHms } from "./duration-format.js";
 
 /** As much of the OBS snapshot as the clock reads. */
 export type RecordAnchor = Pick<
@@ -51,10 +52,7 @@ export function recordElapsedMs(s: RecordAnchor, at: number): number | null {
 /** "HH:MM:SS", hours unpadded past 99 — the shape OBS's own timecode has, minus
  *  the milliseconds nobody reads off a wall. */
 export function formatRecordTimecode(ms: number): string {
-  const sec = Math.floor(ms / 1000);
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec % 60).padStart(2, "0")}`;
+  return formatHms(ms / 1000, { round: "floor", hours: "always", padHours: true });
 }
 
 /**

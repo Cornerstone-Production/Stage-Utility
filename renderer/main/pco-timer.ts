@@ -3,6 +3,8 @@
 // then each item's length while live ("item"). Goes negative (counts past 0) when
 // an item runs over, exactly like PCO. Nothing ever counts up.
 
+import { formatHms } from "../../main/services/duration-format.js";
+
 export interface PcoTimer {
   mode: "item" | "preservice";
   /** Item title, or "Service starts". */
@@ -59,21 +61,7 @@ export function startsInTimer(serviceTimes: readonly string[] | undefined, serve
 // Format a duration. Days for long pre-service waits ("6d 2h"), h:mm:ss past an
 // hour, else mm:ss. Negative → leading "−" (e.g. an item run over).
 export function fmtDuration(totalSec: number): string {
-  const neg = totalSec < 0;
-  const s = Math.abs(Math.round(totalSec));
-  const days = Math.floor(s / 86400);
-  if (days >= 1) {
-    const h = Math.floor((s % 86400) / 3600);
-    return `${neg ? "−" : ""}${days}d ${h}h`;
-  }
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  const sec = s % 60;
-  const body =
-    h > 0
-      ? `${h}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`
-      : `${m}:${String(sec).padStart(2, "0")}`;
-  return neg ? `−${body}` : body;
+  return formatHms(totalSec, { negative: "minus", days: true });
 }
 
 /**

@@ -584,7 +584,7 @@ test("once the pinned binary is in place, an old version directory and archive a
   await fs.access(path.join(downloadsDir, "mediamtx-current.tar.gz")); // the current pin's own archive stays
   for (const f of keep) await fs.access(f); // config, pid, logs, a staging dir, an unrelated file
   assert.equal(logs.length, 1, JSON.stringify(logs));
-  assert.match(logs[0] ?? "", /^\[video\] removed old relay files \(v0\.0\.1, downloads[\\/]mediamtx_v0\.0\.1_linux_amd64\.tar\.gz\), freeing 6 kB$/);
+  assert.match(logs[0] ?? "", /^\[video\] removed old relay files \(v0\.0\.1, downloads[\\/]mediamtx_v0\.0\.1_linux_amd64\.tar\.gz\), freeing 6 KB$/);
 });
 
 test("the sweep also runs when the pinned binary was already extracted, and says nothing when there is nothing to remove", async (t: TestContext) => {

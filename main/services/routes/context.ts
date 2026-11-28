@@ -5,6 +5,7 @@
 // helpers below moved out of remote-server.ts unchanged so nothing imports the
 // server back (route modules stay a leaf of the dependency graph).
 
+import { formatBytes } from "../bytes-format.js";
 import * as http from "http";
 import * as zlib from "node:zlib";
 
@@ -179,7 +180,7 @@ export const MAX_CONFIG_BODY_BYTES = 64 * 1024 * 1024;
 export class BodyTooLargeError extends Error {
   readonly status = 413;
   constructor(limit: number) {
-    super(`Request body exceeds ${Math.round(limit / (1024 * 1024))} MB`);
+    super(`Request body exceeds ${formatBytes(limit, { whole: true })}`);
     this.name = "BodyTooLargeError";
   }
 }

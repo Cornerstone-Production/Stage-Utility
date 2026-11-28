@@ -55,6 +55,7 @@
 // GET /api/stageplots/venues/:id/link, the editor's Publish card: the document and its
 // broadcast leave it out (venueView), and pending ones never leave the server.
 
+import { formatBytes } from "./bytes-format.js";
 import { randomBytes } from "node:crypto";
 
 import { errorMessage } from "./errors.js";
@@ -158,9 +159,8 @@ const retryWait = (failures: number, backoff: Backoff = RETRY) => backoffMs(fail
 /** How long a change waits for the next before it is published. */
 export const REPUBLISH_WAIT_MS = 2000;
 
-
-const MB = 1_000_000;
-const mb = (bytes: number) => (bytes / MB).toFixed(1);
+/** The publish cap is written in decimal bytes (2_000_000, servicecue-publish.ts), so its sizes read that way: a plot at the cap says 2.0 MB. */
+const DECIMAL = { decimal: true } as const;
 
 type Level = "log" | "warn" | "error";
 
@@ -1498,7 +1498,7 @@ export class StagePlotsPublisher {
           ok: false,
           status: 400,
           sent: 0,
-          message: `Plot "${plot.name}" is too large to publish (${mb(bytes)} MB; the limit is ${mb(PUBLISH_MAX_BODY_BYTES)} MB). Remove items or inputs from it, or unlink connection points that list many patch channels.`,
+          message: `Plot "${plot.name}" is too large to publish (${formatBytes(bytes, DECIMAL)}; the limit is ${formatBytes(PUBLISH_MAX_BODY_BYTES, DECIMAL)}). Remove items or inputs from it, or unlink connection points that list many patch channels.`,
         };
       }
     }
@@ -1537,7 +1537,7 @@ export class StagePlotsPublisher {
         continue;
       }
       if (bytes.byteLength > PUBLISH_MAX_BODY_BYTES) {
-        unpublished.push({ hash, why: `it is too large to publish (${mb(bytes.byteLength)} MB; the limit is ${mb(PUBLISH_MAX_BODY_BYTES)} MB)` });
+        unpublished.push({ hash, why: `it is too large to publish (${formatBytes(bytes.byteLength, DECIMAL)}; the limit is ${formatBytes(PUBLISH_MAX_BODY_BYTES, DECIMAL)})` });
         continue;
       }
       const r = await client.putStagePlot(secret, key, bytes, STAGEPLOTS_IMAGE_TYPE);

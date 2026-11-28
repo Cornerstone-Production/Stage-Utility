@@ -20,6 +20,7 @@
 //     Work is deduped per cache path and written to a temp file + renamed, so the
 //     final path only ever exists complete.
 
+import { formatBytes } from "./bytes-format.js";
 import * as fs from "fs/promises";
 import * as path from "path";
 
@@ -62,7 +63,7 @@ export async function pruneAttachmentCache(): Promise<void> {
   const dir = await getCacheDir();
   const r = await pruneCacheDir(dir, { maxAgeMs: MAX_AGE_MS, maxBytes: MAX_BYTES });
   if (r.removed > 0) {
-    console.log(`[attachment-cache] pruned ${r.removed} file(s), freed ${(r.freedBytes / 1e6).toFixed(1)} MB`);
+    console.log(`[attachment-cache] pruned ${r.removed} file(s), freed ${formatBytes(r.freedBytes)}`);
   }
 }
 

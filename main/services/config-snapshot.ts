@@ -12,6 +12,7 @@
 // route) so every integration cleanly re-initializes from the restored config.
 
 import { randomUUID } from "node:crypto";
+import { formatBytes } from "./bytes-format.js";
 import { readFileSync } from "node:fs";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
@@ -231,8 +232,7 @@ const ORIGINALS: FileKind = {
  */
 export function restoreCeilingNote(fileBytes: number): string | null {
   if (fileBytes <= MAX_CONFIG_BODY_BYTES) return null;
-  const mb = (n: number) => `${(n / (1024 * 1024)).toFixed(1)} MB`;
-  return `this backup carries ${mb(fileBytes)} of uploaded images and originals with its settings as it travels, past the ${mb(MAX_CONFIG_BODY_BYTES)} a downloaded backup can restore: restoring it from the file will be refused (a saved snapshot recalled on this server is not limited)`;
+  return `this backup carries ${formatBytes(fileBytes)} of uploaded images and originals with its settings as it travels, past the ${formatBytes(MAX_CONFIG_BODY_BYTES)} a downloaded backup can restore: restoring it from the file will be refused (a saved snapshot recalled on this server is not limited)`;
 }
 
 /**

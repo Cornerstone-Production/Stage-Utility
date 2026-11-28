@@ -67,6 +67,7 @@ import { companionButtonsQuery, type ButtonsReply } from "../../lib/companion-bu
 import { CompanionPageBody, CompanionPageSelect, listedPages, type CompanionPick } from "../../components/companion-pages";
 import { Segmented } from "../../editor/inspector-rows";
 import { plural } from "@main/services/plural";
+import { formatAge } from "../../lib/age-label";
 
 // ── Shapes the server sends ───────────────────────────────────────────────────
 
@@ -180,17 +181,7 @@ export function relativeSince(iso: string | null, nowMs: number): string {
   if (!iso) return "";
   const at = Date.parse(iso);
   if (!Number.isFinite(at)) return "";
-  const secs = Math.max(0, Math.round((nowMs - at) / 1000));
-  if (secs < 90) return "just now";
-  const units: [number, string][] = [
-    [60, "minute"],
-    [3600, "hour"],
-    [86400, "day"],
-  ];
-  let best = units[0]!;
-  for (const unit of units) if (secs >= unit[0]) best = unit;
-  const n = Math.round(secs / best[0]);
-  return `${plural(n, best[1])} ago`;
+  return formatAge((nowMs - at) / 1000, { now: { under: 90, text: "just now" }, long: true, days: true, ago: true });
 }
 
 /** The pill's words, PURE — one place, so the row and the editor cannot disagree. */

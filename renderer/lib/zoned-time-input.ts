@@ -6,9 +6,8 @@
 // evening service in Chicago read its times a day out, and the stamps it sent back
 // moved the whole service a day and trimmed away every item and sample it had.
 
+import { pad2 } from "@main/services/duration-format";
 import { zonedParts, zonedTimeNear, type TimeZone } from "@main/services/app-timezone";
-
-const pad = (n: number) => String(n).padStart(2, "0");
 
 /** An instant as the field shows it in `tz`, or "" for a missing or unreadable stamp. */
 export function toZonedTimeInput(
@@ -20,9 +19,9 @@ export function toZonedTimeInput(
   const ms = Date.parse(iso);
   if (!Number.isFinite(ms)) return "";
   const p = zonedParts(ms, tz);
-  const hhmm = `${pad(p.hour)}:${pad(p.minute)}`;
+  const hhmm = `${pad2(p.hour)}:${pad2(p.minute)}`;
   // Seconds are the instant's own: every zone in use is offset by whole minutes.
-  return opts.seconds ? `${hhmm}:${pad(Math.floor(ms / 1000) % 60)}` : hhmm;
+  return opts.seconds ? `${hhmm}:${pad2(Math.floor(ms / 1000) % 60)}` : hhmm;
 }
 
 /**

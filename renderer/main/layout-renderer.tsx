@@ -1,4 +1,5 @@
 import { clamp } from "@main/services/clamp";
+import { formatSignedHms, pad2 } from "@main/services/duration-format";
 import { resolveLayout, type PlacedObject } from "./responsive-layout";
 import { HomeCard, Stat, isHomeCard } from "../app/home/cards";
 import { ActionTile, StepAction } from "../app/home/card-actions";
@@ -304,10 +305,6 @@ function panelBody(
   return (panelH) => body(panelH || fallbackH, panelH || fallbackH, "panel");
 }
 
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
 /**
  * Box-level CSS (position handled by caller): background, border, radius, and
  * flex alignment derived from text/vertical alignment.
@@ -470,14 +467,14 @@ function noPlanWord(ctx: Pick<LayoutRenderCtx, "planItemsKnown" | "planItemsFail
 function clockText(now: number, showSeconds: boolean, format: "12h" | "24h", showMeridiem: boolean): string {
   const d = new Date(now);
   let h = d.getHours();
-  const m = pad(d.getMinutes());
-  const s = pad(d.getSeconds());
+  const m = pad2(d.getMinutes());
+  const s = pad2(d.getSeconds());
   if (format === "12h") {
     const ampm = h < 12 ? "AM" : "PM";
     h = ((h + 11) % 12) + 1;
-    return `${pad(h)}:${m}${showSeconds ? `:${s}` : ""}${showMeridiem ? ` ${ampm}` : ""}`;
+    return `${pad2(h)}:${m}${showSeconds ? `:${s}` : ""}${showMeridiem ? ` ${ampm}` : ""}`;
   }
-  return `${pad(h)}:${m}${showSeconds ? `:${s}` : ""}`;
+  return `${pad2(h)}:${m}${showSeconds ? `:${s}` : ""}`;
 }
 
 /**
@@ -566,9 +563,7 @@ const FIT_MIN_GROWTH = 0.3;
 /** Render one object's inner content (the positioned box wraps this). */
 // Format a signed pacing delta — over plan reads "+M:SS", under reads "−M:SS".
 function fmtSignedDuration(sec: number): string {
-  const s = Math.round(sec);
-  if (s === 0) return "0:00";
-  return `${s > 0 ? "+" : "−"}${fmtDuration(Math.abs(s))}`;
+  return formatSignedHms(sec, { days: true });
 }
 
 // 0–5 RF bars as filled/empty blocks, for the wireless-channel tile.

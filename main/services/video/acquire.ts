@@ -12,6 +12,7 @@
 // Nothing here runs the binary; that is a later task's supervisor. This is
 // only "is a runnable file on disk, and how did it get there."
 
+import { formatBytes } from "../bytes-format.js";
 import { execFile } from "node:child_process";
 import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
@@ -214,7 +215,7 @@ async function pruneOldRelayFiles(assets: ReadonlyMap<string, MediaMtxAsset>, re
     }
   }
   if (removed.length > 0) {
-    console.log(`[video] removed old relay files (${removed.map((r) => scrub(r)).join(", ")}), freeing ${freed >= 1_000_000 ? `${(freed / 1_000_000).toFixed(1)} MB` : `${Math.round(freed / 1000)} kB`}`);
+    console.log(`[video] removed old relay files (${removed.map((r) => scrub(r)).join(", ")}), freeing ${formatBytes(freed)}`);
   }
 }
 

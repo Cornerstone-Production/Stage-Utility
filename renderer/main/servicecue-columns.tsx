@@ -2,6 +2,7 @@ import type { RundownColumn, RundownShape } from "./rundown-table";
 import type { CategoryRole } from "../../main/types/servicecue-roles.js";
 import { resolveRole, roleAppliesTo, unassignedCategoryRoles } from "./role-resolve";
 import { formatClock } from "../lib/clock-format";
+import { formatHms } from "../../main/services/duration-format.js";
 
 // Shared column/clock logic for ServiceCue, used by both the standalone page and
 // the settings preview so they render identically. Resolves a layout's per-element
@@ -84,17 +85,11 @@ export function computeClocks(items: PlanItemDTO[], anchorISO: string | null | u
 }
 
 export function fmtLen(sec: number): string {
-  if (!sec || sec <= 0) return "";
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
-  return `${m}:${String(s).padStart(2, "0")}`;
+  return sec > 0 ? formatHms(sec, { zero: "" }) : "";
 }
 
 export function fmtTotal(sec: number): string {
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  const s = sec % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return formatHms(sec, { hours: "always", padHours: true });
 }
 
 /** Format an epoch-ms clock in the plan's timezone (falls back to the viewer's). */

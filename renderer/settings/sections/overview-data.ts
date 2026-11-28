@@ -12,6 +12,7 @@
 import { inTrendScope, inAverageScope } from "./overview-scope";
 import type { SplServiceSummary } from "@main/types/stage";
 import { combineLeq, leqOf } from "@main/services/spl-leq";
+import { formatHms, formatSignedHms } from "@main/services/duration-format";
 import { formatClock } from "../../lib/clock-format";
 import { serverClock } from "../../lib/server-clock";
 
@@ -130,21 +131,12 @@ export function computeSplDelta(levels: readonly number[], window = 4, deadbandD
 
 /** Seconds → "m:ss" (or "h:mm:ss"). */
 export function fmtDur(sec: number | null): string {
-  if (sec == null) return "—";
-  const s = Math.max(0, Math.round(sec));
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  if (m >= 60) return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
-  return `${m}:${String(r).padStart(2, "0")}`;
+  return sec == null ? "—" : formatHms(sec);
 }
 
-/** Signed seconds → "+m:ss" / "−m:ss" (over/under planned). */
+/** Signed seconds → "+m:ss" / "−m:ss" (over/under planned); minutes never roll into hours. */
 export function fmtDelta(sec: number | null): string {
-  if (sec == null) return "";
-  const s = Math.round(sec);
-  const sign = s > 0 ? "+" : s < 0 ? "−" : "±";
-  const a = Math.abs(s);
-  return `${sign}${Math.floor(a / 60)}:${String(a % 60).padStart(2, "0")}`;
+  return sec == null ? "" : formatSignedHms(sec, { hours: "never", zero: "±0:00" });
 }
 
 /** Trailing "Stream Buffer"-type padding items — post-service, often left running

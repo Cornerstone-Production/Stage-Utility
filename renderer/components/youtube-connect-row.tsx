@@ -16,6 +16,7 @@ import { useServerNow } from "../lib/server-clock";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { invoke, type IpcChannel } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
+import { formatHms } from "@main/services/duration-format";
 import { Button, Input } from "./ui";
 
 type ConnectStatus =
@@ -42,9 +43,8 @@ interface YouTubeConnectRowProps {
 }
 
 function formatCountdown(expiresAt: number, now: number): string {
-  const s = Math.max(0, Math.round((expiresAt - now) / 1000));
-  const m = Math.floor(s / 60);
-  return `${m}:${String(s % 60).padStart(2, "0")}`;
+  // A pairing code lives minutes, and the row has room for "m:ss" only.
+  return formatHms((expiresAt - now) / 1000, { hours: "never" });
 }
 
 export function YouTubeConnectRow({
