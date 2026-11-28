@@ -31,7 +31,7 @@ import { copyText } from "../../lib/clipboard";
 import { cn } from "../../lib/cn";
 import { errorMessage } from "@main/services/errors";
 import { KIND_DRAWS_TOP_BAR, screenIsControlSurface, viewShownInSidebar, viewSurface, type CreateScreenInput, type ViewSurface } from "@main/types/views";
-import { useNameDraft } from "../../lib/use-name-draft";
+import { useNameDraft, type RenameResult } from "../../lib/use-name-draft";
 import { useResyncOn } from "../../lib/use-resync-on";
 import { NONE, chooseViewForScreen } from "../screen-role-confirm";
 import { useDevices } from "../../app/screens/use-devices";
@@ -74,7 +74,7 @@ export interface PanelDevice {
 /** Everything the panel does to the outside world, as callbacks, so the panel
  *  itself reads from props and a test can drive it with no server behind it. */
 export interface ScreenPanelActions {
-  onRename: (id: string, name: string) => void;
+  onRename: (id: string, name: string) => RenameResult;
   /** Rejects with the server's reason, which the panel shows without closing. */
   onSetSlug: (id: string, slug: string) => Promise<void>;
   onSetView: (id: string, viewId: string | null, expectSurface?: ViewSurface) => void;
@@ -100,7 +100,7 @@ export interface ScreenPanelActions {
   onEditLayout: (viewId: string) => void;
   /** Ask, then remove a screen (and its view, if the operator says so). */
   onRemoveScreen: (outputId: string) => void;
-  onRenameView: (viewId: string, name: string) => void;
+  onRenameView: (viewId: string, name: string) => RenameResult;
   /** Change what a view is for. Asks first when screens show it. */
   onSetViewSurface: (viewId: string, surface: ViewSurface) => void;
   onDuplicateView: (viewId: string) => void;

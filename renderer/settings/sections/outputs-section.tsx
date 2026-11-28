@@ -32,7 +32,7 @@ import { screensListViews } from "@main/services/home-view";
 import { classifyWindow, LAGGING_ADVICE } from "@main/services/video/playback-health";
 
 import type { SectionProps } from "../types";
-import { useNameDraft } from "../../lib/use-name-draft";
+import { useNameDraft, type RenameResult } from "../../lib/use-name-draft";
 import { useSortableRow } from "../../lib/use-sortable-row";
 import { useVideoState } from "../../main/video/use-video-state";
 import { useMessageGroups, type MessageGroups } from "../../main/use-message-groups";
@@ -170,7 +170,7 @@ export interface OutputRowProps {
    *  behind. Absent otherwise, which is every screen with no such output. */
   outputStruggle?: OutputStruggle;
   canRemove: boolean;
-  onRename: (name: string) => void;
+  onRename: (name: string) => RenameResult;
   /** This display's icon tint, or undefined for the theme default. */
   iconColor?: string;
   /** Where this card's icon is stored — the view id for a control surface, so it
@@ -181,7 +181,7 @@ export interface OutputRowProps {
   legacyIconKey?: string;
   onSetView: (viewId: string | null, expectSurface?: ViewSurface) => void;
   /** Rename the view this screen is showing (not the screen). */
-  onRenameView: (viewId: string, name: string) => void;
+  onRenameView: (viewId: string, name: string) => RenameResult;
   /** The message groups that exist, and whether they have been read. The card
    *  draws the ones this screen is in as chips under its name; choosing them is
    *  the Screen settings panel's job. */
@@ -660,7 +660,7 @@ function UnassignedViewCard({
   panelOpen: boolean;
   selected: boolean;
   onSelect: () => void;
-  onRename: (name: string) => void;
+  onRename: (name: string) => RenameResult;
   onDuplicate: () => void;
   onToggleSurface: () => void;
   /** List this console in the sidebar, or keep it out. */

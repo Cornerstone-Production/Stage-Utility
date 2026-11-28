@@ -59,6 +59,8 @@ let hold: Promise<void> | null = null;
 let releaseHold: (() => void) | null = null;
 /** Where it waits: before the server saves it ("request"), or after, before the answer gets back ("answer"). */
 let holdAt: "request" | "answer" = "request";
+/** When set, POST /api/branding waits for it and answers with the status it resolves to. */
+let brandingAnswer: Promise<number> | null = null;
 function holdNextSave(at: "request" | "answer" = "request"): void {
   holdAt = at;
   hold = new Promise<void>((r) => (releaseHold = r));
@@ -103,6 +105,10 @@ const json = (status: number, value: unknown) => ({
       await waiting;
     }
     return json(200, state);
+  }
+  if (method === "POST" && path === "/api/branding" && brandingAnswer) {
+    const status = await brandingAnswer;
+    return json(status, status < 400 ? state : { error: "refused for the test" });
   }
   if (method === "POST" && path === "/api/sidebar") {
     const body = JSON.parse(init?.body ?? "{}") as Sidebar;
@@ -523,6 +529,50 @@ describe("leaving the mode", () => {
     await act(async () => fireEvent.keyDown(name, { key: "Escape" }));
     assert.equal(api!.customizing, true, "Escape in a field left the mode");
     assert.equal((name as HTMLInputElement).value, "Rail test app");
+  });
+});
+
+describe("the app name field", () => {
+  // The save is out when the operator clicks back in and types again; its refusal
+  // must not put the saved name over that new typing.
+  test("a refusal that lands after typing resumed keeps the new typing", async () => {
+    let answer!: (status: number) => void;
+    brandingAnswer = new Promise<number>((r) => (answer = r));
+    try {
+      await mount();
+      await act(async () => api!.open("sidebar"));
+      const name = (await eventually(() => screen.getByLabelText("App name"))) as HTMLInputElement;
+      await act(async () => fireEvent.change(name, { target: { value: "First try" } }));
+      await act(async () => fireEvent.blur(name));
+      await act(async () => fireEvent.change(name, { target: { value: "Second try" } }));
+      await act(async () => answer(400));
+      await act(async () => new Promise((r) => setTimeout(r, 50)));
+      assert.equal(name.value, "Second try", "the refusal put the saved name over new typing");
+    } finally {
+      brandingAnswer = null;
+    }
+  });
+
+  // Another browser saves the very name that was sent, and then this save's refusal
+  // lands: the field shows the name the app now has, not the one from before.
+  test("a refusal that lands after the saved name changed restores the new saved name", async () => {
+    let answer!: (status: number) => void;
+    brandingAnswer = new Promise<number>((r) => (answer = r));
+    try {
+      await mount();
+      await act(async () => api!.open("sidebar"));
+      const name = (await eventually(() => screen.getByLabelText("App name"))) as HTMLInputElement;
+      await act(async () => fireEvent.change(name, { target: { value: "Same name" } }));
+      await act(async () => fireEvent.blur(name));
+      state = { ...state, appName: "Same name" };
+      await act(async () => emitState());
+      await eventually(() => assert.equal(name.value, "Same name"));
+      await act(async () => answer(400));
+      await act(async () => new Promise((r) => setTimeout(r, 50)));
+      assert.equal(name.value, "Same name", "the refusal put back the name from before the save");
+    } finally {
+      brandingAnswer = null;
+    }
   });
 });
 

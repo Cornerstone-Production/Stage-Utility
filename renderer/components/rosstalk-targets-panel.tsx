@@ -5,6 +5,9 @@ import { CheckCircle2Icon, Loader2Icon, PlusIcon, TrashIcon, XCircleIcon } from 
 import { invoke, onNotification } from "../lib/api";
 import { Button, InfoHint, Input, NumberInput, Separator, Status, Switch, toast } from "./ui";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { useNameDraft } from "@renderer/lib/use-name-draft";
+import { errorMessage } from "@main/services/errors";
+import { logToServer } from "../lib/client-log";
 import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
 
 const DEFAULT_PORT = 7788;
@@ -34,31 +37,53 @@ function TargetBadge({ connection, message }: { connection: ConnectionState; mes
   );
 }
 
+/**
+ * Run one write and answer whether it landed. A failure is toasted and logged under
+ * [rosstalk], never left to reject unhandled, which is what every write on this
+ * panel used to do: no toast, and nothing in /log.
+ */
+async function attempt(verb: string, what: string, fn: () => Promise<void>): Promise<boolean> {
+  try {
+    await fn();
+    return true;
+  } catch (err) {
+    logToServer("rosstalk", `could not ${verb} ${what}: ${errorMessage(err)}`);
+    toast.error(`Could not ${verb} ${what}: ${errorMessage(err)}`);
+    return false;
+  }
+}
+
 function TargetCard({ target, onChanged }: { target: RossTalkTarget; onChanged: () => void }) {
-  const [name, setName] = useState(target.name);
+  // A refused rename, or an emptied field, puts the saved name back (useNameDraft).
+  const name = useNameDraft(target.name, (renamed) => patch({ name: renamed }));
   const [host, setHost] = useState(String(target.config.host ?? ""));
   const [port, setPort] = useState<number>(Number(target.config.port ?? DEFAULT_PORT));
   const [family, setFamily] = useState<RossTalkFamily>(target.config.family ?? "carbonite");
   const [testing, setTesting] = useState(false);
 
   useResyncOn([target], () => {
-    setName(target.name);
     setHost(String(target.config.host ?? ""));
     setPort(Number(target.config.port ?? DEFAULT_PORT));
     setFamily(target.config.family ?? "carbonite");
   });
 
-  async function patch(patchBody: Record<string, unknown>) {
-    await invoke("rosstalk:updateTarget", { id: target.id, patch: patchBody });
-    onChanged();
+  /** Resolves false when the save was refused, after saying so. The name field puts
+   *  the saved name back then; host, port and family keep what was typed. */
+  function patch(patchBody: Record<string, unknown>): Promise<boolean> {
+    return attempt("save", `target "${target.name}"`, async () => {
+      await invoke("rosstalk:updateTarget", { id: target.id, patch: patchBody });
+      onChanged();
+    });
   }
 
   async function test() {
     setTesting(true);
     try {
-      const r = await invoke<{ ok: boolean; message?: string }>("rosstalk:test", { id: target.id });
-      if (r.ok) toast.success(r.message ?? "Reachable");
-      else toast.error(r.message ?? "Could not reach the device");
+      await attempt("test", `target "${target.name}"`, async () => {
+        const r = await invoke<{ ok: boolean; message?: string }>("rosstalk:test", { id: target.id });
+        if (r.ok) toast.success(r.message ?? "Reachable");
+        else toast.error(r.message ?? "Could not reach the device");
+      });
     } finally {
       setTesting(false);
     }
@@ -68,9 +93,9 @@ function TargetCard({ target, onChanged }: { target: RossTalkTarget; onChanged: 
     <div className="flex flex-col gap-2.5 rounded-lg border border-line bg-surface p-3">
       <div className="flex items-center gap-2">
         <Input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onBlur={() => name !== target.name && void patch({ name })}
+          value={name.draft}
+          onChange={(e) => name.setDraft(e.target.value)}
+          onBlur={name.commit}
           className="h-7 flex-1 min-w-0 text-footnote font-medium"
           aria-label="Target name"
         />
@@ -85,10 +110,12 @@ function TargetCard({ target, onChanged }: { target: RossTalkTarget; onChanged: 
           size="small"
           iconOnly
           aria-label="Remove target"
-          onClick={async () => {
-            await invoke("rosstalk:removeTarget", { id: target.id });
-            onChanged();
-          }}
+          onClick={() =>
+            void attempt("remove", `target "${target.name}"`, async () => {
+              await invoke("rosstalk:removeTarget", { id: target.id });
+              onChanged();
+            })
+          }
         >
           <TrashIcon className="size-3.5 text-red-10" />
         </Button>
@@ -199,10 +226,12 @@ export function RossTalkTargetsPanel() {
         </div>
         <Switch
           checked={simulate}
-          onCheckedChange={async (v) => {
-            await invoke("rosstalk:setSimulate", { simulate: v });
-            refresh();
-          }}
+          onCheckedChange={(v) =>
+            void attempt("change", "simulate mode", async () => {
+              await invoke("rosstalk:setSimulate", { simulate: v });
+              refresh();
+            })
+          }
           aria-label="Simulate mode"
         />
       </div>
@@ -221,10 +250,12 @@ export function RossTalkTargetsPanel() {
         <Button
           variant="filled"
           size="small"
-          onClick={async () => {
-            await invoke("rosstalk:addTarget", {});
-            refresh();
-          }}
+          onClick={() =>
+            void attempt("add", "a target", async () => {
+              await invoke("rosstalk:addTarget", {});
+              refresh();
+            })
+          }
         >
           <PlusIcon className="size-3.5" /> Add target
         </Button>

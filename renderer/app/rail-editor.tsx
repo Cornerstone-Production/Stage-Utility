@@ -27,6 +27,7 @@ import { MENU_ITEM, menuContent } from "../components/ui";
 import { MAX_APP_NAME } from "@main/services/app-name";
 import { useSidebarChrome } from "../components/ui/sidebar";
 import { cn } from "../lib/cn";
+import { useLatestRef } from "../lib/use-latest-ref";
 import { useStageState } from "../main/use-stage-state";
 import { BRANDING_HREF, REPLACE_LOGO_HREF } from "../settings/sections/branding-links";
 import { useCustomize } from "./customize-mode";
@@ -292,6 +293,7 @@ function BrandEditor() {
   const customize = useCustomize();
   const saved = state?.appName ?? "Stage Utility";
   const [name, setName] = useState(saved);
+  const savedNow = useLatestRef(saved);
   const editing = useRef(false);
 
   // Follow the saved name while the field is not being typed in: a change made
@@ -308,8 +310,11 @@ function BrandEditor() {
       return;
     }
     // As Branding's own field does: a refused save puts the saved name back,
-    // rather than leaving a name in the field that the app does not have.
-    if (!(await setBranding(queryClient, { name: trimmed }))) setName(saved);
+    // rather than leaving a name in the field that the app does not have. The
+    // saved name as it is when the answer lands, and only over what was sent:
+    // typing resumed in the meantime is kept.
+    const sent = name;
+    if (!(await setBranding(queryClient, { name: trimmed }))) setName((now) => (now === sent ? savedNow.current : now));
   }
 
   function goToBranding(href: string) {

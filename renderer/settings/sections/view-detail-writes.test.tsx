@@ -176,3 +176,32 @@ test("deleting a console's view says its screens' buttons will stop working; a w
     f.restore();
   }
 });
+
+// handleRenameView answers false once it has toasted the failure. The view's name did
+// not change, so nothing else would put the field back.
+test("a refused view rename puts the saved name back in the field", async () => {
+  const f = stubFetchWithLog(() => ok({}));
+  try {
+    const renames: string[] = [];
+    const p = props(CONSOLE_VIEW);
+    render(
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(ViewDetail, {
+          ...p,
+          handlers: { handleRenameView: async (_id: string, name: string) => { renames.push(name); return false; } },
+        } as unknown as Parameters<typeof ViewDetail>[0]),
+      ),
+    );
+    await settle();
+    const input = screen.getByRole("textbox", { name: "View name" }) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Renamed" } });
+    fireEvent.blur(input);
+    await settle();
+    assert.deepEqual(renames, ["Renamed"]);
+    assert.equal(input.value, CONSOLE_VIEW.name, "a refused name was left in the field");
+  } finally {
+    f.restore();
+  }
+});
