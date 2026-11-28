@@ -2,7 +2,7 @@
 // Assistant YAML and GET /api/cues (the integration) both read it, so the same
 // rules give the same words whichever way Home Assistant was set up. They were two
 // opposite fallbacks once: the YAML called a rule named "Foyer TVs" with no `says`
-// "Foyer TVs", and the manifest called the same cue "Foyer Tvs".
+// "Foyer TVs", and the manifest called the same cue "Foyer Tvs" (the one kept).
 
 import assert from "node:assert/strict";
 import * as fsp from "node:fs/promises";
@@ -43,42 +43,43 @@ function inYaml(yaml: string, words: string): boolean {
   return yaml.includes(`    alias: "${words}"\n`) || yaml.includes(`      - name: "${words}"\n`);
 }
 
+const yamlOf = () => homeAssistantYaml(RULES, "http://192.168.1.50:8788");
+
 describe("the same rules are called the same in the YAML and the manifest", () => {
-  test("a single cue with no `says` is called by its rule's name, not its humanised cue name", async () => {
+  test("a single cue with no `says` is its cue name humanised, whatever its rule is called", async () => {
     RULES = [cue("Foyer TVs", "foyer_tvs")];
     const named = (await cueManifest()).buttons[0]?.name;
-    assert.equal(named, "Foyer TVs");
-    assert.equal(inYaml(homeAssistantYaml(RULES, "http://192.168.1.50:8788"), named), true);
+    assert.equal(named, "Foyer Tvs");
+    assert.equal(inYaml(yamlOf(), named), true);
   });
 
-  test("a pair with no `says` is called by its ON rule's name, the trailing `on` taken off", async () => {
-    RULES = [cue("Projectors on", "projectors_on"), cue("Projectors off", "projectors_off")];
+  test("a pair with no `says` is its base humanised", async () => {
+    RULES = [cue("Turn the projectors on", "projectors_on"), cue("Turn the projectors off", "projectors_off")];
     const named = (await cueManifest()).switches[0]?.name;
     assert.equal(named, "Projectors");
-    assert.equal(inYaml(homeAssistantYaml(RULES, "http://192.168.1.50:8788"), named), true);
+    assert.equal(inYaml(yamlOf(), named), true);
   });
 
-  test("a single cue's `says` keeps its trailing `on`: only a switch has the verb supplied for it", async () => {
+  test("a trailing `on` is taken off `says` for a single command too, in both", async () => {
     RULES = [cue("Light the stage", "stage_lights", "Lights on")];
     const named = (await cueManifest()).buttons[0]?.name;
-    assert.equal(named, "Lights on");
-    assert.equal(inYaml(homeAssistantYaml(RULES, "http://192.168.1.50:8788"), named), true);
+    assert.equal(named, "Lights");
+    assert.equal(inYaml(yamlOf(), named), true);
   });
 
-  test("a rule with no name falls back to the cue name humanised, in both", async () => {
-    RULES = [cue("  ", "main_conf_tvs")];
+  test("`says` wins", async () => {
+    RULES = [cue("Foyer TVs", "foyer_tvs", "the foyer screens")];
     const named = (await cueManifest()).buttons[0]?.name;
-    assert.equal(named, "Main Conf Tvs");
-    assert.equal(inYaml(homeAssistantYaml(RULES, "http://192.168.1.50:8788"), named), true);
+    assert.equal(named, "the foyer screens");
+    assert.equal(inYaml(yamlOf(), named), true);
   });
 });
 
 describe("two cues with the same words are told apart the same way in both", () => {
-  test("rules with one name get different names in the manifest, and the YAML holds the same ones", async () => {
-    RULES = [cue("Press a button", "press_button"), cue("Press a button", "press_button_2")];
+  test("cues with one `says` get different names in the manifest, and the YAML holds the same ones", async () => {
+    RULES = [cue("A", "press_button", "Press a button"), cue("B", "press_button_2", "Press a button")];
     const names = (await cueManifest()).buttons.map((b) => b.name);
     assert.equal(new Set(names).size, 2, names.join(" | "));
-    const yaml = homeAssistantYaml(RULES, "http://192.168.1.50:8788");
-    for (const n of names) assert.equal(inYaml(yaml, n), true, n);
+    for (const n of names) assert.equal(inYaml(yamlOf(), n), true, n);
   });
 });

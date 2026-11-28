@@ -198,7 +198,7 @@ export async function cueManifest(opts: { includeHidden?: boolean } = {}): Promi
     const row = states?.states.get(pair.base);
     const entry: ManifestSwitch = {
       id: pair.base,
-      name: spokenCueName(pair.on, pair.base, "switch"),
+      name: spokenCueName(pair.on.trigger.params, pair.base),
       room: roomOf(pair.on) || roomOf(pair.off),
       on: pair.onName,
       off: pair.offName,
@@ -243,7 +243,7 @@ export async function cueManifest(opts: { includeHidden?: boolean } = {}): Promi
       ...(hiddenButton ? { hiddenFromHome: true as const } : {}),
       ...(isBuiltinRule(rule) ? { builtin: true as const } : {}),
       id: cue,
-      name: spokenCueName(rule, cue, "button"),
+      name: spokenCueName(rule.trigger.params, cue),
       room: roomOf(rule),
       cue,
       available: pressable(rule),

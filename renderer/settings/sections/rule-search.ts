@@ -42,9 +42,8 @@ export function ruleSearchText(
     const cueName = String(rule.trigger.params.name ?? "");
     parts.push(cueName);
     parts.push(String(rule.trigger.params.says ?? ""));
-    // The words on a row (spokenCueName): `says`, else the rule's name, else the
-    // cue name humanised. A rule with no name reads as the last, found by it.
-    parts.push(spokenCueName(rule, cueName, "button"));
+    // The words on a row (spokenCueName): `says`, else the cue name humanised.
+    parts.push(spokenCueName(rule.trigger.params, cueName));
     parts.push(...parseAliases(rule.trigger.params));
   }
   if (rule.action.id === "companion.press") {

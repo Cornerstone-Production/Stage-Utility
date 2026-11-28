@@ -8,9 +8,9 @@
 //    name when the button reappears. `available: false` is the whole point.
 //  - THE VERSION GOES UP ON A RULE CHANGE. It is the only thing telling an
 //    integration to re-read; frozen, a new cue never appears anywhere.
-//  - THE NAME IS THE WORDS. `says` with the trailing "on" taken off — "Projectors
-//    on" is a sentence, the switch is called Projectors — falling back to the
-//    rule's own name, then the cue name humanised. See spokenCueName.
+//  - THE NAME IS THE WORDS, NOT THE RULE'S NAME. `says` with the trailing "on"
+//    taken off — "Projectors on" is a sentence, the switch is called Projectors
+//    — falling back to the cue name humanised. A rule may be called "Rule 4".
 
 import assert from "node:assert/strict";
 import { beforeEach, describe, test } from "node:test";
@@ -242,12 +242,14 @@ describe("the name a switch is called", () => {
     assert.equal((await cueManifest()).switches[0]?.name, "the big screens");
   });
 
-  test("falls back to the rule's own name, with a trailing `on` stripped", async () => {
+  test("falls back to the cue name humanised, never to the rule's name", async () => {
+    // The rules here are called "Rule room_a_screens_projectors_on". A house
+    // full of switches called "Rule 4" is worse than one called by its cue.
     RULES = [
-      { ...cue("room_a_screens_on"), name: "Room A screens on" },
-      { ...cue("room_a_screens_off", { at: { page: 1, row: 0, col: 2 } }), name: "Room A screens off" },
+      cue("room_a_screens_projectors_on"),
+      cue("room_a_screens_projectors_off", { at: { page: 1, row: 0, col: 2 } }),
     ];
-    assert.equal((await cueManifest()).switches[0]?.name, "Room A screens");
+    assert.equal((await cueManifest()).switches[0]?.name, "Room A Screens Projectors");
   });
 });
 

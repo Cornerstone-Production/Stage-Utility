@@ -139,10 +139,10 @@ function pairsOf(rules: Rule[], cues: Map<string, Cue>): Pair[] {
   for (const pair of cuePairs(rules)) {
     const cue = cues.get(pair.onName);
     if (!cue) continue;
-    // spokenCueName takes the "on" off a switch: the switch is the THING, and Home
+    // spokenCueName takes the "on" off: the switch is the THING, and Home
     // Assistant supplies the verb. "Turn on Projectors on" is what happens
     // otherwise.
-    const friendly = spokenCueName(pair.on, pair.base, "switch");
+    const friendly = spokenCueName(pair.on.trigger.params, pair.base);
     out.push({
       base: pair.base,
       friendly,
@@ -171,7 +171,7 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
     if (!name || cues.has(name)) continue;
     cues.set(name, {
       name,
-      friendly: spokenCueName(rule, name, "button"),
+      friendly: spokenCueName(rule.trigger.params, name),
       formerNames: parseAliases(rule.trigger.params),
       hidden: isHiddenFromHome(rule.trigger.params),
     });
