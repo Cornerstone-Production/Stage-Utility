@@ -17,7 +17,7 @@ import { describe, it, beforeEach, afterEach, mock, type TestContext } from "nod
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { feedLiveTickSettled, makeLive } from "./fixtures/live-dto.js";
+import { feedLiveTickSettled, loadLiveConsumers, makeLive } from "./fixtures/live-dto.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-split-save-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -30,6 +30,7 @@ const { stageController } = await import("./stage-controller.js");
 const { serviceTimelineRecorder } = await import("./service-timeline-recorder.js");
 const { splRecorder } = await import("./spl-recorder.js");
 const { attendanceRecorder } = await import("./attendance-recorder.js");
+await loadLiveConsumers();
 const { addBroadcastListener } = await import("./broadcaster.js");
 const { captureConsole } = await import("./fixtures/capture-console.js");
 const { serviceTimelineStore } = await import("./service-timeline-store.js");

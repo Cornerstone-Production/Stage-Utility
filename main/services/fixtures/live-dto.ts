@@ -2,7 +2,7 @@
 //
 // makeLive: the base is `satisfies PcoLiveDTO`, so a field added to the type as
 // required breaks compilation HERE, once, instead of being silently absent from
-// forty hand-built objects cast `as PcoLiveDTO`.
+// hand-built objects cast `as PcoLiveDTO`.
 //
 // feedLiveTick: hands one tick to the same four consumers live-poller.ts's act()
 // does, in the same order. Services are imported inside the call, not at the top:
@@ -41,14 +41,21 @@ export const LIVE_TICK_ORDER = [
   "baptism-timer",
 ] as const;
 
-async function consumers(): Promise<Record<(typeof LIVE_TICK_ORDER)[number], { onLiveTick(live: PcoLiveDTO): Promise<void> }>> {
+type Consumers = Record<(typeof LIVE_TICK_ORDER)[number], { onLiveTick(live: PcoLiveDTO): Promise<void> }>;
+let loaded: Consumers | null = null;
+
+/** Import the four consumers. Call once, after the test has set its data dir and
+ *  before the first tick: feedLiveTick starts every consumer synchronously, as
+ *  live-poller.ts does, and an import hop first would let a test that acts on the
+ *  line after `tick()` run before any consumer has started. */
+export async function loadLiveConsumers(): Promise<void> {
   const [spl, attendance, timeline, baptism] = await Promise.all([
     import("../spl-recorder.js"),
     import("../attendance-recorder.js"),
     import("../service-timeline-recorder.js"),
     import("../baptism-timer-service.js"),
   ]);
-  return {
+  loaded = {
     "spl-recorder": spl.splRecorder,
     "attendance-recorder": attendance.attendanceRecorder,
     "service-timeline-recorder": timeline.serviceTimelineRecorder,
@@ -56,15 +63,15 @@ async function consumers(): Promise<Record<(typeof LIVE_TICK_ORDER)[number], { o
   };
 }
 
-/** One tick to every consumer, each settled separately so a rejection shows
- *  which consumer threw. Results are in LIVE_TICK_ORDER. */
-export async function feedLiveTickSettled(live: PcoLiveDTO): Promise<PromiseSettledResult<void>[]> {
-  const by = await consumers();
+/** One tick to every consumer, started synchronously in LIVE_TICK_ORDER and
+ *  settled separately so a rejection shows which consumer threw. */
+export function feedLiveTickSettled(live: PcoLiveDTO): Promise<PromiseSettledResult<void>[]> {
+  if (!loaded) throw new Error("call loadLiveConsumers() before feeding a tick");
+  const by = loaded;
   return Promise.allSettled(LIVE_TICK_ORDER.map((name) => by[name].onLiveTick(live)));
 }
 
-/** One tick to every consumer; throws the first failure, naming nothing the
- *  consumer's own error does not. */
+/** One tick to every consumer; rethrows the first rejection. */
 export async function feedLiveTick(live: PcoLiveDTO): Promise<void> {
   for (const r of await feedLiveTickSettled(live)) if (r.status === "rejected") throw r.reason;
 }

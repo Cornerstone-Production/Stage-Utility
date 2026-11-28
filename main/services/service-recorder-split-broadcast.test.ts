@@ -20,7 +20,7 @@ import { describe, it, beforeEach, afterEach, mock } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { feedLiveTick, makeLive } from "./fixtures/live-dto.js";
+import { feedLiveTick, loadLiveConsumers, makeLive } from "./fixtures/live-dto.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-split-broadcast-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -36,6 +36,7 @@ const { stageController } = await import("./stage-controller.js");
 const { serviceTimelineRecorder } = await import("./service-timeline-recorder.js");
 const { splRecorder } = await import("./spl-recorder.js");
 const { attendanceRecorder } = await import("./attendance-recorder.js");
+await loadLiveConsumers();
 const { addBroadcastListener } = await import("./broadcaster.js");
 
 const OCC_1 = "occ-a";

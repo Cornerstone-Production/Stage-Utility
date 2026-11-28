@@ -25,8 +25,8 @@ export async function within<T>(work: Promise<T>, what: string, ms = 5000): Prom
 // the mocked setTimeout would never fire.
 const realSetTimeout = globalThis.setTimeout;
 
-/** Resolve after `ms` of real time. Looks up the global at CALL time, as the
- *  per-file copies did, so a test that mocks setTimeout still controls it. */
+/** Resolve after `ms`. Looks up the global setTimeout at CALL time, as the
+ *  per-file copies did, so a test that mocks setTimeout controls it. */
 export const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
@@ -36,8 +36,7 @@ export const sleep = (ms: number): Promise<void> => new Promise((resolve) => set
  * Deadline on performance.now() and the poll on the timer captured at import,
  * so it neither hangs nor expires early in a file that mocks Date or
  * setTimeout (messages-service does both). Arguments are (ready, what, ms) in
- * every caller; `what` may be a function so the message names state at the
- * moment of failure.
+ * `what` may be a function so the message names state at the moment of failure.
  */
 export async function until(ready: () => boolean, what: string | (() => string), ms = 5000): Promise<void> {
   const deadline = performance.now() + ms;

@@ -18,12 +18,13 @@ type PcoClient = PcoService | PcoCalendarService;
 /** Loose by design: tests answer with JSON:API fragments, not full responses. */
 type Slot = { request: (url: string, appId: string, secret: string) => Promise<unknown> };
 
-// Compile-time tie to the real members: if either class renames or retypes
-// `request`, one of these lines stops compiling.
-type _PcoSlot = PcoService["request"];
-type _CalendarSlot = PcoCalendarService["request"];
-const _check: [_PcoSlot, _CalendarSlot] | null = null;
-void _check;
+// Compile-time tie: each client's real `request` must be assignable to the slot
+// the stub fills. A rename fails on the indexed access, a retype on the
+// assignment.
+// (url is branded in the real signature, so it is not compared.)
+type Tie = (url: never, appId: string, secret: string) => Promise<unknown>;
+const _tie: Tie[] = [null as unknown as PcoService["request"], null as unknown as PcoCalendarService["request"]];
+void _tie;
 
 export interface PcoRequestStub {
   /** Every url asked for, in order, since this stub was installed. */

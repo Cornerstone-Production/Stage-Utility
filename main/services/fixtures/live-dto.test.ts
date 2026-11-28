@@ -1,13 +1,14 @@
 // The fixture's tick order and the real poller's must be one list. Nothing here
 // reads live-poller.ts as text: it runs the poller's own act() against spies on
-// the four consumers, then runs feedLiveTick against the same spies.
+// the four consumers, then runs feedLiveTick against the same spies. It sees
+// only those four: a fifth consumer added to act() is NOT caught here.
 
 import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, describe, it, type TestContext } from "node:test";
-import { feedLiveTick, LIVE_TICK_ORDER, makeLive } from "./live-dto.js";
+import { feedLiveTick, LIVE_TICK_ORDER, loadLiveConsumers, makeLive } from "./live-dto.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-live-dto-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -19,6 +20,8 @@ const { splRecorder } = await import("../spl-recorder.js");
 const { attendanceRecorder } = await import("../attendance-recorder.js");
 const { serviceTimelineRecorder } = await import("../service-timeline-recorder.js");
 const { baptismTimerService } = await import("../baptism-timer-service.js");
+
+await loadLiveConsumers();
 
 after(() => fs.rm(TMP, { recursive: true, force: true }));
 

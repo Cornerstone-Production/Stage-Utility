@@ -10,7 +10,6 @@
 import http from "node:http";
 
 export interface HttpFixture {
-  server: http.Server;
   port: number;
   origin: string;
   /** Drops every open socket first, so a held-open response cannot hang the close. */
@@ -18,7 +17,7 @@ export interface HttpFixture {
 }
 
 /** Collect a request's body. Rejects if the request errors or is aborted. */
-export function readBody(req: http.IncomingMessage): Promise<Buffer> {
+function readBody(req: http.IncomingMessage): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     req.on("data", (c: Buffer) => chunks.push(c));
@@ -41,7 +40,6 @@ export async function startHttpFixture(
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const port = (server.address() as { port: number }).port;
   return {
-    server,
     port,
     origin: `http://127.0.0.1:${port}`,
     close(): Promise<void> {

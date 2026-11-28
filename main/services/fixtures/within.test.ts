@@ -1,4 +1,4 @@
-// until() and within() must keep working in a file that mocks Date and setTimeout
+// until() must keep working in a file that mocks Date and setTimeout
 // (messages-service does both): a Date.now() deadline never expires there, and a
 // poll on the mocked setTimeout never fires. Both would hang the suite.
 
@@ -7,14 +7,14 @@ import { describe, it } from "node:test";
 import { until } from "./within.js";
 
 describe("until", () => {
-  it("resolves once the condition holds, with Date and setTimeout mocked", async (t) => {
+  it("resolves once the condition holds, with Date and setTimeout mocked", { timeout: 3000 }, async (t) => {
     t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });
     let n = 0;
     await until(() => ++n >= 3, "three polls");
     assert.ok(n >= 3);
   });
 
-  it("times out on the real clock and names what it waited for, with Date and setTimeout mocked", async (t) => {
+  it("times out on the real clock and names what it waited for, with Date and setTimeout mocked", { timeout: 3000 }, async (t) => {
     t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });
     await assert.rejects(until(() => false, "a thing that never happens", 30), /timed out waiting for a thing that never happens/);
   });

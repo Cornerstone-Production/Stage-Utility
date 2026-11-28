@@ -23,7 +23,7 @@ import { describe, it, beforeEach, afterEach, mock } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { feedLiveTick, makeLive } from "./fixtures/live-dto.js";
+import { feedLiveTick, loadLiveConsumers, makeLive } from "./fixtures/live-dto.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-opening-item-split-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -43,6 +43,7 @@ const { attendanceStore } = await import("./attendance-store.js");
 const { serviceTimelineRecorder } = await import("./service-timeline-recorder.js");
 const { splRecorder } = await import("./spl-recorder.js");
 const { attendanceRecorder } = await import("./attendance-recorder.js");
+await loadLiveConsumers();
 
 const OCC_1 = "200000001";
 const OCC_2 = "200000003";
