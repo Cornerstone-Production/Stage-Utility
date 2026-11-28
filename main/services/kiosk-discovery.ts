@@ -30,6 +30,8 @@ export const MAX_MODES = 24;
 export const MAX_MODE_LEN = 32;
 /** A datagram larger than this is not ours. Keeps a flood cheap to reject. */
 export const MAX_DATAGRAM = 2048;
+/** The longest address a reply carries; the helper refuses a longer one rather than cut it. */
+export const MAX_URL = 512;
 
 const str = (v: unknown, max = MAX_STR): string | undefined =>
   typeof v === "string" && v.length > 0 ? v.slice(0, max) : undefined;
@@ -129,7 +131,7 @@ export function decodeReply(buf: Buffer | string): DiscoveryReply | null {
   }
   if (o[MAGIC] !== REPLY || o.v !== VERSION) return null;
   const serverId = str(o.serverId);
-  const url = str(o.url, 512);
+  const url = str(o.url, MAX_URL);
   if (!serverId || !url) return null;
   return {
     serverId,

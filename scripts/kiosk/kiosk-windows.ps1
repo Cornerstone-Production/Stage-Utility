@@ -101,11 +101,13 @@ function Send-Probe {
 # without it, so a server with its Screens page open can answer in this boot
 # rather than the next. If none does, the address the old server gave stands.
 function Find-Server {
+  param([bool]$Unreachable = $false)
   $bound = if (Test-Path $boundFile) { Get-Content $boundFile } else { '' }
   $macs = (Get-MacAddress) -join ','
   $probe = '{"stageUtility":"discover","v":1,"id":"' + $id + '","macs":[' + $macs +
            '],"hostname":"' + $env:COMPUTERNAME + '","os":"Windows"'
   if ($bound) { $probe += ',"boundTo":"' + $bound + '"' }
+  if ($Unreachable) { $probe += ',"unreachable":true' }
   $probe += '}'
 
   $replies = @(Send-Probe $probe)
@@ -113,7 +115,7 @@ function Find-Server {
   $reply = Select-Reply $replies $bound
   $url = if ($reply -match '"url":"([^"]+)"') { $matches[1] } else { '' }
   if (Save-Binding $reply $bound) {
-    $again = Find-Server
+    $again = Find-Server $Unreachable
     if ($again) { $url = $again }
   }
   return $url
@@ -124,7 +126,9 @@ if (Test-Path $serverFile) {
 } else {
   $url = ''; $fails = 0
   while (-not $url) {
-    $url = Find-Server
+    # Say we cannot reach our server only after a real effort, as the Linux and
+    # Mac agents do, so another server offers a screen whose own server is gone.
+    $url = Find-Server ($fails -gt 30)
     if (-not $url) {
       $fails++
       # Two seconds while the server might still be booting, then thirty so a

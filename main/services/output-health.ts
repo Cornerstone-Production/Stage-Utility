@@ -25,7 +25,7 @@ export const STREAK = 3;
 
 const MAX_FPS = 1_000;
 /** Ten seconds is far past any real render-to-air figure; past it, the helper is wrong. */
-const MAX_LATENCY_MS = 10_000;
+export const MAX_LATENCY_MS = 10_000;
 const MAX_DROPPED = 1_000_000_000_000;
 
 /** The most a change id may be: a UUID is 36. */

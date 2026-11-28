@@ -1484,8 +1484,10 @@ bcast_targets() {
 
 discover() {
   bound="\$(cat "\$BOUND_FILE" 2>/dev/null || true)"
+  unreachable=\$1
   probe="{\"stageUtility\":\"discover\",\"v\":1,\"id\":\"\$ID\",\"macs\":[\$(macs)],\"hostname\":\"\$(hostname -s)\",\"os\":\"macOS\""
   [ -n "\$bound" ] && probe="\$probe,\"boundTo\":\"\$bound\""
+  [ "\$unreachable" = "1" ] && probe="\$probe,\"unreachable\":true"
   probe="\$probe}"
   for target in \$(bcast_targets); do
     reply="\$(printf '%s' "\$probe" | nc -u -w2 "\$target" \$PORT 2>/dev/null | head -c 2048)"
@@ -1535,10 +1537,10 @@ remember() {
 # without it, so a server with its Screens page open can answer in this boot
 # rather than the next. If none does, the address the old server gave stands.
 find_server() {
-  reply="\$(pick "\$(discover)")"
+  reply="\$(pick "\$(discover "\$1")")"
   url="\$(printf '%s' "\$reply" | sed -n 's/.*"url":"\\([^"]*\\)".*/\\1/p')"
   if ! remember "\$reply"; then
-    again="\$(find_server)"
+    again="\$(find_server "\$1")"
     [ -n "\$again" ] && url="\$again"
   fi
   printf '%s' "\$url"
@@ -1549,7 +1551,10 @@ if [ -r "\$STATE_DIR/server" ]; then
 else
   URL=""; fails=0
   while [ -z "\$URL" ]; do
-    URL="\$(find_server)"
+    # Say we cannot reach our server only after a real effort, as the Linux agent
+    # does, so another server offers a screen whose own server is gone.
+    [ "\$fails" -gt 30 ] && flag=1 || flag=0
+    URL="\$(find_server \$flag)"
     if [ -z "\$URL" ]; then
       fails=\$((fails + 1))
       [ "\$fails" -lt 10 ] && sleep 2 || sleep 30
