@@ -43,8 +43,9 @@ a momentary Planning Center cache miss. Neither may split a recording in progres
 So the change is judged by the new occurrence's own start time — the open record is
 held only while that occurrence is still more than ten minutes away, and closed and
 replaced once it has started or is about to. Where no start time is available the
-decision falls back to the gap since the last live item: under ten minutes holds,
-longer splits.
+decision falls back to the gap since the last live item of the running service,
+the same for all three recorders: under ten minutes holds, longer splits. Time
+parked on an item past SERVICE END does not count as the service running.
 
 Each decision is logged once, whichever way it goes, and a hold that later
 ends in a split logs the split too:
