@@ -7,7 +7,6 @@
 // being deleted with its old shell.
 
 import { useState, type ChangeEvent } from "react";
-import { useNameDraft } from "../../lib/use-name-draft";
 import { TrashIcon, CopyIcon, PanelTopIcon, PanelTopDashedIcon } from "lucide-react";
 import { errorMessage } from "@main/services/errors";
 import { cn } from "../../lib/cn";
@@ -24,6 +23,7 @@ import {
   toast,
 } from "../../components/ui";
 import { invoke } from "../../lib/api";
+import { useNameDraft } from "../../lib/use-name-draft";
 import { useServiceCueLayouts } from "../../lib/use-servicecue-layouts";
 import type { SectionProps } from "../types";
 import { LayoutEditor } from "../../editor/layout-editor";
