@@ -241,10 +241,11 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
   protected currentKey: string | null = null;
   /** Last live-item tick, for measuring the gap between services. */
   protected lastLiveAt = 0;
-  /** Last tick that saw the service NOT running (Planning Center left item
-   *  mode, or sat past SERVICE END). Later than the last running tick means the
-   *  service stopped, which silence alone (no ticks at all) does not. */
-  private lastStoppedAt = 0;
+  /** The first tick that saw the service NOT running (Planning Center left
+   *  item mode, or sat past SERVICE END) after the last running tick, or an
+   *  older stop. Later than the last running tick means the service stopped
+   *  there, which silence alone (no ticks at all) does not. */
+  private stoppedAt = 0;
   /** Re-entrancy latch: the poller fires every tick and onLiveTick awaits I/O. */
   protected busy = false;
   private dirty = false;
@@ -438,7 +439,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     const now = Date.now();
     const gap = this.lastLiveAt === 0 ? Infinity : now - this.lastLiveAt;
     if (running) this.lastLiveAt = now;
-    else this.lastStoppedAt = now;
+    else if (this.stoppedAt <= this.lastLiveAt) this.stoppedAt = now;
     return gap;
   }
 
@@ -621,13 +622,21 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     // opening item's line below gives.
     const lastRanMs = Date.now() - gapSinceLive;
     const ran = Number.isFinite(gapSinceLive);
-    const stopped = this.current?.endedAt != null || this.lastStoppedAt > lastRanMs;
+    const stopped = this.current?.endedAt != null || this.stoppedAt > lastRanMs;
     const endedLongEnough = ran && stopped && gapSinceLive >= SERVICE_GAP_MS;
     const airedSinceItRan = live.currentItemId != null && itemLiveSinceMs(live) > lastRanMs;
+    const ended = this.current?.serviceKey ?? "the open record";
     if (hold && endedLongEnough && airedSinceItRan) {
-      const ended = this.current?.serviceKey ?? "the open record";
       console.log(
         `[service-recorder] ${this.label}: "${scrub(live.label ?? live.currentItemTitle ?? live.currentItemId ?? "")}" went live after the service in ${ended} stopped, ${Math.round(untilMs / 60_000)} min before service time ${serviceTimeId} — the next service's, closing ${ended} and opening a new record`,
+      );
+      return false;
+    }
+    // No item at all (attendance on the next service's arrival ramp): the
+    // stopped service has had its gap, so this is the next one's ramp.
+    if (hold && endedLongEnough && live.currentItemId == null) {
+      console.log(
+        `[service-recorder] ${this.label}: the service in ${ended} stopped ${Math.round(gapSinceLive / 60_000)} min ago, and service time ${serviceTimeId} starts in ${Math.round(untilMs / 60_000)} min — its arrivals are the next service's, closing ${ended} and opening a new record`,
       );
       return false;
     }
@@ -766,9 +775,13 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     this.forgotten.clear();
 
     // Key changed → finalize + persist the outgoing record, then publish it on
-    // this recorder's own channel — see publishClosed's doc above.
+    // this recorder's own channel — see publishClosed's doc above. Closed where
+    // the service stopped, when a tick saw it stop after it last ran: attendance
+    // can hold a record open on the arrival ramp after Planning Center left the
+    // service, and the split that ends that hold comes later.
     if (this.current) {
-      this.finalizeRecord();
+      const stoppedSinceItRan = Number.isFinite(gapSinceLive) && this.stoppedAt > Date.now() - gapSinceLive;
+      this.finalizeRecord(stoppedSinceItRan ? new Date(this.stoppedAt).toISOString() : undefined);
       const outgoing = this.current;
       await this.saveClosed(outgoing);
       if (gen !== this.generation) return; // forgotten while we waited

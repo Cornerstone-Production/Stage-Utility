@@ -69,7 +69,11 @@ before the next service) belongs to the next service and opens its record, even
 though that service is still more than ten minutes away. The finished service is
 reopened only within those ten minutes, or by the item it stopped on coming back
 on the same airing. Ticks that stop altogether, as in a Planning Center outage,
-are not taken for the service ending.
+are not taken for the service ending. Attendance follows the same rule with no
+item at all: after Planning Center leaves a service inside the next one's arrival
+window, the finished record is held for ten minutes in case the service comes
+back, then closed at the moment Planning Center left it, and the arrivals go to
+the next service's record.
 
 Each decision is logged once, whichever way it goes, and a hold that later
 ends in a split logs the split too:
@@ -79,6 +83,7 @@ ends in a split logs the split too:
 [service-recorder] service-timeline-recorder: service time 1001 → 1002 starts in 10 min, closing 100:200:1001 and opening a new record
 [service-recorder] attendance-recorder: service time 1001 → 1002 began at 11:00:00, closing 100:200:1001 and opening a new record
 [service-recorder] spl-recorder: "Walk-in loop" went live after the service in 100:200:1001 stopped, 40 min before service time 1002 — the next service's, closing 100:200:1001 and opening a new record
+[service-recorder] attendance-recorder: the service in 100:200:1001 stopped 10 min ago, and service time 1002 starts in 40 min — its arrivals are the next service's, closing 100:200:1001 and opening a new record
 ```
 
 The clock is not the only thing that can end a hold. While held, the item the
