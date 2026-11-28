@@ -73,6 +73,35 @@ function bootShell(installer: string, tool: "nc" | "socat"): Boot {
   return { probes: read("probes"), sleeps: read("sleeps") };
 }
 
+/** One boot of the Windows launcher's loop, with Send-Probe and Start-Sleep replaced. */
+function bootWindows(): Boot {
+  const dir = fs.mkdtempSync(path.join(TMP, "boot-"));
+  const launcher = text("scripts/kiosk/kiosk-windows.ps1").split("\n");
+  const from = launcher.findIndex((l) => l.startsWith("function Find-Server"));
+  const to = launcher.findIndex((l, i) => i > from && l.startsWith("$target ="));
+  assert.ok(from >= 0 && to > from, "kiosk-windows.ps1: no discovery loop found");
+  const stub = [
+    `$boundFile = '${dir}/bound-to'; $serverFile = '${dir}/server'; $id = 'dev-1'`,
+    "function Get-MacAddress { @() }",
+    "function Select-Reply($r, $b) { $r | Select-Object -First 1 }",
+    "function Save-Binding($r, $b) { $false }",
+    `function Start-Sleep { param($Seconds) Add-Content '${dir}/sleeps' $Seconds }`,
+    "$script:n = 0",
+    "function Send-Probe($probe) {",
+    `  Add-Content '${dir}/probes' $probe`,
+    "  $script:n++",
+    `  if ($script:n -ge ${ANSWERED_ON}) { '${REPLY}' }`,
+    "}",
+  ].join("\n");
+  fs.writeFileSync(path.join(dir, "bound-to"), "srv-a");
+  const script = path.join(dir, "loop.ps1");
+  fs.writeFileSync(script, `${stub}\n${launcher.slice(from, to).join("\n")}\n`);
+  const run = spawnSync("pwsh", ["-NoProfile", "-File", script], { encoding: "utf8", timeout: 60_000 });
+  assert.equal(run.status, 0, run.stderr || run.stdout);
+  const read = (f: string) => (fs.existsSync(path.join(dir, f)) ? fs.readFileSync(path.join(dir, f), "utf8").trim().split("\n") : []);
+  return { probes: read("probes"), sleeps: read("sleeps") };
+}
+
 /** Probe n (1-based) carries the flag from the 32nd, after thirty unanswered. */
 const EXPECTED_FLAGS = Array.from({ length: ANSWERED_ON }, (_, i) => i + 1 > 31);
 /** Sleep after unanswered probe n: 2 s for the first nine, 30 s after. */
@@ -96,3 +125,16 @@ for (const [installer, tool] of [["install-linux.sh", "socat"], ["install-macos.
     });
   });
 }
+
+describe("the kiosk-windows.ps1 discovery loop", { skip: spawnSync("sh", ["-c", "command -v pwsh"]).status !== 0 && "pwsh is not installed" }, () => {
+  const boot = bootWindows();
+
+  it("sends unreachable from the 32nd probe, after thirty unanswered, and not before", () => {
+    assert.equal(boot.probes.length, ANSWERED_ON);
+    assert.deepEqual(boot.probes.map((p) => p.includes('"unreachable":true')), EXPECTED_FLAGS);
+  });
+
+  it("waits 2 s between the first nine unanswered probes, then 30 s", () => {
+    assert.deepEqual(boot.sleeps, EXPECTED_SLEEPS);
+  });
+});
