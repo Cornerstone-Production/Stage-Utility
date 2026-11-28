@@ -110,6 +110,7 @@ const React = (await import("react")).default;
 const { act } = await import("react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { PublishCard, PendingLinksCard, shortSecret } = await import("./stageplots-publish-card.js");
+const { PUBLISH_QUERY_KEY } = await import("./servicecue-publish-query.js");
 const { ConfirmHost } = await import("../../components/ui/confirm-dialog.js");
 const { setDisplayHourCycle } = await import("../../lib/clock-format.js");
 
@@ -136,7 +137,7 @@ async function mount() {
     ({ rerender } = render(view()));
   });
   for (let i = 0; i < 3; i++) await settle();
-  return { refresh: async () => act(async () => rerender(view())) };
+  return { client, refresh: async () => act(async () => rerender(view())) };
 }
 
 async function click(el: Element) {
@@ -193,6 +194,20 @@ describe("the Publish card, off", () => {
     assert.equal((screen.getByRole("button", { name: "Publish Room One" }) as HTMLButtonElement).disabled, true);
     assert.match(text(), /Set up the public link first, in Settings > Advanced > Public link\./);
     assert.equal(screen.getByRole("link", { name: "Settings > Advanced > Public link" }).getAttribute("href"), "/settings/advanced/public-link");
+  });
+});
+
+describe("the Public link settings, read once", () => {
+  test("a change the Public link card writes reaches the card without waiting out a stale window", async () => {
+    SETTINGS = { url: "", token: "" };
+    const m = await mount();
+    assert.match(text(), /Set up the public link first/);
+    // What the Public link card does on every save: setQueryData under its one key.
+    await act(async () => {
+      m.client.setQueryData(PUBLISH_QUERY_KEY, { enabled: false, url: ORIGIN, token: "••••" });
+    });
+    for (let i = 0; i < 3; i++) await settle();
+    assert.doesNotMatch(text(), /Set up the public link first/);
   });
 });
 

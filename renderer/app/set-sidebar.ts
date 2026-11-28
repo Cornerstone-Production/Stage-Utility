@@ -9,6 +9,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { EMPTY_SIDEBAR, type SidebarArrangement } from "@main/services/sidebar-arrangement";
 
 import { invoke } from "../lib/api";
+import { QUERY_KEYS } from "./queries";
 import { revisionOf, type Revised, type SavedListIo } from "./use-saved-list";
 
 const arrangementOf = (state: StageState): SidebarArrangement[] => [state.sidebar ?? EMPTY_SIDEBAR];
@@ -22,12 +23,12 @@ export function sidebarListIo(queryClient: QueryClient): SavedListIo<SidebarArra
   return {
     save: async ([arrangement]) => {
       const next = await invoke<StageState>("sidebar:set", { ...arrangement });
-      queryClient.setQueryData(["stage:getState"], next);
+      queryClient.setQueryData(QUERY_KEYS.stageState, next);
       return answerOf(next);
     },
     read: async () => {
       const next = await invoke<StageState>("stage:getState");
-      queryClient.setQueryData(["stage:getState"], next);
+      queryClient.setQueryData(QUERY_KEYS.stageState, next);
       return answerOf(next);
     },
   };

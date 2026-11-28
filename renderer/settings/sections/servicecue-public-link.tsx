@@ -35,7 +35,9 @@ import { useInAppLink } from "../../lib/use-search-param";
 import { docsPageUrl } from "../../lib/docs-url";
 import { cn } from "../../lib/cn";
 import { useFailedReads } from "../../lib/use-failed-reads";
+import { useNow } from "../../lib/use-now";
 import { ConnectionField } from "./connection-field";
+import { PUBLISH_QUERY_KEY, usePublishQuery } from "./servicecue-publish-query";
 import { selectMask, tokenReason, typedTokenOf } from "./servicecue-token";
 import { KeepPageUpToDate, Note } from "./servicecue-deploy-section";
 import { advancedTabPath } from "./advanced-settings";
@@ -49,8 +51,6 @@ import type {
 
 /** How often the card asks how it is going while the page is open. */
 const POLL_MS = 5_000;
-
-const QUERY_KEY = ["servicecue:getPublish"] as const;
 
 /** Where Planning Center's credentials are set. */
 const INTEGRATIONS_ROUTE = "/settings/integrations";
@@ -191,17 +191,6 @@ function viewOf(dto: PublishSettingsDTO | undefined): View {
   return dto.status.sourceProblem ? "source" : "publishing";
 }
 
-/** The publishing settings and how it is going, read every `pollMs` while anything
- *  that shows them is mounted. One cache entry, so the card and its row's summary make
- *  one request between them. */
-function usePublishQuery(pollMs: number) {
-  return useQuery({
-    queryKey: QUERY_KEY,
-    queryFn: () => invoke<PublishSettingsDTO>("servicecue:getPublish"),
-    refetchInterval: pollMs,
-  });
-}
-
 /**
  * The card's state in its pill's word, for a summary drawn while the card is shut.
  * Polled like the card, so a shut row still says when publishing stops reaching the page.
@@ -339,7 +328,7 @@ export function PublicLinkCard({
   const branch = useUpdateStatus().data?.branch ?? null;
   // The clock now. The age is read off the SERVER's stamps and the browser's own time
   // since the answer arrived, so a browser whose clock is wrong still says how long ago.
-  const [clock, setClock] = useState(() => Date.now());
+  const clock = useNow(1_000);
   // What the operator has typed. null follows the server, so a value read back is
   // what shows until something is typed over it.
   const [addrDraft, setAddrDraft] = useState<string | null>(null);
@@ -361,11 +350,6 @@ export function PublicLinkCard({
     if (readError) fail("publish", "the ServiceCue public link settings", readError);
     else clear("publish");
   }, [readError, fail, clear]);
-
-  useEffect(() => {
-    const tick = setInterval(() => setClock(Date.now()), 1_000);
-    return () => clearInterval(tick);
-  }, []);
 
   const { state: copyState, copy: copyLink } = useCopyFeedback();
   const copied = copyState === "copied";
@@ -399,7 +383,7 @@ export function PublicLinkCard({
 
   /** An answer from a write: newer than any read, so it replaces what was read, and the drafts it settled are dropped. */
   function adopt(next: PublishSettingsDTO) {
-    queryClient.setQueryData(QUERY_KEY, next);
+    queryClient.setQueryData(PUBLISH_QUERY_KEY, next);
     setAddrDraft(null);
     setTokDraft(null);
     setDropped(next.dropped && !next.dropped.ok ? next.dropped.message : null);
@@ -432,7 +416,7 @@ export function PublicLinkCard({
     setDropped(null);
     setDeployRemoved(false);
     // A poll that lands in the middle of a write would put back what the write is changing.
-    await queryClient.cancelQueries({ queryKey: QUERY_KEY });
+    await queryClient.cancelQueries({ queryKey: PUBLISH_QUERY_KEY });
     try {
       await action();
     } catch (err) {
@@ -687,9 +671,9 @@ export function PublicLinkCard({
               readAt={dataUpdatedAt}
               guideHref={`${docsPageUrl("ops/servicecue-on-the-web", branch)}#keeping-it-up-to-date`}
               cache={{
-                quiet: () => queryClient.cancelQueries({ queryKey: QUERY_KEY }),
-                setSettings: (next) => queryClient.setQueryData(QUERY_KEY, next),
-                setDeploy: (deploy) => queryClient.setQueryData<PublishSettingsDTO>(QUERY_KEY, (old) => (old ? { ...old, deploy } : old)),
+                quiet: () => queryClient.cancelQueries({ queryKey: PUBLISH_QUERY_KEY }),
+                setSettings: (next) => queryClient.setQueryData(PUBLISH_QUERY_KEY, next),
+                setDeploy: (deploy) => queryClient.setQueryData<PublishSettingsDTO>(PUBLISH_QUERY_KEY, (old) => (old ? { ...old, deploy } : old)),
               }}
             />
           )}

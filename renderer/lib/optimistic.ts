@@ -29,7 +29,7 @@ import { toast } from "../components/ui";
  */
 export async function writeOptimistic<T>(
   queryClient: QueryClient,
-  key: string[],
+  key: readonly string[],
   optimistic: (current: T) => T,
   send: () => Promise<T>,
   fail?: string,
@@ -59,7 +59,7 @@ export async function writeOptimistic<T>(
  */
 export async function writeTo<T>(
   queryClient: QueryClient,
-  key: string[],
+  key: readonly string[],
   send: () => Promise<T>,
   opts: { fail?: string; ok?: string } = {},
 ): Promise<T | null> {

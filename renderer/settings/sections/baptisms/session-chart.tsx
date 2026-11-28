@@ -29,6 +29,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { chartWidth, useElementSize } from "../../../lib/use-element-size";
+
 import type { BaptismSpan } from "@main/services/archive/baptism-lane";
 import { errorMessage } from "@main/services/errors";
 
@@ -306,29 +308,19 @@ export function HistorySessionChart({ serviceKey, sessions, items }: HistorySess
   const measure = useMemo(() => makeTextMeasurer(LANE_FONT), []);
 
   const hostRef = useRef<HTMLDivElement>(null);
-  const [width, setWidth] = useState(640);
   // THE REF GOES ON CONTENT THAT IS ALWAYS RENDERED — see history-chart.tsx's
   // own "THE REF GOES ON BOTH BRANCHES" note for the identical bug. This
-  // effect runs ONCE, on mount, before useSessionLane's fetch — which never
+  // measuring hook (useElementSize) reads the host ONCE, on mount, before useSessionLane's fetch — which never
   // resolves synchronously — has any chance to flip `loaded` true. An early
   // `return null` above this div meant the FIRST render had no element for
   // the ref to find at all: the effect fired once against
-  // `hostRef.current === null`, attached to nothing, and (deps `[]`) never
+  // `hostRef.current === null`, attached to nothing, and (its dep is the ref) never
   // ran again once the real content finally existed — the chart was stuck at
   // its 640px default for the rest of the page's life, regardless of the
   // card's own real width. The `!loaded` gate now lives INSIDE the div,
   // around the children alone, so this div — and the ref on it — exists from
   // the very first render.
-  useEffect(() => {
-    const el = hostRef.current;
-    if (!el || typeof ResizeObserver !== "function") return;
-    const ro = new ResizeObserver(() => {
-      const w = el.clientWidth;
-      if (w > 0) setWidth(Math.max(320, Math.round(w)));
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+  const width = chartWidth(useElementSize(hostRef).w);
 
   const multiple = sessions.length > 1;
 
@@ -418,9 +410,8 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
 
   const hostRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
-  const [width, setWidth] = useState(640);
   // THE REF GOES ON THE ALWAYS-RENDERED CONTENT DIV BELOW, not on SessionSvg's
-  // own wrapper. This effect runs once, on mount, and returns early when the
+  // own wrapper. The measuring hook (useElementSize) runs once, on mount, and returns early when the
   // host is not there — but while the lane is still loading, none of the three
   // branches below render SessionSvg at all, so a ref that only existed on
   // SessionSvg's own div was never there yet when this ran, and — deps being
@@ -429,17 +420,8 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
   // letterboxed in its card, for the rest of the page's life.
   // history-chart.tsx hit the identical bug the same way and fixed it the
   // same way; see its own "THE REF GOES ON BOTH BRANCHES" note.
-  useEffect(() => {
-    const el = hostRef.current;
-    if (!el || typeof ResizeObserver !== "function") return;
-    const ro = new ResizeObserver(() => {
-      const w = el.clientWidth;
-      // jsdom reports 0 for every box; keep the default rather than collapsing.
-      if (w > 0) setWidth(Math.max(320, Math.round(w)));
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+  // jsdom reports 0 for every box; keep the default rather than collapsing.
+  const width = chartWidth(useElementSize(hostRef).w);
 
   const measure = useMemo(() => makeTextMeasurer(LANE_FONT), []);
   // The window is THIS session's own start/finish, never derived from spans

@@ -7,6 +7,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 
 import { invoke } from "../lib/api";
+import { QUERY_KEYS } from "./queries";
 import { writeOptimistic } from "../lib/optimistic";
 
 /** Optimistic: the server refuses only an id that does not exist, and a switch
@@ -14,7 +15,7 @@ import { writeOptimistic } from "../lib/optimistic";
 export async function setViewShowInSidebar(queryClient: QueryClient, id: string, showInSidebar: boolean): Promise<boolean> {
   const next = await writeOptimistic<StageState>(
     queryClient,
-    ["stage:getState"],
+    QUERY_KEYS.stageState,
     (cur) => ({ ...cur, views: cur.views.map((v) => (v.id === id ? { ...v, showInSidebar } : v)) }),
     () => invoke<StageState>("views:setShowInSidebar", { id, showInSidebar }),
     "Failed to change whether the console is listed in the sidebar",

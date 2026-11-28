@@ -25,6 +25,7 @@ import { cn } from "../../../lib/cn";
 import { prefersReducedMotion } from "../../../lib/reduced-motion";
 import { formatClock } from "../../../lib/clock-format";
 import { useServerNow } from "../../../lib/server-clock";
+import { chartWidth, useElementSize } from "../../../lib/use-element-size";
 import { fmtDur } from "../overview-data";
 import {
   areaPathD,
@@ -194,7 +195,6 @@ export function HistoryChart({
   const uid = useId().replace(/[^a-zA-Z0-9-]/g, "");
   const hostRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
-  const [width, setWidth] = useState(640);
   const [hoverX, setHoverX] = useState<number | null>(null);
   const [hoverRow, setHoverRow] = useState<"plot" | "pre" | "service" | null>(null);
   /** Which milestone the pointer is on, if any. Its own state rather than part
@@ -213,18 +213,8 @@ export function HistoryChart({
   // directly against a segment's width in plot units. With a fixed viewBox the
   // two differ by the scale factor and the label rule silently drifts with the
   // window size.
-  useEffect(() => {
-    const el = hostRef.current;
-    if (!el || typeof ResizeObserver !== "function") return;
-    const ro = new ResizeObserver(() => {
-      const w = el.clientWidth;
-      // jsdom reports 0 for every box; keep the default rather than collapsing
-      // the chart to nothing.
-      if (w > 0) setWidth(Math.max(320, Math.round(w)));
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
+  // jsdom reports 0 for every box; keep the default rather than collapsing the chart to nothing.
+  const width = chartWidth(useElementSize(hostRef).w);
 
   const narrow = width < NARROW_PX;
   const reduced = prefersReducedMotion();
@@ -586,7 +576,7 @@ export function HistoryChart({
     return (
       // THE REF GOES ON BOTH BRANCHES.
       //
-      // The width effect runs once, on mount, and returns early when the host
+      // The width measurement (useElementSize) runs once, on mount, and returns early when the host
       // is not there. This branch used to render without the ref, so a section
       // whose data arrives AFTER the first paint — the sound chart, which fetches
       // its series — mounted empty, the observer was never attached, and the

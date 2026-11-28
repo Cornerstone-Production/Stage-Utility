@@ -116,7 +116,7 @@ export function useStageSettings(pinnedViewId?: string) {
    * lists are eight more copies of this body against their own caches.
    */
   async function writeTo<T>(
-    key: string[],
+    key: readonly string[],
     channel: IpcChannel,
     payload?: Record<string, unknown>,
     opts: { fail?: string; ok?: string } = {},
@@ -134,7 +134,7 @@ export function useStageSettings(pinnedViewId?: string) {
    *  It is a read at the moment of the click, not a promise about what the
    *  server holds when the write lands. handleSetViewSurface sends the screens it
    *  asked about with its write, so the server can refuse when they are stale. */
-  const stateNow = () => queryClient.getQueryData<StageState>(["stage:getState"]);
+  const stateNow = () => queryClient.getQueryData<StageState>(QUERY_KEYS.stageState);
 
   /** The same, for the writes that return a fresh StageState. */
   async function writeState(
@@ -142,12 +142,12 @@ export function useStageSettings(pinnedViewId?: string) {
     payload?: Record<string, unknown>,
     opts: { fail?: string; ok?: string } = {},
   ): Promise<boolean> {
-    return (await writeTo<StageState>(["stage:getState"], channel, payload, opts)) != null;
+    return (await writeTo<StageState>(QUERY_KEYS.stageState, channel, payload, opts)) != null;
   }
 
   /** The shared optimistic write, with this hook's queryClient bound in. */
   const optimistic = <T,>(
-    key: string[],
+    key: readonly string[],
     project: (current: T) => T,
     send: () => Promise<T>,
     fail?: string,
@@ -210,11 +210,7 @@ export function useStageSettings(pinnedViewId?: string) {
   async function handleRefresh() {
     setIsRefreshing(true);
     try {
-      const next = await ipc<StageState>("stage:refresh");
-      queryClient.setQueryData(["stage:getState"], next);
-      toast.success("Refreshed from Planning Center.");
-    } catch (err) {
-      toast.error(`Refresh failed: ${errorMessage(err)}`);
+      await writeState("stage:refresh", undefined, { fail: "Refresh failed", ok: "Refreshed from Planning Center." });
     } finally {
       setIsRefreshing(false);
     }
@@ -319,17 +315,12 @@ export function useStageSettings(pinnedViewId?: string) {
     kind: ViewKind,
     surface: "display" | "console" = "display",
   ): Promise<string | null> {
-    try {
-      const next = await ipc<StageState>("views:add", { name, kind, surface });
-      queryClient.setQueryData(["stage:getState"], next);
-      // Select the newly-created view (last in the list).
-      const created = next.views?.[next.views.length - 1];
-      if (created) setSelectedViewId(created.id);
-      return created?.id ?? null;
-    } catch (err) {
-      toast.error(`Failed to add view: ${errorMessage(err)}`);
-      return null;
-    }
+    const next = await writeTo<StageState>(QUERY_KEYS.stageState, "views:add", { name, kind, surface }, { fail: "Failed to add view" });
+    if (!next) return null;
+    // Select the newly-created view (last in the list).
+    const created = next.views?.[next.views.length - 1];
+    if (created) setSelectedViewId(created.id);
+    return created?.id ?? null;
   }
 
   async function handleRenameView(id: string, name: string) {
@@ -347,7 +338,7 @@ export function useStageSettings(pinnedViewId?: string) {
     try {
       // The answer is the state and the id of the copy this call made.
       const { viewId, ...next } = await ipc<StageState & { viewId?: string }>("views:duplicate", { id, ...how });
-      queryClient.setQueryData(["stage:getState"], next);
+      queryClient.setQueryData(QUERY_KEYS.stageState, next);
       if (viewId) setSelectedViewId(viewId);
       toast.success("View duplicated.");
       return viewId ?? null;
@@ -364,7 +355,7 @@ export function useStageSettings(pinnedViewId?: string) {
   async function handleRemoveView(id: string, opts: { ifUnshown?: boolean } = {}): Promise<RemoveViewOutcome> {
     try {
       const next = await ipc<StageState>("views:remove", { id, ...(opts.ifUnshown ? { ifUnshown: true } : {}) });
-      queryClient.setQueryData(["stage:getState"], next);
+      queryClient.setQueryData(QUERY_KEYS.stageState, next);
       return { removed: true };
     } catch (err) {
       const e = err as ApiError;
@@ -390,7 +381,7 @@ export function useStageSettings(pinnedViewId?: string) {
   ): Promise<{ rev: number; discarded: boolean }> {
     try {
       const next = await ipc<StageState>("views:setLayout", { id, layout, layoutRev });
-      queryClient.setQueryData(["stage:getState"], next);
+      queryClient.setQueryData(QUERY_KEYS.stageState, next);
       return { rev: revOf(next, id), discarded: false };
     } catch (err) {
       // 409: someone else saved this view since this editor opened it. Neither
@@ -408,15 +399,15 @@ export function useStageSettings(pinnedViewId?: string) {
           // No layoutRev = save unconditionally. Deliberate, and only reachable
           // from the dialog above.
           const next = await ipc<StageState>("views:setLayout", { id, layout });
-          queryClient.setQueryData(["stage:getState"], next);
+          queryClient.setQueryData(QUERY_KEYS.stageState, next);
           toast.success("Layout saved, replacing the other version.");
           return { rev: revOf(next, id), discarded: false };
         }
-        await queryClient.invalidateQueries({ queryKey: ["stage:getState"] });
+        await queryClient.invalidateQueries({ queryKey: QUERY_KEYS.stageState });
         toast.success("Loaded their version. Your changes were discarded.");
         // Not an error to the caller — a chosen outcome. `discarded` tells the
         // editor to restart on the layout it just pulled.
-        return { rev: revOf(queryClient.getQueryData<StageState>(["stage:getState"]), id), discarded: true };
+        return { rev: revOf(queryClient.getQueryData<StageState>(QUERY_KEYS.stageState), id), discarded: true };
       }
       toast.error(`Failed to save layout: ${errorMessage(err)}`);
       throw err;
@@ -469,7 +460,7 @@ export function useStageSettings(pinnedViewId?: string) {
     try {
       // The answer is the state and the id of the screen this call made.
       const { outputId, ...next } = await ipc<StageState & { outputId?: string }>("outputs:add", { ...input });
-      queryClient.setQueryData(["stage:getState"], next);
+      queryClient.setQueryData(QUERY_KEYS.stageState, next);
       return { refused: null, outputId: outputId ?? null };
     } catch (err) {
       return createRefusal(err);
@@ -510,7 +501,7 @@ export function useStageSettings(pinnedViewId?: string) {
     alsoSent: Record<string, unknown> = {},
   ): Promise<unknown> {
     return optimistic<StageState>(
-      ["stage:getState"],
+      QUERY_KEYS.stageState,
       (cur) => ({ ...cur, outputs: patchOutput(cur.outputs, id, patch) }),
       () => ipc<StageState>(channel, { id, ...patch, ...alsoSent }),
       fail,
@@ -589,7 +580,7 @@ export function useStageSettings(pinnedViewId?: string) {
         surface,
         ask: confirm,
         send: async (screens) => {
-          queryClient.setQueryData(["stage:getState"], await ipc<StageState>("views:setRole", { id, surface, screens }));
+          queryClient.setQueryData(QUERY_KEYS.stageState, await ipc<StageState>("views:setRole", { id, surface, screens }));
         },
       });
     } catch (err) {
@@ -604,7 +595,7 @@ export function useStageSettings(pinnedViewId?: string) {
 
   async function handleReorderOutputs(ids: string[]) {
     await optimistic<StageState>(
-      ["stage:getState"],
+      QUERY_KEYS.stageState,
       (cur) => ({ ...cur, outputs: reorderById(cur.outputs, ids) }),
       () => ipc<StageState>("outputs:reorder", { ids }),
       "Failed to reorder displays",

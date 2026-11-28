@@ -186,6 +186,7 @@ describe("what is in the bundle", () => {
       // The stage plots page's pan and zoom.
       "renderer/lib/use-latest-ref.ts",
       "renderer/lib/use-media-query.ts",
+      "renderer/lib/use-now.ts",
       "renderer/lib/use-resync-on.ts",
       "renderer/lib/use-search-param.ts",
       "renderer/lib/use-theme.ts",
