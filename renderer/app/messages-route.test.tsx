@@ -10,18 +10,6 @@ import { ok, reply, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
 
-// The page's state hooks open the event stream; a real one keeps the process alive.
-class StubEventSource {
-  static readonly CONNECTING = 0;
-  readyState = 0;
-  onmessage: unknown = null;
-  onerror: unknown = null;
-  addEventListener(): void {}
-  removeEventListener(): void {}
-  close(): void {}
-}
-(globalThis as unknown as { EventSource: unknown }).EventSource = StubEventSource;
-
 const { render, screen, cleanup } = await import("@testing-library/react");
 const React = await import("react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");

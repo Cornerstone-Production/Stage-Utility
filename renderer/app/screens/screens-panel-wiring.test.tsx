@@ -26,17 +26,6 @@ import { ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
 
-class StubEventSource {
-  static readonly CONNECTING = 0;
-  readyState = 0;
-  onmessage: unknown = null;
-  onerror: unknown = null;
-  addEventListener(): void {}
-  removeEventListener(): void {}
-  close(): void {}
-}
-(globalThis as unknown as { EventSource: unknown }).EventSource = StubEventSource;
-
 const { render, screen, cleanup, fireEvent, act, within } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
