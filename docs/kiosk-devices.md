@@ -596,12 +596,12 @@ outage would be worse than a dark one — but other servers can show it as *boun
 elsewhere* behind an explicit force-claim, so recovering from a decommissioned
 server does not need SSH.
 
-A device marks its probe `unreachable` once its own server has not answered 30
-probes in a row, which is what makes other servers list it. Every agent (Pi and
+A device marks its probe `unreachable` once its own server has left more than 30
+probes unanswered, which is what makes other servers list it. Every agent (Pi and
 Linux, macOS, Windows, and the Mac output helper) probes every 2 s for ten
-unanswered probes, then every 30 s, and sets the flag from the 32nd. A macOS or
-Windows kiosk installed before 1.29.1 never sent it; re-run its installer to
-make it appear on other servers.
+unanswered probes, then every 30 s, and sets the flag from the 32nd. An older macOS shell
+agent never sent it, and an older Windows one fetches the new launcher on its own
+update; re-run a Mac kiosk's installer to make it appear on other servers.
 
 ## Two servers with one id
 

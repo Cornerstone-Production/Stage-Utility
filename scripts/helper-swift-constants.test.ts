@@ -60,13 +60,13 @@ describe("the helper's copies of the server's values", () => {
   }
 });
 
-describe("more of the helper's copies", () => {
+describe("the helper's last copies of server caps", () => {
   it("HealthPost.maxLatencyMs is MAX_LATENCY_MS in output-health.ts", () => {
     assert.equal(swiftNumber(read("Health.swift"), "maxLatencyMs"), MAX_LATENCY_MS);
   });
 
   it("Reply.swift takes its address cap from Probe.maxURL, not a literal", () => {
-    assert.match(read("Reply.swift"), /nonEmpty\(obj\["url"\], max: Probe\.maxURL, truncate: false\)/);
+    assert.match(read("Reply.swift"), /^[ \t]*let url = nonEmpty\(obj\["url"\], max: Probe\.maxURL, truncate: false\),$/m);
   });
 });
 
@@ -79,7 +79,9 @@ describe("the helper's log level", () => {
   };
 
   it("DeckLinkKit and the app both log decisions at .notice, which the OS persists, not .info", () => {
-    assert.equal(level("DeckLinkKit/DeckLinkLog.swift", /case \.info: logger\.(\w+)\(/), "notice");
-    assert.equal(level("StageUtilityOutput/Log.swift", /loggers\[category\]\?\.(\w+)\(/m), "notice");
+    assert.equal(level("DeckLinkKit/DeckLinkLog.swift", /^[ \t]*case \.info: logger\.(\w+)\(/m), "notice");
+    const app = fs.readFileSync(path.join(SOURCES, "StageUtilityOutput/Log.swift"), "utf8");
+    const levels = [...app.matchAll(/^[ \t]*loggers\[category\]\?\.(\w+)\(/gm)].map((m) => m[1]).sort();
+    assert.deepEqual(levels, ["error", "notice"]);
   });
 });

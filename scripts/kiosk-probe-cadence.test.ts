@@ -168,6 +168,6 @@ describe("the helper's copy of the probe cadence (Schedule.swift)", () => {
   }
 
   it("interval() reads its two rates and its count from those constants, not from literals", () => {
-    assert.match(swift, /return unanswered < fastProbes \? fastInterval : slowInterval/);
+    assert.match(swift, /^[ \t]*return unanswered < fastProbes \? fastInterval : slowInterval$/m);
   });
 });
