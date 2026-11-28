@@ -4,6 +4,7 @@
 // tested against plain objects rather than through the route.
 
 import { DEFAULT_VIDEO_PORTS, type VideoPorts } from "../../types/video.js";
+import { isRecord } from "../../types/is-record.js";
 
 /** Every key VideoPorts declares, in the order the config and the Advanced
  *  page's two groups read it: the LAN inputs, then the loopback-only listeners.
@@ -22,7 +23,7 @@ export type ParsedPorts = { ok: true; ports: VideoPorts } | { ok: false; error: 
  *  invite two of them to collide before a real bind(). A body without `rtsp` (a
  *  file or page from before it existed) keeps `current`'s. */
 export function parsePorts(body: unknown, current: VideoPorts = DEFAULT_VIDEO_PORTS): ParsedPorts {
-  const obj = { rtsp: current.rtsp, ...(typeof body === "object" && body !== null ? body : {}) } as Record<string, unknown>;
+  const obj = { rtsp: current.rtsp, ...(isRecord(body) ? body : {}) } as Record<string, unknown>;
   const ports = {} as VideoPorts;
   for (const key of PORT_KEYS) {
     const v = obj[key];

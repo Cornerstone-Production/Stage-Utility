@@ -29,7 +29,7 @@ import {
   moveTo,
   newLayout,
   noticeText,
-  unassignedByType,
+  noticeGroups as noticeGroupsOf,
   reorderLayouts,
   type ColumnChange,
   type Rich,
@@ -528,7 +528,7 @@ export function ServiceCueSection() {
 
   const layoutIds = sortedLayouts.map((l) => l.id);
   // Categories on the landing page's types that no role has, by type, for the notice.
-  const noticeGroups = unassignedByType(roles, shownIds, catsByType).map((g) => ({ typeName: typeName(g.typeId) ?? g.typeId, cats: g.cats }));
+  const noticeGroups = noticeGroupsOf(roles, shownIds, catsByType, (id) => typeName(id) ?? id);
 
   const noticeReadFailed = shownIds.filter((id) => failed.has(`cats:${id}`));
 

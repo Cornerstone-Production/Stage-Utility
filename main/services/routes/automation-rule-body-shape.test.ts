@@ -135,14 +135,14 @@ describe("a body that is not a JSON object", () => {
     test(`POST with ${label} is 400 and creates nothing`, async () => {
       const res = await post(body);
       assert.equal(res.status, 400);
-      assert.equal(errorOf(res), "body must be a JSON object");
+      assert.equal(errorOf(res), "the body must be a JSON object");
       assert.equal(automationEngine.listRules().length, 0);
     });
     test(`PATCH with ${label} is 400 and leaves the rule alone`, async () => {
       const made = await post(rule());
       const res = await patch((made.json as { id: string }).id, body);
       assert.equal(res.status, 400);
-      assert.equal(errorOf(res), "body must be a JSON object");
+      assert.equal(errorOf(res), "the body must be a JSON object");
     });
   }
 });

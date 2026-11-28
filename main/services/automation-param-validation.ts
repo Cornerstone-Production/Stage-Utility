@@ -28,6 +28,7 @@
 
 import type { ParamDef } from "../types/automation.js";
 import { plural } from "./plural.js";
+import { isRecord } from "../types/is-record.js";
 
 export interface ParamIssue {
   key: string;
@@ -93,8 +94,8 @@ function parseKeyValueRows(value: unknown): [string, string][] | null {
   if (raw === "") return [];
   try {
     const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
-    return Object.entries(parsed as Record<string, unknown>).map(([k, v]) => [k, String(v ?? "")]);
+    if (!isRecord(parsed)) return null;
+    return Object.entries(parsed).map(([k, v]) => [k, String(v ?? "")]);
   } catch {
     return null;
   }

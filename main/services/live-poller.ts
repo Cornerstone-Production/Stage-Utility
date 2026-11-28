@@ -2,8 +2,10 @@
 // the "pco:live" channel for the dashboard display.
 //
 // Adaptive cadence: 1s while a live item is running (so the countdown is smooth),
-// 4s for the pre-service countdown, 5 min outside a service window. On any error
-// we keep the last state and fall back to the idle cadence.
+// 4s for the pre-service countdown, 5 min outside a service window. On a
+// transient error we keep the last state and fall back to the idle cadence; after
+// an auth failure we ask every 5 minutes. The chain runs on a Ticker, so there is
+// only ever one, and nextDelayMs() is the whole delay table.
 //
 // This is the single largest PCO consumer in the app: at 1s it is about 20
 // requests per 20-second window on its own, roughly a fifth of PCO's DEFAULT
@@ -28,9 +30,10 @@ import { PcoAuthError, pcoService } from "./pco-service.js";
 import { RepeatLog } from "./repeat-log.js";
 import { serviceWindow } from "./service-window.js";
 import { stageController } from "./stage-controller.js";
+import { Ticker } from "./ticker.js";
 
 /** Fire-and-forget a per-tick side effect, naming it if it fails. */
-function tick(who: string, p: Promise<unknown>): void {
+function fireAndLog(who: string, p: Promise<unknown>): void {
   void p.catch((err) => console.error(`[live-poller] ${who} tick failed:`, err));
 }
 
@@ -89,38 +92,52 @@ function liveSignature(l: PcoLiveDTO): string {
 // fresh `serverNow`.
 const LIVE_KEEPALIVE_MS = 15_000;
 
+/**
+ * What one tick did, which is all the delay table needs to know. "superseded"
+ * is a tick whose read finished after a start() or stop(): it acts on nothing,
+ * and the Ticker does not re-arm it, because the generation moved.
+ */
+type LiveTick = "item" | "idle" | "failed" | "auth-failed" | "superseded";
+
 class LivePoller {
-  private timer: ReturnType<typeof setTimeout> | null = null;
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null;
   private running = false;
+  /** Bumped by start() and stop(). A tick that started under another one is
+   *  stale: see LiveTick's "superseded". */
+  private generation = 0;
   private lastSig: string | null = null;
   private lastBroadcastAt = 0;
   /** Collapses a repeating failure so one outage cannot evict the whole log. */
   private readonly errors = new RepeatLog("[live-poller] fetch error:");
+  /** The same, for a throw from the work done with a read that succeeded. */
+  private readonly actErrors = new RepeatLog("[live-poller] tick failed after the read:");
+  /** The one poll chain: see ticker.ts for why a second cannot start. */
+  private readonly ticker = new Ticker<LiveTick>({
+    tick: () => this.tick(),
+    nextDelayMs: (outcome) => this.nextDelayMs(outcome),
+    wanted: () => this.running,
+    generation: () => this.generation,
+  });
 
   /**
    * Begin polling, or bring the next tick forward if we are already polling.
    *
-   * The re-arm matters because an auth failure now backs off for minutes rather
-   * than stopping. `if (running) return` used to be harmless — a stood-down
-   * poller was not running, so start() always took effect — but with the backoff
-   * it would make integration-manager's post-credential-save start() a no-op,
-   * and the operator who just fixed their App ID would wait out the backoff
-   * wondering whether it had worked.
+   * Never a no-op: an auth failure backs off for minutes rather than stopping,
+   * so integration-manager's post-credential-save start() has to take effect
+   * at once, or the operator who just fixed their App ID would wait out the
+   * backoff wondering whether it had worked. A tick already awaiting fetchLive
+   * is superseded: the poller drops its read and it does not re-arm.
    */
   start(): void {
     const wasRunning = this.running;
     this.running = true;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
+    this.generation++;
     if (!wasRunning) console.log("[live-poller] start");
     if (!this.keepaliveTimer) {
       this.keepaliveTimer = setInterval(() => this.clockKeepalive(), LIVE_KEEPALIVE_MS);
       this.keepaliveTimer.unref?.();
     }
-    void this.tick();
+    void this.ticker.run();
   }
 
   /**
@@ -145,11 +162,10 @@ class LivePoller {
   }
 
   stop(): void {
+    // Running goes false before the cancel, so a tick in flight cannot re-arm.
     this.running = false;
-    if (this.timer) {
-      clearTimeout(this.timer);
-      this.timer = null;
-    }
+    this.generation++;
+    this.ticker.cancel();
     if (this.keepaliveTimer) {
       clearInterval(this.keepaliveTimer);
       this.keepaliveTimer = null;
@@ -172,17 +188,56 @@ class LivePoller {
     };
   }
 
-  private schedule(ms: number): void {
-    if (!this.running) return;
-    this.timer = setTimeout(() => void this.tick(), ms);
+  /** The delay table. */
+  private nextDelayMs(outcome: LiveTick | null): number {
+    switch (outcome) {
+      // Bad credentials are usually a configuration fault, so ask rarely; see
+      // the auth branch in tick().
+      case "auth-failed":
+        return AUTH_RETRY_INTERVAL_MS;
+      // Fast cadence while a live item is running (so item switches reflect
+      // quickly). A live item means a service is happening whatever the
+      // schedule says, so this is the one delay that never goes dormant.
+      case "item":
+        return LIVE_INTERVAL_MS * this.rateFactor();
+      // A calmer cadence for the preservice countdown (it ticks client-side
+      // anyway), stretched outside a service window.
+      case "idle":
+        return serviceWindow.pollDelayMs(IDLE_INTERVAL_MS * this.rateFactor(), DORMANT_INTERVAL_MS);
+      // A transient failure (e.g. 429 / network) keeps the last client state
+      // and slows down; so does a tick that threw (null). "superseded" is never
+      // asked: its generation moved, so the Ticker does not re-arm it.
+      default:
+        return serviceWindow.pollDelayMs(IDLE_INTERVAL_MS, DORMANT_INTERVAL_MS);
+    }
   }
 
-  private async tick(): Promise<void> {
-    if (!this.running) return;
+  /**
+   * Past PCO's high-water mark, stretch the cadence rather than wait to be
+   * refused. This poller is the biggest single consumer, so slowing it is the
+   * change that actually returns headroom — the concurrency gate only stops a
+   * burst, and this is a steady drip. The countdown ticks client-side from
+   * liveStartAt, so a longer poll costs the freshness of an item CHANGE, not
+   * the smoothness of the clock. pcoService logs the transition once.
+   */
+  private rateFactor(): number {
+    return pcoService.rateLimitTight() ? RATE_TIGHT_FACTOR : 1;
+  }
+
+  /** A read that finished after a start() or stop(); nothing acts on it. */
+  private superseded(): LiveTick {
+    console.log("[live-poller] dropped a read that finished after the poller restarted or stopped");
+    return "superseded";
+  }
+
+  /** One poll. Returns what it did; the Ticker arms the next one from that. */
+  private async tick(): Promise<LiveTick> {
+    const generation = this.generation;
     let live: PcoLiveDTO | null;
     try {
       live = await stageController.fetchLive();
     } catch (err) {
+      if (generation !== this.generation) return this.superseded();
       // Bad credentials are usually a CONFIGURATION fault: every retry fails the
       // same way and asking again every 4s writes one line per tick until the
       // log holds nothing else. So back off hard — but do NOT stop.
@@ -199,29 +254,46 @@ class LivePoller {
       //
       // Saving credentials still restarts the poller, so the fast path is intact;
       // this is only the floor under it.
-      if (err instanceof PcoAuthError) {
-        const decision = this.errors.fail(`[live-poller] ${err.message} — retrying every 5 minutes`, Date.now());
-        if (decision.line) console.error(decision.line);
-        this.schedule(AUTH_RETRY_INTERVAL_MS);
-        return;
-      }
-      // Transient (e.g. 429 / network) — keep last client state, slow down.
-      const decision = this.errors.fail(errorMessage(err), Date.now());
+      const auth = err instanceof PcoAuthError;
+      const message = auth ? `${errorMessage(err)} — retrying every 5 minutes` : errorMessage(err);
+      const decision = this.errors.fail(message, Date.now());
       if (decision.line) console.error(decision.line);
-      this.schedule(serviceWindow.pollDelayMs(IDLE_INTERVAL_MS, DORMANT_INTERVAL_MS));
-      return;
+      return auth ? "auth-failed" : "failed";
     }
+
+    // fetchLive is an HTTP call that can take seconds, and start() or stop()
+    // may have landed while it was in flight. The poller acts on nothing it read
+    // then: a config restore stops it precisely to keep anything from writing
+    // over the files it is about to lay down, and its resume (or a credential
+    // save) has already started a fresh tick. (fetchLive itself still caches
+    // the read as the controller's last live state; that is its own business.)
+    if (generation !== this.generation) return this.superseded();
 
     const recovered = this.errors.ok(Date.now());
     if (recovered.line) console.log(recovered.line);
 
-    // fetchLive is an HTTP call that can take seconds. stop() may have landed
-    // while it was in flight, and `running` was only checked on entry — so a
-    // config restore, which stops the poller precisely to keep anything from
-    // writing over the files it is about to lay down, could still have an
-    // auto-advance land afterwards and patch settings.json from a stale cache.
-    if (!this.running) return;
+    // A throw from here on is a bug in what a read feeds, not a Planning Center
+    // failure. It costs what this tick had left to do and says so once per run,
+    // rather than once a second as an unhandled rejection would. The read itself
+    // was good, so the cadence stays the read's: a live item keeps polling every
+    // second, because nothing may slow a live service down to the dormant delay.
+    // Logged rather than rethrown: the Ticker is this tick's only caller, and
+    // all it could do with a rejection is the per-tick line this replaces.
+    try {
+      this.act(live);
+      const healed = this.actErrors.ok(Date.now());
+      if (healed.line) console.log(healed.line);
+    } catch (err) {
+      const failed = this.actErrors.fail(errorMessage(err), Date.now());
+      if (failed.line) console.error(failed.line);
+    }
 
+    return live?.mode === "item" ? "item" : "idle";
+  }
+
+  /** Everything one successful read feeds: the broadcast, the recorders and
+   *  auto-advance. Synchronous; the side effects run fire-and-forget. */
+  private act(live: PcoLiveDTO | null): void {
     if (live) {
       // Poll fast (to detect item switches promptly) but only PUSH when something
       // the client renders actually changed — or every LIVE_KEEPALIVE_MS for clock
@@ -238,33 +310,17 @@ class LivePoller {
       // rejection is unhandled, and Node's default is to take the whole server —
       // and every stage display with it — down mid-service.
       // Fold the current SPL reading into the live item's running max/avg.
-      tick("spl-recorder", splRecorder.onLiveTick(live));
+      fireAndLog("spl-recorder", splRecorder.onLiveTick(live));
       // Sample the live attendance/occupancy into the service's trend.
-      tick("attendance-recorder", attendanceRecorder.onLiveTick(live));
+      fireAndLog("attendance-recorder", attendanceRecorder.onLiveTick(live));
       // Record the actual rundown timing (item starts/durations vs planned).
-      tick("service-timeline-recorder", serviceTimelineRecorder.onLiveTick(live));
+      fireAndLog("service-timeline-recorder", serviceTimelineRecorder.onLiveTick(live));
       // Start the baptism timer from the plan, when it has been told how.
-      tick("baptism-timer", baptismTimerService.onLiveTick(live));
+      fireAndLog("baptism-timer", baptismTimerService.onLiveTick(live));
     }
 
     // Auto mode: roll to the next event once the current one ended (+1h grace).
-    tick("auto-advance", stageController.maybeAutoAdvance());
-
-    // Fast cadence while a live item is running (so item switches reflect quickly);
-    // a calmer cadence for the preservice countdown (it ticks client-side anyway).
-    let active = live?.mode === "item" ? LIVE_INTERVAL_MS : IDLE_INTERVAL_MS;
-    // Past PCO's high-water mark, stretch the cadence rather than wait to be
-    // refused. This poller is the biggest single consumer, so slowing it is the
-    // change that actually returns headroom — the concurrency gate only stops a
-    // burst, and this is a steady drip. The countdown ticks client-side from
-    // liveStartAt, so a longer poll costs the freshness of an item CHANGE, not
-    // the smoothness of the clock. pcoService logs the transition once.
-    if (pcoService.rateLimitTight()) active *= RATE_TIGHT_FACTOR;
-    // A live item means a service is happening whatever the schedule says — only
-    // the idle cadence is allowed to go dormant.
-    this.schedule(
-      live?.mode === "item" ? active : serviceWindow.pollDelayMs(active, DORMANT_INTERVAL_MS),
-    );
+    fireAndLog("auto-advance", stageController.maybeAutoAdvance());
   }
 }
 
