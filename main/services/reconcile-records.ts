@@ -60,8 +60,9 @@ function latestOwnMs(rec: OpenRecord): number {
  * SERVICE START included ("pre" in item mode, before serviceStartedAt). Taper
  * samples ("post") are the room emptying after the service and are left out.
  * So is a "pre" sample after serviceStartedAt: that is the NEXT occurrence's
- * arrival ramp, which lands in this record while the recorder holds it
- * through the service-time change.
+ * arrival ramp, which a recorder holding the closed record through the
+ * service-time change used to append to it. Records written before that was
+ * fixed still carry those samples.
  *
  * Walks every attendance record, closed ones too, so a record missing its
  * samples (an import, a hand-edited file) is skipped rather than stopping every

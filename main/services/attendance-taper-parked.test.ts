@@ -71,6 +71,25 @@ async function tick(atMs: number, itemId: string, opts: { since?: number; servic
   await attendanceRecorder.onLiveTick(live);
 }
 
+/** No item live, Planning Center counting down to occurrence `occ` at `startsAt`. */
+async function preserviceTick(atMs: number, occ: string, startsAt: number): Promise<void> {
+  mock.timers.setTime(atMs);
+  await attendanceRecorder.onLiveTick({
+    mode: "preservice",
+    currentItemId: null,
+    label: "Service starts",
+    itemType: null,
+    lengthSec: null,
+    liveStartAt: null,
+    targetAt: iso(startsAt),
+    serverNow: iso(atMs),
+    currentItemTitle: null,
+    nextItemTitle: null,
+    serviceTimeId: occ,
+    serviceTimeStartsAt: iso(startsAt),
+  } as PcoLiveDTO);
+}
+
 /** A service, then the operator steps past SERVICE END and leaves it there. */
 async function serviceThenParked(): Promise<void> {
   await tick(T0, "song");
@@ -143,5 +162,30 @@ describe("attendance parked past SERVICE END", () => {
 
     for (const m of [1, 10, 30]) await tick(SERVICE_END + m * MIN, "dismissal", { since: SERVICE_END, serviceEnded: true });
     assert.equal(samplesAfter(SERVICE_END).length, 0, "sampled a taper that is switched off");
+  });
+
+  it("records the next service's arrival ramp in its own record, never in the finished one", async () => {
+    // The 9am ends, Planning Center drops out of its items, and later counts
+    // down to the 11am. The ramp ticks name the 11am's occurrence; the recorder
+    // used to hold the 9am's CLOSED record through that service-time change,
+    // as it holds an open record through an overrun, and appended the 11am's
+    // arrivals to the 9am after its end.
+    await settingsStore.patch({ taperWindow: { preMin: 60, postMin: 0 } });
+    await tick(T0, "song");
+    await tick(T0 + 20 * MIN, "message");
+    const dropped = T0 + 61 * MIN;
+    await preserviceTick(dropped, "occ-a", T0); // past the ramp grace, taper off: the 9am closes
+    assert.equal(recorder.current?.endedAt, iso(dropped));
+
+    const nextStart = T0 + 150 * MIN;
+    await preserviceTick(nextStart - 40 * MIN, "occ-b", nextStart);
+    await preserviceTick(nextStart - 30 * MIN, "occ-b", nextStart);
+
+    const first = await attendanceRecorder.getRecord(`75953:${planId}:occ-a`);
+    const late = (first?.samples ?? []).filter((x) => Date.parse(x.t) > dropped).map((x) => x.t);
+    assert.deepEqual(late, [], "the next service's arrivals were appended to the finished one");
+    assert.equal(recorder.current?.serviceKey, `75953:${planId}:occ-b`, "the ramp opened the next service's record");
+    assert.equal(recorder.current?.samples.filter((x) => x.phase === "pre").length, 2);
+    recorder.forget(`75953:${planId}:occ-b`);
   });
 });

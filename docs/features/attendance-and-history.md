@@ -45,7 +45,9 @@ held only while that occurrence is still more than ten minutes away, and closed 
 replaced once it has started or is about to. Where no start time is available the
 decision falls back to the gap since the last live item of the running service,
 the same for all three recorders: under ten minutes holds, longer splits. Time
-parked on an item past SERVICE END does not count as the service running.
+parked on an item past SERVICE END does not count as the service running. A
+record that has already closed is held only for a plan item coming back; the
+next service's arrival ramp opens that service's own record.
 
 Each decision is logged once, whichever way it goes, and a hold that later
 ends in a split logs the split too:

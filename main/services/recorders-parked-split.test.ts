@@ -178,7 +178,7 @@ describe("leaving the service", () => {
 
   afterEach(() => {
     for (const [, rec] of RECORDERS) {
-      rec.forget(keyFor("occ-a"));
+      for (const occ of ["occ-a", "occ-b"]) rec.forget(keyFor(occ));
       rec.current = null;
       rec.currentKey = null;
     }
@@ -199,6 +199,20 @@ describe("leaving the service", () => {
     }
     const timeline = serviceTimelineRecorder.getCurrent();
     assert.equal(timeline?.items.find((it) => it.itemId === "message")?.actualDurationSec, 15 * 60);
+  });
+
+  it("resumes the closed record when an item comes back under a rolled occurrence", async () => {
+    // A mode drop mid-service closes all three records; the item coming back
+    // under a rolled-over occurrence id (a cache miss) is the same service, and
+    // is held onto the record it closed rather than split into a new one.
+    await tick(T0, "occ-a", "song");
+    await tickNoItem(T0 + 5 * MIN, "occ-a");
+    await tick(T0 + 7 * MIN, "occ-b", "song", { since: T0 });
+
+    for (const [name, rec] of RECORDERS) {
+      assert.equal(rec.current?.serviceKey, keyFor("occ-a"), `${name}: split a resumed service into a new record`);
+      assert.equal(rec.current?.endedAt, null, `${name}: the record is open again`);
+    }
   });
 
   it("names and releases SPL's raw-archive files once, on the close", async (t) => {

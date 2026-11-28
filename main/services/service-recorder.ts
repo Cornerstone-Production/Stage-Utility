@@ -23,7 +23,7 @@
 
 import type { PcoLiveDTO, ServiceTimelineItem } from "../types/stage.js";
 import { clockOf } from "./app-timezone.js";
-import { serviceDateKey, serviceRunning, shouldRecordLive } from "./live-service-gate.js";
+import { inLiveItem, serviceDateKey, serviceRunning, shouldRecordLive } from "./live-service-gate.js";
 import { scrub, scrubError } from "./scrub.js";
 import { stageController } from "./stage-controller.js";
 
@@ -703,8 +703,17 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
 
     // Hold the open record through a serviceTimeId change WITHIN one live service
     // — see SERVICE_GAP_MS.
+    //
+    // Only while there is a service to hold for: the record is still open, or a
+    // plan item is live (an item coming back after a mode drop resumes the
+    // closed record, as SPL and the timeline do). A closed record and no item
+    // live is a service that has ended, and the tick is the attendance ramp for
+    // the NEXT occurrence; holding there appended its arrivals to the finished
+    // record, after its end, until the hold released ten minutes before the
+    // next start.
     if (
       this.current &&
+      (this.current.endedAt == null || inLiveItem(live)) &&
       this.current.serviceTypeId === serviceTypeId &&
       this.current.planId === planId &&
       this.current.serviceDate === date &&
