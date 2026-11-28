@@ -50,9 +50,6 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
   private socket: dgram.Socket | null = null;
   private running = false;
 
-  private pingTimer: ReturnType<typeof setInterval> | null = null;
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
-  private watchdog: ReturnType<typeof setTimeout> | null = null;
   private reconnectMs = RECONNECT_BASE_MS;
 
   protected channels = new Map<string, ChannelState>();
@@ -70,7 +67,7 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
 
   async disconnect(): Promise<void> {
     this.running = false;
-    this.clearTimers();
+    this.stopAllTimers();
     this.markAllOffline();
     this.closeSocket();
     this.setState("disconnected");
@@ -182,7 +179,7 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
       // Any valid frame proves the device is alive → connected + reset watchdog.
       this.reconnectMs = RECONNECT_BASE_MS;
       this.setState("connected");
-      this.armWatchdog();
+      this.armSilenceWatchdog();
       try {
         this.handleFrame(msg as Record<string, unknown>);
       } catch (err) {
@@ -192,24 +189,23 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
   }
 
   private startTimers(): void {
-    this.clearTimers();
+    this.stopLinkTimers();
     // Liveness probe: a GET on the device name is harmless and universally answered.
-    this.pingTimer = setInterval(() => this.send({ device: { name: null } }), PING_INTERVAL_MS);
-    this.pollTimer = setInterval(() => this.onPoll(), this.meterRateMs);
-    this.armWatchdog();
+    this.every("ping", PING_INTERVAL_MS, () => this.send({ device: { name: null } }));
+    this.every("poll", this.meterRateMs, () => this.onPoll());
+    this.armSilenceWatchdog();
     // Prime immediately.
     this.send({ device: { name: null } });
     this.onPoll();
   }
 
   // Silence for RESPONSE_TIMEOUT_MS ⇒ treat as offline (device unplugged / wrong IP).
-  private armWatchdog(): void {
-    if (this.watchdog) clearTimeout(this.watchdog);
-    this.watchdog = setTimeout(() => {
+  private armSilenceWatchdog(): void {
+    this.armWatchdog(RESPONSE_TIMEOUT_MS, () => {
       if (!this.running) return;
       this.markAllOffline();
       this.setState("error");
-    }, RESPONSE_TIMEOUT_MS);
+    });
   }
 
   private scheduleReconnect(): void {
@@ -220,14 +216,6 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
       this.initChannels();
       this.open();
     });
-  }
-
-  private clearTimers(): void {
-    for (const t of [this.pingTimer, this.pollTimer]) if (t) clearInterval(t);
-    if (this.watchdog) clearTimeout(this.watchdog);
-    this.pingTimer = this.pollTimer = null;
-    this.watchdog = null;
-    this.clearReconnect();
   }
 
   private closeSocket(): void {

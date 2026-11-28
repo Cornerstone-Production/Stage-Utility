@@ -40,7 +40,6 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
   private receiveBuffer = "";
   // Consecutive failed connect attempts, for exponential reconnect back-off.
   private reconnectAttempts = 0;
-  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   // Has this connection already reported a `< REP ERR >`? Reset per socket, so a
   // reconnect to a device that still refuses the command says so again.
   private rejectionLogged = false;
@@ -67,7 +66,7 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
   async disconnect(): Promise<void> {
     this.enabled = false;
     this.reconnectAttempts = 0;
-    this.clearTimers();
+    this.stopAllTimers();
     this.destroySocket();
     this.setState("disconnected");
     this.markAllChannelsOffline();
@@ -370,7 +369,9 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
 
     socket.on("close", () => {
       if (this.reconnectAttempts === 0) console.log(`[shure:${this.id}] socket closed`);
-      this.stopHeartbeat();
+      // Every timer of this link — the heartbeat and anything a driver added,
+      // such as the charger's bay poll. A queued retry is not one of them.
+      this.stopLinkTimers();
       this.markAllChannelsOffline();
       if (this.getConnectionState() !== "disconnected") {
         this.setState("disconnected");
@@ -496,22 +497,7 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
   }
 
   private startHeartbeat(): void {
-    this.stopHeartbeat();
-    this.heartbeatTimer = setInterval(() => {
-      this.send(this.heartbeatCommand());
-    }, HEARTBEAT_INTERVAL_MS);
-  }
-
-  private stopHeartbeat(): void {
-    if (this.heartbeatTimer !== null) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = null;
-    }
-  }
-
-  private clearTimers(): void {
-    this.stopHeartbeat();
-    this.clearReconnect();
+    this.every("heartbeat", HEARTBEAT_INTERVAL_MS, () => this.send(this.heartbeatCommand()));
   }
 
   private destroySocket(): void {

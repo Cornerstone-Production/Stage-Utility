@@ -20,6 +20,7 @@ import type { ConnectionState } from "../../types/integrations.js";
 import type { DeviceStatus } from "../../types/devices.js";
 import { channelHasSubscribers } from "../../services/broadcaster.js";
 import { serviceWindow } from "../../services/service-window.js";
+import { cleared } from "../../services/timers.js";
 
 /**
  * Per-channel telemetry, shared by every driver.
@@ -105,7 +106,9 @@ export abstract class DeviceProviderBase {
   private statusCb: ((s: DeviceStatus) => void) | null = null;
   private connCb: ((state: ConnectionState) => void) | null = null;
   private connState: ConnectionState = "disconnected";
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private readonly intervals = new Map<string, NodeJS.Timeout>();
+  private watchdog: NodeJS.Timeout | null = null;
 
   onStatus(cb: (s: DeviceStatus) => void): void {
     this.statusCb = cb;
@@ -165,12 +168,55 @@ export abstract class DeviceProviderBase {
   }
 
   protected clearReconnect(): void {
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = null;
+    this.reconnectTimer = cleared(this.reconnectTimer);
   }
 
   /** Is a retry already queued? */
   protected get reconnectPending(): boolean {
     return this.reconnectTimer !== null;
+  }
+
+  // ── Timers that belong to one link ──────────────────────────────────────────
+  //
+  // Held here, not by each driver, because a driver-held one is a timer only that
+  // driver remembers to stop. The Shure charger's 30 s bay poll was exactly that:
+  // created in its onConnected(), never cleared, so removing a charger connection
+  // left an interval holding the discarded provider for the life of the process.
+  // A driver asks for a timer by name; stopLinkTimers() ends every one of them.
+
+  /** Run `fn` every `ms` while this link is up. A second call under the same
+   *  `name` replaces the first, so a reconnect cannot stack two. */
+  protected every(name: string, ms: number, fn: () => void): void {
+    const prev = this.intervals.get(name);
+    if (prev) clearInterval(prev);
+    this.intervals.set(name, setInterval(fn, ms));
+  }
+
+  /**
+   * (Re)arm the silence watchdog: `onSilent` runs if nothing re-arms it within
+   * `ms`. Re-arm on every sign of life from the device. One per provider: a link
+   * has one "is anyone there" question.
+   */
+  protected armWatchdog(ms: number, onSilent: () => void): void {
+    this.watchdog = cleared(this.watchdog);
+    this.watchdog = setTimeout(() => {
+      this.watchdog = null;
+      onSilent();
+    }, ms);
+  }
+
+  /** Stop the link's timers: every interval and the watchdog. Not a queued
+   *  retry — that belongs to the next link, and a socket closing is exactly when
+   *  one gets queued. */
+  protected stopLinkTimers(): void {
+    for (const t of this.intervals.values()) clearInterval(t);
+    this.intervals.clear();
+    this.watchdog = cleared(this.watchdog);
+  }
+
+  /** Everything, a queued retry included. For disconnect(). */
+  protected stopAllTimers(): void {
+    this.stopLinkTimers();
+    this.clearReconnect();
   }
 }
