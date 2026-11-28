@@ -20,7 +20,7 @@ import type {
   SplItemHistory,
 } from "../../types/stage.js";
 import { addLeqSample } from "../spl-leq.js";
-import { SERVICE_GAP_MS, isStepBackTo, lastItemEntry } from "../service-recorder.js";
+import { SERVICE_GAP_MS, closeTimelineItem, isStepBackTo, lastItemEntry, stampItemEnds } from "../service-recorder.js";
 import { scrub } from "../scrub.js";
 import { carryItemTimeEdits, logOrphanedItemTimeEdits } from "../history-item-times.js";
 import { serviceDirPath } from "./archive-paths.js";
@@ -189,14 +189,6 @@ function titleSlug(title: string, run = 0): string {
   return run === 0 ? slug : `${slug}-${run + 1}`;
 }
 
-function closeEntry(entry: ServiceTimelineItem, endedAt: string): void {
-  entry.endedAt = endedAt;
-  const startMs = Date.parse(entry.startedAt);
-  const endMs = Date.parse(endedAt);
-  entry.actualDurationSec =
-    Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, Math.round((endMs - startMs) / 1000)) : null;
-}
-
 /**
  * Recompute a service's item timings from its `events.csv` rows.
  *
@@ -214,7 +206,8 @@ function closeEntry(entry: ServiceTimelineItem, endedAt: string): void {
  * is ten minutes.
  *
  * Each entry ends when the next row fires. The last one ends at the record's own
- * `endedAt`, and stays open when the record is still open.
+ * `endedAt` (with no length when the stored record had none for it), and stays
+ * open when the record is still open.
  *
  * What is NOT in the rows is carried from `prior`: the record's identity, its
  * window, `pacingResetAt`, any per-item `counted` override the operator set —
@@ -276,7 +269,7 @@ export function rebuildTimelineRecord(prior: ServiceTimeline, rows: EventRow[]):
     // order the live recorder does it (finalizePrevItem, then openItem): the step
     // back test reads endedAt, so an entry still open is "the same run" by
     // definition and a reopen must see the stamp this row just wrote.
-    if (open) closeEntry(open, at);
+    if (open) closeTimelineItem(open, at);
 
     // Old rows predate the itemId column, so a title is the only handle left.
     //
@@ -363,8 +356,16 @@ export function rebuildTimelineRecord(prior: ServiceTimeline, rows: EventRow[]):
   }
 
   // A closed record ends its last item; an open one leaves it running, which is
-  // what the live recorder's own finalizeRecord would have done.
-  if (open && prior.endedAt) closeEntry(open, prior.endedAt);
+  // what the live recorder's own finalizeRecord would have done. Without a
+  // length when the stored record had none for that run: a boot-time close
+  // could not measure it, and its end is a guess a length must not be built
+  // on. Kept that way, the record still shows the gap repairBootCloseGaps
+  // (reconcile-records.ts) fills from the people counts, which the caller runs.
+  if (open && prior.endedAt) {
+    const stored = lastItemEntry(prior.items, open.itemId);
+    if (stored?.endedAt != null && stored.actualDurationSec == null) stampItemEnds([open], prior.endedAt);
+    else closeTimelineItem(open, prior.endedAt);
+  }
 
   // `counted` exists nowhere in the raw rows, so losing it here would silently
   // undo work. It has two writers, and they carry differently:

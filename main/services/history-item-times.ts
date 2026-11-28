@@ -41,7 +41,13 @@ function runKey(run: { itemId: string; sequence: number }): string {
 }
 
 /** Seconds between two ISO stamps, or null if the end is open or either is junk. */
-function durationSec(startedAt: string, endedAt: string | null): number | null {
+/**
+ * How long a run lasted, in whole seconds and never negative (Planning Center's
+ * live_start_at can sit a moment ahead of this host's clock), or null when it
+ * has no end or a stamp cannot be read. The one length rule: the recorders'
+ * close, a rebuild, a window edit and an item-time correction all use it.
+ */
+export function runLengthSec(startedAt: string, endedAt: string | null): number | null {
   if (endedAt == null) return null;
   const s = Date.parse(startedAt);
   const e = Date.parse(endedAt);
@@ -119,7 +125,7 @@ export function applyItemTimeEdits(record: ServiceTimeline): ItemTimeOverlay {
       ...raw,
       startedAt,
       endedAt,
-      actualDurationSec: durationSec(startedAt, endedAt),
+      actualDurationSec: runLengthSec(startedAt, endedAt),
       editedFrom: { startedAt: raw.startedAt, endedAt: raw.endedAt, actualDurationSec: raw.actualDurationSec },
     };
   }

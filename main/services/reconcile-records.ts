@@ -41,13 +41,10 @@ function itemsOf<I>(rec: { items?: unknown }): I[] {
 
 /** Best "end" for an orphan from its own stamps = the latest timestamp it holds
  *  (last sample / item), falling back to when it started — never a boot-time
- *  "now" that could be days later than the real end. A closed record's own end
- *  counts as one of its stamps, so a repair never moves that end earlier. */
+ *  "now" that could be days later than the real end. */
 function latestOwnMs(rec: OpenRecord): number {
   let best = Date.parse(rec.startedAt);
   if (!Number.isFinite(best)) best = Date.now();
-  const ended = rec.endedAt ? Date.parse(rec.endedAt) : NaN;
-  if (Number.isFinite(ended) && ended > best) best = ended;
   for (const s of Array.isArray(rec.samples) ? rec.samples : []) {
     const p = s ? Date.parse(s.t) : NaN;
     if (Number.isFinite(p) && p > best) best = p;
@@ -109,71 +106,98 @@ const OLD_BOOT_CLOSE_REPAIR = "old-boot-close-gaps";
 /** Each repaired record's file as it was is kept beside it under this suffix. */
 export const REPAIR_BACKUP_SUFFIX = "before-repair";
 
-/** What the repair did, record by record. */
-interface RepairResult {
+/** What a repair did, record by record. `waiting` is why it wrote nothing. */
+export interface GapRepairResult {
   repaired: string[];
   leftAsIs: string[];
   failed: string[];
+  waiting: string | null;
+}
+
+/** The latest moment any of these items holds, start or end. */
+function latestItemStampMs(items: { startedAt?: string | null; endedAt?: string | null }[]): number {
+  let best = -Infinity;
+  for (const it of items) {
+    for (const v of [it.startedAt, it.endedAt]) {
+      const ms = v ? Date.parse(v) : NaN;
+      if (Number.isFinite(ms) && ms > best) best = ms;
+    }
+  }
+  return best;
+}
+
+/** A later of two ISO stamps (the first when the second cannot be read). */
+function laterIso(a: string, b: string | null): string {
+  const bMs = b ? Date.parse(b) : NaN;
+  return Number.isFinite(bMs) && bMs > Date.parse(a) ? b! : a;
 }
 
 /**
- * Records closed at boot before the boot close shared the recorders' close, put
- * right once by that close's rule.
+ * Put right the gap a boot-time close left in closed history records, by the
+ * close reconcileOpenRecords makes now. Shared by the one-time boot repair
+ * (repairOldBootCloses), an archive import and a rebuild from raw, which bring
+ * in or recreate records the boot repair never saw. `only` limits it to those
+ * keys.
  *
- * That close (before v1.29.0) gave an SPL record an end and left the item on
- * air open, and gave the timeline's item on air the record's end (its last
- * stamp, a moment after that item went live) and no length. The records it wrote
- * keep the gap: History's Actual total skips the item, and a closed SPL record
- * holds an item still running. This works out the end reconcileOpenRecords
- * would give the record now, from the same witness, and fills in only what that
- * close would have written, on the one item it left that way:
+ * The gap. A close before v1.29.0 gave an SPL record an end and left the item on
+ * air open, and gave the timeline's item on air an end (the record's last stamp,
+ * a moment after that item went live) and no length; v1.29.0's own close still
+ * leaves no length when nothing measured the item. A timeline item with an end,
+ * a readable start and no length is only ever written by a boot close: every
+ * other close measures it. History's Actual total skips such an item, and a
+ * closed SPL record holds an item still running.
  *
- *   - an SPL record's one open item: that end
- *   - a timeline's one item with no end, or with the record's end and no length:
- *     that end and its length, when the occurrence's attendance saw the service
- *     run past its start; an end alone when nothing did and it has none; and when
- *     nothing did and it has an end, it is left as it is
- *   - the record's end moves to that end, which is never earlier than its own
+ * The fill, on the one item that was on air when the record was closed, and
+ * only what the close would have written:
  *
- * The item is found by that shape, not by start order: a step back reopens an
- * earlier entry with its first start, and the recorder closes that run, start to
- * end, across the items between. A record holding MORE than one such item is a
- * shape no close leaves (two old fragments merged in History can) and is left
- * and logged; a merge leaving one is indistinguishable from a step back, and is
- * filled like one. An item missing its length whose end is not the record's is
- * not touched: a window edit leaves that shape when it cannot read the start,
- * and so does an old close the record later moved past (a window extended, a
- * record resumed on another item), which this cannot tell apart and leaves. An open record is not touched: the boot
- * close below closes those, by the same rule. Each record it changes is kept as
- * it was beside it first (see replaceKeepingPrior), and each record with the
- * gap it changes, leaves or cannot save is logged by key.
+ *   - the end: the occurrence's last in-service people count, when it is later
+ *     than every stamp the record's items hold; else that latest stamp
+ *   - an SPL item gets that end; a timeline item gets it with its length when a
+ *     people count measured it, an end alone when nothing did and it had none,
+ *     and is left as it is when nothing did and it had an end
+ *   - the record's end moves to that end when it is later, never earlier, so an
+ *     end an operator set later stays
+ *
+ * Which item was on air. SPL: the record's one item with no end. Timeline: the
+ * gap item with no end, or whose end is the latest stamp its items hold (the old
+ * close stamped exactly that). Not by start order: a step back reopens an
+ * earlier entry with its first start. More than one such item is a shape no
+ * close leaves (two old fragments merged in History can) and is left and
+ * logged; a merge leaving one is indistinguishable from a step back, and is
+ * filled like one. A timeline gap item that is not the one on air (a record
+ * resumed on another item after the old close) has nothing to measure it by
+ * and is left and logged.
+ *
+ * An open record is not touched: reconcileOpenRecords closes those by the same
+ * rule, and a live recorder owns them. Each record it changes is copied as it
+ * was beside it first (see replaceKeepingPrior), and each record with the gap
+ * it changes, leaves or cannot save is logged by key. A record with no gap is
+ * not written, so a second run changes nothing.
  *
  * With the attendance records not all read, nothing is written: the end would
  * be taken without the witness, and a record repaired short would no longer
  * look like one to repair once the witness reads again.
- *
- * Runs once. A repaired record no longer has the gap it looks for, so a second
- * run changes nothing; the marker saves a record it could not measure from being
- * looked at and logged again on every boot. The marker is set only when every
- * record was read and every save landed, so a failure is tried again next boot.
- * A marker that cannot be written throws: the repair then runs again next boot.
  */
-async function repairOldBootCloses(witness: Map<string, number>): Promise<RepairResult | null> {
-  if ((await historyRepairsStore.load())[OLD_BOOT_CLOSE_REPAIR]) return null;
-  const result: RepairResult = { repaired: [], leftAsIs: [], failed: [] };
-  const what = "the repair of records an older version closed at boot";
+export async function repairBootCloseGaps(only?: ReadonlySet<string>): Promise<GapRepairResult> {
+  const result: GapRepairResult = { repaired: [], leftAsIs: [], failed: [], waiting: null };
+  const attendance = await attendanceStore.list();
   const attendanceUnread = attendanceStore.unreadable();
   if (attendanceUnread) {
-    console.log(`[reconcile] ${what} waits for the next boot, writing nothing: ${scrub(attendanceUnread.message)}`);
+    result.waiting = scrub(attendanceUnread.message);
+    console.log(`[reconcile] records closed at boot are not repaired while an attendance record cannot be read: ${result.waiting}`);
     return result;
   }
+  const witness = inServiceWitness(attendance);
   const say = (key: string, line: string) => console.log(`[reconcile] ${scrub(key)}: ${line}`);
   const leave = (key: string, why: string) => {
     result.leftAsIs.push(key);
     say(key, `closed at boot with ${why}, so it is left as it is`);
   };
   const endPhrase = (end: { iso: string; measured: boolean }) =>
-    `${end.iso} (${end.measured ? "the last in-service people count" : "the record's own latest stamp"})`;
+    `${end.iso} (${end.measured ? "the last in-service people count" : "the latest stamp its items hold"})`;
+  /** endFor over the items alone: the record's own end may be an operator's. */
+  const itemEnd = (rec: { serviceKey: string; startedAt: string; items?: unknown }) =>
+    endFor({ serviceKey: rec.serviceKey, startedAt: rec.startedAt, endedAt: null, items: itemsOf(rec) }, witness);
   const save = async <T extends { serviceKey: string }>(
     store: { replaceKeepingPrior(r: T, suffix: string): Promise<void> },
     next: T,
@@ -182,42 +206,53 @@ async function repairOldBootCloses(witness: Map<string, number>): Promise<Repair
     try {
       await store.replaceKeepingPrior(next, REPAIR_BACKUP_SUFFIX);
       result.repaired.push(next.serviceKey);
-      say(next.serviceKey, `repaired a record an older version closed at boot: ${done}; the file as it was is kept beside it as *.${REPAIR_BACKUP_SUFFIX}`);
+      say(next.serviceKey, `repaired a record closed at boot: ${done}; the file as it was is kept beside it as *.${REPAIR_BACKUP_SUFFIX}`);
     } catch (err) {
       result.failed.push(next.serviceKey);
-      say(next.serviceKey, `could not repair a record an older version closed at boot (${scrub(errorMessage(err))}), so it is left as it is and tried again next boot`);
+      say(next.serviceKey, `could not repair a record closed at boot (${scrub(errorMessage(err))}), so it is left as it is`);
     }
   };
+  const wanted = (key: string) => !only || only.has(key);
 
   for (const rec of await splHistoryStore.list()) {
-    if (rec.endedAt == null) continue;
+    if (rec.endedAt == null || !wanted(rec.serviceKey)) continue;
     const gap = itemsOf<ServiceSplHistory["items"][number]>(rec).filter((it) => it.endedAt == null);
     if (gap.length === 0) continue;
     if (gap.length > 1) {
       leave(rec.serviceKey, `${gap.length} items with no end, more than the one any close leaves`);
       continue;
     }
-    const end = endFor(rec, witness);
+    const end = itemEnd(rec);
     const next: ServiceSplHistory = structuredClone(rec);
     stampItemEnds([next.items[rec.items.indexOf(gap[0]!)]!], end.iso);
-    next.endedAt = end.iso;
+    next.endedAt = laterIso(end.iso, rec.endedAt);
     await save(splHistoryStore, next, `the SPL item it left running closed at ${endPhrase(end)}`);
   }
 
   for (const rec of await serviceTimelineStore.list()) {
-    if (rec.endedAt == null) continue;
-    const gap = itemsOf<ServiceTimelineItem>(rec).filter(
-      (it) => it.endedAt == null || (it.actualDurationSec == null && it.endedAt === rec.endedAt),
+    if (rec.endedAt == null || !wanted(rec.serviceKey)) continue;
+    const items = itemsOf<ServiceTimelineItem>(rec);
+    const unmeasured = items.filter(
+      (it) => it.endedAt == null || (it.actualDurationSec == null && Number.isFinite(Date.parse(it.startedAt))),
     );
-    if (gap.length === 0) continue;
-    if (gap.length > 1) {
-      leave(rec.serviceKey, `${gap.length} items with no end or no length, more than the one any close leaves`);
+    if (unmeasured.length === 0) continue;
+    const latest = latestItemStampMs(items);
+    const onAir = unmeasured.filter((it) => it.endedAt == null || Date.parse(it.endedAt) === latest);
+    const others = unmeasured.length - onAir.length;
+    if (onAir.length !== 1) {
+      leave(
+        rec.serviceKey,
+        onAir.length > 1
+          ? `${onAir.length} items with no end or no length at its end, more than the one any close leaves`
+          : `${others} item(s) with no length that were not on air at its end, which nothing measured`,
+      );
       continue;
     }
-    const gapItem = gap[0]!;
-    const end = endFor(rec, witness);
+    const gapItem = onAir[0]!;
+    const othersNote = others > 0 ? `; ${others} other item(s) with no length, not on air at its end, left as they are` : "";
+    const end = itemEnd(rec);
     if (!end.measured && gapItem.endedAt != null) {
-      leave(rec.serviceKey, `no length on the item that was on air, and no in-service people count after that item began`);
+      leave(rec.serviceKey, `no length on the item that was on air, and no in-service people count after that item began${othersNote}`);
       continue;
     }
     const next: ServiceTimeline = structuredClone(rec);
@@ -226,15 +261,30 @@ async function repairOldBootCloses(witness: Map<string, number>): Promise<Repair
     // close gave it was a guess this rule does not make.
     if (end.measured) closeTimelineItem(item, end.iso);
     else stampItemEnds([item], end.iso);
-    next.endedAt = end.iso;
+    next.endedAt = laterIso(end.iso, rec.endedAt);
     const length =
       item.actualDurationSec != null ? `a length of ${item.actualDurationSec} s` : end.measured ? "no length (its start cannot be read)" : "no length (nothing counted people past its start)";
-    await save(serviceTimelineStore, next, `the timeline item that was on air closed at ${endPhrase(end)} with ${length}`);
+    await save(serviceTimelineStore, next, `the timeline item that was on air closed at ${endPhrase(end)} with ${length}${othersNote}`);
   }
+  return result;
+}
 
+/**
+ * repairBootCloseGaps over every record, once per install, at boot: the records
+ * a close before v1.29.0 wrote.
+ *
+ * The marker saves a record it could not measure from being looked at and
+ * logged again on every boot. It is set only when every record was read and
+ * every save landed, so a failure is tried again next boot. A marker that cannot
+ * be written throws: the repair then runs again next boot.
+ */
+async function repairOldBootCloses(): Promise<GapRepairResult | null> {
+  if ((await historyRepairsStore.load())[OLD_BOOT_CLOSE_REPAIR]) return null;
+  const result = await repairBootCloseGaps();
+  if (result.waiting) return result;
   const unread = splHistoryStore.unreadable() ?? serviceTimelineStore.unreadable();
   if (unread) {
-    console.log(`[reconcile] ${what} runs again next boot: ${scrub(unread.message)}`);
+    console.log(`[reconcile] the repair of records an older version closed at boot runs again next boot: ${scrub(unread.message)}`);
   } else if (result.failed.length === 0) {
     await historyRepairsStore.update((done) => ({ ...done, [OLD_BOOT_CLOSE_REPAIR]: new Date().toISOString() }));
   }
@@ -249,7 +299,7 @@ export async function reconcileOpenRecords(): Promise<void> {
   // close; its failure is thrown once the close is done.
   let repairFailure: unknown = null;
   try {
-    const repair = await repairOldBootCloses(witness);
+    const repair = await repairOldBootCloses();
     if (repair && repair.repaired.length + repair.leftAsIs.length + repair.failed.length > 0) {
       console.log(
         `[reconcile] records an older version closed at boot: ${repair.repaired.length} repaired, ${repair.leftAsIs.length} left as they are, ${repair.failed.length} could not be saved`,

@@ -23,6 +23,7 @@
 
 import type { PcoLiveDTO, ServiceTimelineItem } from "../types/stage.js";
 import { clockOf } from "./app-timezone.js";
+import { runLengthSec } from "./history-item-times.js";
 import { inLiveItem, serviceDateKey, serviceRunning, shouldRecordLive } from "./live-service-gate.js";
 import { scrub, scrubError } from "./scrub.js";
 import { stageController } from "./stage-controller.js";
@@ -169,10 +170,7 @@ export function stampItemEnds(items: { endedAt: string | null }[], endIso: strin
  *  negative: PCO's `live_start_at` can sit a moment ahead of this host's clock. */
 export function closeTimelineItem(item: ServiceTimelineItem, endIso: string): void {
   item.endedAt = endIso;
-  const startMs = Date.parse(item.startedAt);
-  const endMs = Date.parse(endIso);
-  item.actualDurationSec =
-    Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, Math.round((endMs - startMs) / 1000)) : null;
+  item.actualDurationSec = runLengthSec(item.startedAt, endIso);
 }
 
 /**
