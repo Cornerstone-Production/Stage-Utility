@@ -5,11 +5,12 @@
 // targeting its own serviceKey rather than the page's current target,
 // without repeating the entire hook.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { errorMessage } from "@main/services/errors";
 import { invoke, onNotification } from "../../../lib/api";
 import { logToServer } from "../../../lib/client-log";
+import { useLatestRef } from "../../../lib/use-latest-ref";
 
 /** How often to re-ask while blocked and nothing has told us to — see
  *  useServiceLive's own comment for what this backstops. */
@@ -86,10 +87,7 @@ export function useServiceLive(serviceKey: string | null): LiveCheck {
   // during render: nothing here needs it to be current for THIS render, only
   // for whichever async callback reads it later, after every effect for this
   // render (including this one) has already run.
-  const targetRef = useRef(serviceKey);
-  useEffect(() => {
-    targetRef.current = serviceKey;
-  }, [serviceKey]);
+  const targetRef = useLatestRef(serviceKey);
 
   const ask = useCallback(async (key: string): Promise<LiveStatus> => {
     try {
@@ -106,7 +104,7 @@ export function useServiceLive(serviceKey: string | null): LiveCheck {
    *  keeping, it is the answer to a question nobody is asking anymore. */
   const accept = useCallback((key: string, next: LiveStatus) => {
     if (targetRef.current === key) setAnswer({ key, status: next });
-  }, []);
+  }, [targetRef]);
 
   const status: LiveStatus = serviceKey == null ? "not-live" : answer.key === serviceKey ? answer.status : "checking";
 

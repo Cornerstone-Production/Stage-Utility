@@ -10,8 +10,9 @@
 // from the server value (seedStoredKeys) so nobody's existing selection is lost
 // in the move.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { readStored, storeFailure, writeStored } from "../../../lib/safe-storage";
+import { useLatestRef } from "../../../lib/use-latest-ref";
 
 /**
  * Who wants to know when a stored key list changes.
@@ -176,10 +177,7 @@ export function useStoredKeys(
    *  rebuilding the subscription on every one of them. Written in an effect
    *  rather than during render — a ref assigned while rendering is a tear the
    *  linter is right to refuse. */
-  const latest = useRef({ allowed, fallback });
-  useEffect(() => {
-    latest.current = { allowed, fallback };
-  });
+  const latest = useLatestRef({ allowed, fallback });
   // Another component wrote this entry — re-read, so two strips on one page
   // cannot disagree about what is ticked. The writer's own `setKeys` above has
   // already run; this lands on an equal list for it and changes nothing.
@@ -188,7 +186,7 @@ export function useStoredKeys(
       subscribeStoredKeys(storageKey, () => {
         setKeys(readStoredKeys(storageKey, latest.current.allowed, latest.current.fallback));
       }),
-    [storageKey],
+    [storageKey, latest],
   );
   /**
    * Re-read the store.

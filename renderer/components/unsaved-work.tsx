@@ -24,6 +24,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useLatestRef } from "../lib/use-latest-ref";
 
 /** One panel's unsaved buffer, and the save that would land it. */
 export interface UnsavedWork {
@@ -109,14 +110,11 @@ export function useReportUnsavedWork(
   const registry = useContext(UnsavedWorkContext);
   // Read the latest save through a ref so a re-render of the panel does not
   // churn the registration — only `dirty` flipping does.
-  const saveRef = useRef(save);
-  useEffect(() => {
-    saveRef.current = save;
-  });
+  const saveRef = useLatestRef(save);
 
   useEffect(() => {
     registry?.report(id, dirty ? { save: () => saveRef.current() } : null);
-  }, [registry, id, dirty]);
+  }, [registry, id, dirty, saveRef]);
 
   // Deregister on unmount only. Deps are stable, so this does not run when
   // `dirty` flips — the effect above already re-reports for that.

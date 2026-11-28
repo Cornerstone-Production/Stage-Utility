@@ -29,6 +29,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { useListSaves, type ListEdit, type ListIo, type ListSaveResult, type ListStepResult } from "../lib/use-list-saves";
+import { useLatestRef } from "../lib/use-latest-ref";
 
 /** Which save of a list a reading of it is. A different `boot` is a restarted server. */
 export interface Revision {
@@ -118,16 +119,13 @@ export function useSavedList<T>({
   const savedKey = saved === null ? null : keyOf(saved);
   const drawnKey = keyOf(list);
   const { boot, n } = revision;
-  const latest = useRef(saved);
-  useEffect(() => {
-    latest.current = saved;
-  });
+  const latest = useLatestRef(saved);
   useEffect(() => {
     const broadcast = latest.current;
     if (broadcast === null || pending > 0 || hold) return;
     if (!take({ boot, n })) return;
     if (savedKey !== drawnKey) adopt(broadcast);
-  }, [savedKey, drawnKey, boot, n, pending, hold, adopt, take]);
+  }, [savedKey, drawnKey, boot, n, pending, hold, adopt, take, latest]);
 
   return { list, editTracked, request };
 }

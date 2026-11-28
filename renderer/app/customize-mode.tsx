@@ -52,6 +52,7 @@ import { useIsMobile } from "../lib/use-media-query";
 import { ALL_DESTINATIONS } from "./destinations";
 import { resolveIcon } from "../components/icon-set";
 import { useRailDrag } from "./use-rail-drag";
+import { useLatestRef } from "../lib/use-latest-ref";
 
 export { useCustomize, type CustomizeTab, type CustomizeValue } from "./customize-context";
 
@@ -114,10 +115,7 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
   const held = list[0];
   const draft = held && (customizing || JSON.stringify(held) !== savedKey) ? held : null;
   const { resolved, consoles } = useResolvedFromState(state, draft);
-  const consolesRef = useRef(consoles);
-  useEffect(() => {
-    consolesRef.current = consoles;
-  });
+  const consolesRef = useLatestRef(consoles);
 
   /** The Undo toast on screen, retired by the next change on either tab. */
   const undoToast = useRef<string | null>(null);
@@ -181,7 +179,7 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
       } else toast.info(said);
       return true;
     },
-    [offerUndo, resolved, retireUndo, save],
+    [offerUndo, resolved, retireUndo, save, consolesRef],
   );
 
   const setConsoleShown = useCallback(

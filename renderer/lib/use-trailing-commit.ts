@@ -6,6 +6,7 @@
 // component unmounts is committed then, not dropped with the timer.
 
 import { useCallback, useEffect, useRef } from "react";
+import { useLatestRef } from "./use-latest-ref";
 
 /** How long to wait again while `waitWhile` says a save is still running. */
 const WAIT_RETRY_MS = 250;
@@ -28,10 +29,7 @@ export function useTrailingCommit<T>(
   ms: number,
   options: { waitWhile?: () => boolean } = {},
 ): (value: T) => void {
-  const live = useRef({ onCommit, waitWhile: options.waitWhile });
-  useEffect(() => {
-    live.current = { onCommit, waitWhile: options.waitWhile };
-  });
+  const live = useLatestRef({ onCommit, waitWhile: options.waitWhile });
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Boxed, so a pending `undefined` or `null` is still a pending value.
   const pending = useRef<{ value: T } | null>(null);
@@ -49,7 +47,7 @@ export function useTrailingCommit<T>(
       pending.current = null;
       live.current.onCommit(value, { unmounting: false });
     }, delay);
-  }, []);
+  }, [live]);
 
   useEffect(
     () => () => {
@@ -59,7 +57,7 @@ export function useTrailingCommit<T>(
       pending.current = null;
       if (box) live.current.onCommit(box.value, { unmounting: true });
     },
-    [],
+    [live],
   );
 
   return useCallback(

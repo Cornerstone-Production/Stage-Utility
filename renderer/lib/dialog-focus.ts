@@ -14,6 +14,7 @@
 // used. Each of those is one line where it belongs.
 
 import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useLatestRef } from "./use-latest-ref";
 
 /** Everything a Tab can land on inside a panel. */
 export const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
@@ -92,15 +93,12 @@ export function useReturnFocus(open: boolean, target: () => HTMLElement | null):
   // the effect below depends on `open` alone — a dependency on the function
   // itself would run it on every render and return focus while the dialog is
   // still up.
-  const latest = useRef(target);
   // Refreshed in an effect, not during render — a ref written while rendering is
   // exactly what react-hooks/refs forbids, and the rule is right. Declared
   // BEFORE the effect below so that on the commit where `open` goes false,
   // effects run in declaration order and this one has already put the current
   // render's getter in place.
-  useEffect(() => {
-    latest.current = target;
-  });
+  const latest = useLatestRef(target);
   useEffect(() => {
     if (open) {
       wasOpen.current = true;
@@ -109,5 +107,5 @@ export function useReturnFocus(open: boolean, target: () => HTMLElement | null):
     if (!wasOpen.current) return;
     wasOpen.current = false;
     latest.current()?.focus();
-  }, [open]);
+  }, [open, latest]);
 }

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 
 import { invoke, onNotification, type ApiError } from "../../lib/api";
 import { toast } from "../../components/ui";
@@ -18,6 +18,7 @@ import {
   type LaneItem,
 } from "./history-chart";
 import { peakLabel, plottedMetric, type PlotPrefs, type Plotted, writePlotChoice } from "./sound-plot";
+import { useLatestRef } from "../../lib/use-latest-ref";
 
 /** Per-metric stat for an item, with legacy single-metric fallback. */
 function metricStat(item: SplItemHistory, key: string, record: ServiceSplHistory): SplMetricStat | null {
@@ -383,10 +384,7 @@ export function SplDetail({
   const [state, setState] = useState<SeriesState>({ kind: "asking" });
   /** The items as of this render, for the subscription below to compare against
    *  without taking `detail` as a dependency. */
-  const itemsRef = useRef(detail.items);
-  useEffect(() => {
-    itemsRef.current = detail.items;
-  }, [detail.items]);
+  const itemsRef = useLatestRef(detail.items);
 
   // Reset the moment the RECORD or the METRIC changes, during render rather
   // than in the effect below.
@@ -474,7 +472,7 @@ export function SplDetail({
       cancelled = true;
       off();
     };
-  }, [detail.serviceKey, primaryKey, live]);
+  }, [detail.serviceKey, primaryKey, live, itemsRef]);
 
   const raw = state.kind === "series" ? state.data : null;
   const buckets = raw?.buckets ?? null;

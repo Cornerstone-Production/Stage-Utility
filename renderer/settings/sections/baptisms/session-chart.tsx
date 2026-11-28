@@ -66,6 +66,7 @@ import {
   timerLaneItems,
   type TimerLaneItem,
 } from "./session-lane";
+import { useLatestRef } from "../../../lib/use-latest-ref";
 
 /** The Session card's own Customize choice: whether the plan lane draws at
  *  all. One group, one option, deliberately — see the card's own head for
@@ -687,16 +688,13 @@ function SessionSvg({
     ? `${hoveredTimerSeg.item.itemId}-${hoveredTimerSeg.item.endedAt ?? `running-${Math.floor(domainEndMs / 1000)}`}`
     : "";
   const hoverFigs = hoveredTimerSeg ? timerHoverFigures(hoveredTimerSeg.item, domainEndMs) : null;
-  const onHoverRef = useRef(onHover);
-  useEffect(() => {
-    onHoverRef.current = onHover;
-  }, [onHover]);
+  const onHoverRef = useLatestRef(onHover);
   useEffect(() => {
     onHoverRef.current?.(hoverFigs);
     // `hoverFigs` is a fresh array every render; `hoveredKey` is what is IN it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hoveredKey]);
-  useEffect(() => () => onHoverRef.current?.(null), []);
+  useEffect(() => () => onHoverRef.current?.(null), [onHoverRef]);
 
   const lastSpan = spans[spans.length - 1];
   const running = live && !!lastSpan && lastSpan.endedAt === null;

@@ -39,6 +39,7 @@ import {
 
 import { cn } from "../../lib/cn";
 import type { FixedKey } from "./servicecue-layouts-model";
+import { useLatestRef } from "../../lib/use-latest-ref";
 
 export type DragKind = "layout" | "col" | "tray" | "member";
 
@@ -263,10 +264,7 @@ export function LayoutsDnd({
   const stopTracking = useRef<(() => void) | null>(null);
   const swallow = useRef<string | null>(null);
   useEffect(() => () => stopTracking.current?.(), []);
-  const handlersRef = useRef(handlers);
-  useLayoutEffect(() => {
-    handlersRef.current = handlers;
-  });
+  const handlersRef = useLatestRef(handlers);
 
   const drawMarker = (m: Marker) => {
     const el = marker.current;
@@ -371,7 +369,7 @@ export function LayoutsDnd({
       handlersRef.current.onReorder({ kind: l.kind, ctx: l.ctx, id: l.id, label: l.label }, l.order);
     }
     announce(`Dropped ${l.label} at position ${l.order.indexOf(l.id) + 1} of ${l.order.length}.`);
-  }, [announce]);
+  }, [announce, handlersRef]);
 
   // A lifted item is dropped where it is when the operator clicks anywhere else.
   useEffect(() => {
