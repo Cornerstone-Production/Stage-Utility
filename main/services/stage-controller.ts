@@ -90,8 +90,7 @@ import { broadcast, channelHasSubscribers, channelInDemand } from "./broadcaster
 import { pcoService } from "./pco-service.js";
 import { presetsStore } from "./presets-store.js";
 import { PrepTagBook } from "./pco-prep-tags.js";
-import { matchMembers, resolveSlots, stripResolvedFields, unrosteredPersonIds, type AvatarFit } from "./slot-resolver.js";
-import type { PlanPeopleRead, PlanPerson } from "./photo-themes/service.js";
+import { resolveSlots, stripResolvedFields, unrosteredPersonIds, type AvatarFit } from "./slot-resolver.js";
 import { PersonDirectory } from "./person-directory.js";
 import { iconBackgrounds, iconToSettings, type AppIconInput } from "./app-icon.js";
 import { DEFAULT_ICON_BACKGROUND, NO_TAB_BACKGROUND } from "./install-metadata.js";
@@ -117,8 +116,6 @@ import { clampTextSize, isStorableTextSize, MAX_TEXT_SIZE, MIN_TEXT_SIZE } from 
 import { DEFAULT_VIDEO_MODE, isRotation, isVideoMode, ROTATIONS, VIDEO_MODES } from "../types/output-format.js";
 
 const PRIMARY_DISPLAY_ID = "display-1";
-/** No themed photos: what a plan with no theme, or none wired, draws. */
-const NO_THEMED_PHOTOS: ReadonlyMap<string, string> = new Map();
 
 /**
  * The embedded-view font size that shipped as the palette default, and the one
@@ -2753,13 +2750,13 @@ export class StageController {
       return { slots: this.resolve(slots, this.teamMembers), roster: "live" };
     }
     if (!target.planId) {
-      return { slots: this.resolve(slots, [], "column", null), roster: "none" };
+      return { slots: this.resolve(slots, []), roster: "none" };
     }
     const { members, reason } = await this.previewRoster(target.serviceTypeId, target.planId);
     if (reason) {
-      return { slots: this.resolve(slots, [], "column", target.planId), roster: "unavailable", reason };
+      return { slots: this.resolve(slots, []), roster: "unavailable", reason };
     }
-    return { slots: this.resolve(slots, members, "column", target.planId), roster: "plan" };
+    return { slots: this.resolve(slots, members), roster: "plan" };
   }
 
   /**
@@ -6313,79 +6310,9 @@ export class StageController {
   /** resolveSlots with the person directory, asking it for any by-person ID the
    *  roster does not have. Every slot resolution goes through here, so none can
    *  leave a by-person slot empty for want of the lookup. */
-  private resolve(
-    raw: Slot[],
-    members: TeamMemberDTO[],
-    avatarFit: AvatarFit = "column",
-    /** The plan these rows are drawn for: its themed photos replace the
-     *  originals. The plan the screens follow unless a preview names another;
-     *  null for a type's default board, which no theme reaches. */
-    planId: string | null = this.state.planId,
-  ): Slot[] {
+  private resolve(raw: Slot[], members: TeamMemberDTO[], avatarFit: AvatarFit = "column"): Slot[] {
     this.personDirectory.want(unrosteredPersonIds(raw, members));
-    return resolveSlots(
-      raw,
-      members,
-      this.deviceStatuses,
-      avatarFit,
-      this.personDirectory.people,
-      this.prepTags.map,
-      this.themedPhotos(planId),
-    );
-  }
-
-  /** Themed photos for a plan (photo-themes/service.ts shownPhotos), wired at
-   *  boot. A setter rather than an import: that service asks this controller who
-   *  is on a plan, and a module cycle between the two would be the result. */
-  private themedPhotos: (planId: string | null) => ReadonlyMap<string, string> = () => NO_THEMED_PHOTOS;
-
-  setThemedPhotoSource(source: (planId: string | null) => ReadonlyMap<string, string>): void {
-    this.themedPhotos = source;
-  }
-
-  /** A themed photo was approved, removed or switched: redraw every slot. */
-  refreshThemedPhotos(): void {
-    this.recomputeResolved();
-    this.broadcast();
-  }
-
-  /** A plan's PCO sort_date, when it is the plan the screens follow and its date is known. */
-  currentPlanSortDateFor(planId: string): string | null {
-    return planId === this.state.planId ? this.currentPlanSortDate : null;
-  }
-
-  /** A person's current Planning Center photo, where this server has read it. */
-  currentPhotoOf(personId: string): string | undefined {
-    const member = this.teamMembers.find((m) => m.personId === personId);
-    return member?.photoUrl ?? this.personDirectory.people.get(personId)?.photoUrl ?? undefined;
-  }
-
-  /**
-   * The people a plan's shown boards put in a slot, deduped by person: who
-   * Theme photos makes photos for. Read the way checkBoardsFor reads the
-   * boards (every board a screen or widget shows, at that plan), against the
-   * live roster for the plan the screens follow and that plan's own otherwise.
-   * An unreadable roster is reported, not thrown.
-   */
-  async planPeople(serviceTypeId: string, planId: string): Promise<PlanPeopleRead> {
-    const live = serviceTypeId === this.state.serviceTypeId && planId === this.state.planId;
-    let members = this.teamMembers;
-    if (!live) {
-      const read = await this.previewRoster(serviceTypeId, planId);
-      if (read.reason) return { roster: "unavailable", reason: read.reason, people: [] };
-      members = read.members;
-    }
-    const shown = this.shownBoardIds();
-    const people = new Map<string, PlanPerson>();
-    for (const id of this.boards.keys()) {
-      if (!shown.has(id)) continue;
-      const slots = await slotsStore.resolve(id, serviceTypeId, planId);
-      this.personDirectory.want(unrosteredPersonIds(slots, members));
-      for (const m of matchMembers(slots, members, this.personDirectory.people)) {
-        if (m?.personId && !people.has(m.personId)) people.set(m.personId, { personId: m.personId, name: m.name, photoUrl: m.photoUrl });
-      }
-    }
-    return { roster: live ? "live" : "plan", people: [...people.values()] };
+    return resolveSlots(raw, members, this.deviceStatuses, avatarFit, this.personDirectory.people, this.prepTags.map);
   }
 
   /** A board's column width: its own, or, on a boot still running on the shapes
