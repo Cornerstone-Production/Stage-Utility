@@ -121,3 +121,34 @@ describe("panning the crop", () => {
     assert.equal(left(), before, "another finger panned the image");
   });
 });
+
+describe("closing the cropper mid-pan", () => {
+  test("leaves nothing bound to the window", async () => {
+    const live = new Map<unknown, string>();
+    const add = window.addEventListener.bind(window);
+    const remove = window.removeEventListener.bind(window);
+    window.addEventListener = ((type: string, fn: unknown, opts?: unknown) => {
+      if (type.startsWith("pointer")) live.set(fn, type);
+      return (add as (...a: unknown[]) => void)(type, fn, opts);
+    }) as typeof window.addEventListener;
+    window.removeEventListener = ((type: string, fn: unknown, opts?: unknown) => {
+      live.delete(fn);
+      return (remove as (...a: unknown[]) => void)(type, fn, opts);
+    }) as typeof window.removeEventListener;
+    try {
+      await open(300, undefined, 600);
+      const viewport = document.querySelector(".touch-none") as HTMLElement;
+      Object.assign(viewport, { setPointerCapture() {}, hasPointerCapture: () => false, releasePointerCapture() {} });
+      await act(async () => {
+        fireEvent.pointerDown(viewport, { pointerId: 1, pointerType: "touch", button: 0, clientX: 100, clientY: 0 });
+      });
+      assert.ok(live.size > 0, "the control is void: the pan bound nothing");
+      cleanup();
+      await settle();
+      assert.deepEqual([...live.values()], [], "a closed cropper is still listening");
+    } finally {
+      window.addEventListener = add;
+      window.removeEventListener = remove;
+    }
+  });
+});
