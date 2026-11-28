@@ -6,6 +6,7 @@ import { errorMessage } from "../errors.js";
 import { type RouteCtx, json, error, readBodyOrEmpty, readJsonObject } from "./context.js";
 import { ROSSTALK_COMMANDS, commandsForFamily } from "../rosstalk-commands.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
+import { ROSSTALK_CONFIG_RULES, answeringUnknownTarget, parseTargetPatch } from "../target-list.js";
 
 export async function rosstalkRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, url, method } = c;
@@ -25,17 +26,18 @@ export async function rosstalkRoutes(c: RouteCtx): Promise<void> {
   const idMatch = pathname.match(/^\/api\/rosstalk\/targets\/([^/]+)$/);
   if (method === "PATCH" && idMatch) {
     const body = await readJsonObject(req);
-    json(res, await rosstalkManager.updateTarget({ id: idMatch[1], patch: body }));
+    const patch = parseTargetPatch(body, { configRules: ROSSTALK_CONFIG_RULES });
+    await answeringUnknownTarget(res, async () => json(res, await rosstalkManager.updateTarget({ id: idMatch[1], patch })));
     return;
   }
   if (method === "DELETE" && idMatch) {
-    json(res, await rosstalkManager.removeTarget({ id: idMatch[1] }));
+    await answeringUnknownTarget(res, async () => json(res, await rosstalkManager.removeTarget({ id: idMatch[1] })));
     return;
   }
 
   const testMatch = pathname.match(/^\/api\/rosstalk\/targets\/([^/]+)\/test$/);
   if (method === "POST" && testMatch) {
-    json(res, await rosstalkManager.testTarget({ id: testMatch[1] }));
+    await answeringUnknownTarget(res, async () => json(res, await rosstalkManager.testTarget({ id: testMatch[1] })));
     return;
   }
 

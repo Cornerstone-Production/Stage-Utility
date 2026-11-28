@@ -14,6 +14,7 @@ import { wirelessManager } from "../wireless-manager.js";
 import { oscManager } from "../osc-manager.js";
 import * as youtubeConnect from "../youtube-connect.js";
 import { isRecord } from "../../types/is-record.js";
+import { OSC_CONFIG_RULES, answeringUnknownTarget, parseTargetPatch, wrappedPatch } from "../target-list.js";
 
 export async function integrationRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
@@ -91,21 +92,9 @@ export async function integrationRoutes(c: RouteCtx): Promise<void> {
     if ((method === "PATCH" || method === "POST") && wirelessConnMatch) {
       const id = wirelessConnMatch[1];
       const body = await readJsonObject(req);
-      const rawPatch = (body.patch ?? body) as Record<string, unknown>;
-      const patch: {
-        name?: string;
-        providerId?: string;
-        enabled?: boolean;
-        config?: Record<string, unknown>;
-      } = {};
-      if (typeof rawPatch.name === "string") patch.name = rawPatch.name;
-      if (typeof rawPatch.providerId === "string") patch.providerId = rawPatch.providerId;
-      if (typeof rawPatch.enabled === "boolean") patch.enabled = rawPatch.enabled;
-      if (isRecord(rawPatch.config)) {
-        patch.config = rawPatch.config;
-      }
-      const connections = await wirelessManager.updateConnection({ id, patch });
-      json(res, connections);
+      const rawPatch = wrappedPatch(body);
+      const patch = parseTargetPatch(rawPatch, { providerId: true });
+      await answeringUnknownTarget(res, async () => json(res, await wirelessManager.updateConnection({ id, patch })));
       return;
     }
 
@@ -113,8 +102,7 @@ export async function integrationRoutes(c: RouteCtx): Promise<void> {
     const wirelessConnDeleteMatch = pathname.match(/^\/api\/wireless\/connections\/([^/]+)$/);
     if (method === "DELETE" && wirelessConnDeleteMatch) {
       const id = wirelessConnDeleteMatch[1];
-      const connections = await wirelessManager.removeConnection({ id });
-      json(res, connections);
+      await answeringUnknownTarget(res, async () => json(res, await wirelessManager.removeConnection({ id })));
       return;
     }
 
@@ -122,8 +110,7 @@ export async function integrationRoutes(c: RouteCtx): Promise<void> {
     const wirelessTestMatch = pathname.match(/^\/api\/wireless\/connections\/([^/]+)\/test$/);
     if (method === "POST" && wirelessTestMatch) {
       const id = wirelessTestMatch[1];
-      const result = await wirelessManager.testConnection({ id });
-      json(res, result);
+      await answeringUnknownTarget(res, async () => json(res, await wirelessManager.testConnection({ id })));
       return;
     }
 
@@ -182,23 +169,22 @@ export async function integrationRoutes(c: RouteCtx): Promise<void> {
     if ((method === "PATCH" || method === "POST") && oscTargetMatch) {
       const id = oscTargetMatch[1];
       const body = await readJsonObject(req);
-      const rawPatch = (body.patch ?? body) as Record<string, unknown>;
-      const patch: { name?: string; enabled?: boolean; config?: Record<string, unknown> } = {};
-      if (typeof rawPatch.name === "string") patch.name = rawPatch.name;
-      if (typeof rawPatch.enabled === "boolean") patch.enabled = rawPatch.enabled;
-      if (isRecord(rawPatch.config)) {
-        patch.config = rawPatch.config;
-      }
-      const targets = await oscManager.updateTarget({ id, patch });
-      integrationManager.refreshOscSummary();
-      json(res, targets);
+      const rawPatch = wrappedPatch(body);
+      const patch = parseTargetPatch(rawPatch, { configRules: OSC_CONFIG_RULES });
+      await answeringUnknownTarget(res, async () => {
+        const targets = await oscManager.updateTarget({ id, patch });
+        integrationManager.refreshOscSummary();
+        json(res, targets);
+      });
       return;
     }
     // DELETE /api/osc/targets/:id
     if (method === "DELETE" && oscTargetMatch) {
-      const targets = await oscManager.removeTarget({ id: oscTargetMatch[1] });
-      integrationManager.refreshOscSummary();
-      json(res, targets);
+      await answeringUnknownTarget(res, async () => {
+        const targets = await oscManager.removeTarget({ id: oscTargetMatch[1] });
+        integrationManager.refreshOscSummary();
+        json(res, targets);
+      });
       return;
     }
 

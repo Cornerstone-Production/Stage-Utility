@@ -128,7 +128,7 @@ describe("send", () => {
   });
 
   test("an unknown target throws", async () => {
-    await assert.rejects(() => rosstalkManager.send("nope", { commandId: "ftb", params: {} }), /unknown target/i);
+    await assert.rejects(() => rosstalkManager.send("nope", { commandId: "ftb", params: {} }), /unknown id/i);
   });
 });
 

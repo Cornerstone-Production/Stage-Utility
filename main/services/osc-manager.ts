@@ -19,6 +19,7 @@ import { broadcast } from "./broadcaster.js";
 import { decodePacket, encodeMessage } from "./osc-codec.js";
 import { oscStore } from "./osc-store.js";
 import { settingsStore } from "./settings-store.js";
+import { newTargetName, requireTarget, requireTargetIndex } from "./target-list.js";
 
 const FEEDBACK_THROTTLE_MS = 200;
 
@@ -211,10 +212,9 @@ class OscManager {
   }
 
   async addTarget(params: { name?: string }): Promise<OscTarget[]> {
-    const index = this.targets.length + 1;
     const target: OscTarget = {
       id: randomUUID(),
-      name: params.name?.trim() || `OSC target ${index}`,
+      name: newTargetName(params.name, "OSC target", this.targets),
       enabled: false,
       connection: "disconnected",
       message: null,
@@ -230,8 +230,7 @@ class OscManager {
     id: string;
     patch: Partial<Pick<OscTargetConfig, "name" | "enabled" | "config">>;
   }): Promise<OscTarget[]> {
-    const t = this.targets.find((c) => c.id === params.id);
-    if (!t) throw new Error(`osc:updateTarget — unknown id: ${params.id}`);
+    const t = requireTarget(this.targets, params.id, "OSC");
     const p = params.patch;
     if (p.name !== undefined) t.name = p.name.trim() || t.name;
     if (p.enabled !== undefined) t.enabled = p.enabled;
@@ -242,8 +241,7 @@ class OscManager {
   }
 
   async removeTarget(params: { id: string }): Promise<OscTarget[]> {
-    const idx = this.targets.findIndex((c) => c.id === params.id);
-    if (idx === -1) throw new Error(`osc:removeTarget — unknown id: ${params.id}`);
+    const idx = requireTargetIndex(this.targets, params.id, "OSC");
     this.targets.splice(idx, 1);
     // Drop any feedback values held for the removed target.
     const prefix = `${params.id}::`;
