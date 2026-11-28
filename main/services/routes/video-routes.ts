@@ -2,9 +2,8 @@
 //
 // Every route must finish responding before it returns (see RouteCtx).
 
-import { type RouteCtx, json, error, readBody, queryFlag, MAX_CONFIG_BODY_BYTES } from "./context.js";
+import { type RouteCtx, json, error, readBody, queryFlag, refuseCrossOrigin, MAX_CONFIG_BODY_BYTES } from "./context.js";
 import { attachmentDisposition, datedExportFilename } from "../export-filename.js";
-import { isCrossOrigin } from "../http-origin.js";
 import { scrub } from "../scrub.js";
 import { loadFfmpegPath } from "../video/ffmpeg-path-store.js";
 import { findFfmpeg, publicFfmpegStatus, setFfmpegPath } from "../video/ffmpeg-system.js";
@@ -42,10 +41,7 @@ export async function videoRoutes(c: RouteCtx): Promise<void> {
     }
     // With passwords this GET answers live secrets, like the push address
     // route below: a browser cross-site request is refused the same way.
-    if (passwords && isCrossOrigin(req.headers.origin, req.headers.host)) {
-      error(res, "cross-origin request rejected", 403);
-      return;
-    }
+    if (passwords && refuseCrossOrigin(c)) return;
     const r = await videoService.exportBundle(url.searchParams.get("feeds"), ports, passwords);
     if (!r.ok) {
       error(res, r.error);
@@ -120,10 +116,7 @@ export async function videoRoutes(c: RouteCtx): Promise<void> {
     // must be refused the same way a mutating one already is
     // (remote-server.ts's own gate only covers POST/PATCH/PUT/DELETE; reads
     // stay open by design for LAN peers, which this one route cannot be).
-    if (isCrossOrigin(req.headers.origin, req.headers.host)) {
-      error(res, "cross-origin request rejected", 403);
-      return;
-    }
+    if (refuseCrossOrigin(c)) return;
     // The editor's protocol segmented control previews another
     // protocol's address (same feed, same password) before Save — an
     // invalid or absent value just falls back to the feed's own saved one.

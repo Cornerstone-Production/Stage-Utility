@@ -25,6 +25,7 @@ import { baptismStore } from "./baptism-store.js";
 import { stageController } from "./stage-controller.js";
 import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
 import { sampleArchive } from "./archive/sample-archive.js";
+import { scrub } from "./scrub.js";
 
 function idleState(mode: BaptismMode): BaptismState {
   return {
@@ -229,7 +230,7 @@ class BaptismTimerService {
       if (this.lastWarnedItemId !== live.currentItemId) {
         this.lastWarnedItemId = live.currentItemId;
         console.warn(
-          `[baptism] auto-start: "${live.label ?? live.currentItemId}" is bound to the ` +
+          `[baptism] auto-start: "${scrub(live.label ?? live.currentItemId)}" is bound to the ` +
             `${action === "start-baptisms" ? "baptisms" : "testimonies"} but the timer is in ` +
             `${this.state.mode} mode and stayed in "${before}" — ignored`,
         );
@@ -244,8 +245,8 @@ class BaptismTimerService {
     // exists to stop happening.
     console.log(
       action === "start-testimonies"
-        ? `[baptism] auto-start: started testimonies from "${live.label ?? ""}"`
-        : `[baptism] auto-start: armed baptisms from "${live.label ?? ""}" — no clock runs until the first press`,
+        ? `[baptism] auto-start: started testimonies from "${scrub(live.label ?? "")}"`
+        : `[baptism] auto-start: armed baptisms from "${scrub(live.label ?? "")}" — no clock runs until the first press`,
     );
     this.state = { ...this.state, autoStartedFrom: live.label ?? null };
     this.commit();

@@ -20,6 +20,7 @@ import { heardDuplicate, recheckFromScratch, startDuplicateCheck, stopDuplicateC
 import { recordSeen, scanning, forgetSeen, noteReleased } from "./kiosk-presence.js";
 import { bindingWritesHeld, kioskDevicesStore, findById, touch, updateDevices } from "./kiosk-devices-store.js";
 import { errorMessage } from "./errors.js";
+import { scrub } from "./scrub.js";
 import { DEFAULT_DISCOVERY_PORT, type DuplicateCheck } from "../types/kiosk.js";
 
 export interface ResponderOptions {
@@ -76,7 +77,7 @@ export function startKioskResponder(opts: ResponderOptions): void {
   function replyTo(rinfo: dgram.RemoteInfo, claimed: boolean): void {
     const reply = Buffer.from(encodeReply({ serverId: opts.serverId(), name: opts.serverName, url: opts.url(), claimed }));
     sock.send(reply, rinfo.port, rinfo.address, (err) => {
-      if (err) console.warn("[kiosk-responder] reply failed:", err.message);
+      if (err) console.warn(`[kiosk-responder] reply failed: ${scrub(err.message)}`);
     });
   }
 
@@ -219,7 +220,7 @@ export function startKioskResponder(opts: ResponderOptions): void {
   sock.on("error", (err) => {
     // A bound port is the realistic failure — say which, because "discovery does
     // not work" with no reason is the kind of thing that eats a Sunday morning.
-    console.warn(`[kiosk-responder] socket error on udp/${port}: ${err.message}`);
+    console.warn(`[kiosk-responder] socket error on udp/${port}: ${scrub(err.message)}`);
     stopKioskResponder({ state: "failed", at: Date.now(), reason: err.message });
   });
 

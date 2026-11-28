@@ -7,6 +7,7 @@ import * as net from "net";
 import type { DeviceChannel, DeviceProvider } from "../../types/devices.js";
 import type { ConfigField } from "../../types/integrations.js";
 import { DeviceProviderBase, blankChannel, type ChannelState } from "./device-provider-base.js";
+import { scrub } from "../../services/scrub.js";
 
 // Per-channel mutable runtime state.
 export interface ShureConfig {
@@ -361,7 +362,7 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
     });
 
     socket.on("error", (err) => {
-      if (this.reconnectAttempts === 0) console.warn(`[shure:${this.id}] socket error: ${err.message}`);
+      if (this.reconnectAttempts === 0) console.warn(`[shure:${this.id}] socket error: ${scrub(err.message)}`);
       this.setState("error");
       // Tear down so 'close' fires and we reconnect with back-off, rather than
       // leaving a half-open socket lingering.

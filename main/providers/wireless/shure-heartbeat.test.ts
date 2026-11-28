@@ -92,3 +92,33 @@ describe("a refused command says so", () => {
     }
   });
 });
+
+describe("a socket error is written to the log escaped", () => {
+  it("an error message with a newline cannot forge a second line", async () => {
+    const warns: string[] = [];
+    const warn = mock.method(console, "warn", (...a: unknown[]) => {
+      warns.push(a.map(String).join(" "));
+    });
+    const log = mock.method(console, "log", () => {});
+    const p = new ShureCharger() as unknown as {
+      cfg: { host: string; port: number };
+      openSocket(): Promise<void>;
+      socket: { emit(event: string, err: Error): void; destroy(): void };
+      reconnectAttempts: number;
+      disconnect(): Promise<void>;
+    };
+    try {
+      p.cfg = { host: "127.0.0.1", port: 1 };
+      await p.openSocket();
+      p.socket.emit("error", new Error("boom\n[stage-controller] plan switched to 12345"));
+      const said = warns.filter((l) => l.includes("socket error"));
+      assert.equal(said.length, 1, warns.join(" | "));
+      assert.ok(!said[0]!.includes("\n"), `the error reached the log unescaped: ${JSON.stringify(said[0])}`);
+    } finally {
+      p.socket.destroy();
+      await p.disconnect();
+      warn.mock.restore();
+      log.mock.restore();
+    }
+  });
+});
