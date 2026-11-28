@@ -1,16 +1,7 @@
-import { QrHint } from "../components/qr-hint";
-import { Tooltip } from "../components/ui/tooltip";
-import { BrandLogo } from "../components/brand-logo";
 import { useStageState } from "./use-stage-state";
 import { useTranscript } from "./use-transcript";
 import { TranscriptFeed } from "./transcript-feed";
 import { Loader2Icon } from "lucide-react";
-
-interface TranscriptionViewProps {
-  /** Only ever the source of the display NAME here, so an embed with no
-   *  screen behind it passes null rather than inventing an id. */
-  displayId: string | null;
-}
 
 /**
  * Sizes to h-full, never the viewport: this renders both on a display and inside
@@ -33,7 +24,7 @@ interface TranscriptionViewProps {
  * is downstream of the answer. calendar-view.tsx has no vmin at all and its
  * header says why: it is an office display read from a desk, at absolute sizes.
  */
-export function TranscriptionView({ displayId }: TranscriptionViewProps) {
+export function TranscriptionView() {
   const { state, isLoading } = useStageState();
   const lines = useTranscript();
 
@@ -46,55 +37,8 @@ export function TranscriptionView({ displayId }: TranscriptionViewProps) {
     );
   }
 
-  const display = state.outputs?.find((o) => o.id === displayId) ?? null;
-  const displayName = display?.name ?? null;
-
   return (
     <div className="flex flex-col h-full overscroll-none kiosk-surface text-fg">
-      {/* Brand top bar */}
-      <div
-        className="relative flex items-center h-10 shrink-0"
-        style={
-          {
-            background: "rgba(0,0,0,0.50)",
-            backdropFilter: "blur(20px)",
-            borderBottom: "1px solid rgba(255,255,255,0.09)",
-          } as React.CSSProperties
-        }
-      >
-        <div className="shrink-0 ml-3 flex items-center gap-2.5 relative z-10">
-          <Tooltip label="Back to home">
-            <a
-              href="/"
-              className="flex items-center gap-2 text-fg-muted rounded hover:opacity-80 transition-opacity"
-              aria-label="Back to home"
-            >
-              {state.appLogo && (
-                <BrandLogo logo={state.appLogo} monochrome={state.appLogoMonochrome} className="size-5 rounded select-none" />
-              )}
-              <span className="text-caption1 font-title select-none truncate" style={{ letterSpacing: "0.02em" }}>
-                {state.appName}
-              </span>
-            </a>
-          </Tooltip>
-          {displayName && (
-            <>
-              <span className="w-px h-4 bg-white/15 shrink-0" aria-hidden="true" />
-              <span className="text-caption1 font-medium text-fg-subtle select-none truncate" style={{ letterSpacing: "0.02em" }}>
-                {displayName}
-              </span>
-            </>
-          )}
-        </div>
-        {state.showQr && state.remoteUrl && (
-          <Tooltip label="Open settings in a new tab">
-            <a href="/settings" target="_blank" rel="noopener noreferrer" className="shrink-0 ml-auto mr-3 relative z-10 rounded transition-opacity hover:opacity-70" aria-label="Open settings in a new tab">
-              <QrHint url={state.remoteUrl} compact />
-            </a>
-          </Tooltip>
-        )}
-      </div>
-
       {/* Captions — newest at bottom; auto-scrolls only when already at bottom */}
       <TranscriptFeed
         lines={lines}

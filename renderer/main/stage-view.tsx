@@ -137,6 +137,7 @@ function KioskTopBar({
 
   return (
     <div
+      data-testid="kiosk-top-bar"
       className="relative flex items-center shrink-0"
       style={{
         // The whole bar scales with the display: `font-size` is the single knob,
@@ -721,19 +722,19 @@ function renderView(
     case "dashboard":
       return (
         <KioskFrame state={state} screen={screen} kind={kind}>
-          <DashboardView displayId={displayId} />
+          <DashboardView />
         </KioskFrame>
       );
     case "stage":
       return (
         <KioskFrame state={state} screen={screen} kind={kind}>
-          <StageDisplayView displayId={displayId} />
+          <StageDisplayView />
         </KioskFrame>
       );
     case "transcription":
       return (
         <KioskFrame state={state} screen={screen} kind={kind}>
-          <TranscriptionView displayId={displayId} />
+          <TranscriptionView />
         </KioskFrame>
       );
     case "script":

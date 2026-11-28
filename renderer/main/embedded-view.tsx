@@ -129,15 +129,13 @@ export function EmbeddedView({
     }
 
     case "transcription":
-      // The display id is only a name here, so a transcription tile draws with
-      // or without one — unlike the per-display kinds below.
-      return <TranscriptionView displayId={displayId ?? null} />;
+      return <TranscriptionView />;
 
     case "dashboard":
-      return perDisplay("dashboard", (id) => <DashboardView displayId={id} />);
+      return perDisplay("dashboard", () => <DashboardView />);
 
     case "stage":
-      return perDisplay("stage view", (id) => <StageDisplayView displayId={id} />);
+      return perDisplay("stage view", () => <StageDisplayView />);
 
     case "spl-rundown":
       return perDisplay("SPL rundown", (id) => <SplRundownView displayId={id} />);

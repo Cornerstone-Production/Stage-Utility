@@ -195,7 +195,7 @@ A routed view isn't the only thing a display can render. In order of precedence:
 The strip across the top of a kiosk carries the brand, the plan context and the
 QR link back. Not every view kind draws one: a full-bleed kind gives its content
 the whole panel instead. `KIND_DRAWS_TOP_BAR` in `main/types/views.ts` is the
-single declaration of which do — today slots, custom and dashboard — and both
+single declaration of which do — today slots, custom, dashboard, stage and transcription — and both
 the kiosk and the Screens card read it, so the two cannot disagree. The
 placeholder screens (loading, unrouted, empty, not configured, view missing)
 draw a bar whatever the routing says, because there is no content yet to fill
