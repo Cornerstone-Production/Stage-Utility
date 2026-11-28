@@ -8,7 +8,7 @@ import { invoke } from "../lib/api";
 import { useFailedReads } from "../lib/use-failed-reads";
 import { useResyncOn } from "../lib/use-resync-on";
 import { cn } from "../lib/cn";
-import { INLINE_LINK } from "../lib/link-classes";
+import { INLINE_LINK, QUIET_LINK } from "../lib/link-classes";
 import { useOriginHref } from "../lib/back-target";
 import { ALL_COLUMNS_SLUG, slugOf, slugify } from "@main/services/servicecue-slug";
 import { SERVICES_NOT_SENT, isPublicMode, notPublishedYet } from "../lib/public-mode";
@@ -188,7 +188,7 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
           {!isPublicMode() && (
             <a
               href="/servicecue/presets"
-              className={cn("mt-2 text-caption1 text-accent hover:underline", messageShown ? "self-center" : "self-start")}
+              className={cn(QUIET_LINK, "mt-2 text-caption1", messageShown ? "self-center" : "self-start")}
             >
               Edit layouts
             </a>

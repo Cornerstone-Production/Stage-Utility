@@ -15,6 +15,8 @@ import { invoke } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
 import { gridBoardId, pointedGrid } from "@main/services/slot-boards";
 import { Row, RowNumber, RowSelect } from "./inspector-rows";
+import { QUIET_LINK } from "../lib/link-classes";
+import { cn } from "../lib/cn";
 
 type GridConfig = Extract<LayoutObjectConfig, { type: "slots-grid" }>;
 
@@ -125,11 +127,11 @@ export function SlotsGridBoard({
       />
       {current && (
         router ? (
-          <AppLink to="/mic-slots" search={{ board: current } as never} className="text-caption1 text-accent hover:underline">
+          <AppLink to="/mic-slots" search={{ board: current } as never} className={cn(QUIET_LINK, "text-caption1")}>
             Edit in Mic slots
           </AppLink>
         ) : (
-          <a href={`/mic-slots?board=${encodeURIComponent(current)}`} className="text-caption1 text-accent hover:underline">
+          <a href={`/mic-slots?board=${encodeURIComponent(current)}`} className={cn(QUIET_LINK, "text-caption1")}>
             Edit in Mic slots
           </a>
         )

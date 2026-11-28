@@ -39,6 +39,7 @@ import { prefersReducedMotion } from "../../../lib/reduced-motion";
 import { useServerNow } from "../../../lib/server-clock";
 import { useServiceTimeline } from "../../../main/use-service-timeline";
 import { toast } from "../../../components/ui";
+import { ErrorNote } from "../../../components/ui/error-note";
 import { PeopleTable } from "./people-table";
 import {
   CustomizePopover,
@@ -364,7 +365,7 @@ export function HistorySessionChart({ serviceKey, sessions, items }: HistorySess
                 <Legend />
               </>
             ) : error ? (
-              <ErrorNote text="Couldn't load the timing lane. Reload the page to try again." />
+              <ErrorNote>Couldn't load the timing lane. Reload the page to try again.</ErrorNote>
             ) : (
               <EmptyNote text="No timing detail was recorded for this session." />
             )}
@@ -517,13 +518,11 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
           // a press sends, and on mount. A finished session gets no push
           // until someone presses something, so it is told to reload rather
           // than promised a retry that may never come.
-          <ErrorNote
-            text={
-              live
-                ? "Couldn't load the timing lane — it tries again at the next press."
-                : "Couldn't load the timing lane. Reload the page to try again."
-            }
-          />
+          <ErrorNote>
+            {live
+              ? "Couldn't load the timing lane — it tries again at the next press."
+              : "Couldn't load the timing lane. Reload the page to try again."}
+          </ErrorNote>
         ) : !win || sessionOnlySpans.length === 0 ? (
           <EmptyNote text="No timing detail was recorded for this session." />
         ) : (
@@ -566,18 +565,6 @@ function EmptyNote({ text }: { text: string }) {
     <div className="rounded-lg border border-dashed border-line-strong px-4 py-10 text-center text-caption1 text-fg-muted">
       {text}
     </div>
-  );
-}
-
-/** A fetch that failed, not a session that recorded nothing — the same
- *  danger-toned alert banner import-layout.tsx and screen-settings-panel.tsx use
- *  for exactly this distinction. `role="alert"` announces it immediately,
- *  unlike EmptyNote's two neutral states. */
-function ErrorNote({ text }: { text: string }) {
-  return (
-    <p role="alert" className="rounded-lg border border-danger-9/40 bg-danger-9/10 px-3 py-2 text-footnote text-danger-11">
-      {text}
-    </p>
   );
 }
 

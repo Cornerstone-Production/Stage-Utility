@@ -59,6 +59,7 @@ import {
 import { Loader2Icon, RefreshCwIcon, EraserIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 import { formatClock } from "../lib/clock-format";
+import { QUIET_LINK } from "../lib/link-classes";
 
 // ---- helpers ----------------------------------------------------------------
 
@@ -281,7 +282,7 @@ function VideoFeedsLinkPanel() {
   return (
     <p className="px-1 py-2 text-callout text-fg-muted">
       Feeds and the relay's status live on their own page; its ports are in Advanced.{" "}
-      <AppLink to="/video-feeds" className="text-accent hover:underline">
+      <AppLink to="/video-feeds" className={QUIET_LINK}>
         Open Video feeds
       </AppLink>
     </p>

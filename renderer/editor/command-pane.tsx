@@ -5,6 +5,8 @@ import { useCueUsage, usesOf } from "../settings/sections/cue-usage";
 import type { CuesLive } from "../main/use-cue-live";
 import { CuePicker } from "./cue-picker";
 import type { PressOwner } from "./owned-press";
+import { QUIET_LINK_RING } from "../lib/link-classes";
+import { cn } from "../lib/cn";
 
 /** Where "+ New manual command…" goes: the Automation page, which opens its creation
  *  flow for `new=manual`. */
@@ -32,7 +34,7 @@ export function CommandPane({
         href={NEW_MANUAL_COMMAND_HREF}
         target="_blank"
         rel="noopener noreferrer"
-        className="self-start rounded text-footnote text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+        className={cn(QUIET_LINK_RING, "self-start rounded text-footnote")}
       >
         + New manual command…
       </a>

@@ -11,6 +11,7 @@ import { chainNodes, collectChanges, noRowsMessage, rackSections, sourceColor, w
 import { plural } from "@main/services/plural";
 import { LEGEND_NODES, PatchChain } from "./patch-chain";
 import { PatchWide } from "./patch-view-wide";
+import { QUIET_LINK } from "../lib/link-classes";
 
 /**
  * Three layouts, chosen by how wide the page itself is (the pane beside the
@@ -68,7 +69,7 @@ function PatchFooter() {
     <div className="mt-6 flex items-center justify-center gap-2 text-caption2 text-fg-faint">
       <CableIcon className="size-3.5" />
       <span>Read-only · updates live ·</span>
-      <a href="/patch/edit" className="text-accent hover:underline">Edit the patch</a>
+      <a href="/patch/edit" className={QUIET_LINK}>Edit the patch</a>
     </div>
   );
 }

@@ -46,6 +46,7 @@ import {
   isCountedItem,
 } from "./overview-data";
 import { plural } from "@main/services/plural";
+import { QUIET_LINK } from "../../lib/link-classes";
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
@@ -1780,7 +1781,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
             // the Workflow toggle, not a read-only view of anything.
             headerRight={
               readOnly ? undefined : (
-                <AppLink to="/baptism" className="text-caption1 text-accent hover:underline">
+                <AppLink to="/baptism" className={cn(QUIET_LINK, "text-caption1")}>
                   Open in Baptisms →
                 </AppLink>
               )

@@ -37,6 +37,8 @@ import { downloadJson, fileSlug } from "./download";
 import { slotCount } from "./board-model";
 import { freshSlotId } from "./slot-factory";
 import type { MicSlots } from "./use-mic-slots";
+import { QUIET_LINK } from "../../lib/link-classes";
+import { cn } from "../../lib/cn";
 
 function savedOn(iso: string): string {
   const at = Date.parse(iso);
@@ -341,13 +343,13 @@ export function SavedLayouts({
             <p className="text-caption1 text-fg-muted">No saved layouts yet. Save a board above, then recall it into any board later.</p>
           )}
           <div className="flex gap-3 text-caption1">
-            <button type="button" className="inline-flex items-center gap-1 text-accent hover:underline" onClick={() => fileRef.current?.click()}>
+            <button type="button" className={cn(QUIET_LINK, "inline-flex items-center gap-1")} onClick={() => fileRef.current?.click()}>
               <UploadIcon className="size-3.5" />
               Import a file
             </button>
             <button
               type="button"
-              className="inline-flex items-center gap-1 text-accent hover:underline disabled:opacity-40"
+              className={cn(QUIET_LINK, "inline-flex items-center gap-1 disabled:opacity-40")}
               disabled={!saveBoard}
               onClick={() => {
                 const board = mic.boards.find((b) => b.id === saveBoard);

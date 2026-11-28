@@ -19,9 +19,10 @@ import type { PanelDevice } from "../../settings/sections/screen-settings-panel"
 import { useDevices } from "./use-devices";
 import { NOT_SET_UP_ID, foundRow, foundTitle, notSetUp, panelDeviceOf } from "./not-set-up";
 import { dismissFound, restoreAllFound, restoreFound, useDismissed } from "./dismissed-found";
+import { cn } from "../../lib/cn";
+import { QUIET_LINK_RING } from "../../lib/link-classes";
 
-const LINK =
-  "whitespace-nowrap rounded px-0.5 py-1 text-caption1 font-medium text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus";
+const LINK = cn(QUIET_LINK_RING, "whitespace-nowrap rounded px-0.5 py-1 text-caption1 font-medium");
 
 export function FoundBanner({ onSetUp }: {
   /** Open the Screen settings panel for a new screen made for this device. */

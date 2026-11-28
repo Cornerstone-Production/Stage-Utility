@@ -49,6 +49,7 @@ import {
 } from "./screen-panel-parts";
 import { NewScreenBody, STEP_TITLES, type Step } from "./new-screen-body";
 import { ViewBody } from "./view-settings-body";
+import { QUIET_LINK } from "../../lib/link-classes";
 
 /** What the panel is open on. */
 export type PanelTarget =
@@ -205,7 +206,7 @@ function GroupsChecklist({
     if (messageGroups.failed) return <p className="text-caption1 text-danger-11">Couldn't load the groups.</p>;
     if (!messageGroups.known) return <p className="text-caption1 text-fg-subtle">Loading groups...</p>;
     return (
-      <button type="button" onClick={() => onOpenMessagingSettings()} className="text-left text-footnote text-accent hover:underline">
+      <button type="button" onClick={() => onOpenMessagingSettings()} className={cn(QUIET_LINK, "text-left text-footnote")}>
         No groups yet. Make some in Settings → Messages
       </button>
     );

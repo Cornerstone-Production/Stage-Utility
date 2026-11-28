@@ -16,6 +16,8 @@ import { HOME_VIEW_ID, screensListViews } from "@main/services/home-view";
 import { AppLink } from "../app-link";
 import { ViewDetail } from "../../settings/sections/view-detail";
 import { useStageSettings } from "../use-stage-settings";
+import { QUIET_LINK } from "../../lib/link-classes";
+import { cn } from "../../lib/cn";
 
 export function ViewEditorRoute() {
   const params = useParams({ strict: false }) as { viewId?: string };
@@ -55,7 +57,7 @@ export function ViewEditorRoute() {
     return (
       <div className="py-10 text-center">
         <p className="text-body text-fg">That view no longer exists.</p>
-        <AppLink to="/screens" className="text-caption1 text-accent hover:underline mt-2 inline-block">
+        <AppLink to="/screens" className={cn(QUIET_LINK, "text-caption1 mt-2 inline-block")}>
           Back to Screens
         </AppLink>
       </div>

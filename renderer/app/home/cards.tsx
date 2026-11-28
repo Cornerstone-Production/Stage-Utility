@@ -62,6 +62,7 @@ import { useScoresStatus } from "../../main/use-scores-state";
 import { inkFor } from "../../main/score-ink";
 import { emptyReason, pickGame } from "../../main/scores-object";
 import { plural } from "@main/services/plural";
+import { QUIET_LINK } from "../../lib/link-classes";
 
 /**
  * The same set as a VALUE, so a renderer can ask before it starts matching.
@@ -572,7 +573,7 @@ export function RecentServicesCard({
           Recent {scope.toLowerCase()}
         </h2>
         {!inPanel && (
-          <AppLink to="/history/manage" className="ml-auto text-caption1 text-accent hover:underline">
+          <AppLink to="/history/manage" className={cn(QUIET_LINK, "ml-auto text-caption1")}>
             Open History
           </AppLink>
         )}
