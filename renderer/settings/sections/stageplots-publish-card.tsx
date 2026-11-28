@@ -22,10 +22,8 @@
 // selected, to be copied by hand.
 
 import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { CircleXIcon, CopyIcon, GlobeIcon, RefreshCwIcon, TriangleAlertIcon } from "lucide-react";
 
-import type { PublishSettingsDTO } from "@main/types/servicecue-publish-status";
 import type { PendingRemovalView, VenueView } from "@main/types/stageplots";
 import { STAGEPLOTS_PATH } from "@main/types/servicecue-publish";
 import { plural } from "@main/services/plural";
@@ -33,7 +31,6 @@ import { plural } from "@main/services/plural";
 import { Button } from "../../components/ui/button";
 import { Switch } from "../../components/ui/switch";
 import { confirm } from "../../components/ui/confirm-dialog";
-import { invoke } from "../../lib/api";
 import { logReadFailure } from "../../lib/client-log";
 import { useCopyFeedback } from "../../lib/use-copy-feedback";
 import { formatClock } from "../../lib/clock-format";
@@ -42,6 +39,7 @@ import { useResyncOn } from "../../lib/use-resync-on";
 import { Mono } from "../../main/stageplots/mono";
 import { stageplotsApi } from "../../main/stageplots/stageplots-api";
 import { SettingsInAdvancedLink } from "./servicecue-public-link";
+import { usePublishQuery } from "./servicecue-publish-query";
 import { zonedDayLabel } from "./plan-date-label";
 import { CardHeader, iconButton, type Save } from "./stageplots-shared";
 
@@ -63,15 +61,6 @@ const SAVED_HERE = "Your plots save and show on this network as usual; only the 
 
 const pill = "inline-flex h-5 items-center gap-1.5 rounded-full px-2 text-[11px] leading-[13px] font-medium";
 const statusLine = "flex items-start gap-[7px] text-caption1 [&>svg]:mt-px [&>svg]:size-3.5 [&>svg]:shrink-0";
-
-/** The Public link card's address and whether a token is saved for it: the page this server publishes to. */
-function usePublishTarget() {
-  return useQuery({
-    queryKey: ["stageplots", "publish-target"],
-    queryFn: () => invoke<PublishSettingsDTO>("servicecue:getPublish"),
-    staleTime: 60_000,
-  });
-}
 
 /** What names the venue's link without carrying it: changed by a publish, regenerate or move, never by a republish. */
 function linkKey(venue: VenueView): string | null {
@@ -118,7 +107,7 @@ export function usePublishedLink(venue: VenueView): { url: string | null; failed
  * page up again. Never a secret: the server does not send them.
  */
 function PendingLinks({ pending, save }: { pending: readonly PendingRemovalView[]; save: Save }) {
-  const target = usePublishTarget();
+  const target = usePublishQuery();
   const [working, setWorking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   if (pending.length === 0) return null;
@@ -203,7 +192,7 @@ export function PublishCard({
 }) {
   const pub = venue.publish ?? null;
   // The Public link card's address, for the host and whether there is a page to publish to.
-  const target = usePublishTarget();
+  const target = usePublishQuery();
   const [working, setWorking] = useState<Action | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** What the server said beside a success: a copy left on a page this server cannot reach. Kept until another venue. */
