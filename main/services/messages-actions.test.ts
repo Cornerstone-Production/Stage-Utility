@@ -30,7 +30,6 @@ const { EVERYONE } = await import("../types/messages.js");
 const send = AUTOMATION_ACTIONS["messages.send"]!;
 const clearAlerts = AUTOMATION_ACTIONS["messages.clear-alerts"]!;
 
-const real = { log: console.log, warn: console.warn, error: console.error };
 let green = "";
 let stage = "";
 
@@ -47,7 +46,6 @@ beforeEach(async (t) => {
   for (const m of messagesService.state().alerts) await messagesService.clearAlert(m.id);
 });
 afterEach(() => {
-  Object.assign(console, real);
   mock.restoreAll();
 });
 

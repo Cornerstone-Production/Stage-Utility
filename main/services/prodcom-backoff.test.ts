@@ -52,7 +52,6 @@ class TestProdCom extends ProdComService {
   }
 }
 
-
 function started(): TestProdCom {
   const svc = new TestProdCom();
   svc.configure("127.0.0.1", 65535, null);

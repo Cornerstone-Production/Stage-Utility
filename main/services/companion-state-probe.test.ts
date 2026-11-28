@@ -477,15 +477,15 @@ describe("watching a press", () => {
     assert.equal(parseLearning(writes[0]!.patch).attempts, 1, "the press is still spent");
   });
 
-    test("three presses that learn nothing stop learning, with a line", async () => {
-      const lines = await captureConsoleDuringAsync(["warn"], async () => {
+  test("three presses that learn nothing stop learning, with a line", async () => {
+    const lines = await captureConsoleDuringAsync(["warn"], async () => {
       values = new Map([["Rack:status", "Standby"]]);
       let params: Record<string, string | number> = learningOn(["Rack:status"]);
       for (let i = 0; i < 3; i++) {
         notePressForLearning({ ruleId: "id-rack_on", base: "rack", want: "on", params });
         await tick(SETTLE_MS + SETTLE_POLL_MS);
-      params = writes.at(-1)!.patch;
-    }
+        params = writes.at(-1)!.patch;
+      }
     });
     assert.equal(writes.length, 3);
     assert.equal(parseLearning(writes[2]!.patch).stopped, "gave-up");
