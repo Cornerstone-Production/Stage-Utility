@@ -158,12 +158,14 @@ export function foldSecrets(
     if (!(key in incoming)) continue;
     const value = incoming[key];
     if (isMask(value)) continue; // unchanged
-    if (isBlankSecret(value)) {
-      // explicit clear — whitespace is empty
+    if (isBlankSecret(value)) { // explicit clear — whitespace is empty
       if (hasSecretValue(next[key])) cleared.push(key);
       delete next[key];
-    } else if (typeof value === "string") next[key] = value;
-    else ignored.push({ key, type: value === null ? "null" : typeof value });
+    } else if (typeof value === "string") {
+      next[key] = value;
+    } else {
+      ignored.push({ key, type: value === null ? "null" : typeof value });
+    }
   }
   return { next, cleared, ignored };
 }

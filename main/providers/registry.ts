@@ -18,11 +18,18 @@ import { ShureCharger } from "./wireless/shure-charger.js";
 import { ShurePsm } from "./wireless/shure-psm.js";
 import { ShureUlxd } from "./wireless/shure-ulxd.js";
 
-// Common host/port/channels fields shared across Shure providers.
+// The address fields every Shure provider asks for.
+function shureAddress(hostPlaceholder = "192.168.1.100"): ConfigField[] {
+  return [
+    { key: "host", label: "Device IP / Hostname", type: "text", placeholder: hostPlaceholder },
+    { key: "port", label: "TCP Port", type: "number", placeholder: "2202" },
+  ];
+}
+
+// Common host/port/channels fields shared across Shure receivers.
 function shureFields(channelsPlaceholder: string): ConfigField[] {
   return [
-    { key: "host", label: "Device IP / Hostname", type: "text", placeholder: "192.168.1.100" },
-    { key: "port", label: "TCP Port", type: "number", placeholder: "2202" },
+    ...shureAddress(),
     { key: "channels", label: "Number of Channels", type: "number", placeholder: channelsPlaceholder },
   ];
 }
@@ -78,8 +85,7 @@ const PROVIDER_DESCRIPTORS = new Map<string, IntegrationDescriptor>([
       label: "Shure SBC Charger",
       docs: "wireless",
       configSchema: [
-        { key: "host", label: "Device IP / Hostname", type: "text", placeholder: "192.168.1.110" },
-        { key: "port", label: "TCP Port", type: "number", placeholder: "2202" },
+        ...shureAddress("192.168.1.110"),
         {
           key: "channels",
           label: "Number of Bays",

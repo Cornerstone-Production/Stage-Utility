@@ -100,6 +100,13 @@ export function blankChannel(
   };
 }
 
+/**
+ * What a failure is a failure OF, so one cannot end or hide another: the link
+ * itself, a Spectera telemetry subscription, an SSC frame the driver could not
+ * read. A union, so a typo cannot open an outage nobody closes.
+ */
+export type OutageKey = "link" | "subscribe" | "frame";
+
 /** The SSE channel the wireless panel listens on — see reconnectDelayMs. */
 const WIRELESS_CHANNEL = "wireless:connections-changed";
 
@@ -183,11 +190,9 @@ export abstract class DeviceProviderBase {
 
   // ── Timers that belong to one link ──────────────────────────────────────────
   //
-  // Held here, not by each driver, because a driver-held one is a timer only that
-  // driver remembers to stop. The Shure charger's 30 s bay poll was exactly that:
-  // created in its onConnected(), never cleared, so removing a charger connection
-  // left an interval holding the discarded provider for the life of the process.
-  // A driver asks for a timer by name; stopLinkTimers() ends every one of them.
+  // Held here, not by each driver, because a driver-held timer is one only that
+  // driver remembers to stop. A driver asks for a timer by name;
+  // stopLinkTimers() ends every one of them.
 
   /** Run `fn` every `ms` while this link is up. A second call under the same
    *  `name` replaces the first, so a reconnect cannot stack two. */
@@ -242,14 +247,14 @@ export abstract class DeviceProviderBase {
    * without the tag; every device- or operator-supplied value in it is scrubbed
    * by the caller.
    */
-  protected reportFailure(kind: string, message: string, key = "link"): void {
+  protected reportFailure(kind: string, message: string, key: OutageKey = "link"): void {
     const d = this.outages.fail(key, kind, Date.now());
     if (d.log) console.warn(`${this.logTag()} ${message}${d.note}`);
   }
 
   /** The link is working: the device sent something. Cheap enough to call on
    *  every chunk, and ends a run only once it has held. */
-  protected reportWorking(key = "link"): void {
+  protected reportWorking(key: OutageKey = "link"): void {
     const d = this.outages.ok(key, Date.now());
     if (d.log) console.log(`${this.logTag()} working again${d.note}`);
   }

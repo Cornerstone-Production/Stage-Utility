@@ -93,8 +93,7 @@ export class ShureCharger extends ShureBaseProvider {
     console.log(`[shure:${this.id}] sending init commands`);
     this.pollAllBays();
     // Owned by the base class, which stops it when the socket closes and on
-    // disconnect(). This used to be an interval of the charger's own that nothing
-    // ever cleared (see shure-charger-interval.test.ts).
+    // disconnect() (see shure-charger-interval.test.ts).
     this.every("bay-poll", ShureCharger.POLL_MS, () => this.pollAllBays());
   }
 
