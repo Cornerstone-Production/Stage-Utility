@@ -18,15 +18,16 @@ If the service is still live, the next tick reopens the record and that item.
 Versions before 1.29.0 closed those records differently: an SPL record's items
 were left running and the rundown's last item had no length, so the Actual total
 left it out. The first start of a version with the repair puts such records
-right once, by the same rule, on each record's last item: an open item gets the
-end above, a rundown item gets its length when attendance counted people past its
+right once, by the same rule, on the one item the old close left that way (the
+item on air, which after a step back is an earlier one): an open item gets the end
+above, a rundown item gets its length when attendance counted people past its
 start, and the record's end moves to match (never earlier). A rundown nothing
-measured is left as it is, and so is any other item with no end. While an
+measured is left as it is, and so is a record holding more than one such item. While an
 attendance record cannot be read, nothing is repaired and it waits for the next
 start.
 Each record it changes is copied first, as it was, to a `.before-repair` file
-beside it in `spl-history/` or `service-timeline/`, and each record it changes
-or leaves is named on a `[reconcile]` line. Open records are not touched.
+beside it in `spl-history/` or `service-timeline/`, and each record with the gap
+it changes or leaves is named on a `[reconcile]` line. Open records are not touched.
 
 While Planning Center reports a service live, **nothing time-based can stop it
 being recorded** — no clock, calendar or time zone. A recording ends only when the

@@ -185,6 +185,29 @@ describe("records the old boot close left half-closed", () => {
     assert.equal(spl?.endedAt, iso(OLD_END), "the record's end moved with nothing to measure it by");
   });
 
+  it("fills an item a step back reopened, which is not the last to go live", async () => {
+    // SONG, MESSAGE, back to SONG at 25 min, crash at 50. The recorders reopen
+    // SONG's first entry, keeping its start, and close MESSAGE when it went.
+    const id = identity();
+    const back = T0 + 25 * MIN;
+    const tl = oldClosedTimeline(id);
+    tl.items[0] = { ...tl.items[0]!, endedAt: iso(back), actualDurationSec: null };
+    tl.items[1] = { ...tl.items[1]!, endedAt: iso(back), actualDurationSec: (back - MESSAGE_LIVE) / 1000 };
+    tl.endedAt = iso(back);
+    await serviceTimelineStore.upsert(tl);
+    const spl = oldClosedSpl(id);
+    spl.items[0] = { ...spl.items[0]!, endedAt: null };
+    spl.items[1] = { ...spl.items[1]!, endedAt: iso(back) };
+    spl.endedAt = iso(back);
+    await splHistoryStore.upsert(spl);
+    await attendanceStore.upsert(attendance(id, CRASH));
+    await reconcileOpenRecords();
+
+    const song = (await serviceTimelineStore.get(id.serviceKey))?.items[0];
+    assert.deepEqual([song?.endedAt, song?.actualDurationSec], [iso(CRASH), (CRASH - T0) / 1000]);
+    assert.equal((await splHistoryStore.get(id.serviceKey))?.items[0]?.endedAt, iso(CRASH));
+  });
+
   it("keeps a copy of each record as it was, beside it", async () => {
     const id = identity();
     await serviceTimelineStore.upsert(oldClosedTimeline(id));
@@ -322,26 +345,57 @@ describe("what the repair never touches", () => {
     assert.equal((await splHistoryStore.get(id.serviceKey))?.endedAt, iso(OLD_END), "the orphan was not closed");
   });
 
-  it("fills only the last item to go live, not an open one a merge left mid-record", async () => {
-    // An old-close fragment merged in History with the rest of the service:
-    // MESSAGE has no end, and CLOSING ran after it. Ending MESSAGE at the
-    // service's end would draw it across CLOSING.
+  it("leaves a record holding more than one item the old close could have left", async () => {
+    // Two old-close fragments merged in History: two items with no end. No
+    // close leaves that, so there is no one item to fill.
     const id = identity();
     const spl = oldClosedSpl(id);
-    spl.items.push({ ...spl.items[0]!, itemId: "closing", title: "closing", sequence: 2, startedAt: iso(T0 + 30 * MIN), endedAt: iso(T0 + 70 * MIN) });
-    spl.endedAt = iso(T0 + 70 * MIN);
+    spl.items[0] = { ...spl.items[0]!, endedAt: null };
     await splHistoryStore.upsert(spl);
     const tl = oldClosedTimeline(id);
-    tl.items[1] = { ...tl.items[1]!, endedAt: null };
-    tl.items.push({ itemId: "closing", title: "Closing", sequence: 2, plannedLengthSec: 600, startedAt: iso(T0 + 30 * MIN), endedAt: iso(T0 + 70 * MIN), actualDurationSec: 2400 });
-    tl.endedAt = iso(T0 + 70 * MIN);
+    tl.items[0] = { ...tl.items[0]!, endedAt: null, actualDurationSec: null };
     await serviceTimelineStore.upsert(tl);
-    await attendanceStore.upsert(attendance(id, T0 + 75 * MIN));
+    await attendanceStore.upsert(attendance(id, CRASH));
     const before = [await bytes(fileOf("spl-history", id.serviceKey)), await bytes(fileOf("service-timeline", id.serviceKey))];
     await reconcileOpenRecords();
 
     assert.deepEqual([await bytes(fileOf("spl-history", id.serviceKey)), await bytes(fileOf("service-timeline", id.serviceKey))], before);
     assert.equal(lines.filter((l) => l.startsWith("[reconcile]") && l.includes(id.serviceKey) && l.includes("left as it is")).length, 2, lines.join("\n"));
+  });
+
+  it("does not stop the boot-time close over a null item or an open record with no items", async () => {
+    const nulls = identity();
+    const spl = oldClosedSpl(nulls) as unknown as { items: unknown[] };
+    spl.items.unshift(null);
+    await splHistoryStore.upsert(spl as unknown as ServiceSplHistory);
+    const noItems = identity();
+    const openOdd = oldClosedSpl(noItems) as Partial<ServiceSplHistory>;
+    openOdd.endedAt = null;
+    delete openOdd.items;
+    await splHistoryStore.upsert(openOdd as ServiceSplHistory);
+    const id = identity();
+    const open = oldClosedTimeline(id);
+    open.endedAt = null;
+    open.items[1] = { ...open.items[1]!, endedAt: null };
+    await serviceTimelineStore.upsert(open);
+    await reconcileOpenRecords();
+
+    assert.ok((await serviceTimelineStore.get(id.serviceKey))?.endedAt, "the timeline orphan was not closed");
+    assert.ok((await splHistoryStore.get(noItems.serviceKey))?.endedAt, "the SPL orphan was not closed");
+  });
+
+  it("closes the orphans, then fails the boot step, when the repair throws", async (t) => {
+    t.mock.method(historyRepairsStore, "update", async () => {
+      throw new Error("marker disk full");
+    });
+    const id = identity();
+    const open = oldClosedSpl(id);
+    open.endedAt = null;
+    await splHistoryStore.upsert(open);
+
+    await assert.rejects(reconcileOpenRecords(), /marker disk full/);
+    assert.equal((await splHistoryStore.get(id.serviceKey))?.endedAt, iso(OLD_END), "the orphan was not closed");
+    assert.ok(lines.some((l) => l.startsWith("[reconcile]") && l.includes("marker disk full")), lines.join("\n"));
   });
 
   it("never moves a record's end earlier", async () => {
