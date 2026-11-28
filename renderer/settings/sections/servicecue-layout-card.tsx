@@ -9,6 +9,7 @@ import { useRef, type ReactNode, type Ref } from "react";
 
 import { Button, ErrorNote, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tooltip } from "../../components/ui";
 import { cn } from "../../lib/cn";
+import { joinWithAnd } from "../../lib/join-with-and";
 import { useCopyFeedback } from "../../lib/use-copy-feedback";
 import { serviceCueUrl } from "../../main/servicecue-index-view";
 import { Grip, TrayChip, useCarried, useLifted, useLiftedOrder, useTrayOn, type DragItem } from "./servicecue-drag";
@@ -25,7 +26,6 @@ import {
   FOOTER,
   layoutRoles,
   layoutUsers,
-  listOf,
   toggleOn,
   trayItems,
   UNDER_TITLE,
@@ -451,7 +451,7 @@ function Preview({ layout: l, roles, source: p }: { layout: ServiceCueLayout; ro
       </div>
       {skipped.length > 0 && (
         <p className={cn("text-caption1 text-fg-subtle")}>
-          {listOf(skipped.map((r) => r.name))} {skipped.length === 1 ? "has" : "have"} no category in {typeName}, so the preview leaves{" "}
+          {joinWithAnd(skipped.map((r) => r.name))} {skipped.length === 1 ? "has" : "have"} no category in {typeName}, so the preview leaves{" "}
           {skipped.length === 1 ? "it" : "them"} out.
         </p>
       )}

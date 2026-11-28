@@ -9,7 +9,8 @@
 // with no roles, where the page says nothing either.
 
 import { ROLES_FLASH_ID } from "../../../flash";
-import { listOf, unassignedByType, unassignedDistinct } from "../../../../settings/sections/servicecue-layouts-model";
+import { joinWithAnd } from "../../../../lib/join-with-and";
+import { unassignedByType, unassignedDistinct } from "../../../../settings/sections/servicecue-layouts-model";
 import { attentionKey, type AttentionInput, type AttentionItem, type AttentionSource } from "../types";
 
 export const noteCategories: AttentionSource = {
@@ -26,7 +27,7 @@ export const noteCategories: AttentionSource = {
         key: attentionKey("note-categories", [...names].sort((a, b) => a.localeCompare(b)).join("+")),
         severity: "warn",
         title: `${names.length} note ${one ? "category is" : "categories are"} in no column`,
-        detail: `${listOf(names)} ${one ? "shows" : "show"} only under All columns.`,
+        detail: `${joinWithAnd(names)} ${one ? "shows" : "show"} only under All columns.`,
         fix: { label: "Open roles", route: "/servicecue/presets", flash: ROLES_FLASH_ID },
       },
     ];

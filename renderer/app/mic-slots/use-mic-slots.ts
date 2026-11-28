@@ -27,6 +27,7 @@ import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { confirm, toast } from "../../components/ui";
 import { invoke as ipc, onNotification } from "../../lib/api";
+import { joinWithAnd } from "../../lib/join-with-and";
 import { BOARDS_CHANGED_CHANNEL, type BoardsChanged } from "@main/types/boards-changed";
 import { useStageState } from "../../main/use-stage-state";
 import { useWirelessTelemetryStatus } from "../../main/use-wireless-telemetry";
@@ -134,11 +135,6 @@ function staleNamed(err: unknown): string[] | null {
   const listed = (err as { body?: { boards?: unknown } }).body?.boards;
   if (!Array.isArray(listed)) return null;
   return listed.flatMap((b) => (b && typeof (b as { boardId?: unknown }).boardId === "string" ? [(b as { boardId: string }).boardId] : []));
-}
-
-/** "A", "A and B", "A, B and C". */
-function listNames(names: readonly string[]): string {
-  return names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
 }
 
 export interface Selection {
@@ -514,7 +510,7 @@ export function useMicSlots() {
     const named = staleIds ?? boards.filter((b) => message.startsWith(`Board "${b.name}"`)).map((b) => b.id);
     console.warn(`[mic-slots] save-all refused, ${plural(named.length, "board")} changed elsewhere: ${message}`);
     await refresh();
-    const names = named.length > 0 ? listNames(named.map(nameOf)) : "A board";
+    const names = named.length > 0 ? joinWithAnd(named.map(nameOf)) : "A board";
     const one = named.length <= 1;
     const ok = await confirm({
       title: `${names} ${one ? "was" : "were"} changed elsewhere`,

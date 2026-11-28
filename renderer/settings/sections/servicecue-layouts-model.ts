@@ -8,6 +8,7 @@
 
 import { firstFree } from "@main/services/first-free";
 import { layoutNameKey } from "@main/services/servicecue-slug";
+import { joinWithAnd } from "../../lib/join-with-and.js";
 import type { ServiceCueLayout } from "../../../main/types/pco.js";
 import type { CategoryRole } from "../../../main/types/servicecue-roles.js";
 import { norm, unassignedCategoryRoles } from "../../main/role-resolve";
@@ -45,12 +46,6 @@ export const toggleOn = (l: ServiceCueLayout, key: ToggleKey): boolean => l[key]
 
 /** Layouts in the landing page's order. */
 export const byOrder = <T extends { order: number }>(list: readonly T[]): T[] => [...list].sort((a, b) => a.order - b.order);
-
-/** "A", "A and B", "A, B and C". */
-export function listOf(items: readonly string[]): string {
-  if (items.length <= 1) return items.join("");
-  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
-}
 
 /** A layout's roles in column order. An id no role has any more is left out. */
 export function layoutRoles(l: ServiceCueLayout, roles: readonly CategoryRole[]): CategoryRole[] {
@@ -204,7 +199,7 @@ export function deleteLayoutBody(
   const users = layoutUsers(layout, views);
   if (users.length === 0) return [`No screens use this layout.${tablet}`];
   return [
-    { b: listOf(users) },
+    { b: joinWithAnd(users) },
     users.length === 1 ? " uses this layout. It will show All columns." : " use this layout. They will show All columns.",
     tablet,
   ];
@@ -223,14 +218,14 @@ export function deleteRoleBody(role: CategoryRole, layouts: readonly ServiceCueL
     : [
         { b: role.name },
         " is a column in ",
-        { b: listOf(using) },
+        { b: joinWithAnd(using) },
         `. Deleting it removes it from ${n === 1 ? "that layout" : n === 2 ? "both" : `all ${NUMBER_WORDS[n] ?? n}`}.`,
       ];
-  if (tint.length) out.push(` Rows in ${listOf(tint)} stop being tinted by it.`);
+  if (tint.length) out.push(` Rows in ${joinWithAnd(tint)} stop being tinted by it.`);
   const m = role.members.length;
   if (m) {
     out.push(
-      ` ${listOf(role.members)} ${m === 1 ? "goes" : "go"} back to Categories in no role, and still ${m === 1 ? "appears" : "appear"} under All columns.`,
+      ` ${joinWithAnd(role.members)} ${m === 1 ? "goes" : "go"} back to Categories in no role, and still ${m === 1 ? "appears" : "appear"} under All columns.`,
     );
   }
   return out;
@@ -278,13 +273,13 @@ export function noticeGroups(
     entry.cats.push(c.name);
     byTypes.set(key, entry);
   }
-  return [...byTypes.values()].map((g) => ({ typeName: listOf(g.typeIds.map(typeName)), cats: g.cats }));
+  return [...byTypes.values()].map((g) => ({ typeName: joinWithAnd(g.typeIds.map(typeName)), cats: g.cats }));
 }
 
 /** The top-of-page line naming the categories no layout can show, in three parts: the
  *  bold lead, the rest of the sentence, and the quieter reassurance after it. */
 export function noticeText(groups: readonly { typeName: string; cats: string[] }[]): { lead: string; rest: string; still: string } {
-  const parts = groups.map((g) => `${listOf(g.cats)} from ${g.typeName}`);
+  const parts = groups.map((g) => `${joinWithAnd(g.cats)} from ${g.typeName}`);
   const n = groups.reduce((sum, g) => sum + g.cats.length, 0);
   const one = n === 1;
   return {
