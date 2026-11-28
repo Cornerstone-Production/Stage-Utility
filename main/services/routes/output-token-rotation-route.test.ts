@@ -9,10 +9,14 @@
 // why the output is on the holding screen meanwhile.
 
 import assert from "node:assert/strict";
+import * as fs from "node:fs/promises";
+import * as os from "node:os";
+import * as path from "node:path";
 import { beforeEach, describe, it } from "node:test";
-import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-tempDataDir("stage-token-rotation-", { home: true });
+const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-token-rotation-"));
+process.env.STAGE_UTILITY_DATA = TMP;
+process.env.HOME = path.join(TMP, "home");
 
 const { kioskDeviceRoutes } = await import("./kiosk-device-routes.js");
 const { callRoute } = await import("./route-harness.js");
