@@ -31,6 +31,7 @@ import type { ProPresenterStatusDTO, ProSection, ProTimer, PropInstancesDTO, Pro
 import { broadcast } from "./broadcaster.js";
 import { StatusIntegration } from "./integration-base.js";
 import { createSseReader, keepSocketAlive } from "./sse-reader.js";
+import { backoffMs } from "./timers.js";
 
 /** Fallback poll only — see streamFallback. Exported so the case that pins the
  *  fallback's demand gate can assert the two cadences rather than "one is
@@ -1480,10 +1481,7 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
         this.playlistUuid = pUuid; // recorded on failure too: see the note above
         this.playlistItems = [];
         this.playlistFailures++;
-        const wait = Math.min(
-          this.playlistRetryBaseMs * 2 ** (this.playlistFailures - 1),
-          this.playlistRetryMaxMs,
-        );
+        const wait = backoffMs(this.playlistFailures, this.playlistRetryBaseMs, this.playlistRetryMaxMs);
         this.playlistRetryAt = Date.now() + wait;
         if (this.playlistFailures === 1) {
           // Once per playlist, not once per frame. The retry is quiet after this.

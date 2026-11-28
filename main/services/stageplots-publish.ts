@@ -61,7 +61,7 @@ import { errorMessage } from "./errors.js";
 import { plural } from "./plural.js";
 import { scrub } from "./scrub.js";
 import { createPushClient, mayHaveLanded, type PushClient, type PushFailure, type PushResult } from "./servicecue-publish-client.js";
-import { backoffMs } from "./servicecue-publisher.js";
+import { backoffMs } from "./timers.js";
 import { docHash } from "./servicecue-publish-docs.js";
 import type { PublishOrigin } from "./servicecue-publish-rules.js";
 import { resolvePlot } from "./stageplots-doc.js";

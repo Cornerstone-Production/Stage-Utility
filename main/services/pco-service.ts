@@ -36,6 +36,7 @@ export class PcoAuthError extends Error {
   }
 }
 import { scrub } from "./scrub.js";
+import { backoffMs } from "./timers.js";
 import { PCO_BASE, PcoUrlRefused, isPcoId, pcoAttachmentId, pcoId, pcoSegment, pcoUrl, pcoUrlOf, type PcoUrl } from "./pco-path.js";
 
 /**
@@ -849,7 +850,7 @@ class PcoService {
   private backoffMs(attempt: number, retryAfter: string | null): number {
     const ra = retryAfter ? parseInt(retryAfter, 10) : NaN;
     if (Number.isFinite(ra) && ra > 0) return Math.min(ra * 1000, 15_000);
-    return Math.min(1000 * 2 ** attempt, 8000) + Math.floor(Math.random() * 250);
+    return backoffMs(attempt + 1, 1000, 8000) + Math.floor(Math.random() * 250);
   }
 
   private async request<T extends PcoNode = PcoNode>(

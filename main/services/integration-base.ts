@@ -22,6 +22,7 @@ import {
 } from "./broadcaster.js";
 import { DEFAULT_SETTLE_MS, OutageLog } from "./repeat-log.js";
 import { serviceWindow } from "./service-window.js";
+import { backoffMs } from "./timers.js";
 
 /** Connection state as reported to the Integrations panel. */
 export type ConnState = "connected" | "error" | "disconnected";
@@ -324,10 +325,9 @@ export abstract class ConnectionLifecycle {
    * peeked at.
    */
   protected nextReconnectDelayMs(): number {
-    const raw = this.reconnectBaseMs * 2 ** this.reconnectAttempt;
     const ceiling = this.reconnectCeilingMs;
-    const delay =
-      ceiling === null ? serviceWindow.capDelayMs(raw, channelHasSubscribers(this.channel)) : Math.min(raw, ceiling);
+    const raw = backoffMs(this.reconnectAttempt + 1, this.reconnectBaseMs, ceiling ?? Infinity);
+    const delay = ceiling === null ? serviceWindow.capDelayMs(raw, channelHasSubscribers(this.channel)) : raw;
     this.reconnectAttempt++;
     return delay;
   }
