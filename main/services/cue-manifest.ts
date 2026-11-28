@@ -35,6 +35,7 @@
 
 import {
   cuePairs,
+  distinctSpokenNames,
   isHiddenFromHome,
   isPairHalfName,
   isTogglePair,
@@ -248,6 +249,15 @@ export async function cueManifest(opts: { includeHidden?: boolean } = {}): Promi
       available: pressable(rule),
     });
   }
+
+  // Two cues may be called the same (rule names are not unique the way cue names
+  // are): the YAML tells them apart, so the manifest does too, by the same function.
+  const distinct = distinctSpokenNames([
+    ...switches.map((s) => ({ key: `switch:${s.id}`, kind: "switch" as const, id: s.id, friendly: s.name })),
+    ...buttons.map((b) => ({ key: `button:${b.id}`, kind: "button" as const, id: b.id, friendly: b.name })),
+  ]);
+  for (const s of switches) s.name = distinct.get(`switch:${s.id}`) ?? s.name;
+  for (const b of buttons) b.name = distinct.get(`button:${b.id}`) ?? b.name;
 
   reportHidden(hidden);
   const state = stageController.getState();

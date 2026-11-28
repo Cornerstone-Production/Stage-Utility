@@ -72,3 +72,13 @@ describe("the same rules are called the same in the YAML and the manifest", () =
     assert.equal(inYaml(homeAssistantYaml(RULES, "http://192.168.1.50:8788"), named), true);
   });
 });
+
+describe("two cues with the same words are told apart the same way in both", () => {
+  test("rules with one name get different names in the manifest, and the YAML holds the same ones", async () => {
+    RULES = [cue("Press a button", "press_button"), cue("Press a button", "press_button_2")];
+    const names = (await cueManifest()).buttons.map((b) => b.name);
+    assert.equal(new Set(names).size, 2, names.join(" | "));
+    const yaml = homeAssistantYaml(RULES, "http://192.168.1.50:8788");
+    for (const n of names) assert.equal(inYaml(yaml, n), true, n);
+  });
+});

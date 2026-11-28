@@ -8,6 +8,7 @@
 // A command is also found by the screens it is used on, which the caller reads off
 // the usage and passes in.
 
+import { spokenCueName } from "@main/services/cue-pairs";
 import { CALL_TRIGGER_ID, parseAliases } from "@main/services/cue-aliases";
 
 interface RuleLike {
@@ -41,9 +42,9 @@ export function ruleSearchText(
     const cueName = String(rule.trigger.params.name ?? "");
     parts.push(cueName);
     parts.push(String(rule.trigger.params.says ?? ""));
-    // The words on a row are the rule's `says`, else its own name, else the cue
-    // name humanised (spokenCueName), and all but the last are already here: the
-    // humanised name holds nothing the cue name above does not.
+    // The words on a row (spokenCueName): `says`, else the rule's name, else the
+    // cue name humanised. A rule with no name reads as the last, found by it.
+    parts.push(spokenCueName(rule, cueName, "button"));
     parts.push(...parseAliases(rule.trigger.params));
   }
   if (rule.action.id === "companion.press") {

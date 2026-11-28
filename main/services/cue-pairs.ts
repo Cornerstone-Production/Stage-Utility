@@ -498,6 +498,76 @@ export function spokenCueName(
   return spoken || humaniseCueName(cue);
 }
 
+/** One cue that carries a name a person says: a switch or a script in the generated YAML, a switch or a button in the manifest. */
+export interface SpokenCue {
+  /** `switch:<base>` or `script:<cue name>`. Unique across the document. */
+  key: string;
+  /** `switch` or `script` — Home Assistant's own two domains. */
+  kind: "switch" | "script" | "button";
+  /** The id it gets in its domain: a pair's base, or a script's cue name. */
+  id: string;
+  /** The words, from `says` or the rule's name. */
+  friendly: string;
+}
+
+/**
+ * No two objects may share the name a person says — ACROSS THE KINDS, not
+ * within each.
+ *
+ * A switch's `friendly_name` and a script's `alias` are the same thing to a
+ * voice assistant: the words somebody says out loud. Two of them saying
+ * "Projectors" is an assistant that picks one at random, and the operator finds
+ * out which in the middle of a service. Disambiguating the switches on their own
+ * — which is all this did — left two scripts whose cues have the same `says`
+ * both called that, and a switch and a script colliding with each other
+ * entirely unhandled.
+ *
+ * The Companion import already separates most of this on the way in: a name
+ * found on two pages is spoken with its page name (see cueSlugs). A
+ * hand-written cue has no page, and two operators typing the same `says` is
+ * exactly what this catches.
+ *
+ * Three tiers, and every collision is resolved by the second or the third:
+ *
+ *  1. the words, when this is the only object saying them,
+ *  2. else the id humanised — a pair's base, a script's cue name. Ids are
+ *     unique WITHIN a kind, because a pair is keyed by a cue name the engine
+ *     refuses to duplicate,
+ *  3. else the id humanised with its domain, which separates the one case tier
+ *     2 cannot: a pair based `projectors` and a one-shot cue called
+ *     `projectors`, which are `switch.projectors` and `script.projectors` in
+ *     Home Assistant and two different things.
+ *
+ * Returned as a map rather than a rewritten list so the switches and the scripts
+ * can be emitted from their own loops while sharing one answer.
+ */
+export function distinctSpokenNames(items: readonly SpokenCue[]): Map<string, string> {
+  const tally = (of: (item: SpokenCue) => string): Map<string, number> => {
+    const counts = new Map<string, number>();
+    for (const item of items) {
+      const key = of(item).toLowerCase();
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  };
+  const said = tally((i) => i.friendly);
+  const humanised = tally((i) => humaniseCueName(i.id));
+
+  const out = new Map<string, string>();
+  for (const item of items) {
+    if ((said.get(item.friendly.toLowerCase()) ?? 0) < 2) {
+      out.set(item.key, item.friendly);
+      continue;
+    }
+    const fallback = humaniseCueName(item.id);
+    out.set(
+      item.key,
+      (humanised.get(fallback.toLowerCase()) ?? 0) < 2 ? fallback : `${fallback} (${item.kind})`,
+    );
+  }
+  return out;
+}
+
 /**
  * The custom variable an operator most likely means for a pair called `<slug>`,
  * or "" when nothing in Companion matches.

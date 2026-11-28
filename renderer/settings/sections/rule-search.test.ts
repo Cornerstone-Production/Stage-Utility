@@ -34,9 +34,12 @@ describe("ruleMatchesSearch", () => {
     assert.equal(ruleMatchesSearch(rule, "lobby_screens", undefined, undefined), true);
   });
 
-  // A test that a pair is found by the words its row shows was written here and
-  // deleted: a row's words are `says`, the rule's name or the humanised cue name,
-  // and the haystack holds all three, so it cannot be made red.
+  test("matches the words the ROW shows for a rule with no name: the cue name humanised", () => {
+    // The store accepts a blank rule name, and the row then reads "House Lights".
+    const on = cue({ name: "", params: { name: "house_lights_on" } });
+    assert.equal(ruleMatchesSearch(on, "House Lights", undefined, undefined), true);
+    assert.equal(ruleMatchesSearch(on, "lobby lights", undefined, undefined), false);
+  });
 
   test("matches 'says'", () => {
     const rule = cue({ params: { name: "x", says: "the foyer televisions" } });
