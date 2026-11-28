@@ -7,7 +7,7 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { errorMessage } from "../errors.js";
-import { type RouteCtx, error, json, pcoReadFailed, readJsonObject } from "./context.js";
+import { type RouteCtx, error, json, pcoReadFailed, queryNumber, readJsonObject } from "./context.js";
 import { scrub } from "../scrub.js";
 import { stageController } from "../stage-controller.js";
 import { integrationManager } from "../integration-manager.js";
@@ -185,10 +185,11 @@ export async function statusRoutes(c: RouteCtx): Promise<void> {
       if (seriesMatch && method === "GET") {
         const key = decodeURIComponent(seriesMatch[1]);
         const metric = c.url.searchParams.get("metric") ?? "";
-        const bucketSec = c.url.searchParams.get("bucketSec");
+        // Absent or unusable is the 5 s default; clampBucketSec bounds the rest.
+        const bucketSec = queryNumber(c.url, "bucketSec") ?? 5;
         let out: SplSeriesResponse | null;
         try {
-          out = await splSeriesFor(key, metric, bucketSec == null ? 5 : Number(bucketSec));
+          out = await splSeriesFor(key, metric, bucketSec);
         } catch (err) {
           // A real read failure, not an absence: an unreadable directory, a
           // half-written file, a disk that went away. The chart is required to

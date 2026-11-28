@@ -418,6 +418,8 @@ describe("stage plot routes", () => {
     assert.deepEqual(saidName, ['[stageplots] upload refused: "(no name)" the background needs a name']);
     const saidPage = await warnings(() => upload("/api/stageplots/backgrounds?name=p.png&original=0000000000000000&page=x&pages=2", jpg));
     assert.deepEqual(saidPage, ['[stageplots] upload refused: "p.png" ?page= must be a page number']);
+    const saidEmptyPage = await warnings(() => upload("/api/stageplots/backgrounds?name=p.png&original=0000000000000000&page=&pages=2", jpg));
+    assert.deepEqual(saidEmptyPage, ['[stageplots] upload refused: "p.png" ?page= must be a page number']);
     const saidCap = await warnings(() =>
       callRoute(stageplotsRoutes, "/api/stageplots/backgrounds?name=big.jpg", { method: "POST", raw: new Uint8Array(13 * 1024 * 1024) }).catch(() => null),
     );

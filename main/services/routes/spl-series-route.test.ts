@@ -132,7 +132,7 @@ describe("GET /api/spl/history/:key/series", () => {
   });
 
   test("a nonsense bucketSec does not divide by zero", async () => {
-    for (const q of ["?bucketSec=0", "?bucketSec=-4", "?bucketSec=abc"]) {
+    for (const q of ["?bucketSec=0", "?bucketSec=-4", "?bucketSec=abc", "?bucketSec="]) {
       const r = await callRoute(statusRoutes, url(KEY, q));
       assert.equal(r.status, 200, q);
       assert.ok((r.json as { bucketSec: number }).bucketSec > 0, q);

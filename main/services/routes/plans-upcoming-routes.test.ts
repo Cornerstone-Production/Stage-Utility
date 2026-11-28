@@ -152,9 +152,11 @@ describe("GET /api/plans/upcoming", () => {
     assert.deepEqual((r.json as UpcomingPlansDTO).plans.map((p) => p.planId), ["sun-now"]);
   });
 
-  it("ignores a nonsense ?days rather than answering an empty list", async () => {
-    const r = await callRoute(stateRoutes, "/api/plans/upcoming?days=banana");
-    assert.equal((r.json as UpcomingPlansDTO).plans.length, 3);
+  it("ignores a nonsense or empty ?days rather than answering an empty list", async () => {
+    for (const q of ["?days=banana", "?days=", "?days=%20"]) {
+      const r = await callRoute(stateRoutes, `/api/plans/upcoming${q}`);
+      assert.equal((r.json as UpcomingPlansDTO).plans.length, 3, q);
+    }
   });
 
   // `?days=0.5` cleared the `> 0` test and floored to zero afterwards, so the

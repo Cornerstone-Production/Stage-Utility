@@ -14,7 +14,7 @@ import { renderLogPage } from "../log-page.js";
 import { pcoService } from "../pco-service.js";
 import { secretsMatch } from "../secret-compare.js";
 import { SERVER_VERSION } from "../server-version.js";
-import { type RouteCtx, error, json } from "./context.js";
+import { type RouteCtx, error, json, queryNumber } from "./context.js";
 import { CANONICAL_LOG_PATH, LOG_PAGE_PATHS } from "./log-paths.js";
 
 
@@ -31,14 +31,6 @@ import { CANONICAL_LOG_PATH, LOG_PAGE_PATHS } from "./log-paths.js";
 export function logAuthed(url: URL): boolean {
   const token = process.env.STAGE_UTILITY_LOG_TOKEN || null;
   return !token || secretsMatch(url.searchParams.get("token") ?? "", token);
-}
-
-/** `?since=` as a number, or null for "give me everything". */
-function parseSince(url: URL): number | null {
-  const raw = url.searchParams.get("since");
-  if (raw === null || raw === "") return null;
-  const n = Number(raw);
-  return Number.isFinite(n) ? n : null;
 }
 
 export async function logRoutes(c: RouteCtx): Promise<void> {
@@ -73,7 +65,8 @@ export async function logRoutes(c: RouteCtx): Promise<void> {
       error(res, "unauthorized", 401);
       return;
     }
-    const slice = getLogSince(parseSince(url));
+    // No usable `?since=` is null: "give me everything".
+    const slice = getLogSince(queryNumber(url, "since"));
     json(res, {
       ...slice,
       // Counted over the whole buffer, not over the slice — "3 errors" has to

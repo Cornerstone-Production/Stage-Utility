@@ -103,6 +103,18 @@ export function queryFlag(url: URL, name: string, fallback: boolean): boolean | 
   return null;
 }
 
+/** A numeric query parameter, or null when it is absent, empty, only
+ *  whitespace, or not a finite number. `Number("")` is 0, so a bare `?since=`
+ *  read with Number alone is a position rather than "not given"; every route
+ *  reads a number through this so that means the same thing everywhere. The
+ *  caller applies its own range, rounding and default. */
+export function queryNumber(url: URL, name: string): number | null {
+  const raw = url.searchParams.get(name);
+  if (raw === null || raw.trim() === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
 export function error(res: http.ServerResponse, message: string, status = 400, code?: string): void {
   json(res, code ? { error: message, code } : { error: message }, status);
 }

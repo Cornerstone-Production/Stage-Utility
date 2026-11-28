@@ -182,7 +182,7 @@ describe("/api/log", () => {
 
   test("an empty or unparseable ?since= falls back to the whole buffer", async () => {
     // The page sends since= with nothing after it on its very first load.
-    for (const q of ["?since=", "?since=banana"]) {
+    for (const q of ["?since=", "?since=%20", "?since=banana"]) {
       const body = (await callRoute(logRoutes, `/api/log${q}`)).json as { reset: boolean };
       assert.equal(body.reset, true, `${q} must not be trusted as a position`);
     }
