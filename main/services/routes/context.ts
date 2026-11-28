@@ -264,7 +264,10 @@ export async function readJsonObject(
 }
 
 /**
- * Read a JSON body, tolerating junk but NOT an oversized one.
+ * Read a JSON body, tolerating junk but NOT an oversized one. Any JSON value
+ * comes back as it is, an array or a string included; a body that is not JSON,
+ * or is `null`, reads as `{}`. A caller that needs to tell an array from an
+ * object uses this; one that only reads fields uses readBodyOrEmpty.
  *
  * Replaces `readBody(req).catch(() => ({}))`, which was written to shrug off an
  * unparseable body and also swallowed the size limit — so an over-cap request
@@ -272,16 +275,26 @@ export async function readJsonObject(
  * anyone. A body too large to read is a different thing from a body we chose not
  * to parse.
  */
-export async function readBodyOrEmpty(
+export async function readBodyTolerant(
   req: http.IncomingMessage,
   limit = MAX_JSON_BODY_BYTES,
-): Promise<Record<string, unknown>> {
+): Promise<unknown> {
   try {
-    return ((await readBody(req, limit)) ?? {}) as Record<string, unknown>;
+    return (await readBody(req, limit)) ?? {};
   } catch (err) {
     if (err instanceof BodyTooLargeError) throw err;
     return {};
   }
+}
+
+/** readBodyTolerant, narrowed: a body that is not a JSON object (an array, a
+ *  string, a number) reads as `{}`, so a caller can read fields off it. */
+export async function readBodyOrEmpty(
+  req: http.IncomingMessage,
+  limit = MAX_JSON_BODY_BYTES,
+): Promise<Record<string, unknown>> {
+  const body = await readBodyTolerant(req, limit);
+  return isRecord(body) ? body : {};
 }
 
 /**

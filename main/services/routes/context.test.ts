@@ -7,6 +7,8 @@ import {
   error,
   json,
   readBody,
+  readBodyOrEmpty,
+  readBodyTolerant,
   readJsonObject,
   readRawBody,
 } from "./context.js";
@@ -293,4 +295,15 @@ test("readJsonObject refuses null, an array and a scalar with a status of 400", 
   }
   const ok = await callRoute(async ({ req, res }) => json(res, await readJsonObject(req)), "/x", { method: "POST", body: { a: 1 } });
   assert.deepEqual(ok.json, { a: 1 });
+});
+
+test("readBodyOrEmpty reads only an object; readBodyTolerant keeps an array an array", async () => {
+  const via = async (read: typeof readBodyOrEmpty | typeof readBodyTolerant, raw: string) =>
+    (await callRoute(async ({ req, res }) => json(res, { v: await read(req) }), "/x", { method: "POST", raw })).json;
+  assert.deepEqual(await via(readBodyOrEmpty, "[1]"), { v: {} });
+  assert.deepEqual(await via(readBodyOrEmpty, "5"), { v: {} });
+  assert.deepEqual(await via(readBodyOrEmpty, "{ not json"), { v: {} });
+  assert.deepEqual(await via(readBodyOrEmpty, '{"a":1}'), { v: { a: 1 } });
+  assert.deepEqual(await via(readBodyTolerant, "[1]"), { v: [1] });
+  assert.deepEqual(await via(readBodyTolerant, "null"), { v: {} });
 });
