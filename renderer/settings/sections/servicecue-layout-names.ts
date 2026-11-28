@@ -1,5 +1,6 @@
 // What the layouts editor says about a layout's name: a free one for a new layout.
 
+import { firstFreeNumbered } from "@main/services/first-free";
 import { layoutNameKey } from "@main/services/servicecue-slug";
 import type { ServiceCueLayout } from "../../../main/types/pco.js";
 
@@ -8,7 +9,5 @@ import type { ServiceCueLayout } from "../../../main/types/pco.js";
  *  name already taken once one in the middle has been deleted. */
 export function freeLayoutName(layouts: ServiceCueLayout[]): string {
   const taken = new Set(layouts.map((l) => layoutNameKey(l.name)));
-  let n = layouts.length + 1;
-  while (taken.has(layoutNameKey(`Layout ${n}`))) n++;
-  return `Layout ${n}`;
+  return firstFreeNumbered("Layout", (s) => taken.has(layoutNameKey(s)), layouts.length + 1);
 }
