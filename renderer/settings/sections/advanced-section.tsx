@@ -43,6 +43,8 @@ import { VideoRelayFfmpegPanel } from "./video-relay-ffmpeg";
 import { VideoRelayPortsPanel, VIDEO_PORTS_FLASH_ID } from "./video-relay-ports";
 import { useCustomize } from "../../app/customize-mode";
 import { clockOptions, formatClock } from "../../lib/clock-format";
+import { appZoneOf } from "../../lib/app-zone";
+import { weekdayOf } from "@main/services/app-timezone";
 import type { BackupSchedule } from "../../../main/services/backup-scheduler";
 import type { SectionProps } from "../types";
 import { restartConsequence, restartOutcome } from "../../lib/restart-warning";
@@ -186,6 +188,14 @@ const LOCK_CHANNELS: readonly (readonly [string, (payload: unknown) => boolean])
   ["service-timeline:history", isRecordOpen],
 ];
 
+/** "3:00 AM Sunday is inside a service window; the update waits until it closes at 1:15 PM Sunday.": a schedule that
+ *  falls in a window still applies, late, and the operator should not have to find that in the log. Weekdays always: the
+ *  sentence is about a schedule, not about today. */
+function windowedSchedule(w: { at: number; until: number }, timeZone: string | undefined): string {
+  const when = (ms: number) => `${formatClock(ms, { timeZone })} ${weekdayOf(ms, timeZone)}`;
+  return `${when(w.at)} is inside a service window; the update waits until it closes at ${when(w.until)}.`;
+}
+
 /** An hour of the day, in the app's clock format. A fixed date: only the hour is read. */
 function formatHour(h: number): string {
   return formatClock(new Date(2000, 0, 1, h));
@@ -231,6 +241,8 @@ function UpdateProgress({ step }: { step: UpdateStatus["step"] }) {
 export function UpdatesPanel({
   updateStatus,
   autoUpdate,
+  autoUpdateWindow = null,
+  timeZone,
   handlers,
   justUpdated,
   show = SHOW_ALL,
@@ -238,6 +250,10 @@ export function UpdatesPanel({
 }: {
   updateStatus: SectionProps["updateStatus"];
   autoUpdate: StageState["autoUpdate"];
+  /** The next scheduled time that falls in a service window, and when that closes: said under the schedule. */
+  autoUpdateWindow?: StageState["autoUpdateWindow"];
+  /** The app's zone, which those times are written in. */
+  timeZone?: string;
   handlers: SectionProps["handlers"];
   /** Set while the post-update banner is up: the result lines beneath would contradict it. */
   justUpdated?: { version: string } | null;
@@ -701,6 +717,11 @@ export function UpdatesPanel({
               </Select>
             </div>
           </Field>
+        ) : null}
+        {show("update-window") && drawsWindowRow(s, autoUpdate) && autoUpdateWindow ? (
+          <p className="text-caption1 text-warn-11" data-auto-update-window>
+            {windowedSchedule(autoUpdateWindow, timeZone)}
+          </p>
         ) : null}
         {children}
       </FieldGroup>
@@ -1392,6 +1413,8 @@ export function AdvancedSection({
         <UpdatesPanel
           updateStatus={updateStatus}
           autoUpdate={autoUpdate}
+          autoUpdateWindow={stageState.autoUpdateWindow ?? null}
+          timeZone={appZoneOf(stageState)}
           handlers={handlers}
           justUpdated={justUpdated ?? null}
           show={show}

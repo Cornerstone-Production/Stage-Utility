@@ -169,6 +169,10 @@ export interface StageState {
   chargerBays: ChargerBayDTO[];
   /** Automatic-update schedule (in-app self-update). */
   autoUpdate: AutoUpdateSettings;
+  /** The next scheduled automatic-update time in the coming week that falls inside a
+   *  service window, and when that window closes (epoch ms): the update waits for the
+   *  close. Null when none does, or updates are manual. Absent from an older server. */
+  autoUpdateWindow?: { at: number; until: number } | null;
   reconnectSchedule: ReconnectSchedule;
   /** Attendance ramp/taper capture windows (Advanced tab). */
   taperWindow: TaperWindow;

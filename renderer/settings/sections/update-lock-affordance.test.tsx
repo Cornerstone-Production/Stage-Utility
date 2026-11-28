@@ -70,6 +70,7 @@ const { render, screen, cleanup, fireEvent } = await import("@testing-library/re
 const React = (await import("react")).default;
 const { UpdatesPanel } = await import("./advanced-section.js");
 const { ConfirmHost, TooltipProvider } = await import("../../components/ui/index.js");
+const { setDisplayHourCycle } = await import("../../lib/clock-format.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 beforeEach(() => { cleanup(); reads.reset(); lockReply = { active: false, reasons: [] }; });
@@ -108,7 +109,7 @@ function status(over: Partial<UpdateStatus> = {}): UpdateStatus {
   };
 }
 
-async function mount(over: Partial<UpdateStatus> = {}) {
+async function mount(over: Partial<UpdateStatus> = {}, panel: Partial<Parameters<typeof UpdatesPanel>[0]> = {}) {
   applied = [];
   const handlers = {
     handleCheckUpdates: async () => {},
@@ -124,6 +125,7 @@ async function mount(over: Partial<UpdateStatus> = {}) {
         autoUpdate: { mode: "manual", dayOfWeek: null, hour: 3 },
         // Only the three update handlers are reached from this panel.
         handlers: handlers as unknown as Parameters<typeof UpdatesPanel>[0]["handlers"],
+        ...panel,
       }),
       React.createElement(ConfirmHost, null),
     ),
@@ -294,5 +296,25 @@ describe("update lock affordance", () => {
     await settle();
 
     assert.deepEqual(applied, [true], "confirming the override must apply with override=true");
+  });
+});
+
+// Not about the lock, but drawn by the same panel: a schedule that falls inside a
+// service window still applies, late, and says so where the schedule is set.
+describe("a schedule inside a service window", () => {
+  const SUNDAY_3AM = Date.parse("2026-11-29T09:00:00Z");
+  const CLOSES = Date.parse("2026-11-29T19:15:00Z");
+  const auto = { mode: "auto-full" as const, dayOfWeek: 0, hour: 3 };
+  const line = () => document.querySelector("[data-auto-update-window]")?.textContent ?? null;
+
+  test("says the scheduled time is inside the window and when the update goes instead, in the app's zone", async () => {
+    setDisplayHourCycle("24h");
+    await mount({}, { autoUpdate: auto, autoUpdateWindow: { at: SUNDAY_3AM, until: CLOSES }, timeZone: "America/Chicago" });
+    assert.equal(line(), "03:00 Sunday is inside a service window; the update waits until it closes at 13:15 Sunday.");
+  });
+
+  test("says nothing when no scheduled time falls in a window", async () => {
+    await mount({}, { autoUpdate: auto, autoUpdateWindow: null, timeZone: "America/Chicago" });
+    assert.equal(line(), null);
   });
 });

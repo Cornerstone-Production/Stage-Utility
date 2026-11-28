@@ -199,6 +199,11 @@ function zonedDayNumber(ms: number, tz: TimeZone): number {
   return Math.round(Date.UTC(p.year, p.month - 1, p.day) / 86_400_000);
 }
 
+/** The weekday `ms` falls on in `tz`: "Sunday". */
+export function weekdayOf(ms: number, tz: TimeZone = appTimeZone()): string {
+  return WEEKDAY_NAMES[zonedParts(ms, tz).weekday];
+}
+
 /**
  * The day `ms` falls on, for a clock time that needs one beside it: null when it
  * is the same calendar day as `nowMs` in `tz`; the weekday within the next six
@@ -209,7 +214,7 @@ export function dayUnlessToday(ms: number, nowMs: number, tz: TimeZone = appTime
   const ahead = zonedDayNumber(ms, tz) - zonedDayNumber(nowMs, tz);
   if (ahead === 0) return null;
   const p = zonedParts(ms, tz);
-  const weekday = WEEKDAY_NAMES[p.weekday];
+  const weekday = weekdayOf(ms, tz);
   return ahead > 0 && ahead < 7 ? weekday : `${weekday} ${p.day} ${MONTH_NAMES[p.month - 1]}`;
 }
 

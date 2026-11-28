@@ -104,7 +104,7 @@ import { serviceCueLayoutsStore } from "./servicecue-layouts-store.js";
 import { LayoutNameRefused } from "./servicecue-slug.js";
 import { serviceCueConfigStore } from "./servicecue-config-store.js";
 import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE } from "./service-window.js";
-import { autoApplyDecision, migrateAutoUpdate, type AutoApplyDecision } from "./auto-apply-gate.js";
+import { autoApplyDecision, migrateAutoUpdate, scheduledTimes, type AutoApplyDecision } from "./auto-apply-gate.js";
 import { updater } from "./updater.js";
 import { announceIfNew } from "./update/announce.js";
 import { validateSlug } from "./reserved-slugs.js";
@@ -3649,7 +3649,9 @@ export class StageController {
     next.hour = clampAutoUpdateHour(next.hour);
     next.dayOfWeek = clampAutoUpdateDay(next.dayOfWeek);
     console.log(`[stage-controller] setAutoUpdate →`, scrub(next));
+    if (next.mode === "manual") this.updateOwed = false;
     this.state = { ...this.state, autoUpdate: next };
+    this.state = { ...this.state, autoUpdateWindow: this.autoUpdateWindowOf() };
     await settingsStore.patch({ autoUpdate: next });
     this.broadcast();
     return this.state;
@@ -3752,6 +3754,7 @@ export class StageController {
         }
       }
       serviceWindow.setWindows(windows);
+      this.noteAutoUpdateWindow();
       if (gaps > 0) {
         serviceWindow.markUnknown();
         console.warn(`[stage-controller] reconnect windows recomputed with ${scrub(gaps)} plan read(s) failing, so the schedule counts as unknown until the next refresh`);
@@ -3762,6 +3765,27 @@ export class StageController {
       serviceWindow.markUnknown();
       console.warn("[stage-controller] refreshServiceWindows failed:", scrubError(err));
     }
+  }
+
+  /** The next scheduled auto-update time in the coming week that falls inside a
+   *  cached service window, and when that window closes; null when none does, or
+   *  nothing is automatic. What the Updates card warns about. */
+  private autoUpdateWindowOf(nowMs: number = Date.now()): { at: number; until: number } | null {
+    if (this.state.autoUpdate.mode === "manual") return null;
+    for (const at of scheduledTimes(this.state.autoUpdate, nowMs, nowMs + 7 * 86_400_000)) {
+      const until = serviceWindow.activeUntil(at);
+      if (until !== null) return { at, until };
+    }
+    return null;
+  }
+
+  /** The windows changed: broadcast the warning only when what it says changed. */
+  private noteAutoUpdateWindow(): void {
+    const next = this.autoUpdateWindowOf();
+    const was = this.state.autoUpdateWindow ?? null;
+    if (next?.at === was?.at && next?.until === was?.until) return;
+    this.state = { ...this.state, autoUpdateWindow: next };
+    this.broadcast();
   }
 
   /** Start the hourly update-availability check + scheduled auto-apply. */
@@ -3779,20 +3803,33 @@ export class StageController {
     }
   }
 
-  private async updateCheckTick(): Promise<void> {
+  /**
+   * A scheduled hour was declined only because it fell in a service window, and
+   * nothing has applied since: the next check after the window closes applies it
+   * (auto-apply-gate.ts). In memory only. A restart drops it, and the next
+   * scheduled hour decides again; an update applying is itself a restart, and a
+   * store for one flag would be a backup entry for an observation.
+   */
+  private updateOwed = false;
+
+  private async updateCheckTick(now: Date = new Date()): Promise<void> {
     try {
       const status = await updater.checkForUpdate();
     // Once per available release, and only if somebody is connected to hear it.
     await announceIfNew(updater.getStatus());
-      const now = new Date();
+      // Nothing to pull, or nothing automatic: nothing is owed.
+      if (this.state.autoUpdate.mode === "manual" || status.behind <= 0) this.updateOwed = false;
       const decision = this.shouldAutoApply(status.behind, now);
-      // Once per scheduled hour that falls in a window: the tick is hourly, and only the scheduled hour reaches this.
-      if (!decision.apply && decision.why === "window") {
+      // Said once, when it becomes owed: the hourly checks inside the window after it say nothing more.
+      if (!decision.apply && decision.why === "window" && !this.updateOwed) {
+        this.updateOwed = true;
         const until = serviceWindow.activeUntil(now.getTime());
-        console.log(`[stage-controller] auto-update waits: a planned service window is open until ${scrub(clockWithDayOf(until ?? now.getTime(), now.getTime()))}; it tries again at the next scheduled time`);
+        console.log(`[stage-controller] auto-update waits: its scheduled time fell inside a planned service window, open until ${scrub(clockWithDayOf(until ?? now.getTime(), now.getTime()))}; it applies at the first check after the window closes, with no service under way`);
       }
       if (decision.apply) {
-        console.log("[stage-controller] auto-update window — applying update");
+        this.updateOwed = false;
+        if (decision.late) console.log("[stage-controller] auto-update applying late: the service window that held it at its scheduled time has closed");
+        else console.log("[stage-controller] auto-update window — applying update");
         // auto-install applies the build but leaves the restart to the operator,
         // so an update can land on Saturday and be taken on Monday.
         await updater.applyUpdate({ deferRestart: this.state.autoUpdate.mode === "auto-install" });
@@ -3812,6 +3849,7 @@ export class StageController {
       updating: updater.phase === "updating",
       serviceLive: this.serviceActivity().active,
       windowUntil: serviceWindow.activeUntil(now.getTime()),
+      owed: this.updateOwed,
       // The APP's zone. On a UTC host "Monday 03:00" fires at 22:00 Sunday in
       // Chicago — i.e. an unattended restart in the middle of an evening service.
       now: zonedParts(now.getTime()),
