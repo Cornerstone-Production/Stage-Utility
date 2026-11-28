@@ -201,3 +201,40 @@ test("a patch saved while the stage plot points could not follow it says so, and
     f.restore();
   }
 });
+
+test("Add sheet names the new sheet past one that is still there, not after the list's length", async () => {
+  // What is left of "Sheet 1, 2, 3" once the second is deleted: counting the list
+  // would call the next one "Sheet 3" again.
+  const sheet = (id: string, name: string): PatchFile["sheets"][number] => ({ ...FILE.sheets[0], id, name });
+  const f = stubEditable({ ...FILE, sheets: [sheet("a", "Sheet 1"), sheet("c", "Sheet 3")] }, { status: 200, json: { ok: true } });
+  try {
+    render(
+      React.createElement(TooltipProvider, null, React.createElement(PatchSection), React.createElement(ConfirmHost), React.createElement(Toaster)),
+    );
+    await settle();
+    await settle();
+    await eventually(() => assert.equal(!!screen.queryByRole("tab", { name: "Sheet 1" }), true));
+    await press(screen.getByRole("button", { name: "Add sheet" }));
+    const tabs = screen.getAllByRole("tab").map((t) => t.textContent);
+    assert.deepEqual(tabs.filter((t) => t === "Sheet 3"), ["Sheet 3"], `tabs: ${JSON.stringify(tabs)}`);
+    assert.equal(tabs.length, 3);
+  } finally {
+    f.restore();
+  }
+});
+
+test("New variant is named past one that is still there, not after the list's length", async () => {
+  const variant = (id: string, name: string) => ({ id, name, overrides: {} });
+  const file: PatchFile = { ...FILE, sheets: [{ ...FILE.sheets[0], variants: [variant("v1", "Variant 1"), variant("v3", "Variant 3")] }] };
+  const f = stubEditable(file, { status: 200, json: file });
+  try {
+    await mountEditable();
+    await press(screen.getByRole("button", { name: /New variant/ }));
+    await press(screen.getByRole("button", { name: "Save" }));
+    await eventually(() => assert.equal(f.posts.length, 1));
+    const names = f.posts[0].file.sheets[0].variants.map((v) => v.name);
+    assert.deepEqual(names, ["Variant 1", "Variant 3", "Variant 4"]);
+  } finally {
+    f.restore();
+  }
+});

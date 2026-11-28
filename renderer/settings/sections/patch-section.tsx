@@ -15,6 +15,7 @@ import { PatchTable } from "./patch-table";
 import { ExportMenu } from "./patch-export";
 import { RippleSwitch, DEFAULT_RIPPLE, type RippleState } from "./patch-ripple-bar";
 import { SheetTabs } from "./patch-sheet-tabs";
+import { firstFreeNumbered } from "@main/services/first-free";
 
 /** The Editing select's value for this week's one-off tweaks. */
 const WEEK = "__week";
@@ -148,7 +149,7 @@ export function PatchSection() {
   }
   function addSheet() {
     const id = uid("sheet");
-    const s: PatchSheet = { id, name: `Sheet ${draft!.sheets.length + 1}`, kind: "custom", devices: [], endpoints: [], variants: [], assignments: emptyAssignments() };
+    const s: PatchSheet = { id, name: firstFreeNumbered("Sheet", (candidate) => draft!.sheets.some((x) => x.name === candidate), draft!.sheets.length + 1), kind: "custom", devices: [], endpoints: [], variants: [], assignments: emptyAssignments() };
     setDraft((d) => (d ? { ...d, sheets: [...d.sheets, s] } : d));
     switchSheet(id);
   }
@@ -206,7 +207,7 @@ export function PatchSection() {
   };
 
   function newVariant() {
-    const v: PatchVariant = { id: uid("var"), name: `Variant ${sheet.variants.length + 1}`, overrides: {} };
+    const v: PatchVariant = { id: uid("var"), name: firstFreeNumbered("Variant", (candidate) => sheet.variants.some((x) => x.name === candidate), sheet.variants.length + 1), overrides: {} };
     setVariants([...sheet.variants, v]);
     setEditingVariantId(v.id);
   }

@@ -26,6 +26,7 @@ import {
 import { credentialTargetMoved, describeTarget } from "./credential-target.js";
 import { hasSecretValue, isTypedSecret } from "./mask.js";
 import { wirelessStore } from "./wireless-store.js";
+import { firstFreeNumbered } from "./first-free.js";
 
 class WirelessManager {
   // In-memory list of connections including runtime fields.
@@ -132,10 +133,9 @@ class WirelessManager {
   }
 
   async addConnection(params: { name?: string; providerId?: string }): Promise<WirelessConnection[]> {
-    const index = this.connections.length + 1;
     const conn: WirelessConnection = {
       id: randomUUID(),
-      name: params.name?.trim() || `Connection ${index}`,
+      name: params.name?.trim() || firstFreeNumbered("Connection", (s) => this.connections.some((c) => c.name === s), this.connections.length + 1),
       providerId: params.providerId ?? "none",
       enabled: false,
       connection: "disconnected",

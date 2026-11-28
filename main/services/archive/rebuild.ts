@@ -19,6 +19,7 @@ import type {
   ServiceTimelineItem,
   SplItemHistory,
 } from "../../types/stage.js";
+import { slugText } from "../slug.js";
 import { addLeqSample } from "../spl-leq.js";
 import { SERVICE_GAP_MS, isStepBackTo, lastItemEntry } from "../service-recorder.js";
 import { scrub } from "../scrub.js";
@@ -178,12 +179,8 @@ export type EventRow = ArchiveRow;
  * title, so the next rebuild matches it by title and reuses the same id rather
  * than minting a second one.
  */
-function titleSlug(title: string, run = 0): string {
-  const slug =
-    title
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "") || "untitled";
+export function titleSlug(title: string, run = 0): string {
+  const slug = slugText(title, { fallback: "untitled" });
   // The ordinal only appears past the first run, so the common case is
   // unchanged and a second rebuild re-derives the same ids.
   return run === 0 ? slug : `${slug}-${run + 1}`;

@@ -21,6 +21,7 @@ import { feedId, sameRows, withDefaults } from "./integration-panel-helpers";
 import { useReportUnsavedWork } from "./unsaved-work";
 import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
 import { errorMessage } from "@main/services/errors";
+import { firstFreeNumbered } from "@main/services/first-free";
 
 // ---- ProPresenter extra instances -------------------------------------------
 
@@ -93,7 +94,7 @@ export function ProPresenterInstancesPanel({
       // pollMs included, not left to the field's fallback: the row is saved as
       // it is built, and a buffer a key short of what comes back reads as
       // unsaved work the moment the save lands.
-      { id: feedId(), name: `Auditorium ${prev.length + 2}`, host: "", port: 1025, pollMs: DEFAULT_POLL_MS },
+      { id: feedId(), name: firstFreeNumbered("Auditorium", (candidate) => prev.some((r) => r.name === candidate), prev.length + 2), host: "", port: 1025, pollMs: DEFAULT_POLL_MS },
     ]);
   }
   /** Save, and say whether it landed. A false must not be followed by a close. */

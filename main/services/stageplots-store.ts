@@ -25,7 +25,8 @@ import {
   type VenuePublish,
 } from "../types/stageplots.js";
 import { DataStore } from "./data-store.js";
-import { firstFree } from "./first-free.js";
+import { firstFree, truncatingJoin } from "./first-free.js";
+import { slugText } from "./slug.js";
 import { errorMessage } from "./errors.js";
 import { isRecord } from "../types/is-record.js";
 import { asArray, asObject, checked, refuse, required, textList, uniqueIds } from "./restore-check.js";
@@ -163,20 +164,9 @@ export function addressOwners(venues: readonly Venue[]): Map<string, Venue> {
  * while `taken` says another venue answers to it.
  */
 export function slugFromName(name: string, taken: (slug: string) => boolean): string {
-  const base =
-    name
-      .normalize("NFKD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, STAGEPLOT_LIMITS.slugChars)
-      .replace(/-+$/, "") || "venue";
+  const base = slugText(name, { fold: "combining", max: STAGEPLOT_LIMITS.slugChars, fallback: "venue" });
   const usable = (s: string) => venueSlugProblem(s) === null && !taken(s);
-  return firstFree(base, (s) => !usable(s), (b, n) => {
-    const suffix = `-${n}`;
-    return `${b.slice(0, STAGEPLOT_LIMITS.slugChars - suffix.length).replace(/-+$/, "")}${suffix}`;
-  });
+  return firstFree(base, (s) => !usable(s), truncatingJoin(STAGEPLOT_LIMITS.slugChars));
 }
 
 /** What each limit says when it is reached, for a save and a restore alike. */

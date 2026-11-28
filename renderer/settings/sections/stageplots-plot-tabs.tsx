@@ -28,6 +28,7 @@ import { usePressDrag } from "../../lib/use-press-drag";
 import { tabClass } from "../../main/stageplots/doc-helpers";
 import { stageplotsApi } from "../../main/stageplots/stageplots-api";
 import { DraftDot, SaveError, iconButton, type Save } from "./stageplots-shared";
+import { firstFreeNumbered } from "@main/services/first-free";
 
 /** How far, in screen pixels, a press on a tab moves before it is a drag and not a click. */
 const DRAG_SLOP_PX = 5;
@@ -118,7 +119,7 @@ export function PlotTabs({
   const add = async () => {
     if (!(await leaving())) return;
     const made = await run(() =>
-      stageplotsApi.createPlot({ venueId: venue.id, name: `Plot ${plots.length + 1}`, backgroundId: selected?.backgroundId ?? null }),
+      stageplotsApi.createPlot({ venueId: venue.id, name: firstFreeNumbered("Plot", (s) => plots.some((x) => x.name === s), plots.length + 1), backgroundId: selected?.backgroundId ?? null }),
     );
     if (made) onSelect(made.id);
   };

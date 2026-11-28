@@ -13,6 +13,7 @@ import { broadcast } from "./broadcaster.js";
 import { ConnectionLifecycle } from "./integration-base.js";
 import { ROSSTALK_COMMANDS, formatCommand, sanitiseRaw } from "./rosstalk-commands.js";
 import { rosstalkStore } from "./rosstalk-store.js";
+import { firstFreeNumbered } from "./first-free.js";
 
 const DEFAULT_PORT = 7788;
 const RECONNECT_BASE_MS = 3000;
@@ -142,7 +143,7 @@ class RossTalkManager {
   async addTarget(params: { name?: string }): Promise<RossTalkTarget[]> {
     const target: RossTalkTarget = {
       id: randomUUID(),
-      name: params.name?.trim() || `RossTalk target ${this.targets.length + 1}`,
+      name: params.name?.trim() || firstFreeNumbered("RossTalk target", (s) => this.targets.some((t) => t.name === s), this.targets.length + 1),
       enabled: false, // never dial out until the operator says so
       connection: "disconnected",
       message: null,

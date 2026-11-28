@@ -243,6 +243,8 @@ describe("what is in the bundle", () => {
       "main/services/errors.ts",
       // The address a layout is found under, shared with the server that assigns it.
       "main/services/servicecue-slug.ts",
+      // The slug rule servicecue-slug.ts is built on: pure.
+      "main/services/slug.ts",
       // A plot's height and which plot a plan shows: pure, and imports only types.
       "main/services/stageplots-doc.ts",
       // renderer/lib/api.ts gives Update the page now its timeout from here: two

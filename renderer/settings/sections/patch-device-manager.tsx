@@ -8,6 +8,7 @@ import { cn } from "../../lib/cn";
 import { uid } from "../../lib/uid";
 import { DeviceDot } from "./patch-dot";
 import { generateLabels } from "../../lib/patch-ripple";
+import { firstFreeNumbered } from "@main/services/first-free";
 
 const KINDS: { value: PatchDeviceKind; label: string }[] = (Object.keys(PATCH_KIND_LABELS) as PatchDeviceKind[]).map((value) => ({
   value,
@@ -157,7 +158,7 @@ export function PatchDeviceManager({ devices, onChange }: { devices: PatchDevice
   }
   function add() {
     const id = uid("dev");
-    onChange([...devices, { id, name: `Device ${devices.length + 1}`, kind: "rack", inputs: 8, outputs: 0 }]);
+    onChange([...devices, { id, name: firstFreeNumbered("Device", (s) => devices.some((x) => x.name === s), devices.length + 1), kind: "rack", inputs: 8, outputs: 0 }]);
     setOpenId(id);
     setAddedId(id);
   }

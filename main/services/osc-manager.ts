@@ -19,6 +19,7 @@ import { broadcast } from "./broadcaster.js";
 import { decodePacket, encodeMessage } from "./osc-codec.js";
 import { oscStore } from "./osc-store.js";
 import { settingsStore } from "./settings-store.js";
+import { firstFreeNumbered } from "./first-free.js";
 
 const FEEDBACK_THROTTLE_MS = 200;
 
@@ -211,10 +212,9 @@ class OscManager {
   }
 
   async addTarget(params: { name?: string }): Promise<OscTarget[]> {
-    const index = this.targets.length + 1;
     const target: OscTarget = {
       id: randomUUID(),
-      name: params.name?.trim() || `OSC target ${index}`,
+      name: params.name?.trim() || firstFreeNumbered("OSC target", (s) => this.targets.some((t) => t.name === s), this.targets.length + 1),
       enabled: false,
       connection: "disconnected",
       message: null,

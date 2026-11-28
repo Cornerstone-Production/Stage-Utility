@@ -7,6 +7,7 @@
 
 import { randomUUID } from "node:crypto";
 import { errorMessage } from "./errors.js";
+import { firstFree } from "./first-free.js";
 
 import { remapBundle } from "./view-remap.js";
 import { collectRefsFrom } from "./view-refs.js";
@@ -159,10 +160,7 @@ function assertBundle(b: unknown): asserts b is ViewBundle {
 /** `Left Display` -> `Left Display (imported)` when taken. */
 function freeName(name: string, taken: Set<string>): string {
   if (!taken.has(name)) return name;
-  let candidate = `${name} (imported)`;
-  let n = 2;
-  while (taken.has(candidate)) candidate = `${name} (imported ${n++})`;
-  return candidate;
+  return firstFree(`${name} (imported)`, (s) => taken.has(s), (_, n) => `${name} (imported ${n})`);
 }
 
 export interface ImportOptions {
