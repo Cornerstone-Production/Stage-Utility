@@ -167,6 +167,8 @@ A domain whose DNS is on Cloudflare, in the same account, can stand in for the
    `workersDev: false` turns the `workers.dev` address off; leave it out to keep both.
 3. In **Settings → Advanced → Public link**, change the page address and enter the publishing token
    again in the same save: a token is kept only for the address it was saved with.
+   Emptying the address field clears it with no token: the saved token goes too and publishing
+   switches off.
 4. Harden the zone, in the domain's own settings:
    - **SSL/TLS → Edge Certificates**: **Always Use HTTPS** on, **HSTS** on (6 months,
      subdomains included, preload off), **Minimum TLS Version** 1.2. The Worker
