@@ -12,6 +12,7 @@ describe("moveTo", () => {
   test("clamps the index to the ends", () => {
     assert.deepEqual(moveTo(["a", "b", "c"], "a", 99), ["b", "c", "a"]);
     assert.deepEqual(moveTo(["a", "b", "c"], "c", -4), ["c", "a", "b"]);
+    assert.deepEqual(moveTo(["a", "b", "c"], "c", -1), ["c", "a", "b"], "splice counts a negative index from the end; the clamp stops that");
   });
   test("an item not in the list is inserted, and the input is not mutated", () => {
     const list = ["a", "b"];

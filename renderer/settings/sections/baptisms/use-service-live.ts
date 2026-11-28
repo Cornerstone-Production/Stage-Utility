@@ -83,8 +83,8 @@ export function useServiceLive(serviceKey: string | null): LiveCheck {
   const [answer, setAnswer] = useState<{ key: string | null; status: LiveStatus }>({ key: null, status: "not-live" });
   // The one true "what are we asking about right now", read at the moment an
   // async answer is about to be written — never the STALE value a `.then()`
-  // closure captured back when the ask started. Written in an effect, not
-  // during render: nothing here needs it to be current for THIS render, only
+  // closure captured back when the ask started. Mirrored after render,
+  // not during it: nothing here needs it to be current for THIS render, only
   // for whichever async callback reads it later, after every effect for this
   // render (including this one) has already run.
   const targetRef = useLatestRef(serviceKey);

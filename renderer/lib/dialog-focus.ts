@@ -93,11 +93,8 @@ export function useReturnFocus(open: boolean, target: () => HTMLElement | null):
   // the effect below depends on `open` alone — a dependency on the function
   // itself would run it on every render and return focus while the dialog is
   // still up.
-  // Refreshed in an effect, not during render — a ref written while rendering is
-  // exactly what react-hooks/refs forbids, and the rule is right. Declared
-  // BEFORE the effect below so that on the commit where `open` goes false,
-  // effects run in declaration order and this one has already put the current
-  // render's getter in place.
+  // Declared BEFORE the effect below so that on the commit where `open` goes
+  // false, it already holds the current render's getter.
   const latest = useLatestRef(target);
   useEffect(() => {
     if (open) {

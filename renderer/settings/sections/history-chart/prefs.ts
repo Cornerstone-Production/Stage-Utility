@@ -174,9 +174,8 @@ export function useStoredKeys(
 
   /** The current `allowed`/`fallback`, for the subscription below. Both are
    *  fresh arrays every render, so neither can be a dependency without
-   *  rebuilding the subscription on every one of them. Written in an effect
-   *  rather than during render — a ref assigned while rendering is a tear the
-   *  linter is right to refuse. */
+   *  rebuilding the subscription on every one of them. Mirrored after
+   *  render, never assigned during it. */
   const latest = useLatestRef({ allowed, fallback });
   // Another component wrote this entry — re-read, so two strips on one page
   // cannot disagree about what is ticked. The writer's own `setKeys` above has
