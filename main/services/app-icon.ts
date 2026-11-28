@@ -10,6 +10,7 @@
 // Either every image is present or none is. Five optional keys would let a request
 // set a 180 icon and leave a stale 512 one behind, which a phone then shows.
 
+import { LOGO_LIMIT_LABEL } from "../types/limits.js";
 import { MAX_BRANDING_DATA_URL_CHARS, looksLikeStoredRef } from "./branding-image-store.js";
 import { isDataUrl } from "./image-files.js";
 import { isHex6 } from "./settings-rules.js";
@@ -128,7 +129,7 @@ const IMAGE_SIZES: Record<"art" | IconField, number | null> = { art: null, ...IC
  *  `label` names it in the reason: the request field, or the settings key. */
 export function iconPngProblem(key: IconImageField, value: unknown, label = `body.icon.${key}`): string | null {
   if (typeof value !== "string" || !value.startsWith(PNG_PREFIX)) return `${label} must be a PNG data URL`;
-  if (value.length > MAX_BRANDING_DATA_URL_CHARS) return `${label} too large (max ~1.5 MB)`;
+  if (value.length > MAX_BRANDING_DATA_URL_CHARS) return `${label} too large (max ~${LOGO_LIMIT_LABEL})`;
   const dims = pngSize(value);
   if (!dims) return `${label} is not a valid PNG`;
   const size = IMAGE_SIZES[key];
@@ -185,7 +186,7 @@ export function parseAppIcon(v: unknown): IconParse {
       return { ok: false, error: "body.icon.original must be an image data URL, a stored image or null" };
     }
     if (body.original.length > MAX_BRANDING_DATA_URL_CHARS) {
-      return { ok: false, error: "body.icon.original too large (max ~1.5 MB)" };
+      return { ok: false, error: `body.icon.original too large (max ~${LOGO_LIMIT_LABEL})` };
     }
     original = body.original;
   }

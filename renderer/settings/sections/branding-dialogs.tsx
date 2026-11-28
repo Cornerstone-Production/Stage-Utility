@@ -27,6 +27,7 @@ import { useTrailingCommit } from "../../lib/use-trailing-commit";
 import { ART_MAX } from "../../lib/app-icon-render";
 import { resolveAccent } from "../../lib/icon-ink";
 import { NO_TAB_BACKGROUND } from "@main/services/install-metadata";
+import { LOGO_LIMIT_LABEL } from "@main/types/limits";
 
 const BLACK = "#000000";
 const WHITE = "#ffffff";
@@ -289,7 +290,7 @@ export function LogoDialog({ open, brand, editor, ...actions }: { open: boolean;
       footer={<Actions isSet={isSet} removeLabel="Remove logo" {...actions} />}
     >
       <Lead>
-        PNG, JPG, SVG or WebP, up to 1.5 MB. Appears next to the name in the sidebar and on every display.
+        PNG, JPG, SVG or WebP, up to {LOGO_LIMIT_LABEL}. Appears next to the name in the sidebar and on every display.
       </Lead>
       <Editor slot={editor} onUpload={actions.onUpload} />
     </Frame>

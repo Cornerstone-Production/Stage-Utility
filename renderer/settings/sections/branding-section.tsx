@@ -16,6 +16,7 @@ import { AvatarDialog, EmptySlotDialog, IconDialog, LogoDialog, type EditorSlot,
 import { LogoCropper } from "./logo-cropper";
 import { useSearchParam } from "../../lib/use-search-param";
 import { MAX_APP_NAME } from "@main/services/app-name";
+import { LOGO_LIMIT_LABEL, MAX_LOGO_BYTES } from "@main/types/limits";
 import { LOGO_REQUEST_PARAM, LOGO_REQUEST_VALUE } from "./branding-links";
 
 // Convenience presets for the brand accent (any org can also pick a custom hex).
@@ -23,9 +24,6 @@ import { LOGO_REQUEST_PARAM, LOGO_REQUEST_VALUE } from "./branding-links";
 // colors (green/red/amber) are separate and never themed.
 const ACCENT_PRESETS = ["#2e6691", "#3b82a6", "#5b9bd8", "#6e56cf", "#0d9488", "#c2410c"];
 
-// Keep in sync with the server-side cap in remote-server.ts (~1.5 MB decoded
-// leaves headroom under the 2 MB data-URL limit).
-const MAX_LOGO_BYTES = 1_500_000;
 const ACCEPTED = "image/png,image/jpeg,image/svg+xml,image/webp";
 const ACCEPTED_TYPES = ACCEPTED.split(",");
 
@@ -144,7 +142,7 @@ export function BrandingSection({
       return;
     }
     if (file.size > MAX_LOGO_BYTES) {
-      toast.error("Image is too large — please use one under 1.5 MB.");
+      toast.error(`Image is too large — please use one under ${LOGO_LIMIT_LABEL}.`);
       return;
     }
     const seq = ++editSeq.current;

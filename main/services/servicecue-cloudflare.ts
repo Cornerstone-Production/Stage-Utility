@@ -30,7 +30,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { errorMessage, fetchFailureMessage, isNotFound } from "./errors.js";
-import { readCapped } from "./capped-download.js";
+import { SMALL_JSON_ANSWER_BYTES, readCapped } from "./capped-download.js";
 import { isRecord, isStringList } from "../types/is-record.js";
 import { pinToOrigin } from "./pinned-origin.js";
 import { parseTag } from "./release-tags.js";
@@ -115,8 +115,6 @@ export class CloudflareError extends Error {
 
 /** Longest part of Cloudflare's words that is kept: they reach the log and the card. */
 const MAX_MESSAGE = 400;
-/** The largest answer read: every one is a small JSON document. */
-const MAX_ANSWER_BYTES = 1024 * 1024;
 
 interface Envelope {
   success?: unknown;
@@ -402,7 +400,7 @@ export function createCloudflare(opts: CloudflareOptions): CloudflareClient {
     }
     let body: Envelope | undefined;
     try {
-      const bytes = await readCapped(res, MAX_ANSWER_BYTES);
+      const bytes = await readCapped(res, SMALL_JSON_ANSWER_BYTES);
       const parsed: unknown = bytes ? JSON.parse(bytes.toString("utf8")) : undefined;
       body = isRecord(parsed) ? parsed : undefined;
     } catch {

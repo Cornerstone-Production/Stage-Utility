@@ -15,6 +15,7 @@ import * as path from "path";
 
 import { getUserDataPath } from "./app-paths.js";
 import { externKeyed } from "../types/extern-keyed.js";
+import { MAX_IMAGE_BYTES, megabytes } from "../types/limits.js";
 import { atomicWrite } from "./write-queue.js";
 import { isNotFound } from "./errors.js";
 
@@ -42,7 +43,7 @@ const MIME_BY_EXT: Record<string, string> = externKeyed({
 
 /** The largest image the store will accept. Exported so the route body limits
  *  can be checked against it rather than against a copy of the number. */
-export const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+export { MAX_IMAGE_BYTES };
 
 /**
  * The Content-Security-Policy a stored image is served with.
@@ -121,7 +122,7 @@ export function storedImageProblem(file: string, bytes: Buffer, rule: ContentRul
   const ext = /^[0-9a-f]{16}\.([a-z]+)$/.exec(file)?.[1];
   if (!ext || !SAVED_EXTS.has(ext)) return "is not the name of a stored image";
   if (bytes.length === 0) return "is empty";
-  if (bytes.length > MAX_IMAGE_BYTES) return "is too large (max 12 MB)";
+  if (bytes.length > MAX_IMAGE_BYTES) return `is too large (max ${megabytes(MAX_IMAGE_BYTES)})`;
   if (rule.checkContent && !looksLike(MIME_BY_EXT[ext]!, bytes)) return `is not a valid ${ext} image`;
   if (contentName(bytes, ext) !== file) return "does not match its contents";
   return null;
@@ -162,7 +163,7 @@ export async function saveImageBytes(dirName: string, bytes: Buffer, ext: string
   const mime = SAVED_EXTS.has(ext) ? MIME_BY_EXT[ext] : undefined;
   if (!mime) throw new Error(`unsupported image type: ${ext}`);
   if (bytes.length === 0) throw new Error("empty image");
-  if (bytes.length > MAX_IMAGE_BYTES) throw new Error("image too large (max 12 MB)");
+  if (bytes.length > MAX_IMAGE_BYTES) throw new Error(`image too large (max ${megabytes(MAX_IMAGE_BYTES)})`);
   if (rule.checkContent && !looksLike(mime, bytes)) throw new Error(`not a valid ${mime} image`);
 
   const file = contentName(bytes, ext);

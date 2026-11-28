@@ -15,6 +15,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
+import { megabytes } from "../types/limits.js";
 import { STAGEPLOT_LIMITS, type Background, type BackgroundView, type StagePlotsDoc, type StagePlotsView, type Venue, type VenueView } from "../types/stageplots.js";
 import { getUserDataPath } from "./app-paths.js";
 import { errorMessage, isNotFound } from "./errors.js";
@@ -29,7 +30,7 @@ export const STAGEPLOT_ORIGINAL_DIR = "stageplot-originals";
 /** Every stage-plot image is checked against its type when stored, and restored to the same rule. */
 export const STAGEPLOT_IMAGE_RULE: ContentRule = { checkContent: true };
 
-/** The largest PDF original kept. Above the 12 MB image cap: a plan set exported
+/** The largest PDF original kept. Above the image cap: a plan set exported
  *  from a drawing program is often bigger than a photo of it. */
 export const MAX_STAGEPLOT_PDF_BYTES = STAGEPLOT_LIMITS.pdfBytes;
 
@@ -110,7 +111,7 @@ const ORIGINAL_NAME = /^[0-9a-f]{16}\.pdf$/;
 export function storedOriginalProblem(file: string, bytes: Buffer): string | null {
   if (!ORIGINAL_NAME.test(file)) return "is not the name of a stored original";
   if (bytes.length === 0) return "is empty";
-  if (bytes.length > MAX_STAGEPLOT_PDF_BYTES) return "is too large (max 25 MB)";
+  if (bytes.length > MAX_STAGEPLOT_PDF_BYTES) return `is too large (max ${megabytes(MAX_STAGEPLOT_PDF_BYTES)})`;
   if (!isPdf(bytes)) return "is not a PDF";
   if (contentName(bytes, "pdf") !== file) return "does not match its contents";
   return null;

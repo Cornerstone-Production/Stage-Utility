@@ -138,6 +138,7 @@ import {
   validateVenueInput,
   venueSlugProblem,
 } from "../stageplots-store.js";
+import { megabytes } from "../../types/limits.js";
 import { BodyTooLargeError, type RouteCtx, error, json, readObjectBody, readRawBody } from "./context.js";
 
 
@@ -885,7 +886,7 @@ async function uploadImage(c: RouteCtx): Promise<void> {
     // The source is re-encoded (2400 px, sRGB), so it is not the upload and not held to its cap:
     // one over what the image store keeps is refused by name here, not a 500 from the store.
     if (source.length > STAGEPLOT_LIMITS.imageBytes) {
-      const why = `is over 12 MB once brought to 2400 px in sRGB (${kb(source.length)}); save it as a JPEG and upload that`;
+      const why = `is over ${megabytes(STAGEPLOT_LIMITS.imageBytes)} once brought to 2400 px in sRGB (${kb(source.length)}); save it as a JPEG and upload that`;
       refuseUpload(name, bytes.length, why, { answer: `the upload ${why}` });
     }
     // The source as stored, 2400 px and no metadata, is a PNG or JPEG upload's original too.

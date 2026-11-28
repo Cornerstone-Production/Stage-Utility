@@ -73,6 +73,10 @@ export function downloadWatchdog({ idleMs, totalMs, timers }: DownloadTimeouts):
 
 // ── A small body ───────────────────────────────────────────────────────────
 
+/** The most a small JSON answer from outside (a publish client's reply, a release
+ *  record) may weigh: far above any real one, far below a Pi's headroom. */
+export const SMALL_JSON_ANSWER_BYTES = 1024 * 1024;
+
 /**
  * Read a response body, giving up once it exceeds `maxBytes`.
  *

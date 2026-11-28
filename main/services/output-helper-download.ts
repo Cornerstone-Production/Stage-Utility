@@ -50,7 +50,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
 import { withoutDataDir } from "./app-paths.js";
-import { commitPart, downloadWatchdog, readCapped, sha256OfFile, streamToPart, type WatchdogTimers } from "./capped-download.js";
+import { commitPart, downloadWatchdog, SMALL_JSON_ANSWER_BYTES, readCapped, sha256OfFile, streamToPart, type WatchdogTimers } from "./capped-download.js";
 import { errorMessage, fetchFailureMessage, isNotFound } from "./errors.js";
 import { GITHUB_API_REPO, GITHUB_RELEASE_DOWNLOAD, rateLimitMessage } from "./github-repo.js";
 import { scrub } from "./scrub.js";
@@ -96,9 +96,6 @@ export function parseHelperPath(pathname: string): HelperAsset | null {
  *  zip is a good deal under the bundle's 320 MB; this is the ceiling, not the
  *  expectation. */
 const DEFAULT_MAX_ZIP_BYTES = 1024 * 1024 * 1024;
-/** A release's JSON: its notes and one object per asset, some tens of KB; this is
- *  headroom, not the expectation. */
-const MAX_RELEASE_JSON_BYTES = 1024 * 1024;
 /** No bytes for this long (the connect and the response headers count) and the zip
  *  transfer is given up on. A slow link that keeps moving never trips it. */
 const DEFAULT_ZIP_IDLE_MS = 60 * 1000;
@@ -377,8 +374,8 @@ export class OutputHelperDownloads {
   private async fetchChecksum(asset: HelperAsset, file: string, version: string): Promise<Resolution> {
     const zipName = asset.name.replace(/\.sha256$/, "");
     const res = await this.getRelease(zipName, version, AbortSignal.timeout(this.digestTimeoutMs));
-    const body = await readCapped(res, MAX_RELEASE_JSON_BYTES);
-    if (!body) throw new Refusal(502, `the release record for v${version} is larger than ${MAX_RELEASE_JSON_BYTES} bytes; refusing it`);
+    const body = await readCapped(res, SMALL_JSON_ANSWER_BYTES);
+    if (!body) throw new Refusal(502, `the release record for v${version} is larger than ${SMALL_JSON_ANSWER_BYTES} bytes; refusing it`);
     // In `shasum` form, which is what the installer's check reads.
     const line = `${assetDigest(body.toString("utf8"), version, zipName)}  ${zipName}\n`;
     await fs.mkdir(path.dirname(file), { recursive: true });
@@ -392,8 +389,8 @@ export class OutputHelperDownloads {
   private async fetchSignature(asset: HelperAsset, file: string, version: string): Promise<Resolution> {
     // One limit over the record and the signature together: two small reads.
     const signal = AbortSignal.timeout(this.digestTimeoutMs);
-    const record = await readCapped(await this.getRelease(asset.name, version, signal), MAX_RELEASE_JSON_BYTES);
-    if (!record) throw new Refusal(502, `the release record for v${version} is larger than ${MAX_RELEASE_JSON_BYTES} bytes; refusing it`);
+    const record = await readCapped(await this.getRelease(asset.name, version, signal), SMALL_JSON_ANSWER_BYTES);
+    if (!record) throw new Refusal(502, `the release record for v${version} is larger than ${SMALL_JSON_ANSWER_BYTES} bytes; refusing it`);
     // A release that lists no signature is a 404 from here, which the machine
     // reads as "missing" and refuses the update for.
     const expected = assetDigest(record.toString("utf8"), version, asset.name);
