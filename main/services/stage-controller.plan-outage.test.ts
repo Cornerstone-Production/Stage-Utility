@@ -459,7 +459,11 @@ describe("a service running past its planned end", () => {
   const HELD = { id: "p-held", title: "Held plan", seriesTitle: null, sortDate: "2026-11-16T00:00:00Z", dates: "Nov 16" };
 
   beforeEach(() => {
-    pco.getServiceEnd = async (_a: string, _s: string, _t: string, planId: string) => (planId === "p-held" ? LONG_END() : null);
+    // One end per test, as Planning Center gives one. Read fresh from the clock on
+    // every call it differed by a millisecond between two ticks under load, which
+    // is a changed hold and a second broadcast.
+    const end = LONG_END();
+    pco.getServiceEnd = async (_a: string, _s: string, _t: string, planId: string) => (planId === "p-held" ? end : null);
     pco.listUpcomingPlans = async (_a: string, _s: string, typeId: string) => (typeId === "1" ? [HELD] : [WED]);
   });
 
