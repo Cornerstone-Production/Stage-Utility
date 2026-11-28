@@ -99,10 +99,14 @@ describe("deriveCueName: every path gives the same name for the same words", () 
   });
 
   test("the pair-half check sees the prefix and the cut together", () => {
-    // btn_ + 48 letters + `_on` is exactly the cut: it must not end up a pair half.
-    const name = deriveCueName("a".repeat(48) + " on", none, BUTTON_CUE);
-    assert.equal(isPairHalfName(name), false, name);
-    assert.ok(name.length <= MAX_CUE_NAME, name);
+    // Letters then `_on` land on the cut: not a pair half, and a clash after it stays under the cap.
+    const text = "a".repeat(49) + " on";
+    const first = deriveCueName(text, none, BUTTON_CUE);
+    const second = deriveCueName(text, [first], BUTTON_CUE);
+    for (const name of [first, second]) {
+      assert.equal(isPairHalfName(name), false, name);
+      assert.ok(name.length <= MAX_CUE_NAME, `${name.length} characters: ${name}`);
+    }
   });
 
   test("a label with no usable characters is called the fallback, and a clash numbers it", () => {
