@@ -240,6 +240,16 @@ others. See [Health from the screens](../integrations/video-feeds.md#health-from
 `PATCH /api/wireless/connections/:id` also accepts `POST`, and takes either the
 fields themselves or `{patch: {…}}`. The same is true of `/api/osc/targets/:id`.
 
+The three target lists (wireless connections, OSC targets and RossTalk targets)
+take an edit the same way. A field that is absent is left alone; `name` must be a
+string with text in it, `enabled` a boolean and `config` an object, or the edit is
+refused with `400` and nothing is stored. An OSC or RossTalk `config` also holds
+only its own fields (`host` text, `port` an integer 1 to 65535, RossTalk's
+`family` `carbonite` or `ultrix`, OSC's `subscribeAddress` text and
+`subscribeIntervalSec` a positive number); a wireless connection's `config` is
+whatever its provider declares. An id the list does not hold answers `404` on an
+update or a remove, and on a wireless or RossTalk test (an OSC test answers `{ok: false}`).
+
 **OSC** — targets are a list of their own rather than integration config.
 
 | Method | Path | Purpose |
@@ -257,7 +267,7 @@ alike. See [RossTalk](../integrations/rosstalk.md) for the command catalogue.
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET / POST | `/api/rosstalk/targets` | List (`{targets, simulate}`) / add (`{name?}`; `201`, answering the list) |
-| PATCH / DELETE | `/api/rosstalk/targets/:id` | Update (the fields themselves in the body) / remove. Both answer the list |
+| PATCH / DELETE | `/api/rosstalk/targets/:id` | Update (the fields themselves in the body, not wrapped in `{patch}`) / remove. Both answer the list |
 | POST | `/api/rosstalk/targets/:id/test` | Open the socket and send nothing |
 | GET | `/api/rosstalk/commands?family=carbonite\|ultrix` | The commands that family accepts, with their parameters |
 | GET / POST | `/api/rosstalk/simulate` | The global simulate switch (**on** out of the box): `{simulate}`; `POST` takes `{simulate: boolean}` |

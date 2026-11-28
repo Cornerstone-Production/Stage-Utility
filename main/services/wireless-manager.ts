@@ -5,6 +5,7 @@
 import { randomUUID } from "crypto";
 
 import { scrub } from "./scrub.js";
+import { newTargetName, requireTarget, requireTargetIndex } from "./target-list.js";
 
 import type { WirelessConnection } from "../types/devices.js";
 import type { ConnectionState, IntegrationDescriptor } from "../types/integrations.js";
@@ -132,10 +133,9 @@ class WirelessManager {
   }
 
   async addConnection(params: { name?: string; providerId?: string }): Promise<WirelessConnection[]> {
-    const index = this.connections.length + 1;
     const conn: WirelessConnection = {
       id: randomUUID(),
-      name: params.name?.trim() || `Connection ${index}`,
+      name: newTargetName(params.name, "Connection", this.connections),
       providerId: params.providerId ?? "none",
       enabled: false,
       connection: "disconnected",
@@ -155,10 +155,7 @@ class WirelessManager {
     id: string;
     patch: Partial<Pick<WirelessConnection, "name" | "providerId" | "enabled" | "config">>;
   }): Promise<WirelessConnection[]> {
-    const idx = this.connections.findIndex((c) => c.id === params.id);
-    if (idx === -1) throw new Error(`wireless:updateConnection — unknown id: ${params.id}`);
-
-    const conn = this.connections[idx];
+    const conn = requireTarget(this.connections, params.id, "Wireless");
     const patch = params.patch;
     // What the connection was, to put back if the save fails. Without it the
     // in-memory copy kept a change the store never got, and the next unrelated
@@ -241,8 +238,7 @@ class WirelessManager {
   }
 
   async removeConnection(params: { id: string }): Promise<WirelessConnection[]> {
-    const idx = this.connections.findIndex((c) => c.id === params.id);
-    if (idx === -1) throw new Error(`wireless:removeConnection — unknown id: ${params.id}`);
+    const idx = requireTargetIndex(this.connections, params.id, "Wireless");
 
     console.log(`[wireless] removeConnection — ${scrub(params.id)}`);
     this.connections.splice(idx, 1);
@@ -258,8 +254,7 @@ class WirelessManager {
   }
 
   async testConnection(params: { id: string }): Promise<{ ok: boolean; message?: string }> {
-    const conn = this.connections.find((c) => c.id === params.id);
-    if (!conn) throw new Error(`wireless:testConnection — unknown id: ${params.id}`);
+    const conn = requireTarget(this.connections, params.id, "Wireless");
 
     if (conn.providerId === "none") {
       return { ok: true, message: "No hardware driver — placeholder connection" };

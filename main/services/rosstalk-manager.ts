@@ -13,6 +13,7 @@ import { broadcast } from "./broadcaster.js";
 import { ConnectionLifecycle, OUTPUT_RECONNECT_CEILING_MS } from "./integration-base.js";
 import { ROSSTALK_COMMANDS, formatCommand, sanitiseRaw } from "./rosstalk-commands.js";
 import { rosstalkStore } from "./rosstalk-store.js";
+import { newTargetName, requireTarget } from "./target-list.js";
 
 const DEFAULT_PORT = 7788;
 
@@ -141,7 +142,7 @@ class RossTalkManager {
   async addTarget(params: { name?: string }): Promise<RossTalkTarget[]> {
     const target: RossTalkTarget = {
       id: randomUUID(),
-      name: params.name?.trim() || `RossTalk target ${this.targets.length + 1}`,
+      name: newTargetName(params.name, "RossTalk target", this.targets),
       enabled: false, // never dial out until the operator says so
       connection: "disconnected",
       message: null,
@@ -157,9 +158,8 @@ class RossTalkManager {
     id: string;
     patch: Partial<Pick<RossTalkTargetConfig, "name" | "enabled" | "config">>;
   }): Promise<RossTalkTarget[]> {
-    const t = this.targets.find((x) => x.id === params.id);
-    if (!t) throw new Error(`RossTalk: unknown target ${params.id}`);
-    if (params.patch.name !== undefined) t.name = params.patch.name;
+    const t = requireTarget(this.targets, params.id, "RossTalk");
+    if (params.patch.name !== undefined) t.name = params.patch.name.trim() || t.name;
     if (params.patch.enabled !== undefined) t.enabled = params.patch.enabled;
     if (params.patch.config) t.config = { ...t.config, ...params.patch.config };
     await this.persist();
@@ -168,6 +168,7 @@ class RossTalkManager {
   }
 
   async removeTarget(params: { id: string }): Promise<RossTalkTarget[]> {
+    requireTarget(this.targets, params.id, "RossTalk");
     this.conns.get(params.id)?.stop();
     this.conns.delete(params.id);
     this.targets = this.targets.filter((t) => t.id !== params.id);
@@ -177,8 +178,7 @@ class RossTalkManager {
 
   /** Connect only. A probe packet would be a real command, so nothing is sent. */
   async testTarget(params: { id: string }): Promise<{ ok: boolean; message?: string }> {
-    const t = this.targets.find((x) => x.id === params.id);
-    if (!t) throw new Error(`RossTalk: unknown target ${params.id}`);
+    const t = requireTarget(this.targets, params.id, "RossTalk");
     const host = t.config.host?.trim();
     const port = Number(t.config.port) || DEFAULT_PORT;
     if (!host) return { ok: false, message: "No host set" };
@@ -203,8 +203,7 @@ class RossTalkManager {
     targetId: string,
     req: { commandId?: string; params?: Record<string, string | number>; raw?: string },
   ): Promise<{ ok: true; line: string; simulated: boolean }> {
-    const t = this.targets.find((x) => x.id === targetId);
-    if (!t) throw new Error(`RossTalk: unknown target ${targetId}`);
+    const t = requireTarget(this.targets, targetId, "RossTalk");
 
     let line: string;
     if (req.raw !== undefined) {
