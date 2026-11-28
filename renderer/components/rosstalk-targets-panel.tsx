@@ -7,6 +7,7 @@ import { Button, InfoHint, Input, NumberInput, Separator, Status, Switch, toast 
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useNameDraft } from "@renderer/lib/use-name-draft";
 import { errorMessage } from "@main/services/errors";
+import { logToServer } from "../lib/client-log";
 import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
 
 const DEFAULT_PORT = 7788;
@@ -58,6 +59,7 @@ function TargetCard({ target, onChanged }: { target: RossTalkTarget; onChanged: 
       onChanged();
       return true;
     } catch (err) {
+      logToServer("rosstalk", `could not save target ${target.id}: ${errorMessage(err)}`);
       toast.error(`Failed to save: ${errorMessage(err)}`);
       return false;
     }

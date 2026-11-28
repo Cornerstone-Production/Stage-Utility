@@ -1,6 +1,7 @@
 import { invoke as ipc, onNotification } from "../lib/api";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useNameDraft } from "@renderer/lib/use-name-draft";
+import { logToServer } from "../lib/client-log";
 import { useEffect, useState, type ChangeEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -66,6 +67,7 @@ function TargetCard({ target, onChange }: { target: OscTarget; onChange: (t: Osc
       onChange(next);
       return true;
     } catch (err) {
+      logToServer("osc", `could not save target ${target.id}: ${errorMessage(err)}`);
       toast.error(`Failed to save: ${errorMessage(err)}`);
       return false;
     }

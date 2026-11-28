@@ -48,6 +48,8 @@ interface Panel {
   reads: Record<string, unknown>;
   /** The rename's PATCH URL. */
   update: string;
+  /** The tag a refused save logs under, where the panel logs one. */
+  logTag?: string;
 }
 
 const PANELS: Panel[] = [
@@ -57,10 +59,11 @@ const PANELS: Panel[] = [
     label: "Target name",
     saved: "Console",
     reads: {
-      "/api/osc/targets": [{ id: "t1", name: "Console", enabled: true, config: { host: "10.0.0.2", port: 8000 }, connection: "disconnected" }],
+      "/api/osc/targets": [{ id: "t1", name: "Console", enabled: true, config: { host: "192.0.2.2", port: 8000 }, connection: "disconnected" }],
       "/api/osc/feedback-port": { port: 9000 },
     },
     update: "/api/osc/targets/t1",
+    logTag: "osc",
   },
   {
     name: "RossTalk",
@@ -68,10 +71,11 @@ const PANELS: Panel[] = [
     label: "Target name",
     saved: "Switcher",
     reads: {
-      "/api/rosstalk/targets": { targets: [{ id: "r1", name: "Switcher", enabled: true, config: { host: "10.0.0.3", port: 7788, family: "carbonite" }, connection: "disconnected" }], simulate: false },
+      "/api/rosstalk/targets": { targets: [{ id: "r1", name: "Switcher", enabled: true, config: { host: "192.0.2.3", port: 7788, family: "carbonite" }, connection: "disconnected" }], simulate: false },
       "/api/rosstalk/commands": [],
     },
     update: "/api/rosstalk/targets/r1",
+    logTag: "rosstalk",
   },
   {
     name: "wireless",
@@ -97,7 +101,7 @@ function stub(panel: Panel) {
     const hit = Object.entries(panel.reads).find(([suffix]) => url.endsWith(suffix));
     return ok(hit ? hit[1] : {});
   });
-  return { writes, restore: f.restore };
+  return { writes, logs: f.logs, restore: f.restore };
 }
 
 async function mount(panel: Panel): Promise<HTMLInputElement> {
@@ -135,6 +139,10 @@ for (const panel of PANELS) {
         assert.equal(net.writes.length, 1, "the rename was never sent");
         await eventually(() => assert.equal(input.value, panel.saved, "a refused name was left in the field"));
         await eventually(() => assert.match(lastToast(), /That name is taken/));
+        if (panel.logTag) {
+          const tag = panel.logTag;
+          assert.ok(net.logs.some((l) => l.tag === tag && /That name is taken/.test(l.message)), `no [${tag}] line for the refusal: ${JSON.stringify(net.logs)}`);
+        }
       } finally {
         net.restore();
       }
