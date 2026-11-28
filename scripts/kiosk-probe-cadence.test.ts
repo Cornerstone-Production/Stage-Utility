@@ -29,6 +29,14 @@ const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "kiosk-cadence-"));
 after(() => fs.rmSync(TMP, { recursive: true, force: true }));
 
 const text = (rel: string) => fs.readFileSync(path.join(ROOT, rel), "utf8");
+/** The one cadence every agent shares: FAST_SECONDS between probes for FAST_PROBES
+ *  unanswered ones, then SLOW_SECONDS, and the flag after UNREACHABLE_AFTER. The shell
+ *  and PowerShell agents are held to it by running them below; the helper's Swift copy
+ *  by reading its assignments (parity block at the end). */
+const FAST_SECONDS = 2;
+const FAST_PROBES = 10;
+const SLOW_SECONDS = 30;
+const UNREACHABLE_AFTER = 30;
 const ANSWERED_ON = 40;
 const REPLY = '{"stageUtility":"reply","v":1,"serverId":"srv-a","url":"http://192.0.2.1:8788","claimed":true}';
 
@@ -103,9 +111,9 @@ function bootWindows(): Boot {
 }
 
 /** Probe n (1-based) carries the flag from the 32nd, after thirty unanswered. */
-const EXPECTED_FLAGS = Array.from({ length: ANSWERED_ON }, (_, i) => i + 1 > 31);
+const EXPECTED_FLAGS = Array.from({ length: ANSWERED_ON }, (_, i) => i + 1 > UNREACHABLE_AFTER + 1);
 /** Sleep after unanswered probe n: 2 s for the first nine, 30 s after. */
-const EXPECTED_SLEEPS = Array.from({ length: ANSWERED_ON - 1 }, (_, i) => (i + 1 < 10 ? "2" : "30"));
+const EXPECTED_SLEEPS = Array.from({ length: ANSWERED_ON - 1 }, (_, i) => (i + 1 < FAST_PROBES ? String(FAST_SECONDS) : String(SLOW_SECONDS)));
 
 for (const [installer, tool] of [["install-linux.sh", "socat"], ["install-macos.sh", "nc"]] as const) {
   describe(`the ${installer} discovery loop`, () => {
@@ -136,5 +144,30 @@ describe("the kiosk-windows.ps1 discovery loop", { skip: spawnSync("sh", ["-c", 
 
   it("waits 2 s between the first nine unanswered probes, then 30 s", () => {
     assert.deepEqual(boot.sleeps, EXPECTED_SLEEPS);
+  });
+});
+
+describe("the helper's copy of the probe cadence (Schedule.swift)", () => {
+  const swift = text("helper/macos/Sources/StageUtilityOutputCore/Schedule.swift");
+  /** The number assigned on a line that starts with the declaration, so a comment quoting it cannot satisfy this. */
+  const assigned = (decl: string): number => {
+    const found = [...swift.matchAll(new RegExp(`^[ \\t]*public static let ${decl} = ([0-9.]+)[ \\t]*$`, "gm"))];
+    assert.equal(found.length, 1, `exactly one assignment of ${decl}, found ${found.length}`);
+    return Number(found[0][1]);
+  };
+
+  for (const [name, decl, value] of [
+    ["fastInterval", "fastInterval: TimeInterval", FAST_SECONDS],
+    ["fastProbes", "fastProbes", FAST_PROBES],
+    ["slowInterval", "slowInterval: TimeInterval", SLOW_SECONDS],
+    ["unreachableAfter", "unreachableAfter", UNREACHABLE_AFTER],
+  ] as const) {
+    it(`${name} is ${value}, as the shell and PowerShell agents run it`, () => {
+      assert.equal(assigned(decl), value);
+    });
+  }
+
+  it("interval() reads its two rates and its count from those constants, not from literals", () => {
+    assert.match(swift, /return unanswered < fastProbes \? fastInterval : slowInterval/);
   });
 });
