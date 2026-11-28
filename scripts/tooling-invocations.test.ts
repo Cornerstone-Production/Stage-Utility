@@ -109,6 +109,8 @@ describe("how the scripts are started", () => {
     assert.deepEqual(collect(), [
       ".github/workflows/ci.yml: node --import tsx --test scripts/servicecue-bundle-wrangler.test.ts",
       ".github/workflows/ci.yml: node --import tsx --test scripts/update-scripts.test.ts",
+      ".github/workflows/codex-review-fix.yml: node scripts/check-commit-subjects.ts",
+      ".github/workflows/codex-review-fix.yml: node scripts/check-public-hygiene.ts",
       ".github/workflows/commit-lint.yml: node scripts/check-beta-only.ts",
       ".github/workflows/commit-lint.yml: node scripts/check-commit-subjects.ts",
       ".github/workflows/coverage.yml: node --no-warnings scripts/run-tests.ts",
@@ -241,6 +243,7 @@ describe("a workflow job that runs a TypeScript script", () => {
       "ci.yml checks",
       "ci.yml test",
       "ci.yml worker",
+      "codex-review-fix.yml fix",
       "commit-lint.yml conventional-commits",
       "coverage.yml coverage",
       "public-hygiene.yml hygiene",
