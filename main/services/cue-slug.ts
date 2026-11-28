@@ -37,8 +37,12 @@ function foldAccents(text: string): string {
 }
 
 /**
- * A cue name from a button label: lower snake_case, letters/digits/underscore,
- * accents folded to their letter.
+ * A cue name from a button label: lower snake_case, letters/digits/underscore.
+ *
+ * NOT accent-folded, on purpose: the Companion import and its reconcile pass
+ * re-derive a slug from a label every time and compare it with the stored cue
+ * name, so folding here would stop an already-imported "Café" button matching its
+ * `caf_` command and offer it again. A NEW cue's name goes through slugForNewCue.
  *
  * The name is said out loud to a voice assistant and typed into a Home Assistant
  * config, so it has to survive both. Anything else collapses to a single
@@ -46,5 +50,10 @@ function foldAccents(text: string): string {
  * reject rather than a cue called `_`.
  */
 export function slugForCue(text: string): string {
-  return snakeCase(foldAccents(collapse(text)));
+  return snakeCase(collapse(text));
+}
+
+/** slugForCue with accents folded to their letter ("Café" is `cafe`): the slug of a NEW cue's name, which nothing re-derives. */
+export function slugForNewCue(text: string): string {
+  return slugForCue(foldAccents(text));
 }

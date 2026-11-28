@@ -18,7 +18,7 @@
 import { calledCueName, cueKey } from "@main/services/cue-aliases";
 import { deriveCueName } from "@main/services/cue-name";
 import { BUTTON_CUE, buttonCueRule, chosenLabel, namesTakenForNewCue } from "@main/services/cue-naming";
-import { slugForCue } from "@main/services/cue-slug";
+import { slugForNewCue } from "@main/services/cue-slug";
 import type { CueManifest } from "@main/services/cue-manifest";
 import { errorMessage } from "@main/services/errors";
 import type { OwnedBy, Rule } from "@main/types/automation";
@@ -172,7 +172,7 @@ export async function writeOwnedRule(opts: {
     const manifest = await invoke<CueManifest>("cues:manifest");
     const taken = namesTakenForNewCue(rules, manifest);
     // The label first, the pick's name when the label has no letters in it.
-    const cueName = deriveCueName(slugForCue(ruleName) ? ruleName : opts.target.name, taken, BUTTON_CUE);
+    const cueName = deriveCueName(slugForNewCue(ruleName) ? ruleName : opts.target.name, taken, BUTTON_CUE);
     const made = await invoke<Rule>(
       "automation:addRule",
       // `says` because a Button with no label draws the command's spoken name, and without it the

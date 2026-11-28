@@ -10,7 +10,7 @@
 // on"); this makes the name from it.
 
 import { firstFree } from "./first-free.js";
-import { slugForCue } from "./cue-slug.js";
+import { slugForNewCue } from "./cue-slug.js";
 import { isPairHalfName } from "./cue-pairs.js";
 
 /** Long enough for any sentence somebody types, short enough for a URL. */
@@ -45,7 +45,7 @@ export interface CueNameOptions {
  *    operator makes first, and `projectors_on` is exactly the name that breaks.
  *    It becomes `projectors_on_cue`. See isPairHalfName.
  *  - NEVER A NAME THAT IS TAKEN. `taken` is every name and former name the rules
- *    hold plus the built-ins, lowercased by the caller; a pair's base counts as
+ *    hold plus the built-ins, normalised with cueKey; a pair's base counts as
  *    taken too (see namesTakenForNewCue). A clash gets `_2`, `_3`… rather than a
  *    refusal at Create, which would be the first the operator heard of it.
  *  - NEVER EMPTY. Words with no letters or digits in them ("!!!") slug to
@@ -55,7 +55,7 @@ export interface CueNameOptions {
 export function deriveCueName(display: string, taken: Iterable<string>, opts: CueNameOptions = {}): string {
   const used = new Set(taken);
   const prefix = opts.prefix ?? "";
-  const core = slugForCue(display).slice(0, MAX_CUE_NAME - ROOM - prefix.length).replace(/_+$/, "");
+  const core = slugForNewCue(display).slice(0, MAX_CUE_NAME - ROOM - prefix.length).replace(/_+$/, "");
   let base = `${prefix}${core === "" ? (opts.fallback ?? "cue") : core}`;
   if (isPairHalfName(base)) base += NOT_A_PAIR_HALF;
   return firstFree(base, (s) => used.has(s), (b, n) => `${b}_${n}`);

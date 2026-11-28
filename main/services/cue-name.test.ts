@@ -98,12 +98,20 @@ describe("deriveCueName: every path gives the same name for the same words", () 
     assert.notEqual(first, second);
   });
 
-  test("the pair-half check sees the prefix and the cut together", () => {
-    // Letters then `_on` land on the cut: not a pair half, and a clash after it stays under the cap.
-    const text = "a".repeat(49) + " on";
+  test("the pair-half check sees the prefix: a Button labelled On or Off is not half of a pair", () => {
+    // btn_on would be an orphan half; the check must read the whole name, prefix included.
+    assert.equal(deriveCueName("On", none, BUTTON_CUE), "btn_on_cue");
+    assert.equal(deriveCueName("Off", none, BUTTON_CUE), "btn_off_cue");
+  });
+
+  test("an _on that lands on the cut is still taken out of the pair shape, and a clash stays under the cap", () => {
+    const text = "a".repeat(40) + " on";
     const first = deriveCueName(text, none, BUTTON_CUE);
-    const second = deriveCueName(text, [first], BUTTON_CUE);
-    for (const name of [first, second]) {
+    assert.equal(first, `btn_${"a".repeat(40)}_on_cue`);
+    const wide = "a".repeat(49) + " on";
+    const a = deriveCueName(wide, none, BUTTON_CUE);
+    const b = deriveCueName(wide, [a], BUTTON_CUE);
+    for (const name of [a, b]) {
       assert.equal(isPairHalfName(name), false, name);
       assert.ok(name.length <= MAX_CUE_NAME, `${name.length} characters: ${name}`);
     }
