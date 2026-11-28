@@ -73,7 +73,8 @@ describe("a request the page keeps failing", () => {
   it("ends when the request that failed goes through, and the next failure waits the shortest time again", async (t) => {
     const lines = logs(t);
     // What the publisher asked to wait, not how long the wait took: a loaded machine runs every timer late, and a
-    // measured gap then read as a backoff that was not reset. 31 and its doublings are a wait no other timer here asks for.
+    // measured gap then read as a backoff that was not reset. 31 and its doublings are a wait no other timer here asks for:
+    // the polls ask for 5, and the frame flush never more than frameMs, which MANUAL sets to 30.
     const backoff = [31, 62, 124, 248];
     const scheduled = t.mock.method(globalThis, "setTimeout");
     const waits = () => scheduled.mock.calls.map((c) => c.arguments[1]).filter((ms) => backoff.includes(ms as number));
@@ -96,7 +97,8 @@ describe("a request the page keeps failing", () => {
     h.source.data.layouts = [...h.source.data.layouts, { id: "svl9", name: "More", order: 5, columnRoles: [] }];
     h.pub.nudge();
     await waitFor(() => waits().length >= recovered + 2, "two failures after the recovery", 5000);
-    assert.deepEqual(waits().slice(recovered), [31, 62], "the backoff was not reset by the recovery");
+    // The first two only: the publisher keeps retrying, and a poll that resumes late may already see the third.
+    assert.deepEqual(waits().slice(recovered, recovered + 2), [31, 62], "the backoff was not reset by the recovery");
   });
 
   it("is one outage, however often the page comes and goes inside the settle window", async (t) => {
