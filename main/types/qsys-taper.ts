@@ -143,7 +143,7 @@ function levelBinding(config: LayoutObjectConfig): QsysAddress | null {
 
 /** As much of the Core's catalog (`GET /api/qsys/catalog`) as the taper check reads: each component's controls and their ranges. */
 export interface TaperCatalog {
-  components: { name: string; type: string; controls: { Name: string; ValueMin?: unknown; ValueMax?: unknown }[] }[];
+  components: { name: string; type: string; controls: { Name: string; Type?: unknown; Value?: unknown; ValueMin?: unknown; ValueMax?: unknown }[] }[];
 }
 
 /** A component Type and control range with no measured taper, and the fader controls bound on it. */

@@ -736,16 +736,18 @@ describe("/qsys/manage", () => {
   });
 
   test("the allowlist: a limit edited and saved, a row removed and saved; an empty box touched marks nothing edited", async () => {
+    // A numeric control with no limits yet, beside the gain and the (non-numeric) mute.
+    (server.allow.entries as unknown[]).push({ component: MIX, control: "output.2.gain", label: "", min: null, max: null, confirm: "none" });
     await open("/qsys/manage");
     await wait(60);
     const rows = () => [...document.querySelectorAll("[data-qsys-allowlist] tbody tr")] as HTMLElement[];
     const boxes = (row: HTMLElement) => [...row.querySelectorAll("input")] as HTMLInputElement[];
-    // The mute row's empty Min, focused and left: NumberInput reports nothing for a
+    // The empty Min of a control with no limits yet, focused and left: NumberInput reports nothing for a
     // click in and out, so the list is not marked edited and Add-all stays enabled.
-    const muteMin = boxes(rows()[1])[0];
+    const emptyMin = boxes(rows()[2])[0];
     act(() => {
-      fireEvent.focus(muteMin);
-      fireEvent.blur(muteMin);
+      fireEvent.focus(emptyMin);
+      fireEvent.blur(emptyMin);
     });
     await wait(10);
     assert.equal(screen.queryByText("Save the allowlist") !== null, false, "touching an empty box marked the list edited");
@@ -762,7 +764,7 @@ describe("/qsys/manage", () => {
       fireEvent.click(screen.getByText("Save the allowlist"));
     });
     await wait(40);
-    assert.deepEqual((server.puts.at(-1)!.entries as { max: unknown }[]).map((e) => e.max), [0, null]);
+    assert.deepEqual((server.puts.at(-1)!.entries as { max: unknown }[]).map((e) => e.max), [0, null, null]);
     assert.equal(screen.queryByText("Save the allowlist") !== null, false, "still edited after a save");
     // Remove the mute and save.
     act(() => {
@@ -772,8 +774,8 @@ describe("/qsys/manage", () => {
       fireEvent.click(screen.getByText("Save the allowlist"));
     });
     await wait(40);
-    assert.deepEqual((server.puts.at(-1)!.entries as { control: string }[]).map((e) => e.control), ["gain"]);
-    assert.equal(rows().length, 1);
+    assert.deepEqual((server.puts.at(-1)!.entries as { control: string }[]).map((e) => e.control), ["gain", "output.2.gain"]);
+    assert.equal(rows().length, 2);
   });
 
   test("Add a control picks from the Core's writable controls, lands as an unsaved row at the Core's range, and saves", async () => {
@@ -817,6 +819,17 @@ describe("/qsys/manage", () => {
     });
     await wait(10);
     assert.equal(document.querySelector('[data-qsys-browser] [data-qsys-control="output.1.gain"]'), null);
+  });
+
+  test("a listed control the Core says is not a number shows what it is in place of empty limit boxes", async () => {
+    await open("/qsys/manage");
+    await wait(60);
+    // mute is a Boolean on the Core: no limits to set. gain is numeric and keeps its boxes.
+    assert.equal(screen.queryByLabelText(`Min for ${MIX} mute`), null, "an on-off control offered a min box");
+    assert.equal(screen.queryByLabelText(`Max for ${MIX} mute`), null);
+    assert.match(document.querySelector("[data-qsys-allow-kind]")?.textContent ?? "", /on-off control, no limits/);
+    assert.ok(screen.getByLabelText(`Min for ${MIX} gain`), "a numeric control lost its min box");
+    assert.equal(document.querySelectorAll("[data-qsys-allow-kind]").length, 1);
   });
 
   test("Add a control is off, with its reason, while the Core is not connected", async () => {

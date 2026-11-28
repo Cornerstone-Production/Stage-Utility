@@ -23,6 +23,7 @@ import {
   findPanelBySlug,
   isQsysPanel,
   isQsysSlug,
+  kindOf,
   qsysSlugFromName,
   qsysSlugsOf,
   siblingsOf,
@@ -121,14 +122,15 @@ export function QsysManageRoute() {
   const { status, failed: statusFailed } = useQsysStatus();
   const [allow, allowTook] = useAllowlist();
   const bindings = useBindings(views, allow, status);
+  const catalog = useTaperCatalog(status);
 
   return (
     <div className="flex flex-col gap-6 pb-8">
       <PanelsSection views={views} panels={panels} bindings={bindings} />
       <ConnectionSection status={status} failed={statusFailed} />
-      <AllowlistSection allow={allow} took={allowTook} panels={panels} connected={status?.connected === true} />
+      <AllowlistSection allow={allow} took={allowTook} panels={panels} connected={status?.connected === true} catalog={catalog} />
       <BindingsSection bindings={bindings} views={views} />
-      <TapersSection views={views} status={status} />
+      <TapersSection views={views} read={catalog} />
       <Section title="Staff PIN" hint="A volunteer panel's way into Stage Utility. It keeps curious taps out; the network is still the real boundary.">
         <PinSection />
       </Section>
@@ -697,11 +699,14 @@ function AllowlistSection({
   took,
   panels,
   connected,
+  catalog,
 }: {
   allow: AllowState;
   took: (a: AllowRead) => void;
   panels: View[];
   connected: boolean;
+  /** The Core's controls, to tell which listed ones are not numeric. */
+  catalog: Tapers;
 }) {
   /** The operator's edits, and the list (and revision) they were made on: a save
    *  names that revision, so it can never land over a list nobody here has seen. */
@@ -716,6 +721,18 @@ function AllowlistSection({
   const entries = draft?.entries ?? saved;
   const dirty = draft !== null;
   const importInput = useRef<HTMLInputElement>(null);
+  /** The listed controls the Core says are not numbers, by what they are: a limit means nothing on them. */
+  const nonNumeric = useMemo(() => {
+    const m = new Map<string, string>();
+    if (catalog.state !== "ok") return m;
+    for (const comp of catalog.catalog.components) {
+      for (const c of comp.controls) {
+        const kind = kindOf(c);
+        if (kind !== "number") m.set(allowKey(comp.name, c.Name), kind === "boolean" ? "on-off" : kind);
+      }
+    }
+    return m;
+  }, [catalog]);
   const onList = useMemo(() => new Set(entries.map((e) => allowKey(e.component, e.control))), [entries]);
 
   const editTo = (next: AllowEntry[]) => setDraft({ entries: next, base: draft?.base ?? { entries: saved, rev: current?.rev ?? "" } });
@@ -932,12 +949,20 @@ function AllowlistSection({
                   <td className="px-3 py-2 font-mono text-fg">
                     {e.component} <span className="text-fg-muted">{e.control}</span>
                   </td>
-                  <td className="px-3 py-2">
-                    <NumberInput aria-label={`Min for ${e.component} ${e.control}`} value={e.min} onChange={(min) => edit(i, { min })} onUnset={() => edit(i, { min: null })} className="w-36" />
-                  </td>
-                  <td className="px-3 py-2">
-                    <NumberInput aria-label={`Max for ${e.component} ${e.control}`} value={e.max} onChange={(max) => edit(i, { max })} onUnset={() => edit(i, { max: null })} className="w-36" />
-                  </td>
+                  {nonNumeric.has(allowKey(e.component, e.control)) ? (
+                    <td colSpan={2} className="px-3 py-2 text-footnote text-fg-muted" data-qsys-allow-kind>
+                      {nonNumeric.get(allowKey(e.component, e.control))} control, no limits
+                    </td>
+                  ) : (
+                    <>
+                      <td className="px-3 py-2">
+                        <NumberInput aria-label={`Min for ${e.component} ${e.control}`} value={e.min} onChange={(min) => edit(i, { min })} onUnset={() => edit(i, { min: null })} className="w-36" />
+                      </td>
+                      <td className="px-3 py-2">
+                        <NumberInput aria-label={`Max for ${e.component} ${e.control}`} value={e.max} onChange={(max) => edit(i, { max })} onUnset={() => edit(i, { max: null })} className="w-36" />
+                      </td>
+                    </>
+                  )}
                   <td className="px-3 py-2">
                     <Switch aria-label={`Hold to confirm ${e.component} ${e.control}`} checked={e.confirm === "hold"} onCheckedChange={(on) => edit(i, { confirm: on ? "hold" : "none" })} />
                   </td>
@@ -1043,8 +1068,7 @@ function useTaperCatalog(status: Status | null): Tapers {
  * on one moves linearly in dB, not as the Core's own does. Listed so the range can
  * be measured and added; the server logs each once, from the same rule.
  */
-function TapersSection({ views, status }: { views: View[]; status: Status | null }) {
-  const read = useTaperCatalog(status);
+function TapersSection({ views, read }: { views: View[]; read: Tapers }) {
   const ranges: UntaperedRange[] = read.state === "ok" ? untaperedRanges(views, read.catalog) : [];
   return (
     <Section title="Fader tapers" hint="A fader on a kind of component and control range whose Q-SYS taper has been measured sits and moves exactly as the Core's own fader does. Any other moves linearly in dB.">
