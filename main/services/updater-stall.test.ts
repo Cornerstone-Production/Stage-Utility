@@ -13,6 +13,7 @@ import * as fs from "node:fs";
 import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { until } from "./fixtures/within.js";
 
 const TMP = await fsp.mkdtemp(path.join(os.tmpdir(), "stage-stall-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -36,7 +37,6 @@ async function noRepoGit(args: string[]): Promise<string> {
 const deadSpawn = (() =>
   ({ unref() {}, on() {}, once() {} }) as unknown as ReturnType<typeof import("node:child_process").spawn>) as never;
 
-const settle = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const resultFile = () => path.join(TMP, "update-result.json");
 
 describe("an apply that never reports", () => {
@@ -64,8 +64,9 @@ describe("an apply that never reports", () => {
     const started = await u.applyUpdate();
     assert.equal(started.phase, "updating", "the apply must actually start");
 
-    // Longer than the stall window plus a poll tick.
-    await settle(1400);
+    // The stall window plus a poll tick, on a machine of any speed: wait for the
+    // verdict instead of guessing how long it takes.
+    await until(() => u.getStatus().phase === "idle" && fs.existsSync(resultFile()), "the stalled apply to be dropped and recorded", 15_000);
 
     const after = u.getStatus();
     assert.equal(after.phase, "idle", "must not sit in 'updating' after a silent run — this is the bug");
