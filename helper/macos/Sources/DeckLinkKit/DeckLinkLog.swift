@@ -6,7 +6,10 @@ import os
 ///
 ///     log stream --level info --predicate 'subsystem == "com.stageutility.output" && category == "decklink"'
 ///
-/// Decisions and failures only: the driver missing, a port opened or refused, a
+/// Both writers (this one and `Log` in the app) log decisions at `.notice` and
+/// failures at `.error`, because `.info` is not persisted by default and a Sunday
+/// morning needs the line afterwards. `Level.info` is the name of the case, not the
+/// OS level it writes at. Decisions and failures only: the driver missing, a port opened or refused, a
 /// port lost or reopened, repeats or drops starting and stopping. Healthy frames
 /// are not logged.
 public enum DeckLinkLog {
@@ -19,7 +22,7 @@ public enum DeckLinkLog {
   public static func write(_ level: Level, _ message: String) {
     let line = Redact.addresses(in: message)
     switch level {
-    case .info: logger.info("\(line, privacy: .public)")
+    case .info: logger.notice("\(line, privacy: .public)")
     case .error: logger.error("\(line, privacy: .public)")
     }
   }

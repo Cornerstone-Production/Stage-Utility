@@ -63,6 +63,7 @@ public struct Probe: Equatable {
   public static let maxModes = 24
   public static let maxModeLength = 32
   public static let maxDatagram = 2048
+  public static let maxURL = 512
 
   /// The datagram. Keys are sorted so the bytes are the same on every run, which
   /// is what lets a test pin them.

@@ -15,8 +15,8 @@ import * as path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { MAX_DATAGRAM, MAX_MACS, MAX_MODE_LEN, MAX_MODES, MAX_STR } from "../main/services/kiosk-discovery.js";
-import { REPEATED_BAD_PERCENT } from "../main/services/output-health.js";
+import { MAX_DATAGRAM, MAX_MACS, MAX_MODE_LEN, MAX_MODES, MAX_STR, MAX_URL } from "../main/services/kiosk-discovery.js";
+import { MAX_LATENCY_MS, REPEATED_BAD_PERCENT } from "../main/services/output-health.js";
 import { VIDEO_MODES } from "../main/types/output-format.js";
 
 const SWIFT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "helper", "macos", "Sources", "StageUtilityOutputCore");
@@ -24,9 +24,9 @@ const read = (file: string) => fs.readFileSync(path.join(SWIFT, file), "utf8");
 
 /** The number assigned by `<indent>public static let <name> = <number>` on its own line. */
 function swiftNumber(source: string, name: string): number {
-  const found = [...source.matchAll(new RegExp(`^[ \\t]*public static let ${name} = ([0-9.]+)[ \\t]*$`, "gm"))];
+  const found = [...source.matchAll(new RegExp(`^[ \\t]*public static let ${name} = ([0-9._]+)[ \\t]*$`, "gm"))];
   assert.equal(found.length, 1, `exactly one assignment of ${name}, found ${found.length}`);
-  return Number(found[0][1]);
+  return Number(found[0][1].replace(/_/g, ""));
 }
 
 /** The string literals, in order, of the array assigned by `public static let <name> = [`. */
@@ -52,9 +52,34 @@ describe("the helper's copies of the server's values", () => {
     ["maxModes", "MAX_MODES", MAX_MODES],
     ["maxModeLength", "MAX_MODE_LEN", MAX_MODE_LEN],
     ["maxDatagram", "MAX_DATAGRAM", MAX_DATAGRAM],
+    ["maxURL", "MAX_URL", MAX_URL],
   ] as const) {
     it(`Probe.${swift} is ${ts} in kiosk-discovery.ts`, () => {
       assert.equal(swiftNumber(probe, swift), server);
     });
   }
+});
+
+describe("more of the helper's copies", () => {
+  it("HealthPost.maxLatencyMs is MAX_LATENCY_MS in output-health.ts", () => {
+    assert.equal(swiftNumber(read("Health.swift"), "maxLatencyMs"), MAX_LATENCY_MS);
+  });
+
+  it("Reply.swift takes its address cap from Probe.maxURL, not a literal", () => {
+    assert.match(read("Reply.swift"), /nonEmpty\(obj\["url"\], max: Probe\.maxURL, truncate: false\)/);
+  });
+});
+
+describe("the helper's log level", () => {
+  const SOURCES = path.join(SWIFT, "..");
+  const level = (file: string, re: RegExp) => {
+    const found = fs.readFileSync(path.join(SOURCES, file), "utf8").match(re);
+    assert.ok(found, `${file} no longer writes the line this test reads`);
+    return found[1];
+  };
+
+  it("DeckLinkKit and the app both log decisions at .notice, which the OS persists, not .info", () => {
+    assert.equal(level("DeckLinkKit/DeckLinkLog.swift", /case \.info: logger\.(\w+)\(/), "notice");
+    assert.equal(level("StageUtilityOutput/Log.swift", /loggers\[category\]\?\.(\w+)\(/m), "notice");
+  });
 });
