@@ -148,6 +148,10 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
     sock.on("message", (msg: Buffer) => this.onDatagram(msg.toString("utf8")));
     sock.on("error", (err: NodeJS.ErrnoException) => {
       this.reportFailure(`socket ${err.code ?? err.message}`, `${this.where()} socket error: ${scrub(err.message)}`);
+      // The link's ping, poll and watchdog go with its socket; the retry brings
+      // new ones. Left running, the watchdog reported the same outage again as
+      // "has not answered".
+      this.stopLinkTimers();
       this.closeSocket();
       this.markAllOffline();
       if (this.running) {
@@ -221,8 +225,13 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
         `${this.where()} has not answered for ${RESPONSE_TIMEOUT_MS / 1000}s; marking its channels offline. ` +
           "Check the address, and that the receiver's network control is on.",
       );
-      this.markAllOffline();
-      this.setState("error");
+      // Channels go offline once per silence; the report repeats so the outage
+      // log can remind (it stays quiet between reminders).
+      if (this.getConnectionState() !== "error") {
+        this.markAllOffline();
+        this.setState("error");
+      }
+      this.armSilenceWatchdog();
     });
   }
 

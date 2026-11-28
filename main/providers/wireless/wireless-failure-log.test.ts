@@ -163,4 +163,48 @@ describe("a wireless failure reaches /log without a debug variable", () => {
       mock.timers.reset();
     }
   });
+
+  it("an SSC socket error stops that link's timers, so it is not also reported as silent", async () => {
+    mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+    const p = new SennheiserEwDx();
+    try {
+      const lines = await captured(async () => {
+        await p.connect({ host: "127.0.0.1", port: 9, model: "EM2" });
+        const sock = (p as unknown as { socket: dgram.Socket | null }).socket;
+        assert.ok(sock, "connect() built no socket, so this case proves nothing");
+        await once(sock, "listening");
+        sock.emit("error", Object.assign(new Error("simulated send failure"), { code: "ESIM" }));
+        mock.timers.tick(8_000);
+      });
+      assert.ok(lines.some((l) => l.includes("socket error: simulated send failure")), JSON.stringify(lines));
+      assert.ok(
+        !lines.some((l) => l.includes("has not answered")),
+        `the closed socket's watchdog still fired. Saw: ${JSON.stringify(lines)}`,
+      );
+    } finally {
+      await p.disconnect();
+      mock.timers.reset();
+    }
+  });
+
+  it("a silent SSC receiver is reminded about, not mentioned once and forgotten", async () => {
+    mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
+    const p = new SennheiserEwDx();
+    try {
+      const lines = await captured(async () => {
+        await p.connect({ host: "127.0.0.1", port: 9, model: "EM2" });
+        const sock = (p as unknown as { socket: dgram.Socket | null }).socket;
+        assert.ok(sock, "connect() built no socket, so this case proves nothing");
+        await once(sock, "listening");
+        // In watchdog-sized steps, so the outage log sees the clock move between reports.
+        for (let t = 0; t < 16 * 60 * 1000; t += 8_000) mock.timers.tick(8_000);
+      });
+      const silent = lines.filter((l) => l.includes("has not answered"));
+      assert.equal(silent.length, 2, `expected the first line and one 15-minute reminder. Saw: ${JSON.stringify(silent)}`);
+      assert.match(silent[1], /still failing/);
+    } finally {
+      await p.disconnect();
+      mock.timers.reset();
+    }
+  });
 });
