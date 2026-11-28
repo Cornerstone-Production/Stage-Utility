@@ -1,8 +1,8 @@
-// The name a person says for a cue is ONE function (spokenCueName). The pasted Home
-// Assistant YAML and GET /api/cues (the integration) both read it, so the same
-// rules give the same words whichever way Home Assistant was set up. They were two
-// opposite fallbacks once: the YAML called a rule named "Foyer TVs" with no `says`
-// "Foyer TVs", and the manifest called the same cue "Foyer Tvs" (the one kept).
+// The name a person says for a cue, as GET /api/cues (the Home Assistant
+// integration) answers it, through spokenCueName. The pasted YAML keeps the naming
+// it shipped with instead (`says`, else the rule's name, else the cue name), because
+// regenerating it must not rename entities an operator already has; its names are
+// pinned in home-assistant-yaml.test.ts. Where the two agree is asserted here.
 
 import assert from "node:assert/strict";
 import * as fsp from "node:fs/promises";
@@ -45,29 +45,23 @@ function inYaml(yaml: string, words: string): boolean {
 
 const yamlOf = () => homeAssistantYaml(RULES, "http://192.168.1.50:8788");
 
-describe("the same rules are called the same in the YAML and the manifest", () => {
+describe("what the manifest calls a cue", () => {
   test("a single cue with no `says` is its cue name humanised, whatever its rule is called", async () => {
     RULES = [cue("Foyer TVs", "foyer_tvs")];
-    const named = (await cueManifest()).buttons[0]?.name;
-    assert.equal(named, "Foyer Tvs");
-    assert.equal(inYaml(yamlOf(), named), true);
+    assert.equal((await cueManifest()).buttons[0]?.name, "Foyer Tvs");
   });
 
   test("a pair with no `says` is its base humanised", async () => {
     RULES = [cue("Turn the projectors on", "projectors_on"), cue("Turn the projectors off", "projectors_off")];
-    const named = (await cueManifest()).switches[0]?.name;
-    assert.equal(named, "Projectors");
-    assert.equal(inYaml(yamlOf(), named), true);
+    assert.equal((await cueManifest()).switches[0]?.name, "Projectors");
   });
 
-  test("a trailing `on` is taken off `says` for a single command too, in both", async () => {
+  test("a trailing `on` is taken off `says` for a single command too", async () => {
     RULES = [cue("Light the stage", "stage_lights", "Lights on")];
-    const named = (await cueManifest()).buttons[0]?.name;
-    assert.equal(named, "Lights");
-    assert.equal(inYaml(yamlOf(), named), true);
+    assert.equal((await cueManifest()).buttons[0]?.name, "Lights");
   });
 
-  test("`says` wins", async () => {
+  test("`says` wins, in the YAML too", async () => {
     RULES = [cue("Foyer TVs", "foyer_tvs", "the foyer screens")];
     const named = (await cueManifest()).buttons[0]?.name;
     assert.equal(named, "the foyer screens");

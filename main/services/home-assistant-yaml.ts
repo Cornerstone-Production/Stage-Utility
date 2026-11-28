@@ -56,7 +56,6 @@ import {
   isPairHalfName,
   isTogglePair,
   type StateBinding,
-  spokenCueName,
   type SpokenCue,
 } from "./cue-pairs.js";
 import { scrub } from "./scrub.js";
@@ -122,6 +121,21 @@ function attrOf(base: string): string {
 }
 
 /**
+ * The name a cue goes by in the generated YAML: `says`, else the rule's own name,
+ * else the cue name as typed.
+ *
+ * Not spokenCueName, which the manifest and the rule editor use: the YAML is pasted
+ * into Home Assistant once and its names become entities' friendly names there and
+ * the words a voice assistant answers to. Regenerating it must not rename what an
+ * operator already has, so it keeps the naming it shipped with. A pair takes the
+ * trailing "on" off in pairsOf; a script keeps its words as written.
+ */
+function yamlNameOf(rule: Rule): string {
+  const says = String(rule.trigger.params.says ?? "").trim();
+  return says || rule.name.trim() || String(rule.trigger.params.name ?? "");
+}
+
+/**
  * The `_on`/`_off` cues that belong together, and what reads each one's state.
  *
  * The pairing itself is cue-pairs.ts and deliberately not a second copy of it:
@@ -139,10 +153,10 @@ function pairsOf(rules: Rule[], cues: Map<string, Cue>): Pair[] {
   for (const pair of cuePairs(rules)) {
     const cue = cues.get(pair.onName);
     if (!cue) continue;
-    // spokenCueName takes the "on" off: the switch is the THING, and Home
+    // The friendly name loses the "on": the switch is the THING, and Home
     // Assistant supplies the verb. "Turn on Projectors on" is what happens
     // otherwise.
-    const friendly = spokenCueName(pair.on.trigger.params, pair.base);
+    const friendly = cue.friendly.replace(/\s+on$/i, "").trim() || pair.base;
     out.push({
       base: pair.base,
       friendly,
@@ -171,7 +185,7 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
     if (!name || cues.has(name)) continue;
     cues.set(name, {
       name,
-      friendly: spokenCueName(rule.trigger.params, name),
+      friendly: yamlNameOf(rule),
       formerNames: parseAliases(rule.trigger.params),
       hidden: isHiddenFromHome(rule.trigger.params),
     });

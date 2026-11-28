@@ -1007,3 +1007,56 @@ describe("an orphaned pair half", () => {
     assert.deepEqual(scripts(yaml), []);
   });
 });
+
+// The YAML is pasted into Home Assistant once, and its names become entities'
+// friendly names and the words a voice assistant answers to there. A regenerated
+// file must not rename them, so these are the names the generator gave before the
+// manifest's naming was shared with it (v1.28.1), pinned as written: `says`, else
+// the rule's name, else the cue name as typed, with a trailing "on" taken off a
+// pair's name and never off a script's.
+describe("the names the YAML has always given", () => {
+  const yaml = homeAssistantYaml(
+    [
+      cue("lights_cue", "", "Front lights please"),
+      cue("projector_macro", "Turn projectors on", "Projector macro"),
+      cue("foyer_tvs", "", ""),
+      cue("projectors_on", "", "Turn the projectors on"),
+      cue("projectors_off", "", "Turn the projectors off"),
+      cue("stage_on", "Stage lights on", "Stage on"),
+      cue("stage_off", "Stage lights off", "Stage off"),
+      cue("fans_on", "", ""),
+      cue("fans_off", "", ""),
+    ],
+    BASE,
+  );
+
+  test("a script is called by its `says` as written, else its rule's name, else its cue name", () => {
+    assert.deepEqual(scripts(yaml), [
+      { name: "lights_cue", alias: "Front lights please" },
+      { name: "projector_macro", alias: "Turn projectors on" },
+      { name: "foyer_tvs", alias: "foyer_tvs" },
+    ]);
+  });
+
+  test("a switch is called by its on half's `says` or rule name, less a trailing on, else that half's cue name", () => {
+    assert.deepEqual(friendlyNames(yaml), ["fans_on", "Turn the projectors", "Stage lights"]);
+  });
+
+  test("the entity ids are the cue names and the pair bases", () => {
+    assert.deepEqual(commandKeys(yaml), [
+      "su_lights_cue",
+      "su_projector_macro",
+      "su_foyer_tvs",
+      "su_projectors_on",
+      "su_projectors_off",
+      "su_stage_on",
+      "su_stage_off",
+      "su_fans_on",
+      "su_fans_off",
+    ]);
+    assert.deepEqual(
+      switchStates(yaml).map((s) => s.id),
+      ["fans", "projectors", "stage"],
+    );
+  });
+});
