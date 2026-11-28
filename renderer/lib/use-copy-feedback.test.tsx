@@ -45,15 +45,19 @@ describe("useCopyFeedback", () => {
     assert.equal(result.current.state, "failed");
   });
 
-  test("a second copy restarts the timer", async () => {
+  // On a mocked clock: with real waits, a loaded machine that ran the second 70 ms wait 30 ms late let the
+  // second copy's own timer fire, and the test read that as the first one. The other cases' real waits only
+  // ever run long, which they allow.
+  test("a second copy restarts the timer", async (t) => {
+    t.mock.timers.enable({ apis: ["setTimeout"] });
     const { result } = renderHook(() => useCopyFeedback(100));
     await act(async () => void (await result.current.copy("x")));
-    await act(async () => void (await wait(70)));
+    act(() => t.mock.timers.tick(70));
     await act(async () => void (await result.current.copy("x")));
-    await act(async () => void (await wait(70)));
+    act(() => t.mock.timers.tick(99));
     assert.equal(result.current.state, "copied", "the first timer must not fire against the second copy");
-    await act(async () => void (await wait(80)));
-    assert.equal(result.current.state, "idle");
+    act(() => t.mock.timers.tick(1));
+    assert.equal(result.current.state, "idle", "the second copy's timer runs its full duration and no longer");
   });
 
   test("ms null stays until reset", async () => {

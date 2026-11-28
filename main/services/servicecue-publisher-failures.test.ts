@@ -72,25 +72,33 @@ describe("a request the page keeps failing", () => {
 
   it("ends when the request that failed goes through, and the next failure waits the shortest time again", async (t) => {
     const lines = logs(t);
-    const h = await harness({ firstCycleMs: 5, backoffMinMs: 30, backoffMaxMs: 240, outageSettleMs: 0, nudgeMs: 5 });
-    refusing(h, "servicecue-layouts", 503);
+    // What the publisher asked to wait, not how long the wait took: a loaded machine runs every timer late, and a
+    // measured gap then read as a backoff that was not reset. 31 and its doublings are a wait no other timer here asks for:
+    // the polls ask for 5, and the frame flush never more than frameMs, which MANUAL sets to 30.
+    const backoff = [31, 62, 124, 248];
+    const scheduled = t.mock.method(globalThis, "setTimeout");
+    const waits = () => scheduled.mock.calls.map((c) => c.arguments[1]).filter((ms) => backoff.includes(ms as number));
+    const h = await harness({ firstCycleMs: 5, backoffMinMs: 31, backoffMaxMs: 248, outageSettleMs: 0, nudgeMs: 5 });
+    // The page refuses the first four tries and takes the fifth. It decides, not the test: a test that swapped the answer
+    // after seeing four could swap it a try late on a slow machine, and the recovery line then said five.
+    let tries = 0;
+    h.page.respond = (req) => (req.path.endsWith("/doc/servicecue-layouts") && tries++ < 4 ? { status: 503 } : h.page.worker(req));
     await h.pub.start();
-    await waitFor(() => attemptsAt(h, "servicecue-layouts").length >= 4, "four attempts", 5000);
-    assert.equal(h.pub.status().state, "problem");
+    await waitFor(() => h.pub.status().state === "problem", "the first failure", 5000);
 
-    h.page.respond = (req) => h.page.worker(req);
     await waitFor(() => h.pub.status().state === "publishing", "the document to go through", 5000);
     assert.equal(h.pub.status().lastError, null);
+    assert.deepEqual(waits(), [31, 62, 124, 248], "the waits before the recovery");
     assert.equal(lines.filter((l) => /reaching the page again after 4 failed attempts/.test(l)).length, 1, JSON.stringify(lines));
 
     // A new failure, after a recovery, starts the waits again from the shortest.
+    const recovered = waits().length;
     refusing(h, "servicecue-layouts", 503);
     h.source.data.layouts = [...h.source.data.layouts, { id: "svl9", name: "More", order: 5, columnRoles: [] }];
     h.pub.nudge();
-    const before = attemptsAt(h, "servicecue-layouts").length;
-    await waitFor(() => attemptsAt(h, "servicecue-layouts").length >= before + 2, "two more attempts", 5000);
-    const at = attemptsAt(h, "servicecue-layouts");
-    assert.ok(at.at(-1)! - at.at(-2)! < 90, `the second wait after a recovery was ${(at.at(-1)! - at.at(-2)!).toFixed(0)} ms: the backoff was not reset`);
+    await waitFor(() => waits().length >= recovered + 2, "two failures after the recovery", 5000);
+    // The first two only: the publisher keeps retrying, and a poll that resumes late may already see the third.
+    assert.deepEqual(waits().slice(recovered, recovered + 2), [31, 62], "the backoff was not reset by the recovery");
   });
 
   it("is one outage, however often the page comes and goes inside the settle window", async (t) => {
@@ -137,9 +145,11 @@ describe("what the page answers to the first request", () => {
       // A 404 to the status also reads the page's public document, to tell a Worker of another protocol from an address that is not the page.
       assert.equal(h.page.requests.every((r) => r.path === "/_publish/v1/status" || r.path === "/_publish/v1/heartbeat" || (status === 404 && r.method === "GET" && r.path === "/servicecue")), true, "a document went to a page that had not been verified");
       const made = h.page.requests.length;
-      await sleep(150);
-      if (held) assert.equal(h.page.requests.length, made, `${status}: a page that cannot be waited out was asked again`);
-      else assert.ok(h.page.requests.length > made, `${status}: sending did not carry on trying`);
+      // Asked again is waited for, not looked for after a fixed sleep a loaded machine can outrun; not asked again can only be looked for.
+      if (held) {
+        await sleep(150);
+        assert.equal(h.page.requests.length, made, `${status}: a page that cannot be waited out was asked again`);
+      } else await waitFor(() => h.page.requests.length > made, `${status}: sending to carry on trying`, 3000);
     }
   });
 
