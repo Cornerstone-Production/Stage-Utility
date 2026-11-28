@@ -22,7 +22,8 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import type { PcoLiveDTO, ServiceAttendance } from "../types/stage.js";
+import type { ServiceAttendance } from "../types/stage.js";
+import { makeLive } from "./fixtures/live-dto.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-attendance-taper-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -52,7 +53,7 @@ const SERVICE_END = T0 + 60 * MIN;
 /** One live tick on an item, at `atMs`. */
 async function tick(atMs: number, itemId: string, opts: { since?: number; serviceEnded?: boolean } = {}): Promise<void> {
   mock.timers.setTime(atMs);
-  const live: PcoLiveDTO = {
+  const live = makeLive({
     mode: "item",
     currentItemId: itemId,
     label: itemId,
@@ -67,14 +68,14 @@ async function tick(atMs: number, itemId: string, opts: { since?: number; servic
     serviceTimeStartsAt: iso(T0),
     serviceEnded: opts.serviceEnded ?? false,
     beforeServiceStart: false,
-  };
+  });
   await attendanceRecorder.onLiveTick(live);
 }
 
 /** No item live, Planning Center counting down to occurrence `occ` at `startsAt`. */
 async function preserviceTick(atMs: number, occ: string, startsAt: number): Promise<void> {
   mock.timers.setTime(atMs);
-  await attendanceRecorder.onLiveTick({
+  await attendanceRecorder.onLiveTick(makeLive({
     mode: "preservice",
     currentItemId: null,
     label: "Service starts",
@@ -87,7 +88,7 @@ async function preserviceTick(atMs: number, occ: string, startsAt: number): Prom
     nextItemTitle: null,
     serviceTimeId: occ,
     serviceTimeStartsAt: iso(startsAt),
-  } as PcoLiveDTO);
+  }));
 }
 
 /** A service, then the operator steps past SERVICE END and leaves it there. */

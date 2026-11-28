@@ -24,6 +24,7 @@ import { describe, it, beforeEach, afterEach, mock } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { makeLive } from "./fixtures/live-dto.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-back-to-back-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -61,7 +62,7 @@ function tick(
   item: { id: string; title: string; lengthSec?: number | null; liveStartAt?: string },
 ): Promise<void> {
   mock.timers.setTime(Date.parse(at));
-  return serviceTimelineRecorder.onLiveTick({
+  return serviceTimelineRecorder.onLiveTick(makeLive({
     mode: "item",
     currentItemId: item.id,
     label: item.title,
@@ -75,7 +76,7 @@ function tick(
     serviceTimeId: occ.id,
     serviceTimeStartsAt: occ.startsAt,
     beforeServiceStart: false,
-  });
+  }));
 }
 
 describe("ServiceRecorder.ensureRecord: back-to-back services on one plan", () => {

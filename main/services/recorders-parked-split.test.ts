@@ -18,7 +18,6 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import type { PcoLiveDTO } from "../types/stage.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-parked-split-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -31,6 +30,8 @@ const { stageController } = await import("./stage-controller.js");
 const { serviceTimelineRecorder } = await import("./service-timeline-recorder.js");
 const { splRecorder } = await import("./spl-recorder.js");
 const { attendanceRecorder } = await import("./attendance-recorder.js");
+const { feedLiveTick, loadLiveConsumers, makeLive } = await import("./fixtures/live-dto.js");
+await loadLiveConsumers();
 const { captureConsole } = await import("./fixtures/capture-console.js");
 const { addBroadcastListener } = await import("./broadcaster.js");
 const { serviceTimelineStore } = await import("./service-timeline-store.js");
@@ -57,7 +58,7 @@ const T0 = Date.parse("2026-11-08T15:00:00.000Z");
 /** Planning Center out of item mode: the service is over. */
 async function tickNoItem(atMs: number, occ: string) {
   mock.timers.setTime(atMs);
-  const live: PcoLiveDTO = {
+  const live = makeLive({
     mode: "none",
     currentItemId: null,
     label: null,
@@ -70,15 +71,13 @@ async function tickNoItem(atMs: number, occ: string) {
     nextItemTitle: null,
     serviceTimeId: occ,
     serviceTimeStartsAt: null,
-  } as PcoLiveDTO;
-  await splRecorder.onLiveTick(live);
-  await attendanceRecorder.onLiveTick(live);
-  await serviceTimelineRecorder.onLiveTick(live);
+  });
+  await feedLiveTick(live);
 }
 
 async function tick(atMs: number, occ: string, itemId: string, opts: { since?: number; serviceEnded?: boolean } = {}) {
   mock.timers.setTime(atMs);
-  const live: PcoLiveDTO = {
+  const live = makeLive({
     mode: "item",
     currentItemId: itemId,
     label: itemId,
@@ -93,10 +92,8 @@ async function tick(atMs: number, occ: string, itemId: string, opts: { since?: n
     serviceTimeStartsAt: null, // no start to compare: the gap decides
     serviceEnded: opts.serviceEnded ?? false,
     beforeServiceStart: false,
-  };
-  await splRecorder.onLiveTick(live);
-  await attendanceRecorder.onLiveTick(live);
-  await serviceTimelineRecorder.onLiveTick(live);
+  });
+  await feedLiveTick(live);
 }
 
 describe("a service parked past SERVICE END, then the next one", () => {
