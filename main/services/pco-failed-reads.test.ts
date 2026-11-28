@@ -17,6 +17,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, afterEach, beforeEach, describe, it } from "node:test";
+import { restorePcoRequest, stubPcoRequest } from "./fixtures/pco-request.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-pco-failed-reads-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -41,7 +42,7 @@ type Mutable = {
 };
 const ctl = stageController as unknown as Mutable;
 const svc = pcoService as unknown as Record<string, unknown>;
-const real = { ...svc, request: svc.request };
+const real = { ...svc };
 const keptState = ctl.state;
 
 const TYPE = "100";
@@ -52,6 +53,8 @@ const SOON = new Date(Date.now() + 60 * 60_000).toISOString();
 /** Which reads fail, by a piece of their path. */
 let failing: string[] = [];
 let asked: string[] = [];
+/** What the stubbed `request` answers. A case replaces or wraps it. */
+let answer: (url: string) => Promise<unknown> = async () => ({});
 
 beforeEach(() => {
   failing = [];
@@ -67,7 +70,7 @@ beforeEach(() => {
   svc.listPlanItems = async () => [];
   svc.listItemNoteCategories = async () => [];
   svc.listServiceTypes = async () => [{ id: TYPE, name: "Sunday", itemTypeColors: [] }];
-  svc.request = async (url: string) => {
+  answer = async (url: string) => {
     const u = String(url);
     asked.push(u);
     if (failing.some((f) => u.includes(f))) throw new Error("Planning Center returned 503");
@@ -80,9 +83,11 @@ beforeEach(() => {
     // The organization itself: the time zone.
     return { data: { id: "1", type: "Organization", attributes: { time_zone: "America/Chicago" } } };
   };
+  stubPcoRequest(pcoService, (url) => answer(url));
 });
 afterEach(() => {
   Object.assign(svc, real);
+  restorePcoRequest(pcoService);
   ctl.state = keptState;
 });
 after(() => fs.rm(TMP, { recursive: true, force: true }));
@@ -146,13 +151,13 @@ describe("the organization's time zone", () => {
   it("a failed read, with none read before, leaves a rundown in this server's zone, said once on [pco], and held", async (t) => {
     const lines = captureConsole(t, "warn", "log", "error");
     // The organization is the API root: matched on the bare root URL exactly.
-    svc.request = ((inner) => async (url: string) => {
+    answer = ((inner) => async (url: string) => {
       if (/\/services\/v2\/?$/.test(String(url))) {
         asked.push(String(url));
         throw new Error("Planning Center returned 503");
       }
       return inner(url);
-    })(svc.request as (url: string) => Promise<unknown>);
+    })(answer);
     const first = await stageController.getServiceCueRundown(TYPE);
     await stageController.getServiceCueRundown(TYPE);
     assert.equal(first.timeZone, appTimeZone());
@@ -191,10 +196,10 @@ describe("a part that fails after a good read", () => {
     // Each part fails, past its hold (the cache is cleared, so each read asks).
     pcoService.clearCache();
     failing = ["/plan_times"];
-    svc.request = ((inner) => async (url: string) => {
+    answer = ((inner) => async (url: string) => {
       if (/\/services\/v2\/?$/.test(String(url))) throw new Error("Planning Center returned 503");
       return inner(url);
-    })(svc.request as (url: string) => Promise<unknown>);
+    })(answer);
     svc.listServiceTypes = async () => {
       throw new Error("Planning Center returned 503");
     };
@@ -206,7 +211,7 @@ describe("a part that fails after a good read", () => {
 
 describe("what heldRead holds", () => {
   it("an organization with no time zone set is asked once, not on every rundown", async () => {
-    svc.request = async (url: string) => {
+    answer = async (url: string) => {
       asked.push(String(url));
       return { data: { id: "1", type: "Organization", attributes: {} } };
     };
@@ -218,7 +223,7 @@ describe("what heldRead holds", () => {
   it("a failed service-types read is held, not asked again by every caller", async () => {
     // The real read, not the stub beforeEach puts in its place.
     delete svc.listServiceTypes;
-    svc.request = async (url: string) => {
+    answer = async (url: string) => {
       asked.push(String(url));
       throw new Error("Planning Center returned 429");
     };
