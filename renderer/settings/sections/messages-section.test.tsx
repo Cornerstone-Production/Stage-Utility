@@ -91,7 +91,7 @@ beforeEach(() => {
     if ((init?.method ?? "GET") === "PUT") {
       const body = JSON.parse(String(init?.body)) as PutBody;
       puts.push(body as Config);
-      if (gate) return gate.then(() => answerPut(body));
+      if (gate) return gate.then(() => (refuse ? reply(400, { error: refuse }) : answerPut(body)));
       reads.begin(url);
       if (refuse) return reads.answer(reply(400, { error: refuse }));
       return reads.answer(answerPut(body));
@@ -190,7 +190,7 @@ test("a rename left unchanged, or emptied, sends nothing and puts the name back"
   assert.equal(box.value, "Stage");
 });
 
-test("a refused save says why, reaches /log, and leaves what was typed where it is", async () => {
+test("a refused save says why, reaches /log, and puts the stored name back", async () => {
   await mount();
   refuse = 'two groups are named "Stage" (names are not case-sensitive)';
   const box = screen.getByLabelText("Rename Green room") as HTMLInputElement;
@@ -199,11 +199,35 @@ test("a refused save says why, reaches /log, and leaves what was typed where it 
   await flush();
   assert.equal(puts.length, 1);
   assert.match(document.body.textContent ?? "", /Couldn't save that: two groups are named "Stage"/);
-  assert.equal((screen.getByLabelText("Rename Green room") as HTMLInputElement).value, "stage", "the refused name was thrown away");
+  assert.equal((screen.getByLabelText("Rename Green room") as HTMLInputElement).value, "Green room", "a refused name was left in the box as if it were saved");
   assert.ok(
     fetchStub.logs.some((l) => l.tag === "messages" && /could not save the groups and quick messages: two groups are named/.test(l.message)),
     `expected a [messages] line, got ${JSON.stringify(fetchStub.logs)}`,
   );
+});
+
+test("a refused edit of a quick message puts the stored text back, and typing that resumed meanwhile is kept", async () => {
+  await mount();
+  let release!: () => void;
+  gate = new Promise<void>((r) => (release = r));
+  refuse = "a quick message can hold at most 200 characters";
+  const box = screen.getByLabelText("Edit Walk now") as HTMLInputElement;
+  fireEvent.change(box, { target: { value: "Walk now please" } });
+  fireEvent.blur(box);
+  await flush();
+  assert.equal(puts.length, 1);
+  // The operator is back in the box and types again before the refusal lands.
+  fireEvent.change(box, { target: { value: "Walk now, quickly" } });
+  release();
+  await flush();
+  assert.equal(box.value, "Walk now, quickly", "typing that resumed was overwritten by the restore");
+
+  // A second, undisturbed refusal restores.
+  gate = null;
+  fireEvent.change(box, { target: { value: "Something else" } });
+  fireEvent.blur(box);
+  await flush();
+  assert.equal(box.value, "Walk now", "a refused quick message was left in the box as if it were saved");
 });
 
 test("a group that failed to add stays in the box", async () => {
