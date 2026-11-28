@@ -170,16 +170,19 @@ export function framesDisagree(mine: AttendanceRecord, theirs: AttendanceRecord)
   const b = rawSeries(theirs, theirBase);
   if (!a.length || !b.length) return null;
 
+  // A reading of this box's at an instant the archive also has is a copy an
+  // earlier import took from it, not a second box's evidence. Paired — with
+  // its own original or with a neighbouring archive reading, since an archive
+  // can hold two streams unioned — it measures only the two baselines, and a
+  // re-import would decide differently from the first. So it is never paired,
+  // and an overlap made only of such copies counts as none.
+  const theirStamps = new Set(b.map(([t]) => t));
+  const independent = a.filter(([t]) => !theirStamps.has(t));
   const diffs: number[] = [];
   const levels: number[] = [];
   for (const [t, raw] of b) {
     let best: [number, number] | null = null;
-    for (const p of a) {
-      // A reading at the very same instant is a copy an earlier import took
-      // from this archive, not a second box's evidence: pairing with it would
-      // measure only the two baselines, and a re-import would decide
-      // differently from the first.
-      if (p[0] === t) continue;
+    for (const p of independent) {
       if (Math.abs(p[0] - t) <= PAIR_MS && (best == null || Math.abs(p[0] - t) < Math.abs(best[0] - t))) best = p;
     }
     if (best) {
@@ -222,7 +225,12 @@ function fillOnlyAttendance(mine: AttendanceRecord, theirs: AttendanceRecord, re
   const out: AttendanceRecord = { ...fillMissingFields(mine, theirs, ["samples", "attendanceBaseline"]), samples };
   // The room count and the raw daily total depend on no baseline, so the
   // lowest and the total take what either machine saw.
-  const mins = [mine.minOccupancy, theirs.minOccupancy].map(finiteOrNull).filter((v): v is number => v != null);
+  // A stored minimum counts only from a record with in-service samples, as on
+  // the aligned path: a ramp- or taper-only record's stored 0 means "none".
+  const mins = [
+    inServiceSamples(own).length ? mine.minOccupancy : null,
+    inServiceSamples(readings).length ? theirs.minOccupancy : null,
+  ].map(finiteOrNull).filter((v): v is number => v != null);
   if (mins.length) out.minOccupancy = Math.min(...mins);
   const totals = [mine.totalAttendance, theirs.totalAttendance].map(finiteOrNull).filter((v): v is number => v != null);
   if (totals.length) out.totalAttendance = Math.max(...totals);

@@ -535,7 +535,12 @@ test("importing the same archive twice changes nothing, whichever way the check 
   });
   const nearZero = fast(0, 20, 0, 12);
   const zeroed = fast(10, 20, 7, 0); // really baselined at 512
-  for (const [mine, theirs] of [[corrupted, honest], [honest, corrupted], [boxRecord(0, 25, 0, () => 300), honest], [nearZero, zeroed]] as const) {
+  // An archive that is itself two streams unioned (a pre-alignment import, or
+  // a History merge): its readings sit 3 seconds apart, so a copy this box took
+  // of one is within reach of the next.
+  const union = { ...zeroed, samples: [...zeroed.samples, ...fast(10, 20, 10, 0).samples].sort((x, y) => x.t.localeCompare(y.t)) };
+  const pairs = [[corrupted, honest], [honest, corrupted], [boxRecord(0, 25, 0, () => 300), honest], [nearZero, zeroed], [nearZero, union]] as const;
+  for (const [mine, theirs] of pairs) {
     const once = mergeAttendanceRecord(mine, theirs);
     const twice = mergeAttendanceRecord(once.record, theirs);
     assert.equal(twice.frames, once.frames, "a re-import decided differently");
@@ -549,4 +554,15 @@ test("a merge it will not align still takes the lower room count and the larger 
   const out = mergeAttendanceRecord(corrupted, honest).record;
   assert.equal(out.minOccupancy, 240);
   assert.equal(out.totalAttendance, rawAt(15));
+  // A taper-only archive's stored 0 means "none", as on the aligned path.
+  const taper = { ...honest, samples: honest.samples.map((x) => ({ ...x, phase: "post" as const })), minOccupancy: 0 };
+  assert.equal(mergeAttendanceRecord(corrupted, taper).record.minOccupancy, 300, "a taper-only record's 0 became the floor");
+});
+
+test("a reading whose stamp will not parse is not the latest one either", () => {
+  // The bug's signature with no overlap, and an unreadable reading last whose
+  // count sits right at the daily total: taken as the latest, it would hide it.
+  const corrupted = { ...boxRecord(0, 10, 0, () => 300), attendanceBaseline: 0 };
+  const hidden = { ...corrupted, samples: [...corrupted.samples, { t: "bogus", attendance: rawAt(10), occupancy: 300 }] };
+  assert.equal(mergeAttendanceRecord(hidden, boxRecord(20, 30, 7, () => 300)).frames, "implausible");
 });
