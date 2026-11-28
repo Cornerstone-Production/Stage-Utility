@@ -27,6 +27,13 @@ const seedSheets = (): PatchSheet[] => [
 
 const EMPTY: PatchFile = { sheets: seedSheets(), updatedAt: "" };
 
+/** A file's save stamp in ms, for ordering saves. A file never saved by save() (the seed, an older build's or a
+ *  hand-written one) has none, and is older than any that was. */
+const stampMs = (updatedAt: string): number => {
+  const ms = Date.parse(updatedAt);
+  return Number.isFinite(ms) ? ms : -Infinity;
+};
+
 /**
  * Normalize any stored shape into the current multi-sheet PatchFile:
  *  - New shape (`{ sheets }`) → returned as-is.
@@ -130,9 +137,10 @@ class PatchStore {
     return this.read(raw);
   }
 
-  /** The newer of `read` and the last file this process saved: a read made before a save is overtaken by it. */
+  /** The newer of `read` and the last file this process saved: a read made before a save is overtaken by it. On a tie
+   *  the read is that save's own file, since save() stamps every file after the one it replaces. */
   newest(read: PatchFile): PatchFile {
-    return this.lastSaved && this.lastSaved.updatedAt > read.updatedAt ? this.lastSaved : read;
+    return this.lastSaved && stampMs(this.lastSaved.updatedAt) >= stampMs(read.updatedAt) ? this.lastSaved : read;
   }
 
   /**
@@ -142,10 +150,14 @@ class PatchStore {
    * and a view import that saved variants without one left them all on the old patch.
    */
   async save(file: PatchFile): Promise<PatchFile> {
-    const next: PatchFile = { ...file, updatedAt: new Date().toISOString() };
+    let next!: PatchFile;
     let before: PatchFile = EMPTY;
     await this.store.update((prev) => {
       before = prev;
+      // Stamped after the file it replaces, whatever the clock says: newest() orders by the stamp, and a save in the
+      // same millisecond as the last, or after the clock stepped back (across a restart too, or a restore from a
+      // machine whose clock ran ahead), would otherwise tie with or sort before the file it overtook.
+      next = { ...file, updatedAt: new Date(Math.max(Date.now(), stampMs(prev.updatedAt) + 1)).toISOString() };
       return next;
     });
     this.lastSaved = next;
