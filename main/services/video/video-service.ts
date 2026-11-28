@@ -5,12 +5,12 @@
 
 import { createHmac, randomBytes, randomInt } from "node:crypto";
 import { EventEmitter } from "node:events";
-import * as fs from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
 
 import { withoutDataDir } from "../app-paths.js";
 import { addSubscriptionListener, broadcast, channelInDemand, channelNamedByClient } from "../broadcaster.js";
 import { errorMessage } from "../errors.js";
+import { fileExists } from "../file-exists.js";
 import { plural } from "../plural.js";
 import { isRecord } from "../../types/is-record.js";
 import { getLanIp } from "../lan-ip.js";
@@ -109,10 +109,6 @@ interface SettledAudio {
   name: string;
   status: FeedAudioStatus;
   why?: ConverterWhy;
-}
-
-async function fileExists(p: string): Promise<boolean> {
-  return fs.access(p).then(() => true, () => false);
 }
 
 const CHANGED_SINCE_REVIEW = "Changed on this server since the review. Review the file again.";
@@ -1712,9 +1708,18 @@ class VideoService {
     // The answer is kept, so a file that has moved since (`brew upgrade` replaces
     // the Cellar folder the link resolved into) is found out here, not by a
     // converter that fails to launch.
-    if (ffmpeg.ok && !(await fileExists(ffmpeg.resolvedPath))) {
-      this.ffmpegFinder.reset();
-      ffmpeg = await this.ffmpegFinder.find();
+    if (ffmpeg.ok) {
+      let there: boolean;
+      try {
+        there = await fileExists(ffmpeg.resolvedPath);
+      } catch (err) {
+        // Not "moved": the file cannot be looked at, so finding it again would not help.
+        return { ok: false, reason: scrub(`ffmpeg at ${ffmpeg.resolvedPath} cannot be checked: ${errorMessage(err)}`) };
+      }
+      if (!there) {
+        this.ffmpegFinder.reset();
+        ffmpeg = await this.ffmpegFinder.find();
+      }
     }
     if (!ffmpeg.ok) return { ok: false, reason: ffmpeg.reason };
     if (!this.attachedRtsp.on) return { ok: false, reason: "the relay is restarting to turn on audio conversion" };

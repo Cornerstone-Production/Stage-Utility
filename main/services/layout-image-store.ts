@@ -14,6 +14,7 @@ import { layoutGroupsStore } from "./layout-groups-store.js";
 import { MAX_IMAGE_BYTES, imageDir, mimeOfStoredName, saveImage, storedImageProblem, type ContentRule } from "./image-files.js";
 import { atomicWrite } from "./write-queue.js";
 import { errorMessage, isNotFound } from "./errors.js";
+import { fileExists } from "./file-exists.js";
 
 /** The folder under the data directory the images live in. */
 export const LAYOUT_IMAGE_DIR = "layout-images";
@@ -56,12 +57,7 @@ export async function saveLayoutImageBytes(file: string, bytes: Buffer): Promise
   // only ever there whole: it is written aside and renamed into place, because a
   // truncated one under the final name would be taken for the image by this check
   // and served as it was.
-  try {
-    await fs.access(full);
-    return false;
-  } catch (err) {
-    if (!isNotFound(err)) throw err;
-  }
+  if (await fileExists(full)) return false;
   await atomicWrite(full, bytes);
   return true;
 }

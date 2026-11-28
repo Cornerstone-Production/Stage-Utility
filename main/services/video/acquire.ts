@@ -21,6 +21,7 @@ import { promisify } from "node:util";
 import { getUserDataPath } from "../app-paths.js";
 import { commitPart, downloadWatchdog, sha256OfFile, streamToPart, type DownloadTimeouts } from "../capped-download.js";
 import { errorMessage } from "../errors.js";
+import { fileExists } from "../file-exists.js";
 import { scrub } from "../scrub.js";
 import { ASSETS, MEDIAMTX_DOWNLOAD_BYTES, MEDIAMTX_VERSION, assetFor, downloadUrlFor, type MediaMtxAsset } from "./mediamtx-pin.js";
 
@@ -54,15 +55,6 @@ async function realExtract(archive: string, destDir: string, member: string): Pr
   await execFileAsync("tar", ["-xf", archive, "-C", destDir, member]);
 }
 
-async function exists(p: string): Promise<boolean> {
-  try {
-    await fsp.access(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** Whether the pinned binary is already extracted on this machine — used for
  *  the "off" status line's own copy (main/types/video.ts's `binaryPresent`):
  *  "never downloaded yet" (show the download-size sentence) needs telling
@@ -81,7 +73,7 @@ export async function relayBinaryPresent(): Promise<boolean> {
 export async function relayArchivePresent(): Promise<boolean> {
   const asset = assetFor();
   if (!asset) return false;
-  return exists(path.join(relayDir(), "downloads", asset.name));
+  return fileExists(path.join(relayDir(), "downloads", asset.name));
 }
 
 /** A file with bytes in it that this process may run — not merely a name.
@@ -363,7 +355,7 @@ async function ensureAsset(asset: MediaMtxAsset, downloadsDir: string, opts: Ens
   // binary that lost its mode: removed, and extracted again below.
   await fsp.rm(versionDir, { recursive: true, force: true });
 
-  if (await exists(archivePath)) {
+  if (await fileExists(archivePath)) {
     const got = await sha256OfFile(archivePath);
     if (got !== asset.sha256) {
       // No logging here — this can be reached on every retry (relay-lifecycle.ts

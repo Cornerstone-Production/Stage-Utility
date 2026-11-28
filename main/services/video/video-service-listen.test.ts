@@ -291,6 +291,21 @@ test("an ffmpeg file that has gone since it was found is looked for again before
   assert.ok(f.resets >= 1, "the kept answer was never reset");
 });
 
+test("an ffmpeg file that cannot be looked at is reported, not taken for one that has moved", async (t) => {
+  // A path under a file is ENOTDIR: neither there nor gone, so finding it again would not help.
+  const unreadable: FfmpegResult = { ...FFMPEG_OK, resolvedPath: path.join(process.execPath, "ffmpeg") } as FfmpegResult;
+  const f = useFfmpeg(unreadable, FFMPEG_OK);
+  captureConsole(t, "warn");
+  const id = await addFeed({ name: "Unreadable ffmpeg" });
+  const reconciled: RelayFeed[][] = [];
+  await attachWith(() => [ready(id, MPEG4)], reconciled);
+  await videoService.reconcileRelay();
+  const audio = await audioOf(id);
+  assert.equal(audio?.state, "unavailable");
+  assert.match(audio && "reason" in audio ? String(audio.reason) : "", /cannot be checked: .*ENOTDIR/);
+  assert.equal(f.resets, 0, "an ffmpeg that could not be looked at was treated as moved and looked for again");
+});
+
 test("a converter that cannot launch makes the server look for ffmpeg again, at most once a minute", async (t) => {
   t.mock.method(Date, "now", () => 1_000_000);
   const good: FfmpegResult = { ...FFMPEG_OK, resolvedPath: process.execPath } as FfmpegResult;
