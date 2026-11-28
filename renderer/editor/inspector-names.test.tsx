@@ -18,7 +18,7 @@ import { after, afterEach, before, describe, test } from "node:test";
 import type { LayoutObjectType } from "../../main/types/stage.js";
 import { LAYOUT_OBJECTS } from "../main/layout-objects.js";
 import { DEFAULT_STAGE_STATE } from "../main/test-render-ctx.js";
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { installRenderDom, settle, unmountAndTeardown, resetClientCaches } from "../test-dom.js";
 import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -30,8 +30,6 @@ const { RowSwitch, RowText, RowNumber, RowSelect, RowToggle, choiceLayout, Pixel
   await import("./inspector-rows.js");
 const { CuePicker } = await import("./cue-picker.js");
 const { PlanAttachmentConfig } = await import("./inspector.js");
-const { __resetForTests: resetStageState } = await import("../main/use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 const { TooltipProvider } = await import("../components/ui/index.js");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 
@@ -258,9 +256,8 @@ describe("the whole Inspector, for every object type", () => {
   });
   // The page-wide state and replay caches would otherwise carry one type's
   // reads into the next.
-  afterEach(() => {
-    resetStageState();
-    resetReplayCache();
+  afterEach(async () => {
+    await resetClientCaches();
   });
   after(() => server.restore());
 
@@ -304,8 +301,7 @@ describe("the Plan file inspector, once Planning Center has files to pick from",
   test("the file picker and the crop fields are named", async () => {
     // The picker is drawn only when Planning Center is connected and the plan
     // has a document, which no default mount reaches.
-    resetStageState();
-    resetReplayCache();
+    await resetClientCaches();
     const f = stubServer((url) => {
       if (url.endsWith("/api/state")) return ok({ ...DEFAULT_STAGE_STATE, pcoConfigured: true });
       if (url.endsWith("/api/pco/attachments")) {
@@ -334,8 +330,7 @@ describe("the Plan file inspector, once Planning Center has files to pick from",
       assert.deepEqual(unnamed(container), []);
     } finally {
       f.restore();
-      resetStageState();
-      resetReplayCache();
+      await resetClientCaches();
     }
   });
 });

@@ -13,7 +13,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
-import { eventually, installRenderDom, settle, unmountAndTeardown, mountInAct } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown, mountInAct, resetClientCaches } from "../../test-dom.js";
 import { ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 import { LayoutNameRefused, prepareLayoutsSave } from "../../../main/services/servicecue-slug.js";
 import type { ServiceCueLayout } from "../../../main/types/pco.js";
@@ -28,14 +28,11 @@ const { ServiceCueSection } = await import("./servicecue-section.js");
 const { useListSaves } = await import("../../lib/use-list-saves.js");
 const { LAYOUTS } = await import("./servicecue-section.js");
 const { TooltipProvider, ConfirmHost } = await import("../../components/ui/index.js");
-const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../../lib/api.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

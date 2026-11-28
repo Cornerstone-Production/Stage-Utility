@@ -17,7 +17,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, test } from "node:test";
 
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
-import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown, resetClientCaches } from "../test-dom.js";
 import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -31,8 +31,6 @@ const { DisplayServiceCue } = await import("./servicecue-display.js");
 const { ServiceCuePlan } = await import("./servicecue-plan-view.js");
 const { TooltipProvider } = await import("../components/ui/index.js");
 const { displayTextSizeKey, PAGE_TEXT_SIZE_KEY, readStoredSize } = await import("./servicecue-text-size.js");
-const { __resetForTests: resetStageState } = await import("./use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 
@@ -42,10 +40,9 @@ beforeEach(() => {
   localStorage.clear();
   window.history.replaceState({}, "", "/");
 });
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 
 const RUNDOWN = {

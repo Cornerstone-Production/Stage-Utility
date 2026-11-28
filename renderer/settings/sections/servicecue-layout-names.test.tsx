@@ -10,7 +10,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
-import { eventually, installRenderDom, settle, unmountAndTeardown, mountInAct } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown, mountInAct, resetClientCaches } from "../../test-dom.js";
 import { ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -23,14 +23,11 @@ const { ServiceCueSection } = await import("./servicecue-section.js");
 const { freeLayoutName } = await import("./servicecue-layout-names.js");
 const { deleteLayoutBody, plainText } = await import("./servicecue-layouts-model.js");
 const { TooltipProvider, ConfirmHost } = await import("../../components/ui/index.js");
-const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../../lib/api.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 
 const LAYOUTS = [

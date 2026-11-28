@@ -16,7 +16,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, test } from "node:test";
 
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { installRenderDom, settle, unmountAndTeardown, resetClientCaches } from "../test-dom.js";
 import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -28,15 +28,12 @@ const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query
 const { StageView } = await import("./stage-view.js");
 const { TooltipProvider } = await import("../components/ui/index.js");
 const { displayTextSizeKey, readStoredSize } = await import("./servicecue-text-size.js");
-const { __resetForTests: resetStageState } = await import("./use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 beforeEach(() => localStorage.clear());
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 
 const STATE = {

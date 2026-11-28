@@ -20,7 +20,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
-import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown, resetClientCaches } from "../test-dom.js";
 import { ok, reply, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -31,17 +31,14 @@ const { render, screen, cleanup, act } = await import("@testing-library/react");
 const React = await import("react");
 const { ServiceCue } = await import("./servicecue-view.js");
 const { TooltipProvider } = await import("../components/ui/index.js");
-const { __resetForTests: resetStageState } = await import("./use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 // The stream replays its last frame to a late subscriber, so without this the
 // SECOND test's fresh mount immediately replays the FIRST test's last pushed
 // state before its own hydrate has a say.
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 
 const RUNDOWN_P1 = {

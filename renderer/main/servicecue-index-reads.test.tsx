@@ -12,7 +12,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
-import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown, resetClientCaches } from "../test-dom.js";
 import { alerts, ok, reply, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -23,17 +23,14 @@ const { render, screen, cleanup, act } = await import("@testing-library/react");
 const React = await import("react");
 const { ServiceCueIndex } = await import("./servicecue-index-view.js");
 const { TooltipProvider } = await import("../components/ui/index.js");
-const { __resetForTests: resetStageState } = await import("./use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 // The stage state is one cache for the whole page, and the stream replays its
 // last frame to a late subscriber; both are reset so no case starts in the
 // state the one above it left.
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 
 interface Setup {
