@@ -19,6 +19,21 @@ import type { ReconnectSchedule } from "../types/stage.js";
 
 const ACTIVE_CAP_MS = 120_000; // 2 min — the busy-window / demand ceiling
 
+/**
+ * The longest a window, or a run of overlapping ones, may hold. A Thursday rehearsal
+ * through Sunday's last service is about three days; nothing real is longer. Past
+ * it the plan times are taken as wrong and the window is cut, said once: what waits
+ * out a window (the scheduled auto-update, the Mac helpers' updates, the page
+ * deploy) would otherwise wait for as long as the bad times said.
+ *
+ * Cut from the CLOSE backward: the last four days are kept and the early part goes.
+ * The end of a window is the service; its start is the earliest rehearsal's lead. A
+ * Tuesday rehearsal before a Sunday service is a real window of about 117 h, and cut
+ * from its open it ended on Saturday, so the scheduled restart at 09:00 on Sunday
+ * went ahead an hour before the service.
+ */
+export const MAX_WINDOW_MS = 4 * 24 * 60 * 60_000;
+
 export const DEFAULT_RECONNECT_SCHEDULE: ReconnectSchedule = {
   enabled: true,
   leadMin: 120,
@@ -42,8 +57,27 @@ class ServiceWindowService {
 
   /** Replace the known windows (controller recomputes from PCO periodically). */
   setWindows(windows: { open: number; close: number }[]): void {
-    this.windows = [...windows].sort((a, b) => a.open - b.open);
+    this.windows = windows
+      .map((w) => {
+        if (w.close - w.open <= MAX_WINDOW_MS) return w;
+        const kept = w.close - MAX_WINDOW_MS;
+        this.sayCut(
+          `window:${w.open}:${w.close}`,
+          `a service window from ${new Date(w.open).toISOString()} to ${new Date(w.close).toISOString()} runs ${Math.round((w.close - w.open) / 3_600_000)} h, longer than ${MAX_WINDOW_MS / 3_600_000} h: its first ${Math.round((kept - w.open) / 3_600_000)} h, to ${new Date(kept).toISOString()}, are dropped and its last ${MAX_WINDOW_MS / 3_600_000} h kept (a plan's times may be wrong)`,
+        );
+        return { open: kept, close: w.close };
+      })
+      .sort((a, b) => a.open - b.open);
     this.known = true;
+  }
+
+  /** What has been cut and said, so a cut repeated at every refresh or read is said once. */
+  private cutSaid = new Set<string>();
+  private sayCut(key: string, line: string): void {
+    if (this.cutSaid.has(key)) return;
+    if (this.cutSaid.size > 64) this.cutSaid.clear();
+    this.cutSaid.add(key);
+    console.warn(`[reconnect] ${line}`);
   }
 
   /** The last computation failed (Planning Center could not be read): the windows
@@ -85,11 +119,31 @@ class ServiceWindowService {
    *  ones reads as one. One pass: the windows are sorted by when they open, so any
    *  window that extends the run comes after the one it extends. */
   activeUntil(now = Date.now()): number | null {
-    let until: number | null = null;
+    // Runs of overlapping windows, from their first window's open: sorted by open, so one pass finds them.
+    let runOpen = 0;
+    let runClose = -Infinity;
     for (const w of this.windows) {
-      if (until === null ? now >= w.open && now <= w.close : w.open <= until && w.close > until) until = w.close;
+      if (w.open <= runClose) {
+        runClose = Math.max(runClose, w.close);
+        continue;
+      }
+      if (now >= runOpen && now <= runClose) break; // the run holding now is complete
+      runOpen = w.open;
+      runClose = w.close;
     }
-    return until;
+    if (!(now >= runOpen && now <= runClose)) return null;
+    // A run of overlapping windows is held to the same ceiling as one, measured back from its last close: chained,
+    // they could hold anything for good, and the end of the run is the service it leads up to.
+    if (runClose - runOpen > MAX_WINDOW_MS) {
+      const kept = runClose - MAX_WINDOW_MS;
+      this.sayCut(
+        `run:${runOpen}:${runClose}`,
+        `service windows from ${new Date(runOpen).toISOString()} to ${new Date(runClose).toISOString()} overlap into a run longer than ${MAX_WINDOW_MS / 3_600_000} h: its first ${Math.round((kept - runOpen) / 3_600_000)} h, to ${new Date(kept).toISOString()}, are dropped and its last ${MAX_WINDOW_MS / 3_600_000} h kept`,
+      );
+      // Before what is kept, the run holds nothing.
+      return now >= kept ? runClose : null;
+    }
+    return runClose;
   }
 
   /**

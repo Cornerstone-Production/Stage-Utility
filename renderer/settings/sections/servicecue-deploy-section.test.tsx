@@ -56,6 +56,7 @@ const deployOf = (over: Partial<DeployStatus> = {}): DeployStatus => ({
   files: { uploaded: 2, held: 21 },
   waitingFor: null,
   waitingUntil: null,
+  liveReasons: null,
   error: null,
   now: NOW,
   ...over,
@@ -187,6 +188,8 @@ const status = () => (screen.getByRole("status").textContent ?? "").replace(/\s+
 const section = () => screen.getByRole("heading", { name: "Keep the page up to date" }).parentElement!.parentElement!;
 const sectionText = () => (section().textContent ?? "").replace(/\s+/g, " ").trim();
 const updateButton = () => screen.queryByRole("button", { name: "Update the page now" }) as HTMLButtonElement | null;
+/** The same button while a service is under way: the update lock's look and words. */
+const lockedButton = () => screen.queryByRole("button", { name: "Update anyway" }) as HTMLButtonElement | null;
 const acctField = () => screen.getByLabelText("Cloudflare account ID") as HTMLInputElement;
 const tokField = () => screen.getByLabelText("API token") as HTMLInputElement;
 const type = (el: HTMLInputElement, value: string) => fireEvent.change(el, { target: { value } });
@@ -208,7 +211,7 @@ describe("the section", () => {
     assert.ok(sectionText().includes("Keep the page up to date"));
     assert.ok(
       sectionText().includes(
-        "This server is linked to the page, so after each update it puts its own copy of the page on Cloudflare, and the public page always matches what is here. Never during a live service. Clear the API token to stop.",
+        "This server is linked to the page, so after each update it puts its own copy of the page on Cloudflare, and the public page always matches what is here. Never while a service is under way, unless you override it. Clear the API token to stop.",
       ),
     );
     assert.ok(sectionText().includes("A token with the Workers Editor role on the servicecue Worker only. It cannot touch DNS, domains or anything else."));
@@ -255,26 +258,33 @@ describe("the status line, by state", () => {
     assert.equal(status(), "Updating the page…");
   });
 
-  test("waiting for a live service: says so, and what the build is", async () => {
-    await with_(deployOf({ state: "waiting", waitingFor: "live", page: { build: "9c41e07", version: "1.27.0", at: DEPLOYED_AT } }));
+  test("waiting for a live service: says so, what the build is, and what a deploy now would interrupt; the button is an override", async () => {
+    await with_(deployOf({ state: "waiting", waitingFor: "live", liveReasons: ["A PCO service is live", "SPL is recording"], page: { build: "9c41e07", version: "1.27.0", at: DEPLOYED_AT } }));
     assert.equal(status(), "Waiting for the service to end, then updating to build 3f2a91c (1.28.0)");
-    assert.ok(sectionText().includes("Planning Center has a service live (the countdown before it included), so the page is left alone until it ends."));
-    // A request now could only be refused: the status line says why.
-    assert.equal(updateButton()?.disabled, true);
+    assert.ok(sectionText().includes("Updating the page now would interrupt: A PCO service is live, SPL is recording. It is left alone until the service ends."), sectionText());
+    // Guarded, not disabled: the app's own Update now is the same.
+    assert.equal(updateButton() === null, true, "the button reads as an ordinary update during a service");
+    assert.equal(lockedButton()?.disabled, false);
   });
 
   test("waiting for the service window: says when it closes, in the app's zone, and Update the page now can be pressed", async () => {
-    await with_(deployOf({ state: "waiting", waitingFor: "window", waitingUntil: DEPLOYED_AT }));
-    assert.equal(status(), "Waiting for the service window to close at 8:14 AM, then updating to build 3f2a91c (1.28.0)");
+    // NOW is 2:00 AM on a Friday in Chicago. Later the same day: the time alone.
+    await with_(deployOf({ state: "waiting", waitingFor: "window", waitingUntil: NOW + 3 * 60 * 60_000 }));
+    assert.equal(status(), "Waiting for the service window to close at 5:00 AM, then updating to build 3f2a91c (1.28.0)");
     assert.ok(sectionText().includes("it waits out the time around a service, as the app's own updates do"));
     assert.equal(updateButton()?.disabled, false);
+  });
+
+  test("waiting for the service window to close on another day: names the day, in the app's zone", async () => {
+    await with_(deployOf({ state: "waiting", waitingFor: "window", waitingUntil: NOW + 2 * 86_400_000 + 3 * 60 * 60_000 }));
+    assert.equal(status(), "Waiting for the service window to close at 5:00 AM Sunday, then updating to build 3f2a91c (1.28.0)");
   });
 
   test("waiting to hear whether one is live: says that, and that Update the page now goes ahead when it is merely unknown", async () => {
     await with_(deployOf({ state: "waiting", waitingFor: "unknown" }));
     assert.equal(status(), "Waiting to hear whether a service is live, then updating");
-    assert.ok(sectionText().includes("Update the page now goes ahead when the state is merely unknown, never through a live service."));
-    assert.ok(!sectionText().includes("Planning Center has a service live"));
+    assert.ok(sectionText().includes("Update the page now goes ahead when the state is merely unknown."));
+    assert.ok(!sectionText().includes("would interrupt"));
     // Allowed when the state is merely unknown, so it can be pressed.
     assert.equal(updateButton()?.disabled, false);
   });
@@ -775,6 +785,83 @@ describe("Update the page now", () => {
     assert.equal(updateButton()?.disabled, true);
   });
 
+  describe("while a service is under way", () => {
+    const LIVE = ["A PCO service is live", "SPL is recording"];
+    const pressLocked = async () => {
+      const locked = lockedButton();
+      assert.equal(locked !== null, true, "the button does not read as an override during a service");
+      await act(async () => {
+        fireEvent.click(locked!);
+        await settle();
+      });
+    };
+    const SERVICE_LIVE = (reasons: string[]) => ({
+      status: 409,
+      json: { error: `Updating the page now would interrupt: ${reasons.join(", ")}.`, code: "service-live", reasons, deploy: deployOf({ state: "waiting", waitingFor: "live", liveReasons: reasons }) },
+    });
+
+    test("the button is locked, asks first naming what it would interrupt, and sends override only after yes", async () => {
+      await with_(deployOf({ state: "waiting", waitingFor: "live", liveReasons: LIVE }));
+      server.deployAnswers = [{ status: 200, json: dtoOf(deployOf()) }];
+      await pressLocked();
+      const d = await dialog();
+      assert.ok((d.textContent ?? "").includes("Service in progress"));
+      assert.ok((d.textContent ?? "").includes("would interrupt: A PCO service is live, SPL is recording"), d.textContent ?? "");
+      assert.deepEqual(server.posts, [], "a request went before the operator said yes");
+      await press("Override & update anyway");
+      await eventually(() => assert.deepEqual(server.posts, [["deploy", { override: true }]]));
+      await eventually(() => assert.ok(status().startsWith("Up to date:")));
+    });
+
+    test("saying no sends nothing", async () => {
+      await with_(deployOf({ state: "unchecked", liveReasons: LIVE }));
+      await pressLocked();
+      await press("Cancel");
+      await settle();
+      assert.deepEqual(server.posts, []);
+      assert.equal(lockedButton() !== null, true, "a page not yet read is still guarded");
+    });
+
+    test("a page already on this build is not guarded: there is nothing to upload", async () => {
+      await with_(deployOf({ liveReasons: LIVE }));
+      assert.equal(lockedButton() === null, true, "a page already on this build is guarded");
+      assert.equal(updateButton()?.disabled, false);
+    });
+
+    test("a service the status had not seen yet: the server's refusal asks the same question, with its reasons, then overrides", async () => {
+      await with_(deployOf({ page: { build: "0ldbuild", version: "1.27.0", at: DEPLOYED_AT }, state: "failed", error: null }));
+      server.deployAnswers = [SERVICE_LIVE(["Attendance is recording"]), { status: 200, json: dtoOf(deployOf()) }];
+      await click();
+      const d = await dialog();
+      assert.ok((d.textContent ?? "").includes("would interrupt: Attendance is recording"), d.textContent ?? "");
+      assert.deepEqual(server.posts, [["deploy", {}]]);
+      await press("Override & update anyway");
+      await eventually(() => assert.deepEqual(server.posts, [["deploy", {}], ["deploy", { override: true }]]));
+    });
+
+    test("refused again after the override, the refusal is shown rather than asked in a loop", async () => {
+      await with_(deployOf({ state: "waiting", waitingFor: "live", liveReasons: LIVE }));
+      server.deployAnswers = [SERVICE_LIVE(LIVE)];
+      await pressLocked();
+      await press("Override & update anyway");
+      await eventually(() => assert.equal(server.posts.length, 1));
+      await settle();
+      assert.equal(server.posts.length, 1);
+      assert.equal(screen.queryByRole("alertdialog") === null, true);
+      assert.ok(sectionText().includes("Updating the page now would interrupt"));
+    });
+
+    test("composes with the downgrade question: a newer page during a service needs both, and the second request carries both", async () => {
+      await with_(deployOf({ state: "newer", liveReasons: LIVE, page: { build: "9c41e07", version: "1.29.0-beta.2", at: DEPLOYED_AT } }));
+      server.deployAnswers = [NEWER, { status: 200, json: dtoOf(deployOf()) }];
+      await pressLocked();
+      await press("Override & update anyway");
+      await eventually(() => assert.deepEqual(server.posts, [["deploy", { override: true }]]));
+      await press("Replace the page");
+      await eventually(() => assert.deepEqual(server.posts, [["deploy", { override: true }], ["deploy", { confirmDowngrade: true, override: true }]]));
+    });
+  });
+
   test("already current: says so", async () => {
     await with_(deployOf());
     server.deployAnswers = [{ status: 200, json: { ...dtoOf(deployOf()), already: "current" } }];
@@ -791,13 +878,16 @@ describe("Update the page now", () => {
     );
   });
 
-  test("a live service (409) and a failed deploy (502) say the server's words, and the status is the one the refusal carried", async () => {
+  test("a live service (409) refused past the override and a failed deploy (502) say the server's words, and the status is the one the refusal carried", async () => {
     await with_(deployOf({ state: "waiting" }));
+    const words = "Updating the page now would interrupt: A PCO service is live. It updates when the service ends, or send override: true to update it anyway.";
     server.deployAnswers = [
-      { status: 409, json: { error: "A service is live. The page is not updated during one: it updates when the service ends.", code: "service-live", deploy: deployOf({ state: "waiting" }) } },
+      { status: 409, json: { error: words, code: "service-live", reasons: ["A PCO service is live"], deploy: deployOf({ state: "waiting", waitingFor: "live", liveReasons: ["A PCO service is live"] }) } },
     ];
     await click();
-    await eventually(() => assert.ok(sectionText().includes("A service is live. The page is not updated during one: it updates when the service ends.")));
+    await press("Override & update anyway");
+    await eventually(() => assert.ok(sectionText().includes(words), sectionText()));
+    assert.equal(status(), "Waiting for the service to end, then updating to build 3f2a91c (1.28.0)", "the status is not the one the refusal carried");
 
     server.deployAnswers = [
       {
@@ -812,7 +902,12 @@ describe("Update the page now", () => {
         },
       },
     ];
-    await click();
+    // The refusal's status says a service is under way: the button is now the override, and asks again.
+    await act(async () => {
+      fireEvent.click(lockedButton()!);
+      await settle();
+    });
+    await press("Override & update anyway");
     await eventually(() => assert.ok(status().startsWith("Couldn't update the page: Service unavailable")));
     assert.ok(sectionText().includes("The page could not be updated: Service unavailable. It is unchanged."));
   });

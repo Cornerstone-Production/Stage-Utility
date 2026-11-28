@@ -88,6 +88,9 @@ import { tslService } from "./main/services/tsl-service.js";
 import { oscManager } from "./main/services/osc-manager.js";
 import { remoteServer } from "./main/services/remote-server.js";
 import { stageController } from "./main/services/stage-controller.js";
+// Hands the controller's auto-update the same "is a service under way" check the
+// update lock and the ServiceCue deploy read. It wires itself when loaded.
+import "./main/services/service-activity.js";
 import { cacheMaintenance } from "./main/services/cache-maintenance.js";
 import { calendarBroadcaster } from "./main/services/calendar-broadcaster.js";
 import { reconcileOpenRecords } from "./main/services/reconcile-records.js";

@@ -21,8 +21,8 @@ function shouldAutoApply(opts: {
   behind: number;
   updating: boolean;
   serviceLive: boolean;
-  liveKnown?: boolean;
   windowUntil?: number | null;
+  owed?: boolean;
   dayOfWeek: number | null;
   hour: number;
   now: { weekday: number; hour: number };
@@ -32,8 +32,8 @@ function shouldAutoApply(opts: {
     behind: opts.behind,
     updating: opts.updating,
     serviceLive: opts.serviceLive,
-    liveKnown: opts.liveKnown ?? true,
     windowUntil: opts.windowUntil ?? null,
+    owed: opts.owed ?? false,
     now: opts.now,
   }).apply;
 }
@@ -115,25 +115,29 @@ describe("the auto-apply gate", () => {
     assert.equal(shouldAutoApply({ ...base, mode: "auto-full", dayOfWeek: null, now: sunday }), true);
   });
 
-  test("with the live state unknown, a cached service window open now holds it", () => {
-    // Planning Center not answering: the last reading said nothing was live, but a
-    // service may have started since. The cached plan says one is on now.
+  test("a cached service window open now holds it, with nothing under way", () => {
+    // The countdown before a service, or the gap between two: Planning Center reports
+    // nothing live, and an unattended restart then is exactly what must not happen.
     const d = autoApplyDecision({
       cfg: { mode: "auto-full", dayOfWeek: null, hour: 3 },
-      behind: 2, updating: false, serviceLive: false, liveKnown: false, windowUntil: Date.now() + 60_000,
+      behind: 2, updating: false, serviceLive: false, windowUntil: Date.now() + 60_000, owed: false,
       now: { weekday: SUNDAY, hour: 3 },
     });
     assert.deepEqual(d, { apply: false, why: "window" });
   });
 
-  test("with the live state unknown and no cached window open, the schedule applies", () => {
-    // An outage, or bad credentials, must not hold every update for as long as it lasts.
-    assert.equal(shouldAutoApply({ ...base, mode: "auto-full", liveKnown: false, windowUntil: null }), true);
+  test("an owed update applies off its schedule once the window is closed and nothing is under way, and says it is late", () => {
+    const owed = (over: Partial<Parameters<typeof autoApplyDecision>[0]>) =>
+      autoApplyDecision({ cfg: { mode: "auto-full", dayOfWeek: SUNDAY, hour: 3 }, behind: 1, updating: false, serviceLive: false, windowUntil: null, owed: true, now: { weekday: SUNDAY, hour: 14 }, ...over });
+    assert.deepEqual(owed({}), { apply: true, late: true });
+    assert.deepEqual(owed({ windowUntil: Date.now() + 60_000 }), { apply: false, why: "window" });
+    assert.deepEqual(owed({ serviceLive: true }), { apply: false, why: "live" });
+    assert.deepEqual(owed({ behind: 0 }), { apply: false, why: "off" });
+    assert.deepEqual(owed({ owed: false }), { apply: false, why: "schedule" }, "off its schedule without being owed");
   });
 
-  test("with the live state known, a window alone does not hold it", () => {
-    // The reading is current and says nothing is live: the pre-service lead is
-    // the operator's chosen hour to update, as before.
-    assert.equal(shouldAutoApply({ ...base, mode: "auto-full", liveKnown: true, windowUntil: Date.now() + 60_000 }), true);
+  test("outside every window, with nothing under way, the schedule applies", () => {
+    // Planning Center answering or not: an outage, or bad credentials, must not hold every update for as long as it lasts.
+    assert.equal(shouldAutoApply({ ...base, mode: "auto-full", windowUntil: null }), true);
   });
 });

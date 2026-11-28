@@ -29,7 +29,7 @@ const FAST: Partial<DeployTimings> = { backoffMinMs: 30, backoffMaxMs: 60, liveR
 
 interface World {
   creds: DeployCredentials | null;
-  /** Is a service live, as stageController.isServiceLive() says? */
+  /** Is a service under way, as service-activity.ts serviceActivity() says? */
   live: boolean;
   /** When the service window open now closes, as serviceWindow.activeUntil() says. */
   windowCloses: number | null;
@@ -38,6 +38,10 @@ interface World {
   version: string;
 }
 let world: World;
+
+/** What service-activity.ts answers, for a service under way or not. */
+const LIVE_REASONS = ["A PCO service is live", "SPL is recording"];
+const activityOf = (live: boolean) => (live ? { active: true, reasons: LIVE_REASONS } : { active: false, reasons: [] });
 
 /** Until `check` holds, bounded on the real clock; the poll stops when the wait does. */
 async function until(check: () => boolean, what: string): Promise<void> {
@@ -60,7 +64,7 @@ function makeDeployer(timings: Partial<DeployTimings> = FAST): ServiceCueDeploye
   const d = new ServiceCueDeployer({
     bundleDir: bundle.dir,
     version: () => world.version,
-    serviceLive: () => world.live,
+    serviceActivity: () => activityOf(world.live),
     windowCloses: () => world.windowCloses,
     serviceTimesKnown: () => world.known,
     credentials: async () => world.creds,
@@ -277,7 +281,8 @@ describe("a service being live", () => {
     assert.equal(d.status().waitingFor, "live");
     await sleep(100);
     assert.equal(apiCalls(), 0, "Cloudflare was called during a live service");
-    assert.equal(lines.filter((l) => /a service is live/.test(l)).length, 1, "said once, however long the wait");
+    assert.equal(lines.filter((l) => /a service is under way \(A PCO service is live, SPL is recording\), so the page is not updated now/.test(l)).length, 1, "said once, naming what is under way, however long the wait");
+    assert.deepEqual(d.status().liveReasons, LIVE_REASONS, "the card is not told what a deploy would interrupt");
 
     world.live = false;
     await reaches(d, "current");
@@ -296,7 +301,7 @@ describe("a service being live", () => {
     assert.equal(d.status().waitingUntil, world.windowCloses);
     await sleep(100);
     assert.equal(apiCalls(), 0, "Cloudflare was called inside the service window");
-    assert.equal(lines.filter((l) => /the service window is open until \d\d:\d\d:\d\d, so the page is not updated now/.test(l)).length, 1, lines.join("\n"));
+    assert.equal(lines.filter((l) => /the service window is open until \d\d:\d\d( [A-Z][a-z]+day)?, so the page is not updated now/.test(l)).length, 1, lines.join("\n"));
 
     world.windowCloses = null;
     await reaches(d, "current");
@@ -310,6 +315,20 @@ describe("a service being live", () => {
     const d = makeDeployer();
     assert.equal((await d.deployNow()).kind, "deployed");
     assert.equal(puts(), 1);
+  });
+
+  it("an Update the page now without override is refused if a service went live during the checks, and goes with it", async (t) => {
+    captureConsole(t, "log", "warn");
+    fake.respond = (r) => {
+      if (/\/tokens\/verify$/.test(r.path)) world.live = true;
+      return undefined;
+    };
+    const d = makeDeployer({ ...FAST, nowEveryMs: 0 });
+    assert.deepEqual(await d.deployNow(), { kind: "waiting", reasons: LIVE_REASONS });
+    assert.equal(puts(), 0, "the page was deployed into a service that went live during the checks, with no override");
+    assert.equal((await d.deployNow({ override: true })).kind, "deployed");
+    assert.equal(puts(), 1);
+    fake.respond = () => undefined;
   });
 
   it("is checked again just before the upload: a service that went live during the checks is waited out", async (t) => {
@@ -598,12 +617,48 @@ describe("Update the page now", () => {
     assert.ok(lines.some((l) => /over a page left alone until now, as confirmed/.test(l)));
   });
 
-  it("is not made during a live service, and says so", async (t) => {
+  it("is not made while a service is under way, and says what it would interrupt", async (t) => {
     captureConsole(t, "log");
     world.live = true;
     const d = makeDeployer();
-    assert.deepEqual(await d.deployNow({ confirmDowngrade: true }), { kind: "waiting" });
+    assert.deepEqual(await d.deployNow({ confirmDowngrade: true }), { kind: "waiting", reasons: LIVE_REASONS });
     assert.equal(apiCalls(), 0);
+  });
+
+  it("is made while a service is under way with override, as the app's own Update now is, and the override is logged once", async (t) => {
+    const lines = captureConsole(t, "log", "warn");
+    world.live = true;
+    const d = makeDeployer({ ...FAST, nowEveryMs: 0 });
+    const outcome = await d.deployNow({ override: true });
+    assert.deepEqual(outcome, { kind: "deployed", uploaded: 6, held: 0, overrode: LIVE_REASONS });
+    assert.equal(puts(), 1);
+    const said = lines.filter((l) => l.startsWith("[servicecue-deploy] Update the page now goes ahead while a service is under way"));
+    assert.deepEqual(said, ["[servicecue-deploy] Update the page now goes ahead while a service is under way (A PCO service is live, SPL is recording): overridden, as asked"]);
+    // Nothing under way: an override is not one, and says nothing.
+    world.live = false;
+    fake.deployed = null;
+    d.consider("dddddddddddd");
+    await d.settled();
+    lines.length = 0;
+    const plain = await d.deployNow({ override: true });
+    assert.equal(plain.kind, "deployed");
+    assert.equal("overrode" in plain, false);
+    assert.equal(lines.some((l) => /overridden, as asked/.test(l)), false, lines.join("\n"));
+  });
+
+  it("composes override with confirmDowngrade: a newer page under a live service needs both", async (t) => {
+    captureConsole(t, "log", "warn");
+    world.live = true;
+    world.version = "1.27.0";
+    fake.deployed = { tag: BUILD_A, message: "Stage Utility 1.28.0", at: new Date().toISOString() };
+    const d = makeDeployer({ ...FAST, nowEveryMs: 0 });
+    d.consider(BUILD_A);
+    await d.settled();
+    assert.deepEqual(await d.deployNow({ confirmDowngrade: true }), { kind: "waiting", reasons: LIVE_REASONS });
+    assert.equal((await d.deployNow({ override: true })).kind, "newer");
+    assert.equal(puts(), 0);
+    assert.equal((await d.deployNow({ override: true, confirmDowngrade: true })).kind, "deployed");
+    assert.equal(puts(), 1);
   });
 
   it("says there is no token, and no copy of the page, without calling Cloudflare", async (t) => {
@@ -741,7 +796,7 @@ describe("another server at the same version", () => {
       first.consider("cccccccccccc");
       await first.settled();
       assert.equal(puts(), 1, "the first server deploys over an older page");
-      const other = new ServiceCueDeployer({ bundleDir: second.dir, version: () => "1.28.0", serviceLive: () => false, windowCloses: () => null, serviceTimesKnown: () => true, credentials: async () => CREDS, apiOrigin: cloudflareOrigin(fake.origin), timings: FAST });
+      const other = new ServiceCueDeployer({ bundleDir: second.dir, version: () => "1.28.0", serviceActivity: () => activityOf(false), windowCloses: () => null, serviceTimesKnown: () => true, credentials: async () => CREDS, apiOrigin: cloudflareOrigin(fake.origin), timings: FAST });
       deployers.push(other);
       // The first server's page is what the other reads: another build, the same version.
       other.consider(BUILD_B);
@@ -786,7 +841,7 @@ describe("another server at the same version", () => {
 describe("a live state that is not known", () => {
   it("counts as live on the server's own account: after a restart, or a Planning Center outage, nothing is deployed until the service times are known", async (t) => {
     const lines = captureConsole(t, "log");
-    world.live = false; // as isServiceLive() is, after a restart, until the first Planning Center read
+    world.live = false; // as serviceActivity() is, after a restart, until the first Planning Center read
     world.known = false;
     const d = makeDeployer();
     d.consider(BUILD_A);
@@ -802,7 +857,7 @@ describe("a live state that is not known", () => {
     assert.equal(puts(), 1);
   });
 
-  it("is gone ahead of by an explicit Update the page now, which says so, and never when a service is known to be live", async (t) => {
+  it("is gone ahead of by an explicit Update the page now, which says so, and never when a service is known to be under way without override", async (t) => {
     const lines = captureConsole(t, "log");
     world.known = false;
     const d = makeDeployer();
@@ -815,7 +870,7 @@ describe("a live state that is not known", () => {
     fake.reset();
     world.live = true;
     const e = makeDeployer({ ...FAST, nowEveryMs: 0 });
-    assert.deepEqual(await e.deployNow({ confirmDowngrade: true }), { kind: "waiting" });
+    assert.deepEqual(await e.deployNow({ confirmDowngrade: true }), { kind: "waiting", reasons: LIVE_REASONS });
     assert.equal(apiCalls(), 0);
 
     // And known, it carries no such word.

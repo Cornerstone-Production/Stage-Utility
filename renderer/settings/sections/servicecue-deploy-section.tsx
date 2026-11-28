@@ -14,13 +14,14 @@
 // nothing here asks for it again, so "updating" becomes "current" without a reload.
 
 import { errorMessage } from "@main/services/errors";
-import { isValidTimeZone } from "@main/services/app-timezone";
+import { dayUnlessToday, isValidTimeZone } from "@main/services/app-timezone";
 import { FORM_MASK, isMask } from "@main/services/mask";
 import { plural } from "@main/services/plural";
 import { useState, type FocusEvent, type ReactNode } from "react";
 
-import { Button, ErrorNote, Input, confirm } from "../../components/ui";
+import { ErrorNote, Input, confirm } from "../../components/ui";
 import { ConnectionField } from "./connection-field";
+import { GuardedButton } from "./guarded-button";
 import { selectMask, typedTokenOf } from "./servicecue-token";
 import { invoke, isTimeoutError, type ApiError } from "../../lib/api";
 import { cn } from "../../lib/cn";
@@ -86,6 +87,12 @@ interface DeployLine {
  * What the status line and its detail say, for a state. `elapsedMs` is how long ago the answer was
  * read, so a retry time the server stamped is counted from its own clock and not the browser's.
  */
+/** When the service window closes, in the operator's clock format and the app's zone, with its day when that is not today: "1:15 PM Sunday". */
+function closesAt(at: number, nowMs: number, timeZone: string | undefined): string {
+  const day = dayUnlessToday(at, nowMs, timeZone);
+  return `${formatClock(at, { timeZone })}${day ? ` ${day}` : ""}`;
+}
+
 function deployLine(d: DeployStatus, zone: string | undefined, elapsedMs: number): DeployLine {
   const build = d.page?.build ?? d.bundle?.build ?? "unknown";
   switch (d.state) {
@@ -132,8 +139,8 @@ function deployLine(d: DeployStatus, zone: string | undefined, elapsedMs: number
         const timeZone = zone && isValidTimeZone(zone) ? zone : undefined;
         return {
           tone: "warn",
-          text: `Waiting for the service window to close${d.waitingUntil != null ? ` at ${formatClock(d.waitingUntil, { timeZone })}` : ""}, then updating${d.bundle ? ` to build ${d.bundle.build} (${d.bundle.version})` : ""}`,
-          detail: "Updating reloads every open page, so it waits out the time around a service, as the app's own updates do. Update the page now goes ahead, never through a live service.",
+          text: `Waiting for the service window to close${d.waitingUntil != null ? ` at ${closesAt(d.waitingUntil, d.now + elapsedMs, timeZone)}` : ""}, then updating${d.bundle ? ` to build ${d.bundle.build} (${d.bundle.version})` : ""}`,
+          detail: "Updating reloads every open page, so it waits out the time around a service, as the app's own updates do. Update the page now goes ahead.",
         };
       }
       return d.waitingFor === "unknown"
@@ -141,12 +148,12 @@ function deployLine(d: DeployStatus, zone: string | undefined, elapsedMs: number
             tone: "warn",
             text: "Waiting to hear whether a service is live, then updating",
             detail:
-              "This server has just started, or Planning Center cannot be reached. Update the page now goes ahead when the state is merely unknown, never through a live service.",
+              "This server has just started, or Planning Center cannot be reached. Update the page now goes ahead when the state is merely unknown.",
           }
         : {
             tone: "warn",
             text: `Waiting for the service to end, then updating${d.bundle ? ` to build ${d.bundle.build} (${d.bundle.version})` : ""}`,
-            detail: "Planning Center has a service live (the countdown before it included), so the page is left alone until it ends.",
+            detail: `Updating the page now would interrupt: ${(d.liveReasons ?? ["a service"]).join(", ")}. It is left alone until the service ends.`,
           };
     case "failed": {
       const e = d.error;
@@ -270,6 +277,12 @@ export function KeepPageUpToDate({
   const typedToken = typedTokenOf(tokDraft);
   const line = deployLine(deploy, zone, elapsedMs);
   const updating = deploy.state === "updating";
+  /**
+   * What updating the page now would interrupt, as the server read it with this status: null when no service is under way. A page
+   * already on this build is answered "Already up to date" whatever is under way, so it is not guarded; if it turns out not to be,
+   * the server refuses with the reasons and the same question is asked then.
+   */
+  const guard = deploy.state === "current" ? null : deploy.liveReasons;
   // The tick can be up to a second old, so it never reads more than the server said.
   const wait = tooSoon === null ? 0 : Math.min(tooSoon.sec, Math.ceil((tooSoon.until - clock) / 1000));
 
@@ -286,6 +299,16 @@ export function KeepPageUpToDate({
     } finally {
       setBusy(false);
     }
+  }
+
+  /** The app's own Update now asks the same, in the same words, before it overrides the update lock. */
+  function confirmOverride(reasons: string[]): Promise<boolean> {
+    return confirm({
+      title: "Service in progress",
+      message: `Updating the page reloads every open copy of it and would interrupt: ${reasons.join(", ")}. It's safest to wait until the service is over.`,
+      confirmLabel: "Override & update anyway",
+      destructive: true,
+    });
   }
 
   /** Deleting the token cannot be undone from here: it has to be made again in Cloudflare. */
@@ -344,15 +367,25 @@ export function KeepPageUpToDate({
     setTokDraft(null);
   }
 
-  /** "Update the page now". A page that was left alone is replaced only once the operator has said so, in a dialog that names both versions. */
+  /**
+   * "Update the page now". A page that was left alone is replaced only once the operator has said so, in a dialog that names both
+   * versions; while a service is under way, only once they have overridden it in a dialog that names what it would interrupt, as
+   * the app's own Update now asks. Either question is asked when the status says so, or when the server refuses for it.
+   */
   async function updateNow() {
     await run(async () => {
       let confirmDowngrade = false;
+      let override = false;
+      if (guard) {
+        if (!(await confirmOverride(guard))) return;
+        override = true;
+      }
       for (;;) {
         try {
+          const flags = { ...(confirmDowngrade ? { confirmDowngrade } : {}), ...(override ? { override } : {}) };
           const answer = await invoke<PublishSettingsDTO & { already?: "current"; serviceState?: "unknown" }>(
             "servicecue:deployNow",
-            confirmDowngrade ? { confirmDowngrade } : undefined,
+            confirmDowngrade || override ? flags : undefined,
           );
           onAnswer(answer);
           if (answer.already === "current") setSaid("Already up to date.");
@@ -368,6 +401,13 @@ export function KeepPageUpToDate({
           const { status, code, body } = refusal(err);
           const refused = body.deploy as DeployStatus | undefined;
           if (refused) onDeploy(refused);
+          if (status === 409 && code === "service-live") {
+            if (override) throw err;
+            const reasons = Array.isArray(body.reasons) ? body.reasons.map(String) : (refused?.liveReasons ?? ["a service"]);
+            if (!(await confirmOverride(reasons))) return;
+            override = true;
+            continue;
+          }
           if (status === 409 && (code === "newer" || code === "other-build")) {
             if (confirmDowngrade) throw err;
             const q = downgradeQuestion(code, body, refused ?? deploy);
@@ -392,7 +432,7 @@ export function KeepPageUpToDate({
         <h3 className="text-footnote font-semibold text-fg">Keep the page up to date</h3>
         <p className="max-w-[72ch] text-caption1 text-fg-muted">
           This server is linked to the page, so after each update it puts its own copy of the page on Cloudflare, and the public page always
-          matches what is here. Never during a live service. Clear the API token to stop.
+          matches what is here. Never while a service is under way, unless you override it. Clear the API token to stop.
         </p>
       </div>
 
@@ -442,15 +482,16 @@ export function KeepPageUpToDate({
           <span data-deploy-state={deploy.state}>{line.text}</span>
         </div>
         {deploy.state !== "off" && (
-          <Button
+          <GuardedButton
+            guard={guard}
             variant="filled"
             size="small"
             className="ml-auto border border-line-strong bg-surface-raised hover:bg-fill-hover"
-            disabled={busy || updating || wait > 0 || deploy.state === "no-bundle" || deploy.waitingFor === "live"}
+            disabled={busy || updating || wait > 0 || deploy.state === "no-bundle"}
             onClick={() => void updateNow()}
-          >
-            Update the page now
-          </Button>
+            label="Update the page now"
+            lockedLabel="Update anyway"
+          />
         )}
       </div>
       {deploy.state !== "off" && (wait > 0 || said || line.detail) && (

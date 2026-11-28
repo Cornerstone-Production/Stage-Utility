@@ -17,10 +17,12 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 const { stageController } = await import("./stage-controller.js");
+// Wires the controller's auto-update to the update lock's check, as server.ts does.
+await import("./service-activity.js");
 const { pcoService } = await import("./pco-service.js");
 const { serviceWindow } = await import("./service-window.js");
 const { captureConsole } = await import("./fixtures/capture-console.js");
-const { zonedParts } = await import("./app-timezone.js");
+const { setAppTimeZone, zonedParts } = await import("./app-timezone.js");
 const { updater } = await import("./updater.js");
 
 type Mutable = {
@@ -132,10 +134,10 @@ describe("serviceTimesKnown", () => {
   });
 });
 
-// The server's own updater (shouldAutoApply) asks the same question, but falls back
-// on the cached service windows rather than waiting for Planning Center: a long
-// outage must not hold every update.
-describe("shouldAutoApply while the live state is unknown", () => {
+// The server's own updater (shouldAutoApply) waits out the cached service windows
+// whether or not Planning Center answers, and does not wait for Planning Center
+// itself: a long outage must not hold every update.
+describe("shouldAutoApply and the cached service windows", () => {
   const now = new Date();
   beforeEach(() => {
     ctl.pcoAppId = "app";
@@ -160,9 +162,9 @@ describe("shouldAutoApply while the live state is unknown", () => {
     await assert.rejects(() => stageController.fetchLive(), /429/);
   }
 
-  it("waits inside a cached service window", async (t) => {
+  it("waits inside a cached service window, whether the live state is known or not", async (t) => {
     serviceWindow.setWindows([{ open: now.getTime() - 60_000, close: now.getTime() + 3_600_000 }]);
-    assert.equal(stageController.shouldAutoApply(1, now).apply, true, "a current reading of nothing live, at the chosen hour");
+    assert.deepEqual(stageController.shouldAutoApply(1, now), { apply: false, why: "window" }, "a current reading of nothing live let it restart inside the window");
     await liveReadFails(t);
     assert.deepEqual(stageController.shouldAutoApply(1, now), { apply: false, why: "window" });
   });
@@ -195,5 +197,175 @@ describe("shouldAutoApply while the live state is unknown", () => {
     serviceWindow.setWindows([{ open: now.getTime() + 86_400_000, close: now.getTime() + 90_000_000 }]);
     await liveReadFails(t);
     assert.equal(stageController.shouldAutoApply(1, now).apply, true);
+  });
+});
+
+// A schedule that always falls in a window must not silently never apply: the
+// update it declined is owed, and goes at the first check after the window closes.
+describe("an update a service window held at its scheduled time", () => {
+  // In Chicago: the window opens Thursday 26 Nov 17:00 (a rehearsal) and closes Sunday 29 Nov 13:15.
+  const OPEN = Date.parse("2026-11-26T23:00:00Z");
+  const CLOSE = Date.parse("2026-11-29T19:15:00Z");
+  /** Sunday 29 Nov in Chicago, at `hh`:00. */
+  const sunday = (hh: number) => new Date(Date.UTC(2026, 10, 29, hh + 6));
+  const IN_AN_ITEM = { mode: "item", currentItemId: "item-1", serviceTimeStartsAt: sunday(14).toISOString(), liveStartAt: sunday(14).toISOString() };
+  let applied: number;
+  let lines: string[];
+  const tick = (at: Date) => (stageController as unknown as { updateCheckTick(now: Date): Promise<void> }).updateCheckTick(at);
+
+  /** Each test's world: called first in every test, with its own context, so the mocks undo with it. */
+  function setup(t: TestContext): void {
+    setAppTimeZone("America/Chicago");
+    // No Planning Center credentials: the live reading counts as current, so only the window and "under way" hold it.
+    ctl.pcoAppId = null;
+    ctl.pcoSecret = null;
+    ctl.lastLive = null;
+    ctl.liveStale = false;
+    ctl.state = { ...ctl.state, autoUpdate: { mode: "auto-full", dayOfWeek: 0, hour: 3 } };
+    (stageController as unknown as { updateOwed: unknown }).updateOwed = null;
+    serviceWindow.setWindows([{ open: OPEN, close: CLOSE }]);
+    lines = captureConsole(t, "log", "warn", "error");
+    const u = updater as unknown as Record<string, unknown>;
+    const realCheck = u.checkForUpdate;
+    const realApply = u.applyUpdate;
+    applied = 0;
+    u.checkForUpdate = async () => ({ behind: 1 });
+    u.applyUpdate = async () => { applied++; };
+    t.after(() => {
+      u.checkForUpdate = realCheck;
+      u.applyUpdate = realApply;
+      setAppTimeZone(null);
+      serviceWindow.setWindows([]);
+    });
+  }
+
+  it("a Sunday 03:00 schedule inside a Thursday-to-Sunday-13:15 window applies at the first check after 13:15", async (t) => {
+    setup(t);
+    await tick(sunday(3));
+    assert.equal(applied, 0, "applied inside the window");
+    const owed = lines.filter((l) => l.startsWith("[stage-controller] auto-update waits:"));
+    assert.deepEqual(owed, ["[stage-controller] auto-update waits: its scheduled time fell inside a planned service window, open until 13:15; it applies at the first check after the window closes, with no service under way"]);
+    await tick(sunday(13));
+    assert.equal(applied, 0, "applied before the window closed");
+    assert.equal(lines.filter((l) => l.startsWith("[stage-controller] auto-update waits:")).length, 1, "said again on every check inside the window");
+    await tick(sunday(14));
+    assert.equal(applied, 1, "the owed update did not apply after the window closed: the schedule never applies");
+    assert.ok(lines.includes("[stage-controller] auto-update applying late: what held it at its scheduled time is over"), lines.join("\n"));
+    // Applied: nothing is owed, and the next check off-schedule does nothing.
+    await tick(sunday(15));
+    assert.equal(applied, 1);
+  });
+
+  it("does not apply while a service is under way after the window, and applies once it is not", async (t) => {
+    setup(t);
+    await tick(sunday(3));
+    ctl.lastLive = IN_AN_ITEM;
+    await tick(sunday(14));
+    assert.equal(applied, 0, "applied through a service under way");
+    ctl.lastLive = { ...IN_AN_ITEM, mode: "none", currentItemId: null };
+    await tick(sunday(16));
+    assert.equal(applied, 1);
+  });
+
+  it("a scheduled time a service ran over is owed too, said once, and applies once the service is over", async (t) => {
+    setup(t);
+    serviceWindow.setWindows([]);
+    ctl.lastLive = IN_AN_ITEM;
+    await tick(sunday(3));
+    await tick(sunday(4));
+    assert.equal(applied, 0, "applied through a service under way");
+    const said = lines.filter((l) => l.startsWith("[stage-controller] auto-update waits:"));
+    assert.deepEqual(said, ["[stage-controller] auto-update waits: a service is under way (A PCO service is live); it applies at the first check after it is not, outside a service window"]);
+    ctl.lastLive = { ...IN_AN_ITEM, mode: "none", currentItemId: null };
+    await tick(sunday(5));
+    assert.equal(applied, 1, "the slot a service ran over was lost for the week");
+  });
+
+  it("is no longer owed once the mode goes manual", async (t) => {
+    setup(t);
+    await tick(sunday(3));
+    ctl.state = { ...ctl.state, autoUpdate: { mode: "manual", dayOfWeek: 0, hour: 3 } };
+    await tick(sunday(14));
+    ctl.state = { ...ctl.state, autoUpdate: { mode: "auto-full", dayOfWeek: 0, hour: 3 } };
+    await tick(sunday(15));
+    assert.equal(applied, 0, "an update owed before the switch to manual applied after it");
+  });
+
+  it("is no longer owed once nothing is behind, even if a release comes out again", async (t) => {
+    setup(t);
+    await tick(sunday(3));
+    const u = updater as unknown as Record<string, unknown>;
+    u.checkForUpdate = async () => ({ behind: 0 });
+    await tick(sunday(13));
+    u.checkForUpdate = async () => ({ behind: 1 });
+    await tick(sunday(14));
+    assert.equal(applied, 0, "an update owed while behind applied a later release off its schedule, after nothing had been behind");
+  });
+
+  it("is no longer owed once the schedule changes: the new day and hour decide", async (t) => {
+    setup(t);
+    await tick(sunday(3));
+    await stageController.setAutoUpdate({ hour: 5 });
+    await tick(sunday(14));
+    assert.equal(applied, 0, "an update owed by the old schedule applied off the new one");
+    await stageController.setAutoUpdate({ hour: 3 });
+    await tick(sunday(3));
+    await stageController.setAutoUpdate({ dayOfWeek: 6 });
+    await tick(sunday(15));
+    assert.equal(applied, 0, "an update owed by the old day applied after the day changed");
+  });
+});
+
+// A refresh whose plan reads fail must not erase the window around a service it
+// read before: on a Sunday morning that window is all that holds the scheduled
+// restart at 09:00 before a 10:00 service.
+describe("a refresh whose plan reads fail keeps the windows it last read", () => {
+  const hourNow = () => zonedParts(Date.now()).hour;
+  function setup(t: TestContext): void {
+    captureConsole(t, "log", "warn", "error");
+    ctl.pcoAppId = "app";
+    ctl.pcoSecret = "secret";
+    ctl.lastLive = { mode: "none" };
+    ctl.liveStale = false;
+    ctl.state = { ...ctl.state, serviceTypeId: "1", planId: "p1", autoUpdate: { mode: "auto-full", dayOfWeek: null, hour: hourNow() } };
+    (stageController as unknown as { updateOwed: unknown }).updateOwed = null;
+    t.after(() => {
+      Object.assign(pco, real);
+      serviceWindow.setWindows([]);
+    });
+  }
+
+  it("the scheduled hour before a service still waits when its times, or its plan list, fail to read again", async (t) => {
+    setup(t);
+    answering();
+    await stageController.refreshServiceWindows();
+    assert.deepEqual(stageController.shouldAutoApply(1, new Date()), { apply: false, why: "window" });
+    answering({ times: "fail" });
+    await stageController.refreshServiceWindows();
+    assert.deepEqual(stageController.shouldAutoApply(1, new Date()), { apply: false, why: "window" }, "a failed read of the plan's times erased the window an hour before its service");
+    answering({ plans: "fail" });
+    await stageController.refreshServiceWindows();
+    assert.deepEqual(stageController.shouldAutoApply(1, new Date()), { apply: false, why: "window" }, "a failed read of the plan list erased the window an hour before its service");
+  });
+
+  it("an owed update does not release mid-window through a failed read", async (t) => {
+    setup(t);
+    const u = updater as unknown as Record<string, unknown>;
+    const realCheck = u.checkForUpdate;
+    const realApply = u.applyUpdate;
+    let applied = 0;
+    u.checkForUpdate = async () => ({ behind: 1 });
+    u.applyUpdate = async () => { applied++; };
+    t.after(() => { u.checkForUpdate = realCheck; u.applyUpdate = realApply; });
+    const tick = (at: Date) => (stageController as unknown as { updateCheckTick(now: Date): Promise<void> }).updateCheckTick(at);
+    answering();
+    await stageController.refreshServiceWindows();
+    await tick(new Date());
+    assert.equal(applied, 0);
+    answering({ times: "fail" });
+    await stageController.refreshServiceWindows();
+    // A minute on, still inside the window: the failed read must not have opened a way through.
+    await tick(new Date(Date.now() + 60_000));
+    assert.equal(applied, 0, "the owed update applied inside the window its failed read had erased");
   });
 });

@@ -261,3 +261,38 @@ export function clockOf(ms: number, tz: TimeZone = appTimeZone()): string {
     return `${new Date(ms).toISOString().slice(11, 19)} UTC`;
   }
 }
+
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+
+/** Days since the epoch of the calendar date `ms` falls on in `tz`. */
+function zonedDayNumber(ms: number, tz: TimeZone): number {
+  const p = zonedParts(ms, tz);
+  return Math.round(Date.UTC(p.year, p.month - 1, p.day) / 86_400_000);
+}
+
+/** The weekday `ms` falls on in `tz`: "Sunday". */
+export function weekdayOf(ms: number, tz: TimeZone = appTimeZone()): string {
+  return WEEKDAY_NAMES[zonedParts(ms, tz).weekday];
+}
+
+/**
+ * The day `ms` falls on, for a clock time that needs one beside it: null when it
+ * is the same calendar day as `nowMs` in `tz`; the weekday within the next six
+ * days ("Sunday"); the weekday and the date otherwise ("Sunday 6 Dec"), where a
+ * weekday alone would name the wrong week. English, fixed: no locale to vary.
+ */
+export function dayUnlessToday(ms: number, nowMs: number, tz: TimeZone = appTimeZone()): string | null {
+  const ahead = zonedDayNumber(ms, tz) - zonedDayNumber(nowMs, tz);
+  if (ahead === 0) return null;
+  const p = zonedParts(ms, tz);
+  const weekday = weekdayOf(ms, tz);
+  return ahead > 0 && ahead < 7 ? weekday : `${weekday} ${p.day} ${MONTH_NAMES[p.month - 1]}`;
+}
+
+/** "13:15" in the app's zone, or "13:15 Sunday" when that is not today: a time an
+ *  operator reads against their own clock and their own calendar. */
+export function clockWithDayOf(ms: number, nowMs: number = Date.now(), tz: TimeZone = appTimeZone()): string {
+  const day = dayUnlessToday(ms, nowMs, tz);
+  return `${clockOf(ms, tz).slice(0, 5)}${day ? ` ${day}` : ""}`;
+}

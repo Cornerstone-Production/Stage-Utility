@@ -20,6 +20,7 @@ import { readDeployCredentials } from "./servicecue-deploy-store.js";
 import { localAllowed, parsePublishUrl } from "./servicecue-publish-rules.js";
 import { readPublishToken, servicecuePublishStore } from "./servicecue-publish-store.js";
 import { ServiceCuePublisher, type PublishSource } from "./servicecue-publisher.js";
+import { serviceActivity } from "./service-activity.js";
 import { serviceWindow } from "./service-window.js";
 import { splRecorder } from "./spl-recorder.js";
 import { stageController } from "./stage-controller.js";
@@ -68,8 +69,8 @@ const apiOrigin = deployApiOrigin();
 export const deployerDeps: DeployerDeps = {
   bundleDir: path.join(APP_ROOT, "build", "servicecue"),
   version: () => runningVersion,
-  // The app updater's and the Mac helpers' own tests: never through a live service, nor inside the window around one.
-  serviceLive: () => stageController.isServiceLive(),
+  // The app updater's and the Mac helpers' own tests: never through a service under way unless overridden, nor inside the window around one.
+  serviceActivity,
   windowCloses: () => serviceWindow.activeUntil(),
   serviceTimesKnown: () => stageController.serviceTimesKnown(),
   // Read back only for the address they were saved with: the page's current one. None, with no usable API address.

@@ -8,6 +8,7 @@ import { type RouteCtx, json, error, readBody, readBodyOrEmpty } from "./context
 import { BindingsRestoring, bindingWritesHeld, kioskDevicesStore, authorise, claim, release, findById, findByOutput, matchByMac, withoutTokens, pinSecret, setEnabled, updateDevices } from "../kiosk-devices-store.js";
 import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen, recordHealth, noteSwitchAnswer, takeChange, forgetChange, healthList, forgetHealth, firstSecretMismatch, forgetSecretMismatch, forgetSecret, announceDevices } from "../kiosk-presence.js";
 import { MachineUpdates, minutes, parseCheck, REPORT_TTL_MS } from "../machine-updates.js";
+import { serviceActivity } from "../service-activity.js";
 import { serviceWindow } from "../service-window.js";
 import { parseHealthReport } from "../output-health.js";
 import { headerValue } from "../http-origin.js";
@@ -410,7 +411,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
     const m = machineUpdates.check(input, {
       want,
       auto: stageController.getState().autoUpdateMachines,
-      live: stageController.isServiceLive(),
+      live: serviceActivity().active,
       windowCloses: serviceWindow.activeUntil(),
       serviceTimesKnown: stageController.serviceTimesKnown(),
     });

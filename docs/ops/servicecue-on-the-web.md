@@ -250,7 +250,7 @@ the build it carries. When they differ:
 
 | If | The server |
 |---|---|
-| Planning Center reports a service live: any live mode, the countdown before the first item and a service parked between items included (the test the app's own updates use) | waits, looking again every 30 seconds, and deploys when it ends. Nothing goes ahead of it, "Update the page now" included: a deploy reloads every open page and can drop viewers' connections |
+| a service is under way: Planning Center is in one of the plan's items, or a recorder (SPL, attendance, service history) still has its record open. The check the app's own updates use, [the update lock](updates-and-logs.md#the-update-lock); the countdown before a service is not one | waits, looking again every 30 seconds, and deploys when it ends: a deploy reloads every open page and can drop viewers' connections. Only "Update the page now", overridden in its confirm, goes ahead of it |
 | the window around a rehearsal or service is open (the window integration reconnects use, [Winding down between services](reliability.md#winding-down-between-services), which the Mac helpers' updates also wait out) | waits the same way until the window closes. "Update the page now" goes ahead of it |
 | the live state is not known: the server has just started and not yet read Planning Center, or Planning Center cannot be reached | waits the same way, counting unknown as live. Only an explicit "Update the page now" goes ahead of it |
 
@@ -285,7 +285,11 @@ below, with a confirmation.
 **Update the page now** is the button under the status line, and `POST /api/servicecue/publish/deploy`.
 When the page was left alone because it is newer, or another build of this server's version,
 the card asks first, naming both versions, and **Replace the page** sends the request again
-with `confirmDowngrade`. A request made within a minute of a deploy says "Try again in N s", a page
+with `confirmDowngrade`. While a service is under way the button reads **Update anyway** with a
+lock, as the app's own **Update now** does, and asks first in a dialog naming what it would
+interrupt (*A PCO service is live*, *SPL is recording*); **Override & update anyway** sends the
+request with `override`. A page already on this build is not guarded, since nothing is uploaded.
+Each override that goes ahead is logged on `[servicecue-deploy]`. A request made within a minute of a deploy says "Try again in N s", a page
 already on this build says "Already up to date", and a deploy that went ahead while Planning
 Center had not said whether a service is live says so. The button waits while an update is under way,
 for up to six minutes; past that the card says the update is still going, and the status line
@@ -294,8 +298,8 @@ The route deploys when the
 page is older or another build; answers `200` with `already: "current"` and uploads nothing
 when the page is already this build; refuses with `409` and `code: "newer"` or
 `"other-build"` when the page was left alone, unless the body says
-`{"confirmDowngrade": true}`; refuses with `409` and `code: "service-live"` while a
-service is live, always; goes ahead when the live state is merely unknown (just after a
+`{"confirmDowngrade": true}`; refuses with `409`, `code: "service-live"` and the update lock's
+`reasons` while a service is under way, unless the body says `{"override": true}`; goes ahead when the live state is merely unknown (just after a
 restart, or with Planning Center unreachable), and then the answer carries
 `serviceState: "unknown"`; and answers `429` with a `Retry-After` when it has deployed in
 the last minute.
@@ -333,9 +337,9 @@ changed the page and is not asked about.
 |---|---|
 | Up to date: build X (version), deployed *time* | the page is the build this server carries; the time is in the app's time zone |
 | Updating the page… N files to upload, M already on Cloudflare | a deploy is under way |
-| Waiting for the service to end, then updating to build X (version) | a service is live in Planning Center (its countdown included); the page is left alone until it ends |
-| Waiting for the service window to close at *time*, then updating to build X (version) | the window around a service is open; the time is in the app's time zone, and Update the page now goes ahead |
-| Waiting to hear whether a service is live, then updating | the live state is not known yet (the server has just started, or Planning Center cannot be reached); Update the page now goes ahead when the state is merely unknown, never through a live service |
+| Waiting for the service to end, then updating to build X (version) | a service is under way (Planning Center in an item, or a recorder open); the page is left alone until it ends, and the line below names what updating now would interrupt. **Update anyway** overrides it after a confirm |
+| Waiting for the service window to close at *time*, then updating to build X (version) | the window around a service is open; the time is in the app's time zone, followed by its day when that is not today (*1:15 PM Sunday*), and Update the page now goes ahead |
+| Waiting to hear whether a service is live, then updating | the live state is not known yet (the server has just started, or Planning Center cannot be reached); Update the page now goes ahead when the state is merely unknown |
 | Couldn't update the page: *reason*. The page is unchanged. | the last attempt, or a read of what is deployed, failed |
 | Couldn't update the page: *reason*. Whether the page took it is not known. | the last attempt got no answer, and what Cloudflare holds could not be read to see whether it went through |
 | The page runs build X (version), newer than this server's Y | the page is left alone (no-downgrade rule) |

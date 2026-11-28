@@ -187,8 +187,9 @@ folder, which the logged-in account owns. Each run:
    Mac it is, what it runs and what it last did. A server that moves to another
    address is followed by the helper (discovery) but not by the updater: run the
    installer again from the new address.
-2. **The server decides when.** Never while Planning Center reports a service live,
-   and not within the window around a rehearsal or service (the same window integration
+2. **The server decides when.** Never while a service is under way (Planning Center in
+   one of the plan's items, or a recorder still open: the check
+   [the server's own updates](ops/updates-and-logs.md#the-update-lock) use), and not within the window around a rehearsal or service (the same window integration
    reconnects use, [Winding down between services](ops/reliability.md#winding-down-between-services):
    *Lead time before rehearsal* and *Keep active after service ends* in Settings >
    Advanced > Schedule). Not with *Update Mac output helpers and Windows kiosks with this

@@ -40,14 +40,26 @@ server running on the old build.
 Settings → Advanced → Updates can install a new release on its own: **Install**
 applies it and leaves the restart to the operator, **Install + restart** does
 both. Either runs only at the chosen hour (and day, if one is set) in the app's
-time zone, and never while Planning Center reports a service live. When Planning
-Center is not answering, its last reading may be out of date, so the updater
-falls back on the service windows worked out from the plans it last read: inside
-one it waits for the next scheduled time, outside one it goes ahead, so an outage
-holds an update only when the scheduled hour falls in a planned service. A plan
-whose times could not be read adds no window. Just after the server starts, before
-Planning Center has answered and before any window is known, the scheduled hour
-applies as it would with nothing planned.
+time zone, never while a service is under way, as [the update lock](#the-update-lock)
+decides it, and never inside a service window: the time around a rehearsal or
+service worked out from the plans it last read ([Winding down between services](reliability.md#winding-down-between-services)),
+the same window the Mac helpers' updates and the public page's deploy wait out. That
+covers the countdown before a service and the gap between two, when Planning Center
+reports nothing live. A scheduled hour that falls in a window, or that a service
+is still under way at, leaves the update owed: it applies at the first hourly check
+with neither, rather than waiting a week for a schedule that may fall in a window
+every time (*Sunday 03:00* with a Thursday rehearsal) or losing the slot a service
+ran over. The log says when it becomes owed, again if what holds it changes, and
+when it applies late, and the Updates card says, under the schedule, when
+the next scheduled time falls inside a window and when that window closes. An owed
+update is dropped when updates go manual, when the day or hour changes (the new
+schedule decides), when nothing is behind any more, and by a restart, after which the next scheduled hour decides again. Planning Center not answering holds nothing
+by itself: outside every window the scheduled hour applies, so an outage holds an
+update only when the scheduled hour falls in a planned service. A plan, or a service
+type's plan list, that could not be read keeps the window its last good read gave,
+while that window is still to come: a failed read an hour before a service does not
+open the way to a restart. A plan never read adds no window. Just after the server starts, before any window
+is known, the scheduled hour applies as it would with nothing planned.
 
 ### The machines that show screens follow
 
@@ -63,23 +75,39 @@ with this server* turns it off.
 
 ### The update lock
 
-While a Planning Center service is live, or any recorder is open (SPL, attendance,
-service history), `GET /api/update/lock` reports `active` with the reasons. Every
+While Planning Center reports the service running, or any recorder is open (SPL,
+attendance, service history), a service is under way and `GET /api/update/lock`
+reports `active` with the reasons. Running is what the recorders themselves go by:
+in one of the plan's items, and not parked on one past its **SERVICE END** header.
+The countdown Planning Center shows before a service is not one: every plan with a
+service time reports it, days ahead. A recorder still open after Planning Center
+leaves its last item keeps the lock until its record closes, on the next live
+reading. While Planning Center cannot be reached, its last reading, and any record
+left open, count only until 12 hours after that service's start: a failing read is
+not evidence the service stopped, nor that one is still going hours later. A record
+left open with no reading at all, because the plan was unfollowed or Planning
+Center's credentials were cleared mid-service, does not count: nothing would ever
+close it. The same check holds the [automatic update](#automatic-updates), the
+[Mac helpers' updates](../kiosk-devices.md#keeping-the-helper-on-the-servers-version)
+and the [public ServiceCue page's](servicecue-on-the-web.md#keeping-it-up-to-date)
+update, whose **Update the page now** has the same override. Every
 control that would restart the server — **Update now**, **Restart**, the update
 **track switch**, and the **Restart now** on a deferred update — is guarded, and
 Advanced prints the reasons above them.
 
 Guarded is not disabled. A live service can go wrong and the operator may need to
 restart in the middle of one, so each control still opens a confirm dialog whose
-only way forward is an explicit override. `POST /api/update/apply` and
-`/api/update/track` enforce that on the server too, refusing with `409 locked`
-unless the body carries `override: true`; the two restart controls are guarded by
-the dialog alone.
+only way forward is an explicit override. `POST /api/update/apply`,
+`/api/update/track` and `/api/update/restart` enforce that on the server too,
+refusing with `409 locked` and the reasons unless the body carries
+`override: true`, and an override that goes ahead is logged on `[updater]`. The
+dialog sends the override only once it has been confirmed; a lock that began after
+the page read it is refused by the server, and the dialog asks then.
 
-For that reason a lock that could not be read counts as held for the two restart
-controls: Advanced says it couldn't read the lock, both take the guarded look, and
-pressing one asks first. **Update now** and the track switch keep the server's
-`409` as their check. The failed read is logged on the `[updater]` tag.
+A lock that could not be read counts as held for the two restart controls:
+Advanced says it couldn't read the lock, both take the guarded look, and pressing
+one asks first. **Update now** and the track switch keep the server's `409` as
+their check. The failed read is logged on the `[updater]` tag.
 
 What the lock changes is how the controls read: an amber lock in place of the
 action's own icon, a label saying that pressing it now is an override, and — for
@@ -310,7 +338,7 @@ a path or a credential. If you see one, report it.
 | `[pvp]` | Polling state, and playlist-tree fetch failures. Also `BUG: a request URL for <origin> was sent to <origin> instead`, written when a request URL had to be moved back onto the configured ProVideoPlayer host (see [Code scanning](../reference/code-scanning.md#credentialed-requests)): [ProVideoPlayer](../integrations/provideoplayer.md) |
 | `[reaper]` | Polling state, and transport command results: [Reaper](../integrations/reaper.md) |
 | `[reconcile]` | Orphaned open recordings (attendance, SPL, service timeline) closed at boot, and a rundown whose last item is closed with no length because no in-service people count came after it: [What gets recorded](../features/attendance-and-history.md#what-gets-recorded) |
-| `[reconnect]` | The switch into or out of service-window-aware backoff: [Winding down between services](reliability.md#winding-down-between-services) |
+| `[reconnect]` | The switch into or out of service-window-aware backoff, and a window or run of overlapping windows longer than four days cut back to its last four, naming the early part dropped (once each): [Winding down between services](reliability.md#winding-down-between-services) |
 | `[relaunch]` | The server exiting on purpose and expecting its service manager to bring it back: the Restart button, a config import, a snapshot recall, a crash. On macOS (Homebrew and one-line installs) launchd can park the automatic respawn, so each of those exits is paired with a `launchctl kickstart`, and one line names the job being kicked (`com.stageutility.server`, or `com.cornerstone.stage-utility` on an install made before that name; `homebrew.mxcl.<formula>` on Homebrew). `cannot kick this server back up through launchd: …` means the job could not be identified: either none of the known jobs is loaded, or `launchctl` could not be run (the reason says which). Nothing was kicked, so launchd may leave the server stopped until `sudo launchctl kickstart system/<label>` is run by hand; the restart, import and recall replies carry the same reason. Also the warning when nothing will start the server again. An update does not use this path: on a one-line install the installer signals the server and launchd relaunches it, and a Homebrew update kickstarts the service itself |
 | `[remote-server]` | The HTTP/SSE server listening, a port conflict and its retries, kiosk discovery failing to start, the server id being made when discovery first starts, and (under `STAGE_UTILITY_DEBUG`) every request |
 | `[resi]` | Encoder status polling, and broadcast-list availability for encoder names: [Resi](../integrations/resi.md) |
@@ -329,7 +357,7 @@ a path or a credential. If you see one, report it.
 | `[service-timeline-recorder]` | The service-timeline recorder's debounced save failing to persist, and a closed record that could not be saved, held and retried until it is: [When a recorded service cannot be saved](reliability.md#when-a-recorded-service-cannot-be-saved) |
 | `[servicecue]` | A saved ServiceCue file moved in from its old name on upgrade (`scriptview-*.json` to `servicecue-*.json`), or both names found and the new one kept with the old left untouched; a move that failed; browser-side, ServiceCue's settings, types, note categories, rundown or plan list failing to load, a `?plan=` the service type does not have, or a display's text size the server would not keep |
 | `[servicecue-bundle]` | The build preparing the public ServiceCue page for upload (`build/servicecue/`): its failing, which leaves the update itself to go on and this server with nothing to upload: [The copy every build prepares](servicecue-on-the-web.md#the-copy-every-build-prepares) |
-| `[servicecue-deploy]` | Keeping the public ServiceCue page itself up to date ([Keeping it up to date](servicecue-on-the-web.md#keeping-it-up-to-date)): each decision once (deploying and why, the page current, left alone as newer or another build, waiting for a live service, the service window or the service times), the files uploaded and already held, the build deployed, a deploy that left the page on the old build, every failure with Cloudflare's code and words and when it is tried again, an update with no answer (or a 5xx) that Cloudflare was then found to hold, or whose outcome could not be read, a token set or cleared, and the Cloudflare credentials removed with a change of page address. Never the token |
+| `[servicecue-deploy]` | Keeping the public ServiceCue page itself up to date ([Keeping it up to date](servicecue-on-the-web.md#keeping-it-up-to-date)): each decision once (deploying and why, the page current, left alone as newer or another build, waiting for a service under way, naming it, the service window or the service times), each Update the page now that went ahead of a service under way by override (`Update the page now goes ahead while a service is under way (…): overridden, as asked`), the files uploaded and already held, the build deployed, a deploy that left the page on the old build, every failure with Cloudflare's code and words and when it is tried again, an update with no answer (or a 5xx) that Cloudflare was then found to hold, or whose outcome could not be read, a token set or cleared, and the Cloudflare credentials removed with a change of page address. Never the token |
 | `[servicecue-layouts]` | A one-time migration of saved columns from category names to roles: [Category roles](../features/servicecue-and-baptisms.md#category-roles) |
 | `[shure:<id>]` | A Shure wireless or charger connection's init and per-channel state: [Wireless](../integrations/wireless.md) |
 | `[sidebar]` | The sidebar's arrangement: a save refused, with the reason; ids it names that this server no longer has (a page a release removed, a console deleted), left out and said once until the next save; and a `sidebar-config.json` that breaks the rules at start-up, copied aside as `sidebar-config.json.invalid-<time>` and drawn from what in it can be read: [Customizing the sidebar](../features/operator-app.md#customizing-the-sidebar) |
@@ -341,13 +369,13 @@ a path or a credential. If you see one, report it.
 | `[spl-history]` | The SPL records' own files, as for `[attendance-history]`: [When a recorded file cannot be read](reliability.md#when-a-recorded-file-cannot-be-read) |
 | `[spl-recorder]` | The SPL recording resumed or rebuilt from the archive, or resumed from its stored record because the archive could not be read, and archive-close failures: [Sound levels](../features/attendance-and-history.md#sound-levels). A closed record that could not be saved, held and retried until it is: [When a recorded service cannot be saved](reliability.md#when-a-recorded-service-cannot-be-saved) |
 | `[spl-series]` | A raw SPL sample series failing to read: [Sound levels](../features/attendance-and-history.md#sound-levels) |
-| `[stage-controller]` | Layout template and group library changes (saved, updated, deleted) — internal bookkeeping, not an operator signal. Also a screen being made (`createScreen`) and a view changing what it is for (`setViewRole view=… → console, screens: …`, with the screens showing it, which change with it; and `… not made: the screens changed since the operator was asked` when the screens they were shown are no longer the ones it would change), and, when a multi-step screen write fails, a warning naming the step that failed, what was put back, and anything that could not be: [Screens](../features/operator-app.md#screens). An automatic update waiting because Planning Center's live state is unknown and a planned service window is open (`auto-update waits: …`): [Automatic updates](#automatic-updates). At startup, the migrations of views and screens skipped because `views.json` or `settings.json` could not be read: [When a store file cannot be read](reliability.md#when-a-store-file-cannot-be-read). The operator giving this server a new id while another server answered with it (`newServerId: <old> → <new>`): [Two servers with one id](../kiosk-devices.md#two-servers-with-one-id). An auto-mode rollover that could not move, and when it is tried again (`auto rollover — still on plan … trying again in N s`), and one waiting, once per plan, on a service Planning Center still reports live past its planned end (`auto rollover waits: …`): [Which plan the screens follow](../integrations/planning-center.md#which-plan-the-screens-follow) |
+| `[stage-controller]` | Layout template and group library changes (saved, updated, deleted) — internal bookkeeping, not an operator signal. Also a screen being made (`createScreen`) and a view changing what it is for (`setViewRole view=… → console, screens: …`, with the screens showing it, which change with it; and `… not made: the screens changed since the operator was asked` when the screens they were shown are no longer the ones it would change), and, when a multi-step screen write fails, a warning naming the step that failed, what was put back, and anything that could not be: [Screens](../features/operator-app.md#screens). An automatic update held because its scheduled time fell inside a planned service window (`auto-update waits: its scheduled time fell inside a planned service window, open until …`) or a service was under way (`auto-update waits: a service is under way (…)`), and applying once neither holds it (`auto-update applying late: …`): [Automatic updates](#automatic-updates). At startup, the migrations of views and screens skipped because `views.json` or `settings.json` could not be read: [When a store file cannot be read](reliability.md#when-a-store-file-cannot-be-read). The operator giving this server a new id while another server answered with it (`newServerId: <old> → <new>`): [Two servers with one id](../kiosk-devices.md#two-servers-with-one-id). An auto-mode rollover that could not move, and when it is tried again (`auto rollover — still on plan … trying again in N s`), and one waiting, once per plan, on a service Planning Center still reports live past its planned end (`auto rollover waits: …`): [Which plan the screens follow](../integrations/planning-center.md#which-plan-the-screens-follow) |
 | `[stageplots]` | [Stage plots](../features/stageplots.md): every upload refused and why (a bad name or page, the background limit, over the size cap, not a PNG, JPEG or PDF, five PDFs already waiting), a PDF kept, a background accepted with its size before and after and the size of the source kept, a conversion or re-conversion that failed or whose source is missing, a background still over 1 MB at the lowest quality, a clean-up re-conversion, a venue or background deleted, files no background names any more removed or left behind, the tidy skipped (a quarantined `stageplots.json.corrupt-*`, or the plots unreadable), sharp failing to load, a save that failed, every plan override set or handed back to the default, every override refused and why, the plan overrides cleared with a deleted plot, and plan overrides in `stageplots.json` that were not a list and were read as none, every venue address change (and the old address that still opens it), old addresses dropped, every address refused and why, every editor draft refused and why, drafts left out because their plot is not in `stageplots.json` (kept in the file), a draft that could not be written, each venue listed on or taken off the public page's landing page, each new landing list a page took, and a landing list the page would not take (once, with why, and again once it does; never a secret). Publishing a venue to the public page: each publish, republish, Publish now, regenerate and unpublish, every failure and why, every refusal, each old link queued for removal, removed, failing (once) or waiting for its page (once), and each venue moved to a new page; never the secret. A publish that cannot read the patch sheet (once, and again when it can), and each plot sent with linked connection points that went out unlinked, naming each and why. Browser-side, a page that could not read the stage plots, the editor's drafts or the patch sheet for its linked points, the editor's draft of a plot that could not be kept (once, until it is kept again, and then that it is), one that could not be deleted, or one that could not be sent as the page closed, Planning Center becoming unreachable, after which `/stageplots` shows each venue's default plot, and Planning Center readable again |
 | `[store-registry]` | Start-up refusing to run: two stores over one file name that disagree about being `config` or `runtime`. A programming error, never an operator one: [Contributing](../contributing.md) |
 | `[stream-starts]` | The first-seen live timestamp for a streaming platform failing to persist or clear |
 | `[surface-migration]` | A one-time pass that makes a view holding a button a console, and so the screens showing it control surfaces, on an install that predates surfaces: [Upgrading an existing install](../reference/data-model.md#upgrading-an-existing-install) |
 | `[tsl]` | Connection state to a Ross multiviewer over TSL UMD, and an unreachable one once per outage ([Connection outages](#connection-outages)): [Ross MultiViewer](../integrations/ross-tsl.md) |
-| `[updater]` | The update flow described above; a tag held back until its release is published, and the releases being unreadable so none is; What's new failing to read the running release's notes (`could not load the release notes for v<version>: <why>`), or reading them and failing to keep them (`fetched the release notes for v<version> but could not keep them: <why>`); a file `.gitattributes` pins (`-text`) checked out again because, with every CRLF made LF, it was byte for byte the committed file, before the dirty-tree check, and each such file it could not check (`could not check <file> for line ends .gitattributes pins`, with why); and (browser side) the update lock failing to read, and What's new's request for the notes failing (`could not read the release notes for What's new: <why>`) |
+| `[updater]` | The update flow described above; an update, track switch or restart that went ahead of a service under way by override (`… went ahead while a service is under way (…): the update lock was overridden, as asked`); a tag held back until its release is published, and the releases being unreadable so none is; What's new failing to read the running release's notes (`could not load the release notes for v<version>: <why>`), or reading them and failing to keep them (`fetched the release notes for v<version> but could not keep them: <why>`); a file `.gitattributes` pins (`-text`) checked out again because, with every CRLF made LF, it was byte for byte the committed file, before the dirty-tree check, and each such file it could not check (`could not check <file> for line ends .gitattributes pins`, with why); and (browser side) the update lock failing to read, and What's new's request for the notes failing (`could not read the release notes for What's new: <why>`) |
 | `[video-export]` | Exporting video feeds: the count, and whether passwords or relay ports were included: [Moving feeds between servers](../integrations/video-feeds.md#moving-feeds-between-servers) |
 | `[video-import]` | Importing video feeds: how many were added, replaced, kept, already the same or skipped (with the reason), and whether passwords or relay ports were applied: [Moving feeds between servers](../integrations/video-feeds.md#moving-feeds-between-servers) |
 | `[video]` | Relay starts (once per process), exits and restarts, downloads and checksums, port conflicts, a relay left over from the last run, the relay not answering, reconcile and proxy failures, feeds going live, delayed or offline, a pull feed's device not answering the relay's dial or the page's camera check, B-frames detected, a push feed's password rotating, a pull feed's stored password cleared because its address moved to another camera or off an encrypted scheme, or because a new feed landed on the slot of an earlier one, a screen struggling with a feed or playing it smoothly again, and a screen lagging on a feed (holding the delay in its own browser) or no longer; browser-side, a Video widget's feed failing on a screen (once per failing streak: the first failure, a reminder at most every 5 minutes, the recovery), a feed falling back to HLS on a screen and back to WebRTC, a feed refused by a screen's own HLS switch and allowed again, a screen's playback stats failing to read and reading again, and a widget crashing: [Video feeds](../integrations/video-feeds.md#logging) |

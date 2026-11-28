@@ -56,9 +56,19 @@ let lockReply: { active: boolean; reasons: string[] } = { active: false, reasons
  *  mount, and every assertion is about what the panel draws once it has. */
 const reads = readLedger();
 
-(globalThis as unknown as { fetch: unknown }).fetch = async (url: string) => {
+/** Every POST /api/update/restart, as its body. */
+let restarts: Record<string, unknown>[] = [];
+/** What POST /api/update/restart answers, in order; once used up, 200. */
+let restartReplies: { status: number; json: unknown }[] = [];
+
+(globalThis as unknown as { fetch: unknown }).fetch = async (url: string, init?: { method?: string; body?: string }) => {
   // The live-update subscription is nobody's read; see isPlumbing.
   if (isPlumbing(url)) return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
+  if (init?.method === "POST" && url.includes("/api/update/restart")) {
+    restarts.push(init.body ? (JSON.parse(init.body) as Record<string, unknown>) : {});
+    const r = restartReplies.shift() ?? { status: 200, json: { ok: true } };
+    return { ok: r.status < 400, status: r.status, statusText: "", json: async () => r.json, text: async () => JSON.stringify(r.json) };
+  }
   reads.begin(url);
   const payload = url.includes("/api/update/lock") ? lockReply : {};
   return reads.answer({ ok: true, status: 200, json: async () => payload, text: async () => JSON.stringify(payload) });
@@ -66,13 +76,14 @@ const reads = readLedger();
 
 // After installDom(), never before: a static import evaluates first and React
 // would come up with no document.
-const { render, screen, cleanup, fireEvent } = await import("@testing-library/react");
+const { render, screen, cleanup, fireEvent, within } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { UpdatesPanel } = await import("./advanced-section.js");
 const { ConfirmHost, TooltipProvider } = await import("../../components/ui/index.js");
+const { setDisplayHourCycle } = await import("../../lib/clock-format.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
-beforeEach(() => { cleanup(); reads.reset(); lockReply = { active: false, reasons: [] }; });
+beforeEach(() => { cleanup(); reads.reset(); lockReply = { active: false, reasons: [] }; restarts = []; restartReplies = []; });
 afterEach(async () => { cleanup(); await settle(); });
 
 /** Every apply the panel asked for, with the override flag it passed. */
@@ -108,7 +119,7 @@ function status(over: Partial<UpdateStatus> = {}): UpdateStatus {
   };
 }
 
-async function mount(over: Partial<UpdateStatus> = {}) {
+async function mount(over: Partial<UpdateStatus> = {}, panel: Partial<Parameters<typeof UpdatesPanel>[0]> = {}) {
   applied = [];
   const handlers = {
     handleCheckUpdates: async () => {},
@@ -124,6 +135,7 @@ async function mount(over: Partial<UpdateStatus> = {}) {
         autoUpdate: { mode: "manual", dayOfWeek: null, hour: 3 },
         // Only the three update handlers are reached from this panel.
         handlers: handlers as unknown as Parameters<typeof UpdatesPanel>[0]["handlers"],
+        ...panel,
       }),
       React.createElement(ConfirmHost, null),
     ),
@@ -294,5 +306,59 @@ describe("update lock affordance", () => {
     await settle();
 
     assert.deepEqual(applied, [true], "confirming the override must apply with override=true");
+  });
+});
+
+// Not about the lock, but drawn by the same panel: a schedule that falls inside a
+// service window still applies, late, and says so where the schedule is set.
+describe("a schedule inside a service window", () => {
+  const SUNDAY_3AM = Date.parse("2026-11-29T09:00:00Z");
+  const CLOSES = Date.parse("2026-11-29T19:15:00Z");
+  const auto = { mode: "auto-full" as const, dayOfWeek: 0, hour: 3 };
+  const line = () => document.querySelector("[data-auto-update-window]")?.textContent ?? null;
+
+  test("says the scheduled time is inside the window and when the update goes instead, in the app's zone", async () => {
+    setDisplayHourCycle("24h");
+    await mount({}, { autoUpdate: auto, autoUpdateWindow: { at: SUNDAY_3AM, until: CLOSES }, timeZone: "America/Chicago" });
+    assert.equal(line(), "03:00 Sunday is inside a service window; the update waits until it closes at 13:15 Sunday.");
+  });
+
+  test("says nothing when no scheduled time falls in a window", async () => {
+    await mount({}, { autoUpdate: auto, autoUpdateWindow: null, timeZone: "America/Chicago" });
+    assert.equal(line(), null);
+  });
+});
+
+// Restart is refused by the server during a service, as Update now is. The dialog
+// is what sends the override, and only once the operator has said yes to it.
+describe("Restart and the server's lock", () => {
+  const dialog = () => screen.findByRole("alertdialog");
+  const press = async (name: string) => {
+    const d = await dialog();
+    fireEvent.click(within(d).getByRole("button", { name }));
+    await settle();
+  };
+
+  test("locked: the override confirm comes first, and override is sent only after yes", async () => {
+    lockReply = { active: true, reasons: ["A PCO service is live"] };
+    await mount();
+    fireEvent.click(screen.getAllByRole("button", { name: "Restart anyway" })[0]);
+    await settle();
+    assert.ok(((await dialog()).textContent ?? "").includes("would interrupt: A PCO service is live"));
+    assert.deepEqual(restarts, [], "a restart went before the operator said yes");
+    await press("Override & restart anyway");
+    await eventually(() => assert.deepEqual(restarts, [{ override: true }]));
+  });
+
+  test("a service the page had not seen: the server's 409 asks the same question, then sends override, once", async () => {
+    await mount();
+    restartReplies = [{ status: 409, json: { error: "locked", locked: true, reasons: ["SPL is recording"] } }];
+    fireEvent.click(button("Restart"));
+    await settle();
+    await press("Restart");
+    await eventually(() => assert.deepEqual(restarts, [{}]));
+    assert.ok(((await dialog()).textContent ?? "").includes("would interrupt: SPL is recording"));
+    await press("Override & restart anyway");
+    await eventually(() => assert.deepEqual(restarts, [{}, { override: true }]));
   });
 });

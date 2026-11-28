@@ -127,6 +127,9 @@ export interface DeployStatus {
   waitingFor: "live" | "unknown" | "window" | null;
   /** When the service window closes, while `waitingFor` is "window"; null otherwise. */
   waitingUntil: number | null;
+  /** What updating the page now would interrupt, read with this status: the update lock's reasons
+   *  ("A PCO service is live", "SPL is recording"), or null when no service is under way. */
+  liveReasons: string[] | null;
   /** The last failure, until a deploy or a read works again. */
   error: DeployError | null;
   /** The server's clock when this was built. */

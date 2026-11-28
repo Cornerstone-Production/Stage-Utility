@@ -3,7 +3,7 @@ import { availableCount } from "@main/services/update/availability";
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, AlertTriangleIcon, XIcon, RotateCwIcon, LockIcon, FileTextIcon } from "lucide-react";
-import { invoke, onNotification } from "../../lib/api";
+import { invoke, onNotification, type ApiError } from "../../lib/api";
 import { useServerNow } from "../../lib/server-clock";
 import { useFailedReads } from "../../lib/use-failed-reads";
 import {
@@ -19,7 +19,6 @@ import {
   NumberInput,
   Button,
   ButtonGroup,
-  type ButtonProps,
   ErrorNote,
   Select,
   SelectTrigger,
@@ -38,11 +37,14 @@ import { SERVER_ID_FLASH, ServerIdStatus } from "./server-id-field";
 import { HostNamesCard } from "./host-names-card";
 import { HistoryMilestonesPanel } from "./history-milestones-panel";
 import { WhatsNewButton } from "./whats-new";
+import { GuardedButton } from "./guarded-button";
 import { PublicLinkPanel } from "./servicecue-public-link";
 import { VideoRelayFfmpegPanel } from "./video-relay-ffmpeg";
 import { VideoRelayPortsPanel, VIDEO_PORTS_FLASH_ID } from "./video-relay-ports";
 import { useCustomize } from "../../app/customize-mode";
 import { clockOptions, formatClock } from "../../lib/clock-format";
+import { appZoneOf } from "../../lib/app-zone";
+import { weekdayOf } from "@main/services/app-timezone";
 import type { BackupSchedule } from "../../../main/services/backup-scheduler";
 import type { SectionProps } from "../types";
 import { restartConsequence, restartOutcome } from "../../lib/restart-warning";
@@ -175,7 +177,7 @@ function isRecordOpen(payload: unknown): boolean {
 
 /**
  * The one fact each lock-relevant channel carries that the server's lock
- * (serviceActivity() in main/services/routes/system-routes.ts) actually
+ * (serviceActivity() in main/services/service-activity.ts) actually
  * depends on — never the rest of the payload, which changes far more often
  * than the lock does.
  */
@@ -185,6 +187,14 @@ const LOCK_CHANNELS: readonly (readonly [string, (payload: unknown) => boolean])
   ["attendance:history", isRecordOpen],
   ["service-timeline:history", isRecordOpen],
 ];
+
+/** "3:00 AM Sunday is inside a service window; the update waits until it closes at 1:15 PM Sunday.": a schedule that
+ *  falls in a window still applies, late, and the operator should not have to find that in the log. Weekdays always: the
+ *  sentence is about a schedule, not about today. */
+function windowedSchedule(w: { at: number; until: number }, timeZone: string | undefined): string {
+  const when = (ms: number) => `${formatClock(ms, { timeZone })} ${weekdayOf(ms, timeZone)}`;
+  return `${when(w.at)} is inside a service window; the update waits until it closes at ${when(w.until)}.`;
+}
 
 /** An hour of the day, in the app's clock format. A fixed date: only the hour is read. */
 function formatHour(h: number): string {
@@ -226,64 +236,13 @@ function UpdateProgress({ step }: { step: UpdateStatus["step"] }) {
   );
 }
 
-/**
- * A control the update lock guards.
- *
- * The lock deliberately does NOT disable these. A live service can go wrong and
- * the operator may genuinely need to update or restart in the middle of one, so
- * each of these opens a destructive override dialog instead of refusing — that
- * is the "or override in the dialog" the lock warning promises. What was missing
- * was the affordance: while locked they rendered exactly as they do when there
- * is nothing to worry about, so the warning above them was the only thing on
- * screen saying otherwise, and "Update now" in full accent said the opposite.
- *
- * Locked, a control takes an amber lock in place of whatever icon it had and a
- * label saying that pressing it now is an override; the two that are `accent`
- * also drop to `filled`, off the encouraged primary weight. Never colour alone.
- * The tooltip repeats the reasons for a pointer user; it is never the only place
- * they are said.
- *
- * The guarded look follows being PRESSABLE, not the lock alone. A control its own
- * rules have already disabled cannot reach the override, so promising "anyway" on
- * it would be the same lie pointing the other way. That is also what keeps the
- * deferred-update banner honest: it is the one control nothing else disables, so
- * it stays guarded even mid-update, when the others have gone quiet behind their
- * own `disabled`. Tying this to `updating` instead left exactly that button
- * clickable, in full accent, on an active lock.
- */
-function GuardedButton({
-  guard,
-  variant,
-  icon,
-  label,
-  lockedLabel,
-  ...props
-}: Omit<ButtonProps, "children" | "tooltip"> & {
-  /** Why the lock is active, or null when it is not. Never feeds `disabled`. */
-  guard: string[] | null;
-  /** The action's own icon, shown when nothing is locked. */
-  icon?: ReactNode;
-  label: string;
-  lockedLabel: string;
-}) {
-  const locked = guard !== null && !props.disabled;
-  return (
-    <Button
-      {...props}
-      variant={locked ? "filled" : variant}
-      tooltip={locked ? `Locked — ${guard.join(" · ")}. You'll be asked to confirm.` : ""}
-    >
-      {locked ? <LockIcon className="size-3.5 text-amber-11" /> : icon}
-      {locked ? lockedLabel : label}
-    </Button>
-  );
-}
-
 // Exported for update-lock-affordance.test.tsx, which renders it directly — the
 // whole AdvancedSection needs a full StageState it has no opinion about.
 export function UpdatesPanel({
   updateStatus,
   autoUpdate,
+  autoUpdateWindow = null,
+  timeZone,
   handlers,
   justUpdated,
   show = SHOW_ALL,
@@ -291,6 +250,10 @@ export function UpdatesPanel({
 }: {
   updateStatus: SectionProps["updateStatus"];
   autoUpdate: StageState["autoUpdate"];
+  /** The next scheduled time that falls in a service window, and when that closes: said under the schedule. */
+  autoUpdateWindow?: StageState["autoUpdateWindow"];
+  /** The app's zone, which those times are written in. */
+  timeZone?: string;
   handlers: SectionProps["handlers"];
   /** Set while the post-update banner is up: the result lines beneath would contradict it. */
   justUpdated?: { version: string } | null;
@@ -353,7 +316,7 @@ export function UpdatesPanel({
     // keepalive) with the lock's own fact unchanged, so a read is worth
     // repeating only when that fact — a PCO item live, or a recorder's
     // record newly opened/closed — actually flips. See serviceActivity() in
-    // main/services/routes/system-routes.ts for what the lock reads.
+    // main/services/service-activity.ts for what the lock reads.
     const lastFact = new Map<string, boolean>();
     const offs = LOCK_CHANNELS.map(([ch, fact]) =>
       onNotification(ch, (payload, replayed) => {
@@ -399,25 +362,34 @@ export function UpdatesPanel({
   }
 
   async function onRestart() {
-    const doRestart = () =>
-      void invoke<RestartAnswer>("update:restart")
+    /** What the operator is asked before a restart overrides a service under way. */
+    const confirmOverride = (reasons: string[]) =>
+      confirm({
+        title: "Service in progress",
+        message: `Restarting the server would interrupt: ${reasons.join(", ")}. It's safest to wait until the service is over.`,
+        confirmLabel: "Override & restart anyway",
+        destructive: true,
+      });
+    // `override` is sent only after a confirm said so. A lock that started after it was read is refused by the
+    // server with its reasons, and asked about then; asked once, never in a loop.
+    const doRestart = (override = false): void =>
+      void invoke<RestartAnswer>("update:restart", override ? { override: true } : undefined)
         .then((r) => {
           if (r?.relaunchFailure) window.alert(restartOutcome(s?.selfRecovers, "Restarting.", r.relaunchFailure));
         })
-        .catch((e) => window.alert(`Restart failed: ${errorMessage(e)}`));
+        .catch(async (e: unknown) => {
+          const refused = e as Partial<ApiError>;
+          const reasons = refused.status === 409 && Array.isArray(refused.body?.reasons) ? refused.body.reasons.map(String) : null;
+          if (reasons && !override) {
+            if (await confirmOverride(reasons)) doRestart(true);
+            return;
+          }
+          window.alert(`Restart failed: ${errorMessage(e)}`);
+        });
     // Locked during a live service / recording, same as self-update — a manual
     // restart interrupts displays too. Overridable for a genuine emergency.
     if (lock?.active) {
-      if (
-        await confirm({
-          title: "Service in progress",
-          message: `Restarting the server would interrupt: ${lock.reasons.join(", ")}. It's safest to wait until the service is over.`,
-          confirmLabel: "Override & restart anyway",
-          destructive: true,
-        })
-      ) {
-        doRestart();
-      }
+      if (await confirmOverride(lock.reasons)) doRestart(true);
       return;
     }
     if (lockUnread) {
@@ -429,7 +401,7 @@ export function UpdatesPanel({
           destructive: true,
         })
       ) {
-        doRestart();
+        doRestart(true);
       }
       return;
     }
@@ -754,6 +726,11 @@ export function UpdatesPanel({
               </Select>
             </div>
           </Field>
+        ) : null}
+        {show("update-window") && drawsWindowRow(s, autoUpdate) && autoUpdateWindow ? (
+          <p className="text-caption1 text-warn-11" data-auto-update-window>
+            {windowedSchedule(autoUpdateWindow, timeZone)}
+          </p>
         ) : null}
         {children}
       </FieldGroup>
@@ -1445,6 +1422,8 @@ export function AdvancedSection({
         <UpdatesPanel
           updateStatus={updateStatus}
           autoUpdate={autoUpdate}
+          autoUpdateWindow={stageState.autoUpdateWindow ?? null}
+          timeZone={appZoneOf(stageState)}
           handlers={handlers}
           justUpdated={justUpdated ?? null}
           show={show}

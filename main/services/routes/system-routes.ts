@@ -6,6 +6,7 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { errorMessage } from "../errors.js";
+import { scrub } from "../scrub.js";
 import { isStringList } from "../../types/is-record.js";
 import { type RouteCtx, json, error, readBody, readBodyOrEmpty, MAX_CONFIG_BODY_BYTES } from "./context.js";
 import { stageController } from "../stage-controller.js";
@@ -16,25 +17,25 @@ import { exitForRestart, type RelaunchPrep } from "../update/relaunch.js";
 import { backupScheduler } from "../backup-scheduler.js";
 import { configSnapshot } from "../config-snapshot.js";
 import { refuseUnansweredHost } from "./host-name-routes.js";
-import { splRecorder } from "../spl-recorder.js";
-import { attendanceRecorder } from "../attendance-recorder.js";
-import { serviceTimelineRecorder } from "../service-timeline-recorder.js";
+import { serviceActivity } from "../service-activity.js";
 import { zonedDateKey } from "../app-timezone.js";
 import { isUpdateMode, type UpdateMode } from "../../types/state.js";
 
-/** Whether a live service / active recording is in progress, and why. Used to lock
- *  self-updates (which restart the process and would interrupt a service mid-flight
- *  and drop the last un-persisted samples) unless the operator explicitly overrides. */
-function serviceActivity(): { active: boolean; reasons: string[] } {
-  const reasons: string[] = [];
-  if (stageController.getLastLive()?.mode === "item") reasons.push("A PCO service is live");
-  const spl = splRecorder.getCurrent();
-  if (spl && !spl.endedAt) reasons.push("SPL is recording");
-  const att = attendanceRecorder.getCurrent();
-  if (att && !att.endedAt) reasons.push("Attendance is recording");
-  const tl = serviceTimelineRecorder.getCurrent();
-  if (tl && !tl.endedAt) reasons.push("Service history is recording");
-  return { active: reasons.length > 0, reasons };
+/**
+ * The update lock, enforced on a request that restarts the server: true when it may
+ * go ahead. While a service is under way, a request without `override: true` is
+ * answered 409 `locked` with the reasons; one with it goes ahead, and that is said on
+ * `[updater]`, naming what it went ahead of.
+ */
+function lockAllows(c: RouteCtx, body: Record<string, unknown>, action: string): boolean {
+  const lock = serviceActivity();
+  if (!lock.active) return true;
+  if (body.override !== true) {
+    json(c.res, { error: "locked", locked: true, reasons: lock.reasons }, 409);
+    return false;
+  }
+  console.warn(`[updater] ${scrub(action)} went ahead while a service is under way (${scrub(lock.reasons.join(", "))}): the update lock was overridden, as asked`);
+  return true;
 }
 
 /** Exit shortly, so the service manager restarts us. On launchd the exit alone
@@ -110,11 +111,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
     }
     if (method === "POST" && pathname === "/api/update/apply") {
       const body = await readBodyOrEmpty(req);
-      const lock = serviceActivity();
-      if (lock.active && body.override !== true) {
-        json(res, { error: "locked", locked: true, reasons: lock.reasons }, 409);
-        return;
-      }
+      if (!lockAllows(c, body, "Update now")) return;
       try {
         json(res, await updater.applyUpdate());
       } catch (err) {
@@ -128,11 +125,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
         error(res, "body.branch (string) required");
         return;
       }
-      const lock = serviceActivity();
-      if (lock.active && body.override !== true) {
-        json(res, { error: "locked", locked: true, reasons: lock.reasons }, 409);
-        return;
-      }
+      if (!lockAllows(c, body, "Switching track")) return;
       try {
         json(res, await updater.switchTrack(body.branch));
       } catch (err) {
@@ -141,6 +134,8 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (method === "POST" && pathname === "/api/update/restart") {
+      // A restart interrupts displays as an update does: the same lock, enforced here as well as in the dialog.
+      if (!lockAllows(c, await readBodyOrEmpty(req), "Restart")) return;
       try {
         json(res, updater.restart());
       } catch (err) {
