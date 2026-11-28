@@ -39,13 +39,14 @@ import { MESSAGE_ID } from "../../types/messages.js";
 import { MessageRefused } from "../message-rules.js";
 import { GroupsNotCleared, messagesService } from "../messages-service.js";
 import { MessagingConflict } from "../messaging-store.js";
-import { type RouteCtx, error, json, readBodyOrEmpty } from "./context.js";
+import { type RouteCtx, error, json, readBodyOrEmpty, readBodyTolerant } from "./context.js";
 import type http from "node:http";
+import { isRecord } from "../../types/is-record.js";
 
-/** A body that must be a JSON object. A JSON array is not one, and readBodyOrEmpty
+/** A body that must be a JSON object. A JSON array is not one, and readBodyTolerant
  *  hands one through, so it is checked here. */
 function objectBody(body: unknown): Record<string, unknown> | null {
-  return body !== null && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
+  return isRecord(body) ? body : null;
 }
 
 /** Answer a failure the caller can act on, or rethrow one they cannot. */
@@ -74,10 +75,10 @@ export async function messagesRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "POST" && pathname === "/api/messages") {
-    // readBodyOrEmpty: a body that is not JSON reads as empty and is refused below
+    // readBodyTolerant: a body that is not JSON reads as empty and is refused below
     // with the reason, the way every other route in this app answers one, instead
     // of reaching the server's handler as a 500.
-    const body = objectBody(await readBodyOrEmpty(req));
+    const body = objectBody(await readBodyTolerant(req));
     if (!body) {
       error(res, "body must be { to, text, alert?, from? }");
       return;
@@ -118,7 +119,7 @@ export async function messagesRoutes(c: RouteCtx): Promise<void> {
       error(res, "that is not a message id");
       return;
     }
-    const body = objectBody(await readBodyOrEmpty(req));
+    const body = objectBody(await readBodyTolerant(req));
     if (!body) {
       error(res, "body must be { text, objectId, outputId? }");
       return;
@@ -140,7 +141,7 @@ export async function messagesRoutes(c: RouteCtx): Promise<void> {
 
   if (method === "PUT" && pathname === "/api/messaging") {
     try {
-      json(res, await messagesService.updateConfig(await readBodyOrEmpty(req)));
+      json(res, await messagesService.updateConfig(await readBodyTolerant(req)));
     } catch (err) {
       answerFailure(res, err);
     }

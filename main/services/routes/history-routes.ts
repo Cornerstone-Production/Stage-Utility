@@ -6,7 +6,7 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
-import { type RouteCtx, json, error, readBody, readBodyOrEmpty, pcoReadFailed } from "./context.js";
+import { type RouteCtx, json, error, readBodyOrEmpty, pcoReadFailed, readJsonObject } from "./context.js";
 import { errorMessage } from "../errors.js";
 import { baptismTriggersStore } from "../baptism-triggers-store.js";
 import { stageController } from "../stage-controller.js";
@@ -411,7 +411,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
         return;
       }
       if (method === "POST") {
-        const body = (await readBody(req)) as Record<string, unknown>;
+        const body = await readJsonObject(req);
         const id = typeof body.planId === "string" ? body.planId : planId;
         if (!id) {
           json(res, { error: "planId required" }, 400);
@@ -444,7 +444,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
         case "reset": json(res, baptismTimerService.reset()); return;
         case "dismiss-save-error": json(res, baptismTimerService.dismissSaveError()); return;
         case "mode": {
-          const body = (await readBody(req)) as Record<string, unknown>;
+          const body = await readJsonObject(req);
           json(res, baptismTimerService.setMode(body.mode === "grouped" ? "grouped" : "per-person"));
           return;
         }
@@ -534,7 +534,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
     // Awaited before the response: a tick that looked saved and was not is how
     // somebody skips a job on Sunday believing it was done.
     if (method === "POST" && pathname === "/api/pco/checklist/tick") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (typeof body.key !== "string" || typeof body.done !== "boolean") {
         error(res, "body.key (string) and body.done (boolean) required");
         return;

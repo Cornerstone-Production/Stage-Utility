@@ -20,7 +20,7 @@ import {
 import type { NotesContent } from "../notes-store.js";
 import { errorMessage } from "../errors.js";
 import { isStringList } from "../../types/is-record.js";
-import { type RouteCtx, json, error, readBody, isDisplayKind, MAX_CONFIG_BODY_BYTES } from "./context.js";
+import { type RouteCtx, json, error, BodyTooLargeError, isDisplayKind, MAX_CONFIG_BODY_BYTES, readJsonObject } from "./context.js";
 import { isLayoutShape, isSlotsLayoutValue, type ViewSurface } from "../../types/views.js";
 import { oscManager } from "../osc-manager.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
@@ -29,7 +29,7 @@ import { readSlotsTarget, INVALID_TARGET, TARGET_ERROR } from "../slots-target-b
 import { LayoutConflictError, SlotsNotFoundError, stageController, ViewScreensChangedError, ViewShownError } from "../stage-controller.js";
 import { isSelectionList } from "../../types/calendar.js";
 import { calendarBroadcaster } from "../calendar-broadcaster.js";
-import { datedExportFilename } from "../export-filename.js";
+import { attachmentDisposition, datedExportFilename } from "../export-filename.js";
 import { answerScreenWriteFailure, readCreateScreenBody, refuseMode } from "./screen-write.js";
 
 /** `stage-utility-view-left-mic-display-2026-08-17.json`. */
@@ -75,7 +75,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // What an operator typed into a notes/checklist object. Awaited before the
     // response, so a failed write is a failed request rather than a silent loss.
     if (method === "POST" && pathname === "/api/notes") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (typeof body.objectId !== "string" || typeof body.content !== "object" || body.content === null) {
         error(res, "body.objectId (string) and body.content (object) required");
         return;
@@ -89,7 +89,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     }
 
     if (method === "POST" && pathname === "/api/views") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const name = typeof body.name === "string" ? body.name : undefined;
       const kind = isDisplayKind(body.kind) ? body.kind : "slots";
       const surface = body.surface === "console" ? "console" : "display";
@@ -100,7 +100,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
 
     // POST /api/views/reorder — { ids: string[] }
     if (method === "POST" && pathname === "/api/views/reorder") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (!Array.isArray(body.ids)) {
         error(res, "body.ids (string[]) required");
         return;
@@ -117,7 +117,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // week; absent, it is the plan the screens are following. Must precede the
     // /api/views/:id/slots matcher.
     if (method === "POST" && pathname === "/api/views/resolve-slots") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (!Array.isArray(body.slots)) {
         error(res, "body.slots (array) required");
         return;
@@ -197,7 +197,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // plan's board onto the service type's default and drop the override.
     const promoteMatch = pathname.match(/^\/api\/(views|layout-objects)\/([^/]+)\/slots\/promote$/);
     if (method === "POST" && promoteMatch) {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (typeof body.planId !== "string") {
         error(res, "body.planId (string) required");
         return;
@@ -218,7 +218,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // POST /api/views/:id/slots — { slots, target? }
     const viewSlotsMatch = pathname.match(/^\/api\/views\/([^/]+)\/slots$/);
     if (method === "POST" && viewSlotsMatch) {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (!Array.isArray(body.slots)) {
         error(res, "body.slots (array) required");
         return;
@@ -239,7 +239,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // POST /api/layout-objects/:objectId/slots — { slots, target? } (inline grid)
     const objectSlotsMatch = pathname.match(/^\/api\/layout-objects\/([^/]+)\/slots$/);
     if (method === "POST" && objectSlotsMatch) {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (!Array.isArray(body.slots)) {
         error(res, "body.slots (array) required");
         return;
@@ -268,7 +268,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         // wraps it to carry the chosen service type and the clash choice.
         // Detected by the ABSENCE of `kind`, which every bundle has and no
         // wrapper does.
-        const body = await readBody(req, MAX_CONFIG_BODY_BYTES) as Record<string, unknown>;
+        const body = await readJsonObject(req, MAX_CONFIG_BODY_BYTES);
         const wrapped = body?.kind === undefined && !!body?.bundle;
         const opts: ImportOptions = wrapped
           ? {
@@ -329,6 +329,8 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         // Still always, even on the failure path, and still unable to take the
         // process down: the reply has not been sent yet here.
         await stageController.reloadViews().catch(() => {});
+        // Too large to read is a 413 from the server, not a bad bundle.
+        if (err instanceof BodyTooLargeError) throw err;
         error(res, errorMessage(err));
       }
       return;
@@ -342,7 +344,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         const filename = exportFilename(bundle.views[0].name, new Date());
         res.writeHead(200, {
           "content-type": "application/json; charset=utf-8",
-          "content-disposition": `attachment; filename="${filename}"`,
+          "content-disposition": attachmentDisposition(filename),
           "cache-control": "no-store",
         });
         res.end(JSON.stringify(bundle, null, 2));
@@ -358,7 +360,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // POST /api/views/:id/duplicate — { name? }
     const viewDuplicateMatch = pathname.match(/^\/api\/views\/([^/]+)\/duplicate$/);
     if (method === "POST" && viewDuplicateMatch) {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const name = typeof body.name === "string" ? body.name : undefined;
       // By default the copy gets boards of its own; `copyBoards: false` shows
       // the same boards as the original.
@@ -372,7 +374,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // at a board, or at none.
     const viewBoardMatch = pathname.match(/^\/api\/views\/([^/]+)\/board$/);
     if (method === "PUT" && viewBoardMatch) {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const boardId = body?.boardId;
       if (boardId !== null && (typeof boardId !== "string" || !boardId)) {
         error(res, "body.boardId (a board id, or null for none) required");
@@ -395,7 +397,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // plan on the way past.
     const viewCopySlotsMatch = pathname.match(/^\/api\/views\/([^/]+)\/copy-slots$/);
     if (method === "POST" && viewCopySlotsMatch) {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (typeof body.fromViewId !== "string") {
         error(res, "body.fromViewId (string) required");
         return;
@@ -423,7 +425,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // that screens are showing, naming them. The checks here are the body's shape.
     const viewSurfaceMatch = pathname.match(/^\/api\/views\/([^/]+)\/surface$/);
     if (method === "POST" && viewSurfaceMatch) {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (body.surface !== "display" && body.surface !== "console") {
         error(res, 'body.surface ("display"|"console") required');
         return;
@@ -449,7 +451,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     const viewPatchMatch = pathname.match(/^\/api\/views\/([^/]+)$/);
     if (method === "PATCH" && viewPatchMatch) {
       const id = viewPatchMatch[1];
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const hasName = typeof body.name === "string";
       const hasKind = isDisplayKind(body.kind);
       const hasNdiSource = "ndiSource" in body
@@ -593,7 +595,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     }
 
     if (method === "POST" && pathname === "/api/layout-templates") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (typeof body.name !== "string" || !isLayoutShape(body.layout)) {
         error(res, "body.name (string) and body.layout (objects array + numeric canvas) required");
         return;
@@ -607,7 +609,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
 
     const tplPatchMatch = pathname.match(/^\/api\/layout-templates\/([^/]+)$/);
     if (method === "PATCH" && tplPatchMatch) {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const patch: { name?: string; layout?: LayoutDTO } = {};
       if (typeof body.name === "string") patch.name = body.name;
       if ("layout" in body) {
@@ -640,7 +642,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     }
 
     if (method === "POST" && pathname === "/api/layout-groups") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (typeof body.name !== "string" || body.object == null || typeof body.object !== "object") {
         error(res, "body.name (string) and body.object (object) required");
         return;
@@ -670,7 +672,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // it goes through stageController.createScreen, which validates before it
     // writes. A `mode` is refused: the view decides.
     if (method === "POST" && pathname === "/api/outputs") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (refuseMode(res, body)) return;
       const input = readCreateScreenBody(body);
       if ("error" in input) {
@@ -690,7 +692,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
 
     // POST /api/outputs/reorder — { ids: string[] }
     if (method === "POST" && pathname === "/api/outputs/reorder") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (!Array.isArray(body.ids)) {
         error(res, "body.ids (string[]) required");
         return;
@@ -712,7 +714,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     const outputPatchMatch = pathname.match(/^\/api\/outputs\/([^/]+)$/);
     if (method === "PATCH" && outputPatchMatch) {
       const id = outputPatchMatch[1];
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const hasName = typeof body.name === "string";
       const hasViewId = "viewId" in body
         && (typeof body.viewId === "string" || body.viewId === null);
@@ -791,7 +793,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     // How the editor's plan switcher steps. Beside the allowlist because they are
     // edited together on the Plan page and neither changes what the screens show.
     if (method === "POST" && pathname === "/api/plan-switcher-mode") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (body.mode !== "within-type" && body.mode !== "upcoming") {
         error(res, 'body.mode must be "within-type" or "upcoming"');
         return;
@@ -801,7 +803,7 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
     }
 
     if (method === "POST" && pathname === "/api/allowed-service-types") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (!Array.isArray(body.ids)) {
         error(res, "body.ids (string[]) required");
         return;

@@ -1,8 +1,8 @@
 // sharp-load.ts — the image library, loaded the first time something needs it.
 //
 // Not when the server starts: a platform whose native build is missing or will
-// not load then fails the features that convert images (stage-plot backgrounds,
-// themed photos), each with the reason, and nothing else. A failed load is tried
+// not load then fails the features that convert images (stage-plot backgrounds),
+// each with the reason, and nothing else. A failed load is tried
 // again on the next use.
 
 import type { Sharp, SharpOptions } from "sharp";

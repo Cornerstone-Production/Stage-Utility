@@ -6,13 +6,14 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { errorMessage } from "../errors.js";
-import { type RouteCtx, json, error, readBody, readBodyOrEmpty } from "./context.js";
+import { type RouteCtx, json, error, readBodyOrEmpty, readJsonObject } from "./context.js";
 import { integrationManager } from "../integration-manager.js";
 import { deviceManager } from "../device-manager.js";
 import { stageController } from "../stage-controller.js";
 import { wirelessManager } from "../wireless-manager.js";
 import { oscManager } from "../osc-manager.js";
 import * as youtubeConnect from "../youtube-connect.js";
+import { isRecord } from "../../types/is-record.js";
 
 export async function integrationRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
@@ -56,7 +57,7 @@ export async function integrationRoutes(c: RouteCtx): Promise<void> {
     }
 
     if (method === "POST" && pathname === "/api/wireless/meter-rate") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (typeof body.ms !== "number" || !Number.isFinite(body.ms) || body.ms < 0) {
         error(res, "body.ms (non-negative number) required");
         return;
@@ -77,7 +78,7 @@ export async function integrationRoutes(c: RouteCtx): Promise<void> {
     }
 
     if (method === "POST" && pathname === "/api/wireless/connections") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const name = typeof body.name === "string" ? body.name : undefined;
       const providerId = typeof body.providerId === "string" ? body.providerId : undefined;
       const connections = await wirelessManager.addConnection({ name, providerId });
@@ -89,7 +90,7 @@ export async function integrationRoutes(c: RouteCtx): Promise<void> {
     const wirelessConnMatch = pathname.match(/^\/api\/wireless\/connections\/([^/]+)$/);
     if ((method === "PATCH" || method === "POST") && wirelessConnMatch) {
       const id = wirelessConnMatch[1];
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const rawPatch = (body.patch ?? body) as Record<string, unknown>;
       const patch: {
         name?: string;
@@ -100,8 +101,8 @@ export async function integrationRoutes(c: RouteCtx): Promise<void> {
       if (typeof rawPatch.name === "string") patch.name = rawPatch.name;
       if (typeof rawPatch.providerId === "string") patch.providerId = rawPatch.providerId;
       if (typeof rawPatch.enabled === "boolean") patch.enabled = rawPatch.enabled;
-      if (typeof rawPatch.config === "object" && rawPatch.config !== null) {
-        patch.config = rawPatch.config as Record<string, unknown>;
+      if (isRecord(rawPatch.config)) {
+        patch.config = rawPatch.config;
       }
       const connections = await wirelessManager.updateConnection({ id, patch });
       json(res, connections);
@@ -132,7 +133,7 @@ export async function integrationRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (method === "POST" && pathname === "/api/osc/targets") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const name = typeof body.name === "string" ? body.name : undefined;
       const targets = await oscManager.addTarget({ name });
       integrationManager.refreshOscSummary();
@@ -141,7 +142,7 @@ export async function integrationRoutes(c: RouteCtx): Promise<void> {
     }
     // POST /api/osc/send — { targetId, address, args? }
     if (method === "POST" && pathname === "/api/osc/send") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (typeof body.targetId !== "string" || typeof body.address !== "string") {
         error(res, "body.targetId (string) and body.address (string) required");
         return;
@@ -160,7 +161,7 @@ export async function integrationRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (method === "POST" && pathname === "/api/osc/feedback-port") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const port = typeof body.port === "number" ? body.port : parseInt(String(body.port), 10);
       if (!Number.isFinite(port)) {
         error(res, "body.port (number) required");
@@ -180,13 +181,13 @@ export async function integrationRoutes(c: RouteCtx): Promise<void> {
     const oscTargetMatch = pathname.match(/^\/api\/osc\/targets\/([^/]+)$/);
     if ((method === "PATCH" || method === "POST") && oscTargetMatch) {
       const id = oscTargetMatch[1];
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const rawPatch = (body.patch ?? body) as Record<string, unknown>;
       const patch: { name?: string; enabled?: boolean; config?: Record<string, unknown> } = {};
       if (typeof rawPatch.name === "string") patch.name = rawPatch.name;
       if (typeof rawPatch.enabled === "boolean") patch.enabled = rawPatch.enabled;
-      if (typeof rawPatch.config === "object" && rawPatch.config !== null) {
-        patch.config = rawPatch.config as Record<string, unknown>;
+      if (isRecord(rawPatch.config)) {
+        patch.config = rawPatch.config;
       }
       const targets = await oscManager.updateTarget({ id, patch });
       integrationManager.refreshOscSummary();
@@ -205,8 +206,8 @@ export async function integrationRoutes(c: RouteCtx): Promise<void> {
     const configMatch = pathname.match(/^\/api\/integrations\/([^/]+)\/config$/);
     if (method === "POST" && configMatch) {
       const id = configMatch[1];
-      const body = await readBody(req) as Record<string, unknown>;
-      if (typeof body.config !== "object" || body.config === null) {
+      const body = await readJsonObject(req);
+      if (!isRecord(body.config)) {
         error(res, "body.config (object) required");
         return;
       }
@@ -222,7 +223,7 @@ export async function integrationRoutes(c: RouteCtx): Promise<void> {
     const enabledMatch = pathname.match(/^\/api\/integrations\/([^/]+)\/enabled$/);
     if (method === "POST" && enabledMatch) {
       const id = enabledMatch[1];
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (typeof body.enabled !== "boolean") {
         error(res, "body.enabled (boolean) required");
         return;

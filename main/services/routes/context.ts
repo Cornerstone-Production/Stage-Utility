@@ -215,43 +215,59 @@ export async function readRawBody(
   return new Uint8Array(Buffer.concat(chunks, total));
 }
 
+/** A body that is not JSON. Declares 400, which handlerErrorStatus passes through,
+ *  so a route that reads its body with a bare `await readBody(req)` answers 400
+ *  rather than the 500 a status-less Error becomes. */
+export class BadJsonBodyError extends Error {
+  readonly status = 400;
+  constructor(message = "Invalid JSON body") {
+    super(message);
+    this.name = "BadJsonBodyError";
+  }
+}
+
+/** The request body parsed as JSON; `{}` for an empty body. Throws
+ *  BodyTooLargeError (413) over `limit` and BadJsonBodyError (400) for text that
+ *  is not JSON. Any JSON value comes back as it is — a route that needs an
+ *  object uses readJsonObject. */
 export async function readBody(
   req: http.IncomingMessage,
   limit = MAX_JSON_BODY_BYTES,
 ): Promise<unknown> {
-  refuseDeclared(req, limit);
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    let total = 0;
-    req.on("data", (chunk: Buffer) => {
-      total += chunk.byteLength;
-      if (total > limit) {
-        // Pause rather than destroy — see readRawBody.
-        req.pause();
-        reject(new BodyTooLargeError(limit));
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on("end", () => {
-      try {
-        // Decoded once, at the end. Decoding each chunk as it arrived split any
-        // multi-byte character that straddled a chunk boundary into two halves,
-        // each of which decodes to U+FFFD — so a curly apostrophe in a song
-        // title or an accent in a name came back as replacement characters,
-        // depending only on where TCP happened to cut the stream.
-        const body = Buffer.concat(chunks, total).toString("utf8");
-        resolve(body ? JSON.parse(body) : {});
-      } catch {
-        reject(new Error("Invalid JSON body"));
-      }
-    });
-    req.on("error", reject);
-  });
+  // Decoded once, from the whole body. Decoding each chunk as it arrived split any
+  // multi-byte character that straddled a chunk boundary into two halves, each of
+  // which decodes to U+FFFD — so a curly apostrophe in a song title or an accent
+  // in a name came back as replacement characters, depending only on where TCP
+  // happened to cut the stream.
+  const text = Buffer.from(await readRawBody(req, limit)).toString("utf8");
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new BadJsonBodyError();
+  }
 }
 
 /**
- * Read a JSON body, tolerating junk but NOT an oversized one.
+ * A JSON body that must be an object. Throws BadJsonBodyError (400) for text that
+ * is not JSON and for JSON that is not an object (an array, a string, `null`),
+ * BodyTooLargeError (413) over `limit`. A route with no handling of its own
+ * writes `const body = await readJsonObject(req)` and the dispatcher answers.
+ */
+export async function readJsonObject(
+  req: http.IncomingMessage,
+  limit = MAX_JSON_BODY_BYTES,
+): Promise<Record<string, unknown>> {
+  const body = await readBody(req, limit);
+  if (!isRecord(body)) throw new BadJsonBodyError("the body must be a JSON object");
+  return body;
+}
+
+/**
+ * Read a JSON body, tolerating junk but NOT an oversized one. Any JSON value
+ * comes back as it is, an array or a string included; a body that is not JSON,
+ * or is `null`, reads as `{}`. A caller that needs to tell an array from an
+ * object uses this; one that only reads fields uses readBodyOrEmpty.
  *
  * Replaces `readBody(req).catch(() => ({}))`, which was written to shrug off an
  * unparseable body and also swallowed the size limit — so an over-cap request
@@ -259,16 +275,26 @@ export async function readBody(
  * anyone. A body too large to read is a different thing from a body we chose not
  * to parse.
  */
-export async function readBodyOrEmpty(
+export async function readBodyTolerant(
   req: http.IncomingMessage,
   limit = MAX_JSON_BODY_BYTES,
-): Promise<Record<string, unknown>> {
+): Promise<unknown> {
   try {
-    return ((await readBody(req, limit)) ?? {}) as Record<string, unknown>;
+    return (await readBody(req, limit)) ?? {};
   } catch (err) {
     if (err instanceof BodyTooLargeError) throw err;
     return {};
   }
+}
+
+/** readBodyTolerant, narrowed: a body that is not a JSON object (an array, a
+ *  string, a number) reads as `{}`, so a caller can read fields off it. */
+export async function readBodyOrEmpty(
+  req: http.IncomingMessage,
+  limit = MAX_JSON_BODY_BYTES,
+): Promise<Record<string, unknown>> {
+  const body = await readBodyTolerant(req, limit);
+  return isRecord(body) ? body : {};
 }
 
 /**
@@ -282,19 +308,13 @@ export async function readObjectBody(
   res: http.ServerResponse,
   limit = MAX_JSON_BODY_BYTES,
 ): Promise<Record<string, unknown> | null> {
-  let body: unknown;
   try {
-    body = await readBody(req, limit);
+    return await readJsonObject(req, limit);
   } catch (err) {
-    if (err instanceof BodyTooLargeError) throw err;
-    error(res, errorMessage(err));
+    if (!(err instanceof BadJsonBodyError)) throw err;
+    error(res, err.message);
     return null;
   }
-  if (!isRecord(body)) {
-    error(res, "the body must be a JSON object");
-    return null;
-  }
-  return body;
 }
 
 /** Narrow an untrusted body value to a ViewKind. Lives with the type, so a

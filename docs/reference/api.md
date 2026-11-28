@@ -12,7 +12,8 @@ or more is gzipped when the request sends `Accept-Encoding: gzip`, as every
 browser does; one that does not ask gets it plain.
 
 Failures answer `{error}` with the status that says whose problem it is: `400`
-for a body or query the caller got wrong, `409` for something the server cannot
+for a body or query the caller got wrong (a body that is not JSON is a `400` on every route that
+requires one), `409` for something the server cannot
 do right now (editing a service that is recording), `413` for an over-limit
 body, and `502` for a read that only failed because Planning Center could not be
 reached — every `/api/pco/*` read, plus `/api/service-types`, `/api/plans`,
@@ -719,43 +720,6 @@ swatch or `null`. It is never checked against the patch, so a link to a device t
 gone saves; on any other type it is a `400`. A plot holds up to 500 items, each `id`
 once. Any other field is dropped.
 
-### Photo themes
-
-Themed mic slot photos and the OpenAI key that makes them. See
-[Photo themes](../features/photo-themes.md). A theme id is the one these routes
-issue (`th-` and twelve hex digits); a person id is a Planning Center person id
-and a plan or service type id a Planning Center id (digits only). An id of the
-wrong shape is a `400` before anything is looked up; an unknown theme, or a person
-with no photo in it, is a `404`. A refusal is `{error}` naming the field or saying
-why: `409` for something not possible now (no key, a key OpenAI rejected, a plan
-with no theme, nothing waiting for review), `502` when the plan's roster cannot be
-read from Planning Center, `503` while `photo-themes.json` cannot be used or a
-config restore is landing. No answer carries the key: the connection is always
-described by its hint.
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/openai` | The connection: `{method, hint, state, reason, checkedAt}`. `method` is `api-key` or `null`, `hint` the key's last four characters (`sk-…3f2a`), `state` one of `not-connected`, `unchecked`, `connected`, `invalid-key`, `out-of-credits`, `forbidden`, `unreachable` |
-| PUT | `/api/openai/key` | `{apiKey}`: save the key, replacing any. Trimmed; 20 to 512 printable characters with no space, else `400`. Answers the connection |
-| DELETE | `/api/openai/key` | Remove the key. Answers the connection |
-| POST | `/api/openai/test` | Lists OpenAI's models with the key, which costs nothing. Answers the connection, its `reason` saying why when it does not work |
-| GET | `/api/photo-themes` | `{themes, plans, connection, running, queued}`. Each theme is `{id, name, prompt, promptChanged, createdAt, lastUsedDate, keptUntil, plans, people}`; `keptUntil` is the last day (app time zone) its photos are kept, `plans` the plans using it, and each person `{personId, name, status, promptChanged, approved, pending, originalUrl}`: `promptChanged` is true when their photo (the edit waiting for review, else the approved one) was made under an earlier prompt and has been neither redone nor kept, and a theme's `promptChanged` is true while any person's is; `originalUrl` is their Planning Center photo as this server last saw it, else the one their edit was made from, or `null`; `status` is `none`, `generating`, `ready`, `approved`, `stale` or `failed`, `approved` is `{url, fromPlanId, fromDate, approvedAt, stale}` or `null`, `pending` `{status, url, file, reason, planId}` or `null`, `file` being the stored edit's name that an approval sends back. Each plan choice is `{planId, serviceTypeId, sortDate, themeId, show}` |
-| POST | `/api/photo-themes/themes` | `{name, prompt}`: a name of 1 to 80 characters on one line, a prompt of 1 to 2000. `201` with the theme |
-| PATCH | `/api/photo-themes/themes/:id` | Any of `{name, prompt}`, held to the same rules. A new prompt on a theme with photos sets `promptChanged` on each person whose photo was made under another |
-| DELETE | `/api/photo-themes/themes/:id` | The theme and its photos; plans using it go back to their original photos. `{plans, photos}`: how many of each |
-| POST | `/api/photo-themes/themes/:id/keep-prompt` | Keep the photos made under an earlier prompt, everyone's on every plan: clears `promptChanged` |
-| POST | `/api/photo-themes/themes/:id/people/:personId/approve` | `{file}`, the stored edit that was shown for review (its `pending.file`). Approve it: it replaces any approved photo and goes on screens. `409` when none is waiting, or when the edit waiting is no longer that file (a Redo landed after it was shown); nothing is approved |
-| POST | `/api/photo-themes/themes/:id/people/:personId/keep` | Keep an approved photo made from an older Planning Center photo. `409` when their current photo is not known yet |
-| POST | `/api/photo-themes/themes/:id/people/:personId/redo` | `{planId, serviceTypeId}` (both or neither): make their photo again from their Planning Center photo on that plan (`404` when they are not on it, `502` with the reason when its roster cannot be read), or, with neither, from the last one the server saw. `202` with the person. `409` while one is already being made |
-| POST | `/api/photo-themes/themes/:id/people/:personId/move` | `{to}`, another theme: move their approved photo there, replacing any photo they have there. `409` when they have no approved photo, or one is being made |
-| POST | `/api/photo-themes/themes/:id/people/:personId/copy` | `{to}`: the same, leaving this theme's photo in place. A copy shares the stored file |
-| DELETE | `/api/photo-themes/themes/:id/people/:personId` | Take them out of the theme; every plan using it shows their original again. An edit of theirs being made is cancelled, and not sent if it has not been yet (this works for someone whose first photo is still being made). `404` when they have neither a photo nor one being made |
-| GET | `/api/photo-themes/plans/:planId?serviceTypeId=` | `{planId, serviceTypeId, choice, roster, reason?, people, toGenerate}`: the people the plan's shown boards put in a slot, each as a theme person plus `originalUrl` (their Planning Center photo, or `null`), and how many a Generate would send (people with a Planning Center photo, no approved photo and none waiting for review). `roster` is `live`, `plan` or `unavailable` with a `reason` |
-| PATCH | `/api/photo-themes/plans/:planId` | `{serviceTypeId, sortDate?, themeId?, show?}`, at least one of `themeId` and `show`. `themeId` a theme or `null`; choosing one sets `show` to `themed`. `show` is `original` or `themed`. `sortDate` is the plan's Planning Center sort date (an ISO date and time) or `null`; omitted, the one already stored is kept, or the current plan's is filled in. Answers the plan choice |
-| POST | `/api/photo-themes/plans/:planId/generate` | `{serviceTypeId, mode?}`. `mode` `missing` (the default) sends only people with no approved photo in the plan's theme and none waiting for review (an approved photo is reused, even after a failed Redo); `all` also sends the people on this plan whose photo has `promptChanged`, which clears it for them; people on other plans keep theirs until they are redone or kept. The plan's people read carries `toRedoAll` beside `toGenerate`: how many `all` would send, by the same rule. `202` with `{queued, reused, skipped: [{personId, name, reason}]}`. Progress arrives on `photo-themes:changed` |
-| POST | `/api/photo-themes/plans/:planId/approve-all` | `{people: [{personId, file}]}`, the ready edits that were shown, at most 500, each person once. Approves each that is still that file, waiting for review and made for this plan; an edit that landed after they were shown is left for review. `{approved, skipped}`, `skipped` naming the person ids left. `409` when none of them could be approved |
-| GET | `/api/photo-themes/images/:file` | A stored edit, ready or approved, served immutable with the stored-image policy. `404` for a name that is not one |
-
 ## Channels
 
 `GET /api/events` is one stream carrying everything, filtered per connection.
@@ -853,12 +817,7 @@ something to change:
 `wireless:channels` · `wireless:chargers` · `calendar:grid` · `displays:presence` · `video:state` ·
 `video:probe` · `messages:state` · `home:snoozes` · `trends:prefs` · `boards:changed` (the last
 write to the slot boards, `{epoch, seq, boards: [{id, meta, targets}]}`; see
-[Network traffic](../ops/network-traffic.md#slot-boards)) · `photo-themes:changed`
-(`{epoch, seq, running, queued, active: [{themeId, personId}], connection}`: theme
-photos being made or waiting, and the OpenAI connection as `GET /api/openai` answers
-it, sent when the queue, a theme or the connection changes and only while somebody is
-subscribed; a `seq` that is not the next one, or a new `epoch`, says a change was
-missed and `GET /api/photo-themes` should be read again)
+[Network traffic](../ops/network-traffic.md#slot-boards))
 
 **Pushed only when something happens:**
 
@@ -915,7 +874,7 @@ Either channel having a subscriber starts the five-second read.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/photos?u=…[&s=N]` | Cached Planning Center photo proxy. `u` must be an `https` URL on `planningcenteronline.com`; anything else, and any redirect, is refused — it is not a general-purpose proxy (`400` without `u`, `404` for a photo it will not serve, `500` for a failed read). The `200` is `public, max-age=31536000, immutable`, except a full-size photo standing in for a smaller one Planning Center would not give, which is `no-cache`. `s` is the longest side the photo is drawn at, in device pixels, rounded up to 128, 192, 256, 384, 512 or 768; it scales `u`'s geometry down, never up, and anything else is ignored. See [Photos](../integrations/planning-center.md#photos). A `u` of `photo-theme:<file>` is an approved [themed photo](../features/photo-themes.md#what-screens-show), served from the server's own store as it was made (`s` is ignored), immutable, `404` for a name it does not hold |
+| GET | `/photos?u=…[&s=N]` | Cached Planning Center photo proxy. `u` must be an `https` URL on `planningcenteronline.com`; anything else, and any redirect, is refused — it is not a general-purpose proxy (`400` without `u`, `404` for a photo it will not serve, `500` for a failed read). The `200` is `public, max-age=31536000, immutable`, except a full-size photo standing in for a smaller one Planning Center would not give, which is `no-cache`. `s` is the longest side the photo is drawn at, in device pixels, rounded up to 128, 192, 256, 384, 512 or 768; it scales `u`'s geometry down, never up, and anything else is ignored. See [Photos](../integrations/planning-center.md#photos) |
 | GET | `/log` | The server's recent output, as a page, with a health strip and level/source filters. Token-gated when `STAGE_UTILITY_LOG_TOKEN` is set |
 | GET | `/logs` | Redirects to `/log`, query string intact. Same gate, checked before the redirect — an unauthorised request is a 401, never a 302 into one |
 | GET | `/api/log[?since=N]` | `{ lines, reset, latestSeq, checks }`. Same gate. Omit `since` for the whole buffer; pass the previous `latestSeq` to get only what is newer. `reset: true` means replace rather than append — you asked for everything, the buffer rolled past your cursor, or your cursor is above the newest line, which means it came from before a restart (`seq` is per-process and starts again at 1). `checks` is the health snapshot the page draws: version, uptime, app time zone, warning and error counts, and one entry per configured integration |
@@ -930,7 +889,7 @@ Either channel having a subscriber starts the five-second read.
 | GET | `/manifest.webmanifest` | The web app manifest, built per request: `name` and `short_name` are the app name, so renaming the app renames the home-screen label on Android. `no-cache` |
 | GET | `/apple-touch-icon.png` \| `/icon-192.png` \| `/icon-512.png` \| `/icon-maskable-512.png` | The home-screen icons the pages and the manifest name. The operator's own [tab and home-screen icon](../features/operator-app.md#branding) when one is set, else the built-in file, and the built-in file too when the stored one is missing. A query string is ignored. `no-cache`, so a new icon reaches the next install. The operator's icon carries the uploaded images' `Content-Security-Policy` |
 | POST | `/api/layout-images` | Store an image and return its URL |
-| GET | `/api/history/export` | The service report as a spreadsheet (`?from=&to=&include=…`, `include` a comma-separated choice of `services`, `attendance`, `items`, `spl` and `baptisms`; names it does not know are ignored) |
+| GET | `/api/history/export` | The service report as a spreadsheet (`?from=&to=&include=…`, `include` a comma-separated choice of `services`, `attendance`, `items`, `spl` and `baptisms`; names it does not know are ignored). `from` and `to` are inclusive `YYYY-MM-DD` days, either left out or empty for an open end; anything else, including a day that does not exist, is a 400 |
 
 Everything else is the app itself: `/<display id>` and `/<slug>` render a
 screen, and the operator pages render the app — see

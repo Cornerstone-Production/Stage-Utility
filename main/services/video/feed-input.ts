@@ -2,6 +2,7 @@
 
 import { PUSH_PROTOCOLS, EMBED_PLAYERS, type VideoSourceKind, type VideoSource } from "../../types/video.js";
 import type { CredentialTarget } from "../credential-target.js";
+import { isRecord } from "../../types/is-record.js";
 import { parseAudioFields, type AudioFields } from "./audio-input.js";
 import { normalizeEmbedRef } from "./embed.js";
 import { hasUserinfo } from "./url-userinfo.js";
@@ -76,11 +77,11 @@ export function parseFeedInput(
   allowKinds: ReadonlySet<VideoSourceKind>,
   keptPassword?: string,
 ): ({ ok: true; name: string; source: VideoSource; password?: string } & AudioFields) | { ok: false; error: string } {
-  if (typeof body !== "object" || body === null) {
+  if (!isRecord(body)) {
     return { ok: false, error: "Invalid input." };
   }
 
-  const obj = body as Record<string, unknown>;
+  const obj = body;
 
   // Validate name
   if (obj.name === undefined) {

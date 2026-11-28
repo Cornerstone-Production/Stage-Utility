@@ -273,6 +273,25 @@ describe("selectGlobalNextPlan during an outage", () => {
     assert.equal(ctl.state.planId, "p-held");
   });
 
+  it("says the hold again when the reason it cannot read changes mid-outage, and not when it repeats", async (t) => {
+    const lines = captureConsole(t, "log", "warn", "error");
+    let reason = "PCO API error 429: Too Many Requests";
+    pco.listUpcomingPlans = async (_a: string, _s: string, typeId: string) => {
+      if (typeId === "1") throw new Error(reason);
+      return [WED];
+    };
+    const holds = () => lines.filter((l) => l.includes("[plans] holding the followed plan"));
+    await stageController.selectGlobalNextPlan();
+    await stageController.selectGlobalNextPlan();
+    assert.equal(holds().length, 1, "one reason, said once");
+    reason = "PCO API error 503: Service Unavailable";
+    await stageController.selectGlobalNextPlan();
+    await stageController.selectGlobalNextPlan();
+    assert.equal(holds().length, 2, `a new reason is a new decision: ${holds().join(" | ")}`);
+    assert.match(holds()[0] ?? "", /429/);
+    assert.match(holds()[1] ?? "", /503/);
+  });
+
   it("keeps the followed plan when its own live reading went stale while its service is near now", async (t) => {
     captureConsole(t, "log", "warn", "error");
     // The followed type failing is exactly when its live read fails too.
