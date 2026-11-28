@@ -48,7 +48,7 @@ import { useSplState } from "../main/use-spl-state";
 import { useWirelessChannels } from "../app/queries";
 import { usePeopleCountState } from "../main/use-people-count-state";
 import { useObsStatus } from "../main/use-obs-state";
-import { findPvpLayer, hasContent, type PvpLayerDTO, type PvpStatusDTO } from "@main/types/pvp";
+import { findPvpLayer, hasContent, uniquePvpLayerNames, type PvpLayerDTO, type PvpStatusDTO } from "@main/types/pvp";
 import { DEFAULT_PVP_NOW_LABEL, PVP_NOW_LABEL_OPTIONS, pvpLayerStateWord, type PvpNowLabel } from "../main/pvp-now";
 import { WARN_MAX_SEC, pvpNowLayout, pvpNowRowStates, pvpWarnThresholds, withPvpNowLayout } from "../main/pvp-now-config";
 import { PvpLayoutRow } from "./pvp-layout-row";
@@ -137,16 +137,10 @@ function pvpLayerNamed(layers: readonly PvpLayerDTO[], name: string): PvpLayerDT
  *  where it first appears, as `<name> · duplicate` rather than as two options
  *  with one value. */
 export function pvpLayerOptions(layers: readonly PvpLayerDTO[]): { name: string; word: string }[] {
-  const seen = new Set<string>();
-  const out: { name: string; word: string }[] = [];
-  for (const l of layers) {
-    const key = l.name.trim().toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const got = findPvpLayer(layers, l.name);
-    out.push({ name: l.name, word: got.kind === "duplicate" ? "duplicate" : pvpLayerStateWord(l) });
-  }
-  return out;
+  return uniquePvpLayerNames(layers).map((name) => {
+    const got = findPvpLayer(layers, name);
+    return { name, word: got.kind === "found" ? pvpLayerStateWord(got.layer) : "duplicate" };
+  });
 }
 
 const PVP_CUSTOM_LAYER = "__pvp-custom__";

@@ -79,8 +79,11 @@ describe("a duplicated PVP layer name is refused, whatever PVP's order", () => {
 describe("the duplicate is said in the server log, once", () => {
   test("named on the first read, quiet while it lasts, and said again when it is gone", async () => {
     const { pvpService } = await import("./pvp-service.js");
+    // Through emitFresh, which every successful read goes through, so a read
+    // path that stopped asking would fail here.
+    let readAt = Date.now();
     const note = (layers: PvpLayerDTO[]) =>
-      (pvpService as unknown as { noteDuplicateNames(l: PvpLayerDTO[]): void }).noteDuplicateNames(layers);
+      (pvpService as unknown as { emitFresh(l: PvpLayerDTO[], at: number): void }).emitFresh(layers, ++readAt);
     const lines: string[] = [];
     const { warn, log } = console;
     console.warn = (...a: unknown[]) => void lines.push(a.map(String).join(" "));

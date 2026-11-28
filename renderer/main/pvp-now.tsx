@@ -174,10 +174,9 @@ export function chooseNowLayer(
  * about whether a name is "in the list". An unpinned widget (blank name) has no
  * notion of "not found" and answers "unpinned".
  */
-export function pinnedLayer(
-  layers: readonly PvpLayerDTO[],
-  layerName: string | null | undefined,
-): "unpinned" | "found" | "missing" | "duplicate" {
+export type PinState = "unpinned" | "found" | "missing" | "duplicate";
+
+export function pinnedLayer(layers: readonly PvpLayerDTO[], layerName: string | null | undefined): PinState {
   const want = (layerName ?? "").trim();
   return want ? findPvpLayer(layers, want).kind : "unpinned";
 }
@@ -214,7 +213,7 @@ export function pvpLayerStateWord(layer: PvpLayerDTO | null): PvpNowBadge {
  */
 export function nowBadge(
   layer: PvpLayerDTO | null,
-  pin: ReturnType<typeof pinnedLayer> = "found",
+  pin: PinState = "found",
 ): PvpNowBadge {
   if (pin === "missing") return "not found";
   if (pin === "duplicate") return "duplicate";
@@ -288,11 +287,10 @@ export function PvpNowObject({
   const layers = status?.layers ?? [];
   const layer = chooseNowLayer(layers, config.layerName);
   // "not found" and "duplicate" are verdicts about PVP's live layer list, so
-  // they need one. With
-  // no usable snapshot (not configured, offline, nothing heard yet) the tile
-  // says "empty" and the sub-line says why; claiming the layer does not exist
-  // when we cannot see any layers would send the operator to fix a layout that
-  // is fine.
+  // they need one. With no usable snapshot (not configured, offline, nothing
+  // heard yet) the tile says "empty" and the sub-line says why; claiming the
+  // layer does not exist when we cannot see any layers would send the operator
+  // to fix a layout that is fine.
   const pin = pvpUnavailableReason(status) !== null ? "found" : pinnedLayer(layers, config.layerName);
   // The widget's own hold wins over the PVP card's default — an operator who
   // set one on this specific tile did so to disagree with the card, and a

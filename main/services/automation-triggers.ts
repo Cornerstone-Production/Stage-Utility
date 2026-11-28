@@ -110,12 +110,9 @@ const pvpUp = (v: unknown): boolean => (v && typeof v === "object" ? (v as PvpSn
 const pvpNamed = (layers: readonly PvpLayer[], want: unknown): ((l: PvpLayer) => boolean) => {
   const name = String(want ?? "");
   if (!name.trim()) return () => true;
-  const got = findPvpLayer(
-    layers.map((l) => ({ name: l.name ?? "", l })),
-    name,
-  );
+  const got = findPvpLayer(layers, name);
   if (got.kind !== "found") return () => false;
-  const named = got.layer.l;
+  const named = got.layer;
   return (l) => l === named;
 };
 

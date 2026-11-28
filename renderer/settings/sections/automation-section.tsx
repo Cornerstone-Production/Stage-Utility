@@ -15,6 +15,7 @@ import { hasServiceGuard } from "@main/services/service-guard";
 // to the outcome copy by hand, and nothing would have said so if it had not
 // been. Type-only, so nothing these modules reach at runtime is bundled.
 import type { AutomationOutcome, Rule } from "@main/types/automation";
+import { uniquePvpLayerNames } from "@main/types/pvp";
 import { fieldsNeedAttention, type RuleIssue } from "@main/services/automation-param-validation";
 import type { CueStateRow } from "@main/services/cue-states";
 import { labelFor, ruleMatchesSearch } from "./rule-search";
@@ -707,7 +708,9 @@ export function AutomationSection({
   // ungated one would hold an unconfigured PVP's poll open for anybody who
   // opened the Automation page.
   const pvp = usePvpState(configuredIntegrations.has("pvp"));
-  const pvpLayers = useMemo(() => (pvp?.layers ?? []).map((l) => l.name), [pvp]);
+  // One entry per NAME: two layers PVP calls the same are one source, which reads
+  // unknown (see findPvpLayer), not two options with one value.
+  const pvpLayers = useMemo(() => uniquePvpLayerNames(pvp?.layers ?? []), [pvp]);
 
   // Memoised because the pair resolution below depends on it: `data?.rules ?? []`
   // is a new array on every render, which would re-resolve every pair each time.

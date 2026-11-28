@@ -28,7 +28,14 @@ import {
   layerSignature, parseWorkspace, updateMediaSince, withMediaSinceAt, withNextCues,
 } from "./pvp-parse.js";
 import type { MediaSinceEntry } from "./pvp-parse.js";
-import { PVP_OFFLINE, duplicatedPvpLayerNames, hasContent, type PvpLayerDTO, type PvpStatusDTO } from "../types/pvp.js";
+import {
+  PVP_OFFLINE,
+  duplicatedPvpLayerNames,
+  hasContent,
+  pvpLayerKey,
+  type PvpLayerDTO,
+  type PvpStatusDTO,
+} from "../types/pvp.js";
 
 /** Active cadence. Governs how fast a cue change reaches a rule, not how smooth
  *  the progress bar is — the bar is interpolated on the client. A 20-second loop
@@ -606,7 +613,7 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
     const names = duplicatedPvpLayerNames(layers);
     // Compared case- and order-blind, as the names are matched: PVP listing the
     // same two layers the other way round is not news.
-    const said = names.map((n) => n.toLowerCase()).sort().join("\n");
+    const said = names.map(pvpLayerKey).sort().join("\n");
     if (said === this.loggedDuplicateNames) return;
     this.loggedDuplicateNames = said;
     if (names.length === 0) {
