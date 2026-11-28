@@ -1680,6 +1680,9 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     }
     tgtAt.attendanceBaseline = aligned.attendanceBaseline;
     tgtAt.samples = aligned.samples;
+    // Samples an archive import joined unaligned stay in more than one frame
+    // whichever record they now sit in; the mark goes with them.
+    if (srcAt.attendanceUnaligned) tgtAt.attendanceUnaligned = true;
     tgtAt.endedAt = laterEnd(tgtAt.endedAt, srcAt.endedAt);
     tgtAt.totalAttendance = Math.max(tgtAt.totalAttendance, srcAt.totalAttendance);
     recomputeAttendance(tgtAt);

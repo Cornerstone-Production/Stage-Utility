@@ -581,3 +581,90 @@ test("an archive that comes back from the other box still shows the disagreement
   assert.equal(back.frames, "implausible", "the copies hid X's own evidence");
   assert.equal(back.record.attendanceBaseline, 500, "X's baseline was moved");
 });
+
+// ── Records an import joined without aligning ───────────────────────────────
+
+test("a join it would not align marks the record, and the mark is never aligned on again", () => {
+  // X honest; Y's baseline 300 low after a later edit re-based it.
+  const x = boxRecord(0, 10, 0, () => 300);
+  const yHonest = boxRecord(5, 15, 7, () => 300);
+  const y = { ...yHonest, attendanceBaseline: yHonest.attendanceBaseline - 300 };
+  const x1 = mergeAttendanceRecord(x, y);
+  assert.equal(x1.record.attendanceUnaligned, true);
+  // Y takes X's record, then X takes Y's back: every stamp is now shared.
+  const y1 = mergeAttendanceRecord(y, x1.record);
+  assert.equal(y1.frames, "implausible");
+  const x2 = mergeAttendanceRecord(x1.record, y1.record);
+  assert.equal(x2.frames, "implausible", "two machines that exchanged archives aligned on the wrong baseline");
+  assert.equal(x2.record.attendanceBaseline, x.attendanceBaseline);
+  assert.deepEqual(mergeAttendanceRecord(x2.record, y1.record).record, x2.record);
+});
+
+test("a join with no baseline on one side is marked, and importing it again changes nothing", () => {
+  const a = boxRecord(0, 10, 0, () => 300);
+  const b = { ...boxRecord(5, 15, 7, () => 300), attendanceBaseline: null };
+  const once = mergeAttendanceRecord(a, b);
+  assert.equal(once.frames, "unknown");
+  assert.equal(once.record.attendanceUnaligned, true);
+  assert.deepEqual(mergeAttendanceRecord(once.record, b).record, once.record);
+});
+
+test("a third box that reveals a disagreement only marks the record; no sample or figure moves", () => {
+  const here = boxRecord(0, 20, 0, () => 300);
+  const a = boxRecord(2, 8, 7, () => 300);
+  const bRebased = boxRecord(12, 18, 11, () => 300);
+  const b = { ...bRebased, attendanceBaseline: bRebased.attendanceBaseline - 300 };
+  const r1 = mergeAttendanceRecord(here, a).record;
+  const r2 = mergeAttendanceRecord(r1, b).record;
+  const r3 = mergeAttendanceRecord(r2, a).record;
+  const unmarked = ({ attendanceUnaligned: _mark, ...rest }: typeof r3) => rest;
+  assert.deepEqual(unmarked(r3), unmarked(r2));
+});
+
+test("importing the same archive twice changes nothing, over many generated pairs", () => {
+  // Deterministic: one seed, so a failure names the same case every run.
+  // Records as two boxes write them (honest), as v1.9.3 left them (zero), and
+  // re-based wrong by a later edit; half the archives are two streams unioned.
+  let st = 1n;
+  const rnd = () => {
+    st = (st * 6364136223846793005n + 1442695040888963407n) & ((1n << 64n) - 1n);
+    return Number(st >> 11n) / 2 ** 53;
+  };
+  const ri = (lo: number, hi: number) => lo + Math.floor(rnd() * (hi - lo + 1));
+  for (let i = 0; i < 1000; i++) {
+    const start = ri(0, 600);
+    const rate = ri(1, 6);
+    const raw = (m: number) => start + rate * m;
+    const make = () => {
+      const from = ri(0, 60);
+      const to = from + ri(2, 40);
+      const skew = ri(0, 29_999);
+      const base = raw(from);
+      const mode = ri(0, 3);
+      const samples = Array.from({ length: to - from + 1 }, (_, k) => {
+        const m = from + k;
+        const phase: "pre" | "post" | undefined = rnd() < 0.1 ? "post" : rnd() < 0.1 ? "pre" : undefined;
+        return { t: new Date(T9 + m * 30_000 + skew).toISOString(), attendance: raw(m) - base, occupancy: ri(100, 400), ...(phase ? { phase } : {}) };
+      });
+      return {
+        attendanceBaseline: mode === 2 ? 0 : mode === 3 ? base - ri(100, 400) : base,
+        samples,
+        totalAttendance: raw(to) + (rnd() < 0.3 ? ri(0, 300) : 0),
+        peakAttendance: Math.max(0, ...samples.filter((x) => !x.phase).map((x) => x.attendance)),
+        peakOccupancy: 400,
+        minOccupancy: 100,
+        lastAttendance: samples[samples.length - 1]!.attendance,
+        lastOccupancy: samples[samples.length - 1]!.occupancy,
+      };
+    };
+    const here = make();
+    let archive = make();
+    if (rnd() < 0.5) archive = mergeAttendanceRecord(archive, make()).record as typeof archive;
+    for (const [mine, theirs] of [[here, archive], [archive, here]]) {
+      const once = mergeAttendanceRecord(mine, theirs);
+      const twice = mergeAttendanceRecord(once.record, theirs);
+      assert.equal(twice.frames, once.frames, `case ${i}: a re-import decided differently`);
+      assert.deepEqual(twice.record, once.record, `case ${i}`);
+    }
+  }
+});

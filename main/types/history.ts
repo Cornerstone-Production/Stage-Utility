@@ -180,6 +180,16 @@ export interface ServiceAttendance {
   /** Most recent sampled values (for the summary row). */
   lastAttendance: number;
   lastOccupancy: number;
+  /**
+   * Set when an archive import joined another machine's recording into this
+   * record WITHOUT putting the two on one start (one side had no baseline, or
+   * the two baselines could not both be right): its samples are then in more
+   * than one frame, and attendanceBaseline describes only some of them. A
+   * later import never aligns on such a record; it joins as it stands again,
+   * so importing twice changes nothing. Absent on every record no such import
+   * touched, including all records written before this existed.
+   */
+  attendanceUnaligned?: true;
 }
 
 /** A ServiceAttendance as a list page reads it

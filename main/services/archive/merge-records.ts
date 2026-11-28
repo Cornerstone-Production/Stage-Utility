@@ -104,6 +104,7 @@ interface AttendanceRecord {
   lastAttendance?: number;
   lastOccupancy?: number;
   totalAttendance?: number;
+  attendanceUnaligned?: true;
   [k: string]: unknown;
 }
 
@@ -170,25 +171,19 @@ export function framesDisagree(mine: AttendanceRecord, theirs: AttendanceRecord)
   const b = rawSeries(theirs, theirBase);
   if (!a.length || !b.length) return null;
 
-  // A stamp both records hold is a reading one of them copied from the other
-  // in an earlier import, so the two copies are one box's reading, not two.
-  // Pairing a shared archive reading with a shared reading of this box's —
-  // its own copy, or a neighbouring one when the archive holds two streams
-  // unioned — measures only the two baselines, and a re-import would decide
-  // differently from the first. So a pair is skipped only when BOTH readings
-  // are shared. A re-import then pairs exactly as the first import did (every
-  // archive reading is shared, and only this box's own readings can answer
-  // it), and an archive coming back from the other box still pairs that box's
-  // own readings with this box's originals.
+  // A reading of this box's at an instant the archive also holds is a copy an
+  // earlier aligned import took from it (a fallback import's copies never
+  // reach here: the record they land in is marked unaligned and is not judged
+  // again). Paired with the archive's readings, a copy measures the archive
+  // against itself, not this box against the archive, so only this box's own
+  // readings are paired.
   const theirStamps = new Set(b.map(([t]) => t));
-  const myStamps = new Set(a.map(([t]) => t));
+  const own = a.filter(([t]) => !theirStamps.has(t));
   const diffs: number[] = [];
   const levels: number[] = [];
   for (const [t, raw] of b) {
     let best: [number, number] | null = null;
-    const shared = myStamps.has(t);
-    for (const p of a) {
-      if (shared && theirStamps.has(p[0])) continue;
+    for (const p of own) {
       if (Math.abs(p[0] - t) <= PAIR_MS && (best == null || Math.abs(p[0] - t) < Math.abs(best[0] - t))) best = p;
     }
     if (best) {
@@ -204,6 +199,11 @@ export function framesDisagree(mine: AttendanceRecord, theirs: AttendanceRecord)
     }
     return null;
   }
+  // Shared instants with no overlap left to judge: an earlier import between
+  // these two aligned them (a fallback would have marked the record and never
+  // reached here). The signature below reads totals that merge moved, so it
+  // is not asked again; the earlier decision stands.
+  if (own.length < a.length) return null;
 
   const signature = (r: AttendanceRecord, base: number, series: [number, number][], who: string): string | null => {
     const total = finiteOrNull(r.totalAttendance);
@@ -221,14 +221,16 @@ export function framesDisagree(mine: AttendanceRecord, theirs: AttendanceRecord)
  * The merge as it was before frames were aligned, for a pair whose baselines
  * cannot both be right: samples unioned unshifted (this box's on a clash), the
  * peaks recomputed over in-service samples and never lowered, everything else
- * filled, never overwritten. Two departures: this box's baseline is kept,
- * never filled from the archive's, and the lowest room count and the raw
- * daily total, which no baseline touches, take what either machine saw.
+ * filled, never overwritten. Three departures: this box's baseline is kept,
+ * never filled from the archive's; the lowest room count and the raw daily
+ * total, which no baseline touches, take what either machine saw; and the
+ * result is marked attendanceUnaligned, because its samples are now in more
+ * than one frame.
  */
 function fillOnlyAttendance(mine: AttendanceRecord, theirs: AttendanceRecord, readings: AttendanceSample[]): AttendanceRecord {
   const own = Array.isArray(mine.samples) ? mine.samples : [];
   const samples = mergeByKey(own, readings, (x) => x.t).sort((a, b) => a.t.localeCompare(b.t));
-  const out: AttendanceRecord = { ...fillMissingFields(mine, theirs, ["samples", "attendanceBaseline"]), samples };
+  const out: AttendanceRecord = { ...fillMissingFields(mine, theirs, ["samples", "attendanceBaseline"]), samples, attendanceUnaligned: true };
   // The room count and the raw daily total depend on no baseline, so the
   // lowest and the total take what either machine saw.
   // A stored minimum counts only from a record with in-service samples, as on
@@ -296,11 +298,23 @@ export function mergeAttendanceRecord(mine: AttendanceRecord, theirs: Attendance
   const incoming: unknown[] = Array.isArray(theirs.samples) ? theirs.samples : [];
   const readings = incoming.filter(isReading);
   const skippedSamples = incoming.length - readings.length;
-  const disagree = framesDisagree(mine, { ...theirs, samples: readings });
+  // A record an earlier import joined without aligning holds more than one
+  // frame, and no baseline describes it: it is never aligned on again, so a
+  // re-import, an exchange back and forth, or a chain through a third machine
+  // decides the same way the first import did.
+  const already = mine.attendanceUnaligned
+    ? "this box's record already holds recordings joined without aligning them"
+    : theirs.attendanceUnaligned
+      ? "the archive's record already holds recordings joined without aligning them"
+      : null;
+  const disagree = already ?? framesDisagree(mine, { ...theirs, samples: readings });
   if (disagree) {
     return { record: fillOnlyAttendance(mine, theirs, readings), frames: "implausible", implausible: disagree, skippedSamples };
   }
   const aligned = alignAttendance(mine, { ...theirs, samples: readings });
+  if (aligned.frames === "unknown") {
+    return { record: fillOnlyAttendance(mine, theirs, readings), frames: "unknown", skippedSamples };
+  }
   const out: AttendanceRecord = {
     ...fillMissingFields(mine, theirs, ["samples", "attendanceBaseline"]),
     samples: aligned.samples,

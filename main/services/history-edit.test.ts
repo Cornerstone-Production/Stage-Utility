@@ -1103,6 +1103,13 @@ describe("merging attendance the frames cannot align", () => {
     assert.ok(warned.some((w) => w.startsWith("[history-edit]") && w.includes("without aligning")), warned.join("\n"));
   });
 
+  it("carries a source's unaligned mark onto the target its samples join", async () => {
+    await attendanceStore.upsert(rec("nf-tgt", 500, [0, 1, 2]) as never);
+    await attendanceStore.upsert({ ...rec("nf-src", 500, [3, 4]), attendanceUnaligned: true } as never);
+    await mergeServiceRecords("nf-src", "nf-tgt");
+    assert.equal((await attendanceStore.get("nf-tgt"))!.attendanceUnaligned, true);
+  });
+
   it("keeps one copy of a sample both records hold at the same instant", async () => {
     await attendanceStore.upsert(rec("nf-tgt", 500, [0, 1, 2]) as never);
     await attendanceStore.upsert(rec("nf-src", 500, [2, 3]) as never);
