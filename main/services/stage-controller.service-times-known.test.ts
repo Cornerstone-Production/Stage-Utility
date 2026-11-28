@@ -277,3 +277,57 @@ describe("an update a service window held at its scheduled time", () => {
     assert.equal(applied, 0, "an update owed before the switch to manual applied after it");
   });
 });
+
+// A refresh whose plan reads fail must not erase the window around a service it
+// read before: on a Sunday morning that window is all that holds the scheduled
+// restart at 09:00 before a 10:00 service.
+describe("a refresh whose plan reads fail keeps the windows it last read", () => {
+  const hourNow = () => zonedParts(Date.now()).hour;
+  function setup(t: TestContext): void {
+    captureConsole(t, "log", "warn", "error");
+    ctl.pcoAppId = "app";
+    ctl.pcoSecret = "secret";
+    ctl.lastLive = { mode: "none" };
+    ctl.liveStale = false;
+    ctl.state = { ...ctl.state, serviceTypeId: "1", planId: "p1", autoUpdate: { mode: "auto-full", dayOfWeek: null, hour: hourNow() } };
+    (stageController as unknown as { updateOwed: unknown }).updateOwed = false;
+    t.after(() => {
+      Object.assign(pco, real);
+      serviceWindow.setWindows([]);
+    });
+  }
+
+  it("the scheduled hour before a service still waits when its times, or its plan list, fail to read again", async (t) => {
+    setup(t);
+    answering();
+    await stageController.refreshServiceWindows();
+    assert.deepEqual(stageController.shouldAutoApply(1, new Date()), { apply: false, why: "window" });
+    answering({ times: "fail" });
+    await stageController.refreshServiceWindows();
+    assert.deepEqual(stageController.shouldAutoApply(1, new Date()), { apply: false, why: "window" }, "a failed read of the plan's times erased the window an hour before its service");
+    answering({ plans: "fail" });
+    await stageController.refreshServiceWindows();
+    assert.deepEqual(stageController.shouldAutoApply(1, new Date()), { apply: false, why: "window" }, "a failed read of the plan list erased the window an hour before its service");
+  });
+
+  it("an owed update does not release mid-window through a failed read", async (t) => {
+    setup(t);
+    const u = updater as unknown as Record<string, unknown>;
+    const realCheck = u.checkForUpdate;
+    const realApply = u.applyUpdate;
+    let applied = 0;
+    u.checkForUpdate = async () => ({ behind: 1 });
+    u.applyUpdate = async () => { applied++; };
+    t.after(() => { u.checkForUpdate = realCheck; u.applyUpdate = realApply; });
+    const tick = (at: Date) => (stageController as unknown as { updateCheckTick(now: Date): Promise<void> }).updateCheckTick(at);
+    answering();
+    await stageController.refreshServiceWindows();
+    await tick(new Date());
+    assert.equal(applied, 0);
+    answering({ times: "fail" });
+    await stageController.refreshServiceWindows();
+    // A minute on, still inside the window: the failed read must not have opened a way through.
+    await tick(new Date(Date.now() + 60_000));
+    assert.equal(applied, 0, "the owed update applied inside the window its failed read had erased");
+  });
+});

@@ -3724,8 +3724,18 @@ export class StageController {
   /** Recompute the upcoming rehearsal/service windows (from PCO) that gate the
    *  integration reconnect cadence. Cheap (cached PCO calls); runs on refresh +
    *  when creds/allowed/schedule change. Never throws. */
+  /** The window each followed plan's times gave at the last refresh that read them, by `typeId:planId`, and the
+   *  plans each type listed: what a failed read of either falls back on (refreshServiceWindows). */
+  private windowsByPlan = new Map<string, { open: number; close: number }>();
+  private plansByType = new Map<string, string[]>();
+
   async refreshServiceWindows(): Promise<void> {
-    if (!this.pcoAppId || !this.pcoSecret) { serviceWindow.setWindows([]); return; }
+    if (!this.pcoAppId || !this.pcoSecret) {
+      this.windowsByPlan.clear();
+      this.plansByType.clear();
+      serviceWindow.setWindows([]);
+      return;
+    }
     const { leadMin, tailMin } = this.state.reconnectSchedule;
     const leadMs = leadMin * 60_000, tailMs = tailMin * 60_000;
     try {
@@ -3735,29 +3745,62 @@ export class StageController {
       const windows: { open: number; close: number }[] = [];
       // A type or a plan whose times could not be read leaves a gap, not "nothing
       // planned": the windows are still set, for reconnects, but counted as unknown,
-      // so what must not act blind (a Mac helper's restart) waits.
+      // so what must not act blind (a Mac helper's restart) waits. And the gap keeps
+      // what the last good read of it said, while that is still to come: a 429 on
+      // Sunday morning must not erase the window around the service an hour away,
+      // which is all that stands between it and a scheduled restart.
       let gaps = 0;
+      let kept = 0;
+      const now = Date.now();
+      const byPlan = new Map<string, { open: number; close: number }>();
+      const plansByType = new Map<string, string[]>();
+      const keep = (key: string) => {
+        const w = this.windowsByPlan.get(key);
+        if (w && w.close >= now) {
+          byPlan.set(key, w);
+          kept++;
+        }
+      };
       for (const t of types) {
+        let listed = true;
         const plans = await pcoService.listUpcomingPlans(this.pcoAppId, this.pcoSecret, t.id).catch(() => {
           gaps++;
+          listed = false;
           return [] as PlanDTO[];
         });
-        for (const p of plans.slice(0, 2)) { // next couple plans per type is plenty
+        if (!listed) {
+          for (const id of this.plansByType.get(t.id) ?? []) keep(`${t.id}:${id}`);
+          plansByType.set(t.id, this.plansByType.get(t.id) ?? []);
+          continue;
+        }
+        const next = plans.slice(0, 2); // next couple plans per type is plenty
+        plansByType.set(t.id, next.map((p) => p.id));
+        for (const p of next) {
+          const key = `${t.id}:${p.id}`;
+          let read = true;
           const times = await pcoService.listPlanTimes(this.pcoAppId, this.pcoSecret, t.id, p.id).catch(() => {
             gaps++;
+            read = false;
             return [];
           });
+          if (!read) {
+            keep(key);
+            continue;
+          }
           const starts = times.map((x) => Date.parse(x.startsAt)).filter(Number.isFinite);
           if (!starts.length) continue;
           const ends = times.map((x) => (x.endsAt ? Date.parse(x.endsAt) : NaN)).filter(Number.isFinite);
-          windows.push({ open: Math.min(...starts) - leadMs, close: (ends.length ? Math.max(...ends) : Math.max(...starts)) + tailMs });
+          byPlan.set(key, { open: Math.min(...starts) - leadMs, close: (ends.length ? Math.max(...ends) : Math.max(...starts)) + tailMs });
         }
       }
+      this.windowsByPlan = byPlan;
+      this.plansByType = plansByType;
+      windows.push(...byPlan.values());
       serviceWindow.setWindows(windows);
       this.noteAutoUpdateWindow();
       if (gaps > 0) {
         serviceWindow.markUnknown();
-        console.warn(`[stage-controller] reconnect windows recomputed with ${scrub(gaps)} plan read(s) failing, so the schedule counts as unknown until the next refresh`);
+        console.warn(`[stage-controller] reconnect windows recomputed with ${scrub(gaps)} plan read(s) failing, so the schedule counts as unknown until the next refresh; ${scrub(kept)} window(s) kept from the last good read`);
       } else {
         console.log(`[stage-controller] reconnect windows recomputed: ${scrub(windows.length)}`);
       }

@@ -54,8 +54,10 @@ the next scheduled time falls inside a window and when that window closes. An ow
 update is dropped when updates go manual, when nothing is behind any more, and by a
 restart, after which the next scheduled hour decides again. Planning Center not answering holds nothing
 by itself: outside every window the scheduled hour applies, so an outage holds an
-update only when the scheduled hour falls in a planned service. A plan whose times
-could not be read adds no window. Just after the server starts, before any window
+update only when the scheduled hour falls in a planned service. A plan, or a service
+type's plan list, that could not be read keeps the window its last good read gave,
+while that window is still to come: a failed read an hour before a service does not
+open the way to a restart. A plan never read adds no window. Just after the server starts, before any window
 is known, the scheduled hour applies as it would with nothing planned.
 
 ### The machines that show screens follow
