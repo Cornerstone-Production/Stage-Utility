@@ -510,7 +510,9 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
       const customerId = await this.ensureCustomerId(token);
       const all = await this.fetchEncoderStatus(token, customerId);
       // The run, not `running`: a reconfigure restarts inside these awaits, and
-      // the old account's encoders must not be published as the new one's.
+      // the old account's encoders must not be published as the new one's, nor
+      // its broadcast list read below with its token, which refreshEvents would
+      // cache under the account configured by then.
       if (!this.current(run)) return;
 
       // Deliberately AFTER the status call and deliberately not fatal: this is
