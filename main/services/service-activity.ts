@@ -20,7 +20,10 @@
 // the first live tick after the service stops running, so with a current reading
 // an open record is a service just ending and its last samples not yet saved; with
 // no current reading no tick comes to close it, and without the bound it would
-// hold every update for as long as the outage lasted.
+// hold every update for as long as the outage lasted. With no reading at all (the
+// plan unfollowed, or Planning Center's credentials cleared, while a record was
+// open) nothing will ever tick it closed either, and there is no service to bound
+// it by: it does not count.
 //
 // Planning Center's "preservice" mode is NOT a service under way. It is the
 // countdown every plan with a service time reports, days ahead, whenever no item
@@ -61,8 +64,8 @@ const open = (r: Recording): boolean => r !== null && !r.endedAt;
 export function serviceActivityOf(r: ActivityReadings): ServiceActivity {
   const reasons: string[] = [];
   if (r.live && serviceRunning(r.live, { stale: r.stale, nowMs: r.nowMs })) reasons.push("A PCO service is live");
-  // An open record counts while the reading is current, or a kept one is of a service near now.
-  const recordsCount = !r.stale || (r.live !== null && isServiceNearNow(r.live, r.nowMs));
+  // An open record counts while there is a reading to close it by: a current one, or a kept one of a service near now.
+  const recordsCount = r.live !== null && (!r.stale || isServiceNearNow(r.live, r.nowMs));
   if (recordsCount && open(r.spl)) reasons.push("SPL is recording");
   if (recordsCount && open(r.attendance)) reasons.push("Attendance is recording");
   if (recordsCount && open(r.timeline)) reasons.push("Service history is recording");

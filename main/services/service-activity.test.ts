@@ -144,6 +144,15 @@ describe("whether a service is under way, as every restart and deploy asks it", 
     await allSay(false, "no reading yet");
   });
 
+  it("is not, for a record left open when the plan was unfollowed or Planning Center's credentials cleared: nothing will tick it closed", async (t) => {
+    quiet(t);
+    // With no plan followed, or no credentials, the controller holds no reading, and the reading it has counts as current.
+    ctl.lastLive = null;
+    for (const r of recorders) r.current = OPEN_RECORD;
+    assert.deepEqual(serviceActivity(), { active: false, reasons: [] });
+    await allSay(false, "a record open with no reading to close it");
+  });
+
   it("is, while Planning Center is in an item", async (t) => {
     quiet(t);
     ctl.lastLive = IN_AN_ITEM;

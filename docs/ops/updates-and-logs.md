@@ -83,7 +83,10 @@ service time reports it, days ahead. A recorder still open after Planning Center
 leaves its last item keeps the lock until its record closes, on the next live
 reading. While Planning Center cannot be reached, its last reading, and any record
 left open, count only until 12 hours after that service's start: a failing read is
-not evidence the service stopped, nor that one is still going hours later. The same check holds the [automatic update](#automatic-updates), the
+not evidence the service stopped, nor that one is still going hours later. A record
+left open with no reading at all, because the plan was unfollowed or Planning
+Center's credentials were cleared mid-service, does not count: nothing would ever
+close it. The same check holds the [automatic update](#automatic-updates), the
 [Mac helpers' updates](../kiosk-devices.md#keeping-the-helper-on-the-servers-version)
 and the [public ServiceCue page's](servicecue-on-the-web.md#keeping-it-up-to-date)
 update, whose **Update the page now** has the same override. Every
