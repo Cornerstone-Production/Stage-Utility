@@ -15,6 +15,20 @@ last in-service attendance sample when one came after the last item change;
 otherwise the item that was on air keeps no length, since nothing measured it.
 If the service is still live, the next tick reopens the record and that item.
 
+Versions before 1.29.0 closed those records differently: an SPL record's items
+were left running and the rundown's last item had no length, so the Actual total
+left it out. The first start of a version with the repair puts such records
+right once, by the same rule, on the one item the old close left that way (the
+item on air, which after a step back is an earlier one): an open item gets the end
+above, a rundown item gets its length when attendance counted people past its
+start, and the record's end moves to match (never earlier). A rundown nothing
+measured is left as it is, and so is a record holding more than one such item. While an
+attendance record cannot be read, nothing is repaired and it waits for the next
+start.
+Each record it changes is copied first, as it was, to a `.before-repair` file
+beside it in `spl-history/` or `service-timeline/`, and each record with the gap
+it changes or leaves is named on a `[reconcile]` line. Open records are not touched.
+
 While Planning Center reports a service live, **nothing time-based can stop it
 being recorded** — no clock, calendar or time zone. A recording ends only when the
 plan leaves item mode or reaches its service-end marker. Wall-clock checks apply
@@ -49,6 +63,14 @@ parked on an item past SERVICE END does not count as the service running. A
 record that has already closed is held only for a plan item coming back; the
 next service's arrival ramp opens that service's own record.
 
+Once Planning Center has left a service and nothing has run for ten minutes, a
+plan item put live after that (a walk-in loop or a slide check half an hour
+before the next service) belongs to the next service and opens its record, even
+though that service is still more than ten minutes away. The finished service is
+reopened only within those ten minutes, or by the item it stopped on coming back
+on the same airing. Ticks that stop altogether, as in a Planning Center outage,
+are not taken for the service ending.
+
 Each decision is logged once, whichever way it goes, and a hold that later
 ends in a split logs the split too:
 
@@ -56,6 +78,7 @@ ends in a split logs the split too:
 [service-recorder] service-timeline-recorder: service time 1001 → 1002, holding the open record (next occurrence starts in 25 min)
 [service-recorder] service-timeline-recorder: service time 1001 → 1002 starts in 10 min, closing 100:200:1001 and opening a new record
 [service-recorder] attendance-recorder: service time 1001 → 1002 began at 11:00:00, closing 100:200:1001 and opening a new record
+[service-recorder] spl-recorder: "Walk-in loop" went live after the service in 100:200:1001 stopped, 40 min before service time 1002 — the next service's, closing 100:200:1001 and opening a new record
 ```
 
 The clock is not the only thing that can end a hold. While held, the item the
