@@ -12,7 +12,7 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { eventually, installDom, unmountAndTeardown } from "../test-dom.js";
 
-const teardown = installDom();
+const teardown = installDom(undefined, { intersectionObserver: true, matchMedia: true });
 
 const listeners = new Map<string, Set<(e: { data: string }) => void>>();
 class StubEventSource {
@@ -33,14 +33,6 @@ class StubEventSource {
   }
 }
 (globalThis as unknown as { EventSource: unknown }).EventSource = StubEventSource;
-(globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
-  observe(): void {}
-  disconnect(): void {}
-  unobserve(): void {}
-};
-(window as unknown as { matchMedia: unknown }).matchMedia = () => ({
-  matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
-});
 
 const VIEWS = [
   { id: "view-foh", name: "FOH", kind: "custom", surface: "console", ndiSource: null, createdAt: "" },

@@ -33,12 +33,7 @@ import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { alerts, ok, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
-const teardown = installRenderDom();
-(globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
-  observe(): void {}
-  disconnect(): void {}
-  unobserve(): void {}
-};
+const teardown = installRenderDom({ intersectionObserver: true });
 
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 

@@ -18,16 +18,11 @@ import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 import { routerWithBaptismDestination } from "../../test-fixtures/router.js";
 import { fmtTime } from "./overview-data.js";
 
-const teardown = installDom();
+const teardown = installDom(undefined, { intersectionObserver: true });
 
 // api.ts opens an SSE stream on first use — most tests here never push on
 // it, but a few drive a live channel through `FakeEventSource.last`.
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
-(globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
-  observe(): void {}
-  disconnect(): void {}
-  unobserve(): void {}
-};
 
 const DAY = "2026-09-17";
 const KEY = "gathering:plan-1:evening";

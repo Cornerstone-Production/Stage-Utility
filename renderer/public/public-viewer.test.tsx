@@ -22,19 +22,12 @@ import { eventually, installRenderDom, settle, unmountAndTeardown, mountInAct } 
 import { alerts, ok, reply } from "../test-fixtures/fetch-log.js";
 import { FakeSocket } from "../test-fixtures/fake-socket.js";
 
-const teardown = installRenderDom();
+// The shell follows the system's light or dark through matchMedia, which jsdom lacks.
+const teardown = installRenderDom({ matchMedia: true });
 const g = globalThis as unknown as Record<string, unknown>;
 document.documentElement.setAttribute("data-servicecue-public", "");
 g.location = { protocol: "https:", host: "servicecue.example.workers.dev", search: "" };
 g.WebSocket = FakeSocket;
-
-// jsdom has no matchMedia, and the shell follows the system's light or dark through it.
-(window as unknown as Record<string, unknown>).matchMedia = (query: string) => ({
-  matches: false,
-  media: query,
-  addEventListener() {},
-  removeEventListener() {},
-});
 
 // A monotonic clock the test spends: the page's own corrected clock runs off it.
 let perfNow = 50_000;

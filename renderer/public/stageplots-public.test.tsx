@@ -15,8 +15,7 @@ import type { PublishedPlot, PublishedVenue } from "@main/types/stageplots";
 
 import { installRenderDom, settle, mountInAct } from "../test-dom.js";
 
-installRenderDom();
-(window as unknown as Record<string, unknown>).matchMedia = (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} });
+installRenderDom({ matchMedia: true });
 
 const SECRET = "A".repeat(42) + "E";
 let STORED: Map<string, unknown>;

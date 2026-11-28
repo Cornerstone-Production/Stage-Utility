@@ -11,16 +11,8 @@ import { eventually, installDom, unmountAndTeardown } from "../test-dom.js";
 import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 
-const teardown = installDom();
+const teardown = installDom(undefined, { intersectionObserver: true, matchMedia: true });
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
-(globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
-  observe(): void {}
-  disconnect(): void {}
-  unobserve(): void {}
-};
-(window as unknown as { matchMedia: unknown }).matchMedia = () => ({
-  matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
-});
 
 const { render, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;

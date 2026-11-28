@@ -16,14 +16,9 @@ import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js"
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 import { DEFAULT_VIDEO_PORTS } from "@main/types/video";
 
-const teardown = installRenderDom();
+const teardown = installRenderDom({ intersectionObserver: true });
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 // The editor beside the list renders a picture, which reads this; never on screen.
-(globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
-  observe(): void {}
-  disconnect(): void {}
-  unobserve(): void {}
-};
 
 const { render, screen, cleanup, within, act } = await import("@testing-library/react");
 const React = await import("react");

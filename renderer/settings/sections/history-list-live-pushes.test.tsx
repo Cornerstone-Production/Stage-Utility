@@ -22,14 +22,9 @@ import { after, afterEach, describe, test } from "node:test";
 import { eventually, installDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 
-const teardown = installDom();
+const teardown = installDom(undefined, { intersectionObserver: true });
 
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
-(globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
-  observe(): void {}
-  disconnect(): void {}
-  unobserve(): void {}
-};
 
 const DAY = "2026-09-24";
 const iso = (hhmmss: string) => new Date(`${DAY}T${hhmmss}`).toISOString();

@@ -22,7 +22,7 @@ import { eventually, installDom, unmountAndTeardown } from "../test-dom.js";
 import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 import type { View } from "../../main/types/views.js";
 
-const teardown = installDom();
+const teardown = installDom(undefined, { intersectionObserver: true, matchMedia: true });
 
 /** api.ts opens an SSE stream on first use; nothing here pushes on it. */
 class FakeEventSource {
@@ -32,15 +32,6 @@ class FakeEventSource {
   close(): void {}
 }
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
-(globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
-  observe(): void {}
-  disconnect(): void {}
-  unobserve(): void {}
-};
-// The rail's theme hook reads the OS colour scheme; jsdom has no matchMedia.
-(window as unknown as { matchMedia: unknown }).matchMedia = () => ({
-  matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
-});
 
 const {
   consoleHidesChrome, consolePages, consoleViewList, isConsolePath, isFullBleedPath, resolvePage, sidebarConsoleList,

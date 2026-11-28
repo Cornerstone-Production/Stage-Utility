@@ -12,8 +12,7 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 
 import { installRenderDom, settle, mountInAct } from "../test-dom.js";
 
-installRenderDom();
-(window as unknown as Record<string, unknown>).matchMedia = (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} });
+installRenderDom({ matchMedia: true });
 
 const A = `${"a".repeat(42)}A`;
 const B = `${"b".repeat(42)}E`;
