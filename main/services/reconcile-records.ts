@@ -49,21 +49,27 @@ function latestOwnMs(rec: OpenRecord): number {
 }
 
 /**
- * The last in-service attendance sample per occurrence: the one clock that keeps
- * ticking through a plan item.
+ * The last attendance sample per occurrence taken while the service ran: the one
+ * clock that keeps ticking through a plan item.
  *
  * The item-shaped records stamp only item changes, and the recorder stamps a
  * change from this host's clock a moment AFTER Planning Center's live_start_at
  * for the incoming item. So their own latest stamp sits a second or two into the
  * last item, and a length computed from it is an item that ran for two seconds.
- * Attendance samples every 30 s while the service runs. Ramp and taper samples
- * are not the service running and are left out.
+ * Attendance samples every 30 s while the service runs, pre-roll items above
+ * SERVICE START included ("pre" in item mode). Taper samples ("post") are the
+ * room emptying after the service and are left out. The arrival ramp is "pre"
+ * too, but comes before any item, so it is never later than an item change.
+ *
+ * Walks every attendance record, closed ones too, so a record missing its
+ * samples (an import, a hand-edited file) is skipped rather than stopping every
+ * orphan from being closed.
  */
 function inServiceWitness(records: ServiceAttendance[]): Map<string, number> {
   const out = new Map<string, number>();
   for (const rec of records) {
-    for (const s of rec.samples) {
-      if (s.phase) continue;
+    for (const s of rec.samples ?? []) {
+      if (!s || s.phase === "post") continue;
       const t = Date.parse(s.t);
       if (Number.isFinite(t) && t > (out.get(rec.serviceKey) ?? -Infinity)) out.set(rec.serviceKey, t);
     }
@@ -71,29 +77,29 @@ function inServiceWitness(records: ServiceAttendance[]): Map<string, number> {
   return out;
 }
 
+/** The end for an orphan, and whether a clock saw the service run up to it. */
+function endFor(rec: OpenRecord, witness: Map<string, number>): { iso: string; measured: boolean } {
+  const own = latestOwnMs(rec);
+  const seen = witness.get(rec.serviceKey);
+  const measured = seen != null && seen > own;
+  return { iso: new Date(measured ? seen : own).toISOString(), measured };
+}
+
 export async function reconcileOpenRecords(): Promise<void> {
   const attendance = await attendanceStore.list();
   const witness = inServiceWitness(attendance);
   let closed = 0;
 
-  /** The end for an orphan, and whether a clock saw the service run up to it. */
-  const endFor = (rec: OpenRecord) => {
-    const own = latestOwnMs(rec);
-    const seen = witness.get(rec.serviceKey);
-    const measured = seen != null && seen > own;
-    return { iso: new Date(measured ? seen : own).toISOString(), measured };
-  };
-
   for (const rec of attendance) {
     if (rec.endedAt == null) {
-      rec.endedAt = endFor(rec).iso;
+      rec.endedAt = endFor(rec, witness).iso;
       await attendanceStore.upsert(rec);
       closed++;
     }
   }
   for (const rec of await splHistoryStore.list()) {
     if (rec.endedAt == null) {
-      const end = endFor(rec);
+      const end = endFor(rec, witness);
       stampItemEnds(rec.items, end.iso);
       rec.endedAt = end.iso;
       await splHistoryStore.upsert(rec);
@@ -102,13 +108,12 @@ export async function reconcileOpenRecords(): Promise<void> {
   }
   for (const rec of await serviceTimelineStore.list()) {
     if (rec.endedAt == null) {
-      const end = endFor(rec);
+      const end = endFor(rec, witness);
       if (end.measured) {
         closeTimelineItems(rec.items, end.iso);
-      } else if (rec.items.some((it) => it.endedAt == null)) {
+      } else if (stampItemEnds(rec.items, end.iso) > 0) {
         // Nothing saw the last item run past its own start, so its length is
         // unknown, and stays null rather than reading as a two-second item.
-        stampItemEnds(rec.items, end.iso);
         console.log(
           `[reconcile] ${scrub(rec.serviceKey)}: no in-service people count after the last item change, so that item is closed with no length`,
         );

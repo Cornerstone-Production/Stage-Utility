@@ -52,6 +52,7 @@ const { splRecorder } = await import("./spl-recorder.js");
 const { captureConsole } = await import("./fixtures/capture-console.js");
 
 const MIN = 60_000;
+const HOUR_MS = 60 * MIN;
 const iso = (ms: number) => new Date(ms).toISOString();
 const T0 = Date.parse("2026-11-08T15:00:00.000Z");
 /** The trailing item, MESSAGE, went live in Planning Center at this instant... */
@@ -178,6 +179,40 @@ describe("closing a crashed service's records at boot", () => {
     const message = (await serviceTimelineStore.get(id.serviceKey))?.items.find((it) => it.itemId === "message");
     assert.equal(message?.endedAt, iso(SONG_CLOSED));
     assert.equal(message?.actualDurationSec, null);
+  });
+});
+
+describe("what counts as the service running", () => {
+  beforeEach((t) => captureConsole(t as TestContext, "log", "warn", "error"));
+
+  it("measures a pre-roll item above SERVICE START that attendance saw run", async () => {
+    // Attendance tags its samples "pre" on an item above SERVICE START as well
+    // as on the arrival ramp; the timeline records that item like any other.
+    const id = identity();
+    await serviceTimelineStore.upsert(openTimeline(id));
+    const att = openAttendance(id, MESSAGE_LIVE - 5 * MIN);
+    att.samples.push({ t: iso(CRASH), attendance: 150, occupancy: 140, phase: "pre" });
+    await attendanceStore.upsert(att);
+    await reconcileOpenRecords();
+
+    const message = (await serviceTimelineStore.get(id.serviceKey))?.items.find((it) => it.itemId === "message");
+    assert.equal(message?.endedAt, iso(CRASH));
+    assert.equal(message?.actualDurationSec, (CRASH - MESSAGE_LIVE) / 1000);
+  });
+
+  it("is not stopped by a stored attendance record with no samples", async () => {
+    // Every attendance record is read for the witness, closed ones too, and an
+    // imported or hand-edited one need not carry samples.
+    const broken = identity();
+    const att = openAttendance(broken, T0) as Partial<ServiceAttendance>;
+    delete att.samples;
+    att.endedAt = iso(T0 + HOUR_MS);
+    await attendanceStore.upsert(att as ServiceAttendance);
+    const id = identity();
+    await serviceTimelineStore.upsert(openTimeline(id));
+    await reconcileOpenRecords();
+
+    assert.equal((await serviceTimelineStore.get(id.serviceKey))?.endedAt, iso(SONG_CLOSED), "the orphan was closed");
   });
 });
 
