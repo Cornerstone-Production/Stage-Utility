@@ -16,6 +16,7 @@
 // carries: an event's TIME still has to be printed, and printing it in the
 // browser's zone is the same failure a formatting step later.
 
+import { pad2 } from "./duration-format.js";
 import type { CalendarDay, CalendarEventDTO, CalendarGrid } from "../types/calendar.js";
 import {
   appTimeZone,
@@ -53,16 +54,12 @@ const MONTH_NAMES = [
   "December",
 ];
 
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
 /** Civil date arithmetic on a YYYY-MM-DD key. No zone is involved: "the day
  *  after the 14th" is the 15th everywhere, whatever the offsets did in between. */
 function addDays(dateKey: string, n: number): string {
   const [y, m, d] = dateKey.split("-").map(Number);
   const t = new Date(Date.UTC(y, m - 1, d) + n * 86_400_000);
-  return `${t.getUTCFullYear()}-${pad(t.getUTCMonth() + 1)}-${pad(t.getUTCDate())}`;
+  return `${t.getUTCFullYear()}-${pad2(t.getUTCMonth() + 1)}-${pad2(t.getUTCDate())}`;
 }
 
 /**
@@ -90,7 +87,7 @@ function anchorParts(monthAnchorIso: string, zone: TimeZone): ZonedParts {
 /** The date the visible grid starts on: the Sunday on or before the 1st of the
  *  anchor's LOCAL month. */
 function gridStartKey(p: ZonedParts): string {
-  const first = `${p.year}-${pad(p.month)}-01`;
+  const first = `${p.year}-${pad2(p.month)}-01`;
   const weekday = new Date(Date.UTC(p.year, p.month - 1, 1)).getUTCDay();
   return addDays(first, -weekday);
 }
@@ -197,7 +194,7 @@ export function buildGrid(
   zone: TimeZone = appTimeZone(),
 ): CalendarGrid {
   const p = anchorParts(monthAnchorIso, zone);
-  const monthPrefix = `${p.year}-${pad(p.month)}`;
+  const monthPrefix = `${p.year}-${pad2(p.month)}`;
   const startKey = gridStartKey(p);
 
   const days: CalendarDay[] = [];

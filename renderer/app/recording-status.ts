@@ -6,6 +6,7 @@
 // connected-but-stopped judgement is a second place for the same bug.
 
 import { obsRecordTimecode, type RecordAnchor } from "@main/services/obs-record-clock";
+import { formatHms } from "@main/services/duration-format";
 import { externKeyed } from "@main/types/extern-keyed";
 
 /**
@@ -226,11 +227,7 @@ export function elapsedSince(startedAt: string | null | undefined, now: number):
   if (!Number.isFinite(t)) return null;
   // A start in the future is a clock disagreement between us and the platform,
   // not a negative duration. Show it as just-started rather than "-0:03".
-  const sec = Math.max(0, Math.floor((now - t) / 1000));
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  const ss = String(sec % 60).padStart(2, "0");
-  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+  return formatHms((now - t) / 1000, { round: "floor" });
 }
 
 /**
@@ -346,10 +343,7 @@ export function streamIndicator(
 /** "H:MM:SS" past an hour, else "M:SS". The shape `elapsedSince` returns, from
  *  a count of seconds rather than a start time. */
 export function formatDuration(sec: number): string {
-  const h = Math.floor(sec / 3600);
-  const m = Math.floor((sec % 3600) / 60);
-  const ss = String(sec % 60).padStart(2, "0");
-  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${ss}` : `${m}:${ss}`;
+  return formatHms(sec, { round: "floor" });
 }
 
 /**

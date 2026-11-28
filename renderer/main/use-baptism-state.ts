@@ -3,6 +3,7 @@ import { useCallback } from "react";
 import { invoke } from "../lib/api";
 import { reduceBaptismPeople } from "../lib/baptism-people";
 import { formatClock } from "../lib/clock-format";
+import { formatHms } from "@main/services/duration-format";
 import { useStatusChannel, type StatusChannelResult } from "./use-status-channel";
 
 /**
@@ -55,13 +56,9 @@ export function summarizeBaptism(s: BaptismState | null) {
   };
 }
 
-/** ms → "m:ss" (or "h:mm:ss"). */
+/** ms → "m:ss" (or "h:mm:ss"). Floored: a running clock never shows a second early. */
 export function fmtClock(ms: number): string {
-  const s = Math.max(0, Math.floor(ms / 1000));
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  if (m >= 60) return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
-  return `${m}:${String(r).padStart(2, "0")}`;
+  return formatHms(ms / 1000, { round: "floor" });
 }
 
 /**
