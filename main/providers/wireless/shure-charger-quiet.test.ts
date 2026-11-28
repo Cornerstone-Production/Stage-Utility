@@ -16,6 +16,7 @@ import { ShureAxient } from "./shure-axient.js";
 import { ShureCharger } from "./shure-charger.js";
 import { ShurePsm } from "./shure-psm.js";
 import { ShureUlxd } from "./shure-ulxd.js";
+import { captureConsoleDuring } from "../../services/fixtures/capture-console.js";
 
 interface Inner {
   initChannelStates(count: number): void;
@@ -30,19 +31,13 @@ function driver(provider: object): { lines: string[]; feed: (...frames: string[]
   inner.initChannelStates(8);
 
   const lines: string[] = [];
-  const realLog = console.log;
-  const realWarn = console.warn;
-  const push = (...args: unknown[]) => lines.push(args.map(String).join(" "));
 
   const feed = (...frames: string[]) => {
-    console.log = push;
-    console.warn = push;
-    try {
-      for (const f of frames) inner.handleData(f);
-    } finally {
-      console.log = realLog;
-      console.warn = realWarn;
-    }
+    lines.push(
+      ...captureConsoleDuring(["log", "warn"], () => {
+        for (const f of frames) inner.handleData(f);
+      }),
+    );
   };
   return { lines, feed, reinit: () => inner.initChannelStates(8) };
 }
