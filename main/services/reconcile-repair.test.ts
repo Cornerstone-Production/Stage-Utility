@@ -579,6 +579,16 @@ describe("records that arrive after the boot repair ran, when their repair canno
     assert.equal((await historyRepairsStore.load())["old-boot-close-gaps"], undefined, "the next start will not try again");
   });
 
+  it("reports the repair's own failure when handing it on fails too", async (t) => {
+    t.mock.method(attendanceStore, "list", async () => {
+      throw new Error("EIO listing");
+    });
+    t.mock.method(historyRepairsStore, "update", async () => {
+      throw new Error("marker disk full");
+    });
+    await assert.rejects(repairArrivedRecords(new Set(["any"])), /EIO listing/);
+  });
+
   it("leaves the marker when it finished", async () => {
     await repairArrivedRecords(new Set(["nothing-here"]));
     assert.ok((await historyRepairsStore.load())["old-boot-close-gaps"]);

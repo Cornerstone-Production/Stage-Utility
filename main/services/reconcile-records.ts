@@ -289,7 +289,11 @@ export async function repairArrivedRecords(keys: ReadonlySet<string>): Promise<G
   try {
     result = await repairBootCloseGaps(keys);
   } catch (err) {
-    await retryAtNextStart();
+    // The repair's own failure is the one to report; a marker that also cannot
+    // be written is said here, not thrown over it.
+    await retryAtNextStart().catch((markerErr: unknown) =>
+      console.log(`[reconcile] could not hand the repair to the next start either: ${scrub(errorMessage(markerErr))}`),
+    );
     throw err;
   }
   if (result.waiting || result.failed.length) await retryAtNextStart();
