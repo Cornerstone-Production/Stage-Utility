@@ -16,6 +16,7 @@
 // with the credential attached. The setters write one component each and cannot
 // touch the origin.
 
+import { hasUserinfo } from "./http-origin.js";
 import { scrub } from "./scrub.js";
 
 /**
@@ -40,7 +41,7 @@ export function pinToOrigin(origin: string, candidate: string, tag: string): str
   const rebuilt = new URL(origin);
   rebuilt.pathname = parsed.pathname;
   rebuilt.search = parsed.search;
-  if (parsed.origin !== rebuilt.origin || parsed.username !== "" || parsed.password !== "") {
+  if (parsed.origin !== rebuilt.origin || hasUserinfo(parsed)) {
     console.error(
       `[${scrub(tag, 20)}] BUG: a request URL for ${scrub(parsed.origin, 80)} was sent to ${scrub(rebuilt.origin, 80)} instead. ` +
         "Whatever built that URL is wrong; the credential stayed on the configured origin.",

@@ -429,7 +429,9 @@ others are resumed, nothing is written, and `[config-snapshot]` names which.
   this build does not keep, and an image outside the two image folders, is
   skipped and logged.
 - A public URL that is not an http or https address, which builds before 1.27.0
-  saved without checking, is restored as none and logged rather than refused.
+  saved without checking, or that has an `@` in it (a user name or password), is
+  restored as none and logged rather than refused. The line does not show an
+  address with an `@` in it.
 - A snapshot listing more than 500 files, or more than 2000 images, is refused
   outright. No backup the app writes comes near either.
 

@@ -299,16 +299,23 @@ const backupSchedule: KeyCheck = (v, k) => {
 };
 
 /**
- * setPublicUrl: normalizeBaseUrl, and only an http or https address. One that
- * does not parse is restored as null and logged rather than refused: builds
- * before 1.27.0 saved whatever normalizeBaseUrl returned, so a real backup can
- * hold "http://stage box", and refusing it refused the whole restore.
+ * setPublicUrl: normalizeBaseUrl, and only an http or https address with no `@`
+ * (see isHttpBaseUrl). One that fails is restored as null and logged rather than
+ * refused: builds before 1.27.0 saved whatever normalizeBaseUrl returned, so a
+ * real backup can hold "http://stage box", and refusing it refused the whole
+ * restore.
  */
 const publicUrl: KeyCheck = (v, k) => {
   textOrNull(v, k);
   const normalized = normalizeBaseUrl((v ?? null) as string | null);
   if (normalized !== null && !isHttpBaseUrl(normalized)) {
-    console.warn(`[config-snapshot] settings.json: ${scrub(k)} "${scrub(normalized)}" is not an http or https address; restored as none`);
+    // An address holding an `@` may hold a password, and where it ends cannot
+    // be told from an address that does not parse, so it is not shown at all.
+    const shown = normalized.includes("@") ? "(an address with a user name or password, not shown)" : `"${normalized}"`;
+    console.warn(
+      `[config-snapshot] settings.json: ${scrub(k)} ${scrub(shown)} is not an http or https address ` +
+        "without a user name or password; restored as none",
+    );
     return null;
   }
   return normalized;

@@ -143,6 +143,28 @@ test("the public URL setter refuses what is not a web address, as a restore does
   await assert.rejects(() => stageController.setPublicUrl("javascript:alert(1)//"), /http or https/);
 });
 
+test("the public URL setter refuses an address with a user name or password in it, and never repeats them", async () => {
+  // The address goes on the connect QR and into every display link, so a
+  // password typed into it would be handed to everyone who scans the code.
+  // The last three would otherwise land the password in the path: a mistyped
+  // scheme is taken as a host once `http://` is put in front of it.
+  for (const url of [
+    "http://admin:hunter22@stage.example.org",
+    "operator:hunter22@stage.example.org",
+    "https://admin@stage.example.org",
+    "https:/admin:hunter22@stage.example.org",
+    "ftp://operator:hunter22@stage.example.org",
+    "admin:1234/x@stage.example.org",
+  ]) {
+    await assert.rejects(
+      () => stageController.setPublicUrl(url),
+      (err: Error) => !/hunter22|admin|operator/.test(err.message),
+      url,
+    );
+  }
+  assert.doesNotMatch(String(stageController.getState().publicUrl), /@/, "a refused address was kept");
+});
+
 test("the caption colour setter writes no key a restore would refuse", async () => {
   for (const channel of ["__proto__", "constructor", "prototype"]) {
     await stageController.setCaptionChannelColor(channel, "#ffcc00");

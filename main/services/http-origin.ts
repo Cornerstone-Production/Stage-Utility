@@ -4,6 +4,10 @@
 // the browser exemption on the cue routes. They used to be one function here and
 // a looser copy in cue-tokens.ts, and the copy accepted a bare `Sec-Fetch-Site`
 // header — curl with one header minted itself a cue token. One definition now.
+//
+// Also the one rule for a username or password inside an address (hasUserinfo),
+// which used to be written in more than one place, and the copies disagreed.
+// Import-free, because the renderer imports this file.
 
 /**
  * Hostname of an Origin header ("http://host:port") or a Host header
@@ -59,4 +63,12 @@ export function headerValue(
 ): string {
   const raw = headers[name];
   return String(Array.isArray(raw) ? (raw[0] ?? "") : (raw ?? ""));
+}
+
+/** A username or password inside the address itself. Refused for every address
+ *  the app keeps: stored there it would sit in a config store and go out to every
+ *  screen (video:state, the connect QR and display links), and a browser refuses
+ *  to fetch an address that carries one, so it could never work either. */
+export function hasUserinfo(u: URL): boolean {
+  return u.username !== "" || u.password !== "";
 }

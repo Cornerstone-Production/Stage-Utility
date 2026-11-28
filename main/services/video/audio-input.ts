@@ -8,7 +8,7 @@
 // the address, that keeps it from ever changing what runs.
 
 import { AUDIO_CONVERSIONS, type AudioConversion } from "../../types/video.js";
-import { hasUserinfo } from "./url-userinfo.js";
+import { hasUserinfo } from "../http-origin.js";
 
 /** Longest audio source address, in characters. */
 export const MAX_AUDIO_URL_LENGTH = 1024;

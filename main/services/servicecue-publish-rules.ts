@@ -2,9 +2,11 @@
 //
 // The page address and the publishing token, and nothing else. A LEAF MODULE: the card
 // reads the same rules the routes and the publisher enforce, so what it lets through is
-// what the server accepts, and the renderer pays for two functions and a type.
+// what the server accepts, and the renderer pays for two functions and a type. Its one
+// import besides the types is http-origin.ts, which imports nothing.
 
 import { PUBLISH_MIN_TOKEN_LENGTH } from "../types/servicecue-publish.js";
+import { hasUserinfo } from "./http-origin.js";
 
 declare const PUBLISH_ORIGIN: unique symbol;
 /** The operator's page as `scheme://host[:port]`, and nothing after it. Made only by
@@ -49,7 +51,7 @@ export function parsePublishUrl(raw: unknown, allowLocal: boolean = localAllowed
   if (url.protocol === "http:" && !(allowLocal && LOOPBACK_HOSTS.has(url.hostname))) {
     return { ok: false, message: "The page address has to start with https://." };
   }
-  if (url.username || url.password) {
+  if (hasUserinfo(url)) {
     return { ok: false, message: "Leave the user name and password out of the page address." };
   }
   if (!url.hostname) return { ok: false, message: "That doesn't look like a web address." };
