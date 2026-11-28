@@ -78,6 +78,10 @@ describe("storing a chosen glyph", () => {
       /read-only/,
       "the operator is told a save failed but not what the server said",
     );
+    // The toast is gone in four seconds; /log is what an operator reads the
+    // next morning. The line is a POST to the client-log route, not console.
+    const logged = writes.filter((w) => w.url === "/api/log/client").map((w) => w.body);
+    assert.deepEqual(logged, [{ tag: "icons", message: "could not change the icon (display-invented-1): the icon store is read-only" }]);
     ui.unmount();
   });
 

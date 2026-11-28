@@ -16,6 +16,7 @@ import type { MachineUpdate } from "@main/services/machine-updates";
 import type { PublicDevice } from "@main/services/kiosk-devices-store";
 import type { OutputHealth } from "@main/types/output-health";
 import { LISTENING_GRACE_MS, listeningFor, refreshDevices, type DevicesPayload } from "./use-devices";
+import { logFailure } from "../../lib/report-failure";
 
 /** The machine a device id belongs to. A helper output is `<mac id>.<output key>`
  *  and the output that took over a Chrome kiosk is the bare `<mac id>`; a Windows
@@ -97,6 +98,7 @@ export async function requestUpdate(machine: string): Promise<void> {
     if (failed) toast.error(`Asked, but the list did not reload: ${failed.message}`);
   } catch (err) {
     toast.error(errorMessage(err));
+    logFailure("screens", "ask that machine to update", err, machine);
   }
 }
 

@@ -11,6 +11,7 @@ import { invoke, type ApiError } from "../../../lib/api";
 import { toast, confirm } from "../../../components/ui";
 import { fmtDate } from "../../../main/use-baptism-state";
 import type { LiveCheck, LiveStatus } from "./use-service-live";
+import { logFailure } from "../../../lib/report-failure";
 
 /**
  * What a baptism-only rebuild did, in a sentence — the same "say what
@@ -173,8 +174,10 @@ export async function runBaptismRebuild(args: {
       // Not a liveness problem at all — leave the button exactly as it was
       // and say what the server actually refused on.
       toast.error(errorMessage(e));
+      logFailure("baptism", "rebuild: no raw rows to rebuild from", e);
       return;
     }
     toast.error(`Rebuild failed: ${errorMessage(e)}`);
+    logFailure("baptism", "rebuild", e);
   }
 }

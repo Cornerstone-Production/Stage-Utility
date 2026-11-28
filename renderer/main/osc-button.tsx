@@ -4,6 +4,7 @@ import { invoke } from "../lib/api";
 import { toast } from "../components/ui";
 import { Loader2Icon } from "lucide-react";
 import { BUTTON_BASE_STYLE, ButtonLabel } from "./button-label";
+import { logFailure } from "../lib/report-failure";
 
 // OscArg / OscFeedbackBind are ambient global types (see renderer/types.d.ts).
 interface OscButtonConfig {
@@ -52,6 +53,7 @@ export function OscButton({
       });
     } catch (e) {
       toast.error(`OSC failed: ${errorMessage(e)}`);
+      logFailure("osc", "send that OSC message", e);
     } finally {
       setBusy(false);
     }

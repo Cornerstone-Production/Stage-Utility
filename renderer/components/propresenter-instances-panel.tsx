@@ -20,7 +20,7 @@ import { ConnectionBadge } from "./connection-badge";
 import { feedId, sameRows, withDefaults } from "./integration-panel-helpers";
 import { useReportUnsavedWork } from "./unsaved-work";
 import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
-import { errorMessage } from "@main/services/errors";
+import { reportFailure } from "../lib/report-failure";
 
 // ---- ProPresenter extra instances -------------------------------------------
 
@@ -108,8 +108,7 @@ export function ProPresenterInstancesPanel({
       toast.success("ProPresenter instances saved.");
       return true;
     } catch (err) {
-      console.error("[ProPresenterInstancesPanel:save]", err);
-      toast.error(`Could not save instances: ${errorMessage(err)}`);
+      reportFailure("propresenter", "save instances", err);
       return false;
     } finally {
       setSaving(false);

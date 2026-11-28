@@ -47,6 +47,7 @@ export function useSavedColors(): SavedColors {
             : colors.filter((c: string) => c !== color),
         }),
         () => invoke<StageState>("savedColors:set", { color, keep }),
+        { tag: "settings" },
       );
       // The list has a ceiling, and reaching it costs the oldest colour. Say so:
       // a swatch that disappeared without a word reads as a bug, and quietly

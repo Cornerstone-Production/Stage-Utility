@@ -42,6 +42,7 @@ export interface BrandingPatch {
  */
 export async function setBranding(queryClient: QueryClient, partial: BrandingPatch): Promise<boolean> {
   const next = await writeTo<StageState>(queryClient, ["stage:getState"], () => invoke<StageState>("stage:setBranding", { ...partial }), {
+    tag: "branding",
     fail: "Failed to update branding",
     ok: "Branding updated.",
   });

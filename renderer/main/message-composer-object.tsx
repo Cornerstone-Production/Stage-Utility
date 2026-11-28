@@ -43,7 +43,7 @@ import { ageLabel } from "../lib/age-label";
 import { cn } from "../lib/cn";
 import { invoke } from "../lib/api";
 import { joinWithAnd } from "../lib/join-with-and";
-import { reportActionFailure } from "./report-action-failure";
+import { reportFailure } from "../lib/report-failure";
 
 /**
  * Who a message from this composer says it is from: the output's name on a
@@ -169,7 +169,7 @@ export function MessageComposerObject({ state, known, outputs, from, interactive
       setText("");
       setAlert(false);
     } catch (e) {
-      reportActionFailure("send that message", e, `to ${targets.join(", ")}`);
+      reportFailure("messages", "send that message", e, `to ${targets.join(", ")}`);
     } finally {
       setSending(false);
     }
@@ -181,7 +181,7 @@ export function MessageComposerObject({ state, known, outputs, from, interactive
     try {
       await invoke("messages:clearAlert", { id: m.id, from });
     } catch (e) {
-      reportActionFailure("clear that alert", e, m.id);
+      reportFailure("messages", "clear that alert", e, m.id);
     } finally {
       setClearing(null);
     }

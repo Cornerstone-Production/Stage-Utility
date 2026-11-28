@@ -7,6 +7,8 @@
 import { useEffect, useState } from "react";
 
 import { invoke, onNotification } from "../lib/api";
+import { logFailure } from "../lib/report-failure";
+import { logReadFailure } from "../lib/client-log";
 import { Button, DialogRoot, DialogContent, DialogHeader, DialogTitle, DialogDescription, toast } from "../components/ui";
 import { cn } from "../lib/cn";
 import type { JustUpdated } from "@main/services/update-notices-store";
@@ -45,8 +47,8 @@ export function UpdateNotices() {
     void invoke<{ justUpdated: JustUpdated | null }>("update:notices")
       .then((r) => setJustUpdated(r.justUpdated))
       // A notice that cannot be fetched is not worth interrupting anybody over,
-      // and there is no operator action that would help.
-      .catch(() => {});
+      // and there is no operator action that would help. It is worth a line.
+      .catch((e: unknown) => logReadFailure("updater", "the release notice", e));
   }, []);
 
   async function dismiss(): Promise<void> {
@@ -54,9 +56,10 @@ export function UpdateNotices() {
     try {
       await invoke("update:dismissNotice", {});
       setJustUpdated(null);
-    } catch {
+    } catch (e) {
       // Leave it on screen: better a dialog that will not close than one that
       // closes and comes back on the next load.
+      logFailure("updater", "dismiss the release notice", e);
       setDismissing(false);
     }
   }

@@ -8,7 +8,6 @@
 
 import { useState, type ChangeEvent } from "react";
 import { TrashIcon, CopyIcon, PanelTopIcon, PanelTopDashedIcon } from "lucide-react";
-import { errorMessage } from "@main/services/errors";
 import { cn } from "../../lib/cn";
 import {
   Button,
@@ -20,9 +19,9 @@ import {
   SelectItem,
   SelectValue,
   Separator,
-  toast,
 } from "../../components/ui";
 import { invoke } from "../../lib/api";
+import { reportFailure } from "../../lib/report-failure";
 import { useServiceCueLayouts } from "../../lib/use-servicecue-layouts";
 import type { SectionProps } from "../types";
 import { LayoutEditor } from "../../editor/layout-editor";
@@ -168,7 +167,7 @@ export function ViewDetail({
             }
             onClick={() =>
               void invoke("views:setHideChrome", { id: view.id, hideChrome: !view.hideChrome })
-                .catch((e: unknown) => toast.error(`Could not change this console's chrome: ${errorMessage(e)}`))
+                .catch((e: unknown) => reportFailure("screens", "change this console's chrome", e, view.id))
             }
           >
             {view.hideChrome
@@ -215,7 +214,7 @@ export function ViewDetail({
                 void invoke("views:setServiceCueLayout", {
                   id: view.id,
                   serviceCueLayoutId: v === ALL_COLUMNS ? null : v,
-                }).catch((e: unknown) => toast.error(`Could not change this view's layout: ${errorMessage(e)}`))
+                }).catch((e: unknown) => reportFailure("screens", "change this view's layout", e, view.id))
               }
             >
               <SelectTrigger className="w-full sm:w-64" aria-label="Layout" data-flash-id={VIEW_LAYOUT_FLASH_ID}><SelectValue /></SelectTrigger>

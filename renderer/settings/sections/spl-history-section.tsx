@@ -1,8 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import { invoke, onNotification, type ApiError } from "../../lib/api";
-import { toast } from "../../components/ui";
-import { errorMessage } from "@main/services/errors";
 import { combineLeq } from "@main/services/spl-leq";
 import {
   CustomizePopover,
@@ -18,6 +16,7 @@ import {
   type LaneItem,
 } from "./history-chart";
 import { peakLabel, plottedMetric, type PlotPrefs, type Plotted, writePlotChoice } from "./sound-plot";
+import { reportFailure } from "../../lib/report-failure";
 
 /** Per-metric stat for an item, with legacy single-metric fallback. */
 function metricStat(item: SplItemHistory, key: string, record: ServiceSplHistory): SplMetricStat | null {
@@ -270,12 +269,12 @@ export function SplDetail({
   const [figureKeys, storeFigure] = useStoredKeys(FIGURES_STORAGE_KEY, FIGURE_KEYS, DEFAULT_FIGURES);
   function toggleFigure(key: string) {
     const err = storeFigure(key);
-    if (err) toast.error(`Could not remember that choice: ${errorMessage(err)}`);
+    if (err) reportFailure("history", "remember that choice", err);
   }
   const [seriesKeys, storeSeries] = useStoredKeys(SERIES_STORAGE_KEY, SERIES_KEYS, DEFAULT_SERIES);
   function toggleSeries(key: string) {
     const err = storeSeries(key);
-    if (err) toast.error(`Could not remember that choice: ${errorMessage(err)}`);
+    if (err) reportFailure("history", "remember that choice", err);
   }
 
   const allKeys = useMemo(() => metricKeysOf(detail), [detail]);
@@ -285,7 +284,7 @@ export function SplDetail({
    *  Trends when the organisation changes it. */
   function rememberPlot(metric: string | null) {
     const err = writePlotChoice(metric === plotted?.trends ? null : metric);
-    if (err) toast.error(`Could not remember that choice: ${errorMessage(err)}`);
+    if (err) reportFailure("history", "remember that choice", err);
   }
 
   /**
@@ -336,7 +335,7 @@ export function SplDetail({
       .catch((err) => {
         if (cancelled) return;
         setSeeded(true);
-        toast.error(`Could not read the saved Smaart metrics: ${errorMessage(err)}`);
+        reportFailure("history", "read the saved Smaart metrics", err);
       });
     return () => {
       cancelled = true;
@@ -345,7 +344,7 @@ export function SplDetail({
 
   function toggleMetric(key: string) {
     const err = storeMetric(key);
-    if (err) toast.error(`Could not remember that choice: ${errorMessage(err)}`);
+    if (err) reportFailure("history", "remember that choice", err);
   }
 
   const items = useMemo(() => detail.items.slice().sort((a, b) => a.sequence - b.sequence), [detail]);

@@ -13,6 +13,7 @@ import { screensShowing, viewCanBeControlSurface, viewShownInSidebar, viewSurfac
 import { SURFACE_COPY } from "../screen-role-confirm";
 import { ChoiceCard, DangerButton, NameInput, OutlineButton, PanelFooter, Section, SidebarRow } from "./screen-panel-parts";
 import type { PanelTarget, ScreenPanelActions } from "./screen-settings-panel";
+import { logFailure } from "../../lib/report-failure";
 
 /** What the view body does to the outside world. */
 export type ViewPanelActions = Pick<
@@ -26,6 +27,7 @@ async function setDisplayWidth(viewId: string, displayWidthIn: number | null): P
     await invoke("views:setSlotsLayout", { id: viewId, slotsLayout: displayWidthIn === null ? null : { displayWidthIn } });
   } catch (err) {
     toast.error(`Couldn't set the display width: ${errorMessage(err)}`);
+    logFailure("screens", "set the display width", err);
   }
 }
 

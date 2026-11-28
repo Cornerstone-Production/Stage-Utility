@@ -19,11 +19,10 @@
 
 import type { LucideIcon } from "lucide-react";
 import { invoke } from "../lib/api";
-import { errorMessage } from "@main/services/errors";
-import { toast } from "./ui";
 import type { IconEditing } from "./ui/color-field";
 import { resolveIcon } from "./icon-set";
 import { useStageState } from "../main/use-stage-state";
+import { reportFailure } from "../lib/report-failure";
 
 /**
  * Store a chosen glyph, and say so if it does not land.
@@ -48,8 +47,7 @@ export function saveIcon(key: string, glyph: string, legacyKey?: string): void {
     .catch((e: unknown) => {
       // Tagged as well as toasted: a toast is gone in four seconds and leaves
       // /log with nothing to read on the Sunday morning it happened.
-      console.error("[editable-icon:setIcon]", key, glyph, e);
-      toast.error(`Could not change the icon: ${errorMessage(e)}`);
+      reportFailure("icons", "change the icon", e, key);
     });
 }
 

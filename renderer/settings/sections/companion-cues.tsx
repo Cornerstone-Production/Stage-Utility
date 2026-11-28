@@ -63,6 +63,8 @@ import {
 } from "../../components/ui";
 import { SETTINGS_CARD } from "../../lib/card-classes";
 import { copyText } from "../../lib/clipboard";
+import { logToServer } from "../../lib/client-log";
+import { logFailure } from "../../lib/report-failure";
 import { companionButtonsQuery, type ButtonsReply } from "../../lib/companion-buttons";
 import { CompanionPageBody, CompanionPageSelect, listedPages, type CompanionPick } from "../../components/companion-pages";
 import { Segmented } from "../../editor/inspector-rows";
@@ -424,9 +426,11 @@ function ButtonPickerDialog({
           `Read Companion, but could not save ${failed.length} command status(es): ` +
             `${failed.map((f) => f.label).join(", ")}`,
         );
+        logToServer("companion", `read Companion, but could not save ${failed.length} command status(es)`);
       }
     } catch (e) {
       toast.error(errorMessage(e));
+      logFailure("companion", "refresh the Companion buttons", e);
     }
   }
 
@@ -1045,6 +1049,7 @@ export function ImportPairsDialog({
       close();
     } catch (e) {
       toast.error(errorMessage(e));
+      logFailure("companion", "import the commands", e);
     } finally {
       setBusy(false);
     }
@@ -1248,6 +1253,7 @@ export function CueAccessCard() {
       refresh();
     } catch (e) {
       toast.error(errorMessage(e));
+      logFailure("companion", "mint a token", e);
     }
   }
 
@@ -1333,6 +1339,7 @@ export function CueAccessCard() {
                       refresh();
                     } catch (e) {
                       toast.error(errorMessage(e));
+                      logFailure("companion", "revoke a token", e, t.id);
                     }
                   }}
                 >

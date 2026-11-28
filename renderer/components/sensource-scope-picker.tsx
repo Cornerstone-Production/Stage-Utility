@@ -15,6 +15,7 @@ import {
 import { Loader2Icon, CheckCircle2Icon, RefreshCwIcon, AlertTriangleIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 import { plural } from "@main/services/plural";
+import { reportFailure } from "../lib/report-failure";
 
 /**
  * SafeSpace is switched on and has no space id — say so where the fix is.
@@ -70,7 +71,7 @@ function SafeSpaceIdMissingNotice({
     } catch (err) {
       // Surfaced, not swallowed: the notice stays up either way, and without
       // this the button would read as a control that does nothing.
-      toast.error(`Could not turn SafeSpace off: ${errorMessage(err)}`);
+      reportFailure("sensource", "turn SafeSpace off", err);
     } finally {
       setTurningOff(false);
     }
@@ -198,7 +199,7 @@ export function SenSourceScopePicker({
       const next = await invoke<IntegrationState>("integrations:setConfig", { id: "sensource", config: patch });
       onStateChange(next);
     } catch (err) {
-      toast.error(`Could not save: ${errorMessage(err)}`);
+      reportFailure("sensource", "save", err);
     }
   }
 

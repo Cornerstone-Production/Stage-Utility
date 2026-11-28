@@ -34,6 +34,7 @@ import {
 } from "../../components/ui";
 import { useHostNames, useHostNamesChange } from "../../app/host-names-query";
 import { settingText, type AdvancedSettingId } from "./advanced-settings";
+import { logFailure } from "../../lib/report-failure";
 
 const SOURCE_LABEL: Record<AcceptedSource | HostNamesView["automatic"][number]["source"], string> = {
   machine: "This machine",
@@ -104,6 +105,7 @@ export function HostNamesCard({
       return true;
     } catch (err) {
       toast.error(errorMessage(err));
+      logFailure("host-names", "change a host-name setting", err);
       return false;
     } finally {
       setBusy(false);

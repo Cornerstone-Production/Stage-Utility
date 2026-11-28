@@ -50,8 +50,8 @@ import {
 import { LEAGUES, type LeagueId } from "@main/types/scores";
 import { errorMessage } from "@main/services/errors";
 import { invoke as ipc } from "../../lib/api";
-import { toast } from "../../components/ui";
 import { cn } from "../../lib/cn";
+import { reportFailure } from "../../lib/report-failure";
 
 /** The identity of a favourite. League AND id: ESPN's ids are unique per league. */
 const keyOf = (f: { league: string; teamId: string }): string => `${f.league}:${f.teamId}`;
@@ -451,13 +451,10 @@ export function ScoresTeamsPanel({ className }: { className?: string } = {}) {
     paint: (next) => queryClient.setQueryData<ScoresConfig>(FAVOURITES_KEY, { favourites: next }),
     write: (next) => ipc<ScoresConfig>("scores:setFavourites", { favourites: next }),
     onError: (err) => {
-      // Tagged for the browser console, as the other list panels do — a toast is
-      // gone in seconds and this is the failure someone has to reconstruct.
-      console.error("[ScoresTeamsPanel:save]", err);
       // Put the stored truth back rather than leaving a team on screen that was
       // never saved, and say so. Nothing is dropped quietly.
       void favouritesQuery.refetch();
-      toast.error(`Could not save followed teams: ${errorMessage(err)}`);
+      reportFailure("scores", "save followed teams", err);
     },
   });
   const edit = writerRef.current;

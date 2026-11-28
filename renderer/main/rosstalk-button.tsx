@@ -5,6 +5,7 @@ import { Loader2Icon, RadioTowerIcon } from "lucide-react";
 import { invoke } from "../lib/api";
 import { toast } from "../components/ui";
 import { BUTTON_BASE_STYLE, ButtonLabel } from "./button-label";
+import { logFailure } from "../lib/report-failure";
 
 interface RossTalkButtonConfig {
   targetId?: string | null;
@@ -57,6 +58,7 @@ export function RossTalkButton({
       if (r.simulated) toast.info(`Simulated: ${r.line}`);
     } catch (e) {
       toast.error(`RossTalk failed: ${errorMessage(e)}`);
+      logFailure("rosstalk", "send that RossTalk command", e);
     } finally {
       setBusy(false);
     }

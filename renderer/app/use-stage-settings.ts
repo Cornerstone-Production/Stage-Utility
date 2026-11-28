@@ -23,6 +23,7 @@ import { invoke as ipc, type ApiError, type IpcChannel } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
 import { writeOptimistic, writeTo as writeToKey } from "../lib/optimistic";
 import { toast, confirm } from "../components/ui";
+import { logFailure } from "../lib/report-failure";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { changeViewRole } from "../settings/view-role-change";
 import { askDuplicateView } from "../settings/sections/screen-confirms";
@@ -121,7 +122,7 @@ export function useStageSettings(pinnedViewId?: string) {
     payload?: Record<string, unknown>,
     opts: { fail?: string; ok?: string } = {},
   ): Promise<T | null> {
-    return writeToKey<T>(queryClient, key, () => ipc<T>(channel, payload), opts);
+    return writeToKey<T>(queryClient, key, () => ipc<T>(channel, payload), { tag: "settings", ...opts });
   }
 
   /** The StageState as it stands right now, from the cache every write updates.
@@ -151,7 +152,7 @@ export function useStageSettings(pinnedViewId?: string) {
     project: (current: T) => T,
     send: () => Promise<T>,
     fail?: string,
-  ) => writeOptimistic<T>(queryClient, key, project, send, fail);
+  ) => writeOptimistic<T>(queryClient, key, project, send, { tag: "settings", fail });
 
   const { data: stageState, isLoading: stageLoading } = useStageStateQuery();
   const { data: serviceTypes = [] } = useServiceTypes(stageState);
@@ -215,6 +216,7 @@ export function useStageSettings(pinnedViewId?: string) {
       toast.success("Refreshed from Planning Center.");
     } catch (err) {
       toast.error(`Refresh failed: ${errorMessage(err)}`);
+      logFailure("settings", "refresh", err);
     } finally {
       setIsRefreshing(false);
     }
@@ -250,6 +252,7 @@ export function useStageSettings(pinnedViewId?: string) {
       else toast.success("You're up to date.");
     } catch (err) {
       toast.error(`Update check failed: ${errorMessage(err)}`);
+      logFailure("settings", "check for updates", err);
     }
   }
 
@@ -264,6 +267,7 @@ export function useStageSettings(pinnedViewId?: string) {
       toast.success("Updating… this page will reload automatically when it's done.");
     } catch (err) {
       toast.error(`Failed to start update: ${errorMessage(err)}`);
+      logFailure("settings", "start update", err);
     }
   }
 
@@ -328,6 +332,7 @@ export function useStageSettings(pinnedViewId?: string) {
       return created?.id ?? null;
     } catch (err) {
       toast.error(`Failed to add view: ${errorMessage(err)}`);
+      logFailure("settings", "add view", err);
       return null;
     }
   }
@@ -353,6 +358,7 @@ export function useStageSettings(pinnedViewId?: string) {
       return viewId ?? null;
     } catch (err) {
       toast.error(`Failed to duplicate view: ${errorMessage(err)}`);
+      logFailure("settings", "duplicate view", err);
       return null;
     }
   }
@@ -371,6 +377,7 @@ export function useStageSettings(pinnedViewId?: string) {
       const screens = e.code === "view-shown" && Array.isArray(e.body?.screens) ? (e.body.screens as { id: string; name?: string }[]) : null;
       if (screens) return { removed: false, shownOn: screens.map(screenName) };
       toast.error(`Failed to remove view: ${errorMessage(err)}`);
+      logFailure("settings", "remove view", err);
       return { removed: false };
     }
   }
@@ -419,6 +426,7 @@ export function useStageSettings(pinnedViewId?: string) {
         return { rev: revOf(queryClient.getQueryData<StageState>(["stage:getState"]), id), discarded: true };
       }
       toast.error(`Failed to save layout: ${errorMessage(err)}`);
+      logFailure("settings", "save layout", err);
       throw err;
     }
   }
@@ -594,6 +602,7 @@ export function useStageSettings(pinnedViewId?: string) {
       });
     } catch (err) {
       toast.error(`Failed to change what the view is for: ${errorMessage(err)}`);
+      logFailure("settings", "change what the view is for", err);
     }
   }
 
@@ -617,6 +626,7 @@ export function useStageSettings(pinnedViewId?: string) {
       toast.success(id ? "Refresh sent to display." : "Refresh sent to all displays.");
     } catch (err) {
       toast.error(`Failed to refresh display: ${errorMessage(err)}`);
+      logFailure("settings", "refresh display", err);
     }
   }
 

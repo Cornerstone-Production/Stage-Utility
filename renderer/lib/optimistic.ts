@@ -15,13 +15,26 @@ import type { QueryClient } from "@tanstack/react-query";
 
 import { errorMessage } from "@main/services/errors";
 import { toast } from "../components/ui";
+import { logToServer } from "./client-log";
+
+/** The refused write, told to the operator and written to /log in the same words. */
+function reportWrite(tag: string, fail: string | undefined, key: string[], err: unknown): void {
+  const why = errorMessage(err);
+  toast.error(fail ? `${fail}: ${why}` : why);
+  // With no prefix the toast is the server's sentence alone, so the line names
+  // the cache key it was writing to, or it would say nothing about what failed.
+  logToServer(tag, `${fail ?? `write to ${key.join("/")} refused`}: ${why}`);
+}
 
 /**
  * @param optimistic What to show while the write is in flight, from the cached
  *   value. Not called when the cache is empty — there is nothing to roll back to
  *   and nothing on screen to correct.
  * @param send The write itself. Whatever it resolves to is installed.
- * @param fail Prefix for the error toast. Omit to show the server's message
+ * @param opts.tag The /log tag of the area the write belongs to. Required: a
+ *   refused write is toasted AND logged, and the type checker is what keeps a
+ *   new caller from toasting alone.
+ * @param opts.fail Prefix for the error toast. Omit to show the server's message
  *   verbatim, which is right where the refusal is written FOR the operator.
  * @returns What the server returned, or null if it refused. Callers with
  *   follow-up work — one reports a colour the server dropped — key off that
@@ -32,7 +45,7 @@ export async function writeOptimistic<T>(
   key: string[],
   optimistic: (current: T) => T,
   send: () => Promise<T>,
-  fail?: string,
+  opts: { tag: string; fail?: string },
 ): Promise<T | null> {
   const prev = queryClient.getQueryData<T>(key);
   if (prev) queryClient.setQueryData(key, optimistic(prev));
@@ -42,7 +55,7 @@ export async function writeOptimistic<T>(
     return next;
   } catch (err) {
     if (prev) queryClient.setQueryData(key, prev);
-    toast.error(fail ? `${fail}: ${errorMessage(err)}` : errorMessage(err));
+    reportWrite(opts.tag, opts.fail, key, err);
     return null;
   }
 }
@@ -61,7 +74,7 @@ export async function writeTo<T>(
   queryClient: QueryClient,
   key: string[],
   send: () => Promise<T>,
-  opts: { fail?: string; ok?: string } = {},
+  opts: { tag: string; fail?: string; ok?: string },
 ): Promise<T | null> {
   try {
     const next = await send();
@@ -69,7 +82,7 @@ export async function writeTo<T>(
     if (opts.ok) toast.success(opts.ok);
     return next;
   } catch (err) {
-    toast.error(opts.fail ? `${opts.fail}: ${errorMessage(err)}` : errorMessage(err));
+    reportWrite(opts.tag, opts.fail, key, err);
     return null;
   }
 }

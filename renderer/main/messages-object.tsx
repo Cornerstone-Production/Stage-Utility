@@ -29,7 +29,7 @@ import { useState, type CSSProperties } from "react";
 import { messageReaches, senderLabel, widgetGroups, type MessageGroup, type MessagesState, type StageMessage } from "@main/types/messages";
 import { invoke } from "../lib/api";
 import { ageLabel } from "../lib/age-label";
-import { reportActionFailure } from "./report-action-failure";
+import { reportFailure } from "../lib/report-failure";
 import type { OwnScreen } from "./stage-screen";
 
 /** How many messages the widget draws. */
@@ -108,7 +108,7 @@ export function MessagesObject({ objectId, config, state, known, screen, interac
       // Told, and logged: a reply that did not go must not read as sent. The
       // thread shows replies only once the server has them, so a failure leaves
       // nothing on screen to mistake for success.
-      reportActionFailure("send that reply", e, `to ${target.id}`);
+      reportFailure("messages", "send that reply", e, `to ${target.id}`);
     } finally {
       setSending(false);
     }

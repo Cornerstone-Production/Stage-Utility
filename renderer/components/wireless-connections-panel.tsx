@@ -39,6 +39,7 @@ import { ConnectionBadge } from "./connection-badge";
 import { IpListField } from "./ip-list-field";
 import { numberFieldValue } from "./integration-number-fields";
 import { droppedCredentialNotice } from "../lib/dropped-credentials";
+import { logFailure } from "../lib/report-failure";
 
 // ---- single connection card -------------------------------------------------
 
@@ -117,8 +118,8 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
       });
       onUpdate(next);
     } catch (err) {
-      console.error("[WirelessConnectionsPanel:updateName]", err);
       toast.error(`Failed to rename: ${errorMessage(err)}`);
+      logFailure("wireless", "rename", err);
       setLocalName(conn.name);
     }
   }
@@ -136,8 +137,8 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
       const dropped = droppedCredentialNotice(conn.name, provider?.configSchema ?? [], conn.config, {}, next.find((c) => c.id === conn.id)?.config);
       if (dropped) toast.info(dropped);
     } catch (err) {
-      console.error("[WirelessConnectionsPanel:updateProvider]", err);
       toast.error(`Failed to change provider: ${errorMessage(err)}`);
+      logFailure("wireless", "change provider", err);
     }
   }
 
@@ -162,8 +163,8 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
       const dropped = droppedCredentialNotice(conn.name, provider.configSchema, conn.config, sent, next.find((c) => c.id === conn.id)?.config);
       if (dropped) toast.info(dropped);
     } catch (err) {
-      console.error("[WirelessConnectionsPanel:updateConfig]", err);
       toast.error(`Failed to save: ${errorMessage(err)}`);
+      logFailure("wireless", "save", err);
     }
   }
 
@@ -185,8 +186,8 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
       });
       onUpdate(next);
     } catch (err) {
-      console.error("[WirelessConnectionsPanel:updateConfigValue]", key, err);
       toast.error(`Failed to save: ${errorMessage(err)}`);
+      logFailure("wireless", "save", err);
     }
   }
 
@@ -199,6 +200,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
       onUpdate(next);
     } catch (err) {
       toast.error(`Failed to ${enabled ? "enable" : "disable"}: ${errorMessage(err)}`);
+      logFailure("wireless", enabled ? "enable" : "disable", err);
     }
   }
 
@@ -224,6 +226,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
       onRemove(next);
     } catch (err) {
       toast.error(`Failed to remove: ${errorMessage(err)}`);
+      logFailure("wireless", "remove", err);
       setIsRemoving(false);
     }
   }
@@ -504,6 +507,7 @@ export function WirelessConnectionsPanel({ className }: WirelessConnectionsPanel
       toast.success(`Polling interval set to ${next.ms} ms`);
     } catch (err) {
       toast.error(`Failed to set polling interval: ${errorMessage(err)}`);
+      logFailure("wireless", "set polling interval", err);
       setMeterInput(meterData?.ms ?? 1000);
     }
   }
@@ -532,6 +536,7 @@ export function WirelessConnectionsPanel({ className }: WirelessConnectionsPanel
       applyUpdate(next);
     } catch (err) {
       toast.error(`Failed to add connection: ${errorMessage(err)}`);
+      logFailure("wireless", "add connection", err);
     }
   }
 

@@ -22,6 +22,7 @@ import {
 import { cn } from "../lib/cn";
 import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
 import { errorMessage } from "@main/services/errors";
+import { logFailure } from "../lib/report-failure";
 
 function TargetBadge({ connection, message }: { connection: ConnectionState; message: string | null }) {
   if (connection === "connected") {
@@ -65,6 +66,7 @@ function TargetCard({ target, onChange }: { target: OscTarget; onChange: (t: Osc
       onChange(next);
     } catch (err) {
       toast.error(`Failed to save: ${errorMessage(err)}`);
+      logFailure("osc", "save", err);
     }
   }
   const patchConfig = (p: Record<string, unknown>) => patch({ config: p });
@@ -86,6 +88,7 @@ function TargetCard({ target, onChange }: { target: OscTarget; onChange: (t: Osc
       onChange(await ipc<OscTarget[]>("osc:removeTarget", { id: target.id }));
     } catch (err) {
       toast.error(`Failed to remove: ${errorMessage(err)}`);
+      logFailure("osc", "remove", err);
     }
   }
 
@@ -186,6 +189,7 @@ export function OscTargetsPanel({ className }: { className?: string }) {
       applyUpdate(await ipc<OscTarget[]>("osc:addTarget", {}));
     } catch (err) {
       toast.error(`Failed to add target: ${errorMessage(err)}`);
+      logFailure("osc", "add target", err);
     }
   }
 
@@ -198,6 +202,7 @@ export function OscTargetsPanel({ className }: { className?: string }) {
       toast.success(`OSC feedback port set to ${next.port}`);
     } catch (err) {
       toast.error(`Failed to set port: ${errorMessage(err)}`);
+      logFailure("osc", "set port", err);
     }
   }
 
