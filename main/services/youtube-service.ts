@@ -537,7 +537,7 @@ class YouTubeService extends StatusIntegration<YouTubeStatusDTO> {
       // not drop the new token, report, blank or arm the quota wait.
       if (!this.current(run)) return;
       const msg = errorMessage(err);
-      if (this.attempt === 0) console.warn(`[youtube] ${msg} — backing off quietly`);
+      this.noteOutage(`${msg} — backing off quietly`);
       // A refused token is worth dropping so the next attempt re-exchanges.
       this.accessToken = null;
       this.report("error", msg);

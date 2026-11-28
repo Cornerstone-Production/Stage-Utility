@@ -546,7 +546,7 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
       // not drop the new account's token, report, blank or reschedule.
       if (!this.current(run)) return;
       const msg = errorMessage(err);
-      if (this.attempt === 0) console.warn(`[resi] status unavailable (${msg}) — backing off quietly`);
+      this.noteOutage(`status unavailable (${msg}) — backing off quietly`);
       // A rejected token is worth dropping so the next attempt re-authenticates
       // rather than replaying a credential Resi has already refused.
       this.token = null;

@@ -253,8 +253,8 @@ class ReaperService extends StatusIntegration<ReaperStatusDTO> {
       // THROWN rather than handled here, so it takes the one failure path this
       // function already has: reporting, going offline, backing off and the
       // first-failure gate are written once. A second copy of that block would
-      // be a second `attempt === 0` gate in a release whose whole point was that
-      // there are already twelve too many.
+      // be a second outage line in a release whose whole point was that there
+      // were already twelve copies of one.
       if (!read) throw new UnreadableTransport();
       if (!this.last.connected) {
         this.resetBackoff();
@@ -278,7 +278,7 @@ class ReaperService extends StatusIntegration<ReaperStatusDTO> {
         err instanceof UnreadableTransport
           ? `${where} ${err.message}`
           : `Can't reach ${where} — ${fetchFailureMessage(err, where)}`;
-      if (this.attempt === 0) console.warn(`[reaper] ${detail} — backing off quietly`);
+      this.noteOutage(`${detail} — backing off quietly`);
       this.report("error", detail);
       this.goOffline();
       this.scheduleReconnect();

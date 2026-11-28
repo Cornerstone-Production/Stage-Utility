@@ -256,9 +256,7 @@ class ScoresService extends StatusIntegration<ScoresStatusDTO> {
   }
 
   private fail(message: string): void {
-    if (this.attempt === 0) {
-      console.warn(`[scores] ESPN unreachable (${message}) — backing off quietly`);
-    }
+    this.noteOutage(`ESPN unreachable (${message}) — backing off quietly`);
     this.report("error", message);
     // The scores we last had are kept and marked stale rather than blanked:
     // a display going empty reads as "no games", which is a different and wrong

@@ -360,6 +360,9 @@ const NOT_SCANNED = new Map<string, string>([
   ["data-store.ts", UNAUDITED],
   ["device-manager.ts", DEVICE],
   ["encryption.ts", UNAUDITED],
+  // Writes the integrations' outage lines; the text is the subclass's, built
+  // from what its device answered, under the same threat model as theirs.
+  ["integration-base.ts", DEVICE],
   ["keyed-record-store.ts", UNAUDITED],
   ["kiosk-duplicate-check.ts", DEVICE],
   ["kiosk-responder.ts", DEVICE],

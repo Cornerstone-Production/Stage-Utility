@@ -571,9 +571,9 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
    * rather than a 2xx is what proves a stream is real. It is not enough: a peer
    * that sends its six-frame subscribe snapshot and hangs up delivers data every
    * time, so `attempt` went back to 0 on every cycle. The delay then never left
-   * the 5s base, and `const first = this.attempt === 0` in endStream was always
-   * true — so the line that is supposed to be said once was written every five
-   * to twenty seconds, indefinitely.
+   * the 5s base, and endStream's "first failure" gate (since replaced by the
+   * base's outage log) was always true — so the line that is supposed to be said
+   * once was written every five to twenty seconds, indefinitely.
    */
   private sustainTimer: ReturnType<typeof setTimeout> | null = null;
   /** PLAYLIST_RETRY_BASE_MS and PLAYLIST_RETRY_MAX_MS, for the same reason: the
@@ -950,9 +950,8 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       // and a superseded run must not schedule a reconnect racing the live one.
       if (!this.current(epoch)) return;
       const msg = errorMessage(err);
-      // Log only the first failure of an outage, then stay quiet until it recovers —
-      // a machine off all week shouldn't spam the log every retry.
-      if (this.attempt === 0) console.warn(`[propresenter] ${host}:${port} unreachable (${msg}) — backing off, will keep retrying quietly`);
+      // Once per outage — a machine off all week shouldn't spam the log every retry.
+      this.noteOutage(`${host}:${port} unreachable (${msg}) — backing off, will keep retrying quietly`);
       this.goOffline();
       this.report("error", `Can't reach ${host}:${port} — ${msg}`);
       this.scheduleReconnect();
@@ -1114,16 +1113,15 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     // repeat. Counting them is what lets the badge stop agreeing with a display
     // that has been frozen since the publisher wedged.
     this.silentStreams = hadData ? 0 : this.silentStreams + 1;
-    // `attempt` no longer resets on the first byte (see sustainTimer), so this
-    // really is "the first end since a stream last held", and a peer flapping
-    // open/closed says it once and then rides the ramp.
-    const first = this.attempt === 0;
+    // Once per outage, through the base's outage log: a peer flapping
+    // open/closed says it once and then rides the ramp. The kind is fixed, so
+    // a reason that varies per stream is not mistaken for a new problem.
+    // Scheduled first, because the line says the delay that was chosen.
     this.scheduleReconnect();
-    if (first) {
-      console.warn(
-        `[propresenter] stream ended (${reason}) — reconnecting in ${Math.round(this.nextDelayMs / 1000)}s`,
-      );
-    }
+    this.noteOutage(
+      `stream ended (${reason}) — reconnecting in ${Math.round(this.nextDelayMs / 1000)}s`,
+      "stream ended",
+    );
     // The badge is left alone for an ordinary drop, on purpose: the next
     // connect() probes /version, a machine that is genuinely gone fails THERE
     // and reports the error with an address in it, and flipping it here would
@@ -1184,8 +1182,9 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
    * reaches attempt 3 in a couple of minutes, and from then on a 60-second
    * stream delivering a heartbeat a second cannot clear a bar that has moved
    * past it. It re-dials on the 2-minute service-window clamp instead of the 5s
-   * base it used to, and says nothing in the log, because `const first =
-   * this.attempt === 0` is false for ever.
+   * base it used to, and said nothing in the log, because endStream's
+   * "first failure" gate (since replaced by the base's outage log) was false for
+   * ever.
    *
    * Capped at one window the worst case is 3 x streamIdleMs — 45s — which is
    * under the 2-minute reconnect ceiling, so a stream that survives a single

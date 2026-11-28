@@ -64,7 +64,7 @@ export class RossTalkConnection extends ConnectionLifecycle {
     // Send-only protocol: drain anything the device sends so the buffer can't grow.
     sock.on("data", () => {});
     sock.on("error", (err) => {
-      if (this.attempt === 0) console.warn(`[rosstalk] ${this.host}:${this.port} unreachable (${err.message})`);
+      this.noteOutage(`${this.host}:${this.port} unreachable (${err.message})`);
       this.report("error", `Can't reach ${this.host}:${this.port} — ${err.message}`);
     });
     sock.on("close", () => {

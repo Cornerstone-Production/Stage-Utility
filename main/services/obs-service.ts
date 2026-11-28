@@ -292,7 +292,7 @@ class ObsService extends StatusIntegration<ObsStatusDTO> {
         return;
       }
 
-      if (this.attempt === 0) console.warn(`[obs] ${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);
+      this.noteOutage(`${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);
       this.report("error", `Can't reach ${this.host}:${this.port} — ${msg}`);
       this.scheduleReconnect();
     }
@@ -327,7 +327,7 @@ class ObsService extends StatusIntegration<ObsStatusDTO> {
       return;
     }
 
-    if (this.attempt === 0) console.warn("[obs] connection closed — reconnecting");
+    this.noteOutage("connection closed — reconnecting");
     this.report("error", "OBS connection dropped — reconnecting");
     this.goOffline();
     this.scheduleReconnect();

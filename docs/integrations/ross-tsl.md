@@ -32,8 +32,9 @@ tile's source label — over a persistent TCP socket to the Ross device.
 - While the socket is connected and a feed exists, SenSource keeps polling even with no
   browser watching, so the tile keeps moving.
 - `/log` carries `[tsl] connecting <host>:<port>` when it starts and `[tsl] write error:
-  …` if a packet cannot be written. A refused or dropped connection shows on the card as
-  *Can't reach <host>:<port>* and retries quietly.
+  …` if a packet cannot be written. A refused connection shows on the card as *Can't
+  reach <host>:<port>* and is logged as `[tsl] <host>:<port> unreachable (…)` once per
+  outage, on the rule in [Connection outages](../ops/updates-and-logs.md#connection-outages).
 
 ## Setup
 

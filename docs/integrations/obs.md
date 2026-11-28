@@ -16,8 +16,8 @@ WebSocket (JSON message protocol, default port `4455`, optional password):
   `StreamStateChanged` and `VirtualcamStateChanged` fold into the status
   snapshot. `recording` stays true while a recording is paused.
 The service broadcasts the snapshot on the `obs:status` channel on change. It
-uses a configure/connect/reconnect loop with exponential backoff and goes quiet
-when unreachable. The password is stored as an encrypted secret.
+uses a configure/connect/reconnect loop with exponential backoff, and logs an
+outage on the rule in [Connection outages](../ops/updates-and-logs.md#connection-outages). The password is stored as an encrypted secret.
 
 ### The record timecode
 

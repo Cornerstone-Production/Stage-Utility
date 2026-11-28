@@ -41,7 +41,6 @@ class Fake extends StatusIntegration<Dto> {
   }
 
   // Surface protected bits the tests need to observe.
-  get attemptCount(): number { return this.attempt; }
   get runNow(): number { return this.run; }
   isCurrent(run: number): boolean { return this.current(run); }
   callRestart(): void { this.restart(); }
@@ -122,13 +121,14 @@ describe("ConnectionLifecycle", () => {
     f.shouldFail = true;
     f.start();
     await Promise.resolve();
-    assert.equal(f.attemptCount, 1, "one failure recorded");
+    // The delay is how the counter shows: 3 s doubled once for one failure.
+    assert.equal(f.nextDelay(), 6000, "one failure recorded");
 
     f.shouldFail = false;
     f.stopTimers();
     f.callScheduleIn(1);
     await new Promise((r) => setTimeout(r, 30));
-    assert.equal(f.attemptCount, 0, "a success must clear the back-off counter");
+    assert.equal(f.nextDelay(), 3000, "a success must clear the back-off counter");
     f.stop();
   });
 

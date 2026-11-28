@@ -177,6 +177,9 @@ class TslService extends ConnectionLifecycle {
       this.sendAll(sensourceService.getLatest());
     });
     sock.on("error", (err) => {
+      // Said here as well as reported: the manager stores the state without
+      // logging it, so a dark tally output was silent in /log.
+      this.noteOutage(`${this.host}:${this.port} unreachable (${err.message})`);
       this.report("error", `Can't reach ${this.host}:${this.port} — ${err.message}`);
     });
     sock.on("close", () => {

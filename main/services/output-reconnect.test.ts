@@ -103,10 +103,10 @@ test("RossTalk: an unreachable switcher is logged once per outage, not on every 
   );
 });
 
-test("TSL: the same fixed 30 s ceiling, not the shared window-aware cap", async (t) => {
+test("TSL: the same fixed 30 s ceiling, and the outage reaches the log once", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const port = await refusingPort();
-  warnsTagged(t, "tsl");
+  const warns = warnsTagged(t, "tsl");
 
   const delays: number[] = [];
   const svc = tslService as unknown as { scheduleIn(ms: number): void };
@@ -124,4 +124,8 @@ test("TSL: the same fixed 30 s ceiling, not the shared window-aware cap", async 
   await walk(t, { delays, stop: () => tslService.stop() }, CEILING_STEPS.length);
 
   assert.deepEqual(delays, CEILING_STEPS);
+  // TSL only reported the state, and the integration manager stores it without
+  // logging, so a dark tally output said nothing at all in /log.
+  assert.equal(warns.length, 1, `${CEILING_STEPS.length} refused connects wrote ${warns.length} lines:\n${warns.join("\n")}`);
+  assert.match(warns[0], /unreachable/);
 });

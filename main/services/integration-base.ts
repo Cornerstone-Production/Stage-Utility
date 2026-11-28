@@ -20,6 +20,7 @@ import {
   channelHasSubscribers,
   channelInDemand,
 } from "./broadcaster.js";
+import { DEFAULT_SETTLE_MS, OutageLog } from "./repeat-log.js";
 import { serviceWindow } from "./service-window.js";
 
 /** Connection state as reported to the Integrations panel. */
@@ -28,6 +29,9 @@ export type ConnState = "connected" | "error" | "disconnected";
 /** Default first retry delay; doubles per attempt, then clamped by serviceWindow.
  *  A subclass can raise it via `reconnectBaseMs` (ProPresenter waits 5s). */
 const RECONNECT_BASE_MS = 3000;
+
+/** The one key this integration's outage log keeps its run under. */
+const OUTAGE_KEY = "connection";
 
 export abstract class ConnectionLifecycle {
   protected running = false;
@@ -49,6 +53,14 @@ export abstract class ConnectionLifecycle {
 
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
+  /**
+   * This integration's outage, so a failure is said once per OUTAGE — see
+   * noteOutage. One run at a time, under one key; a kind per distinct line.
+   */
+  private readonly connectionOutages = new OutageLog();
+  /** Re-asks whether a recovery has held, for an integration whose success is
+   *  a single event (a socket that connects and stays up). See noteHealthy. */
+  private settleTimer: ReturnType<typeof setTimeout> | null = null;
   private onConn: ((state: ConnState, message: string | null) => void) | null = null;
   private reported: ConnState | null = null;
   /** The message that went WITH `reported`. Kept beside it because a state that
@@ -113,6 +125,10 @@ export abstract class ConnectionLifecycle {
     if (this.running || !this.configured) return;
     this.running = true;
     this.reconnectAttempt = 0;
+    // A start is a fresh look: nothing learned about the old target or the old
+    // credentials is true of the new ones, and a run carried across would
+    // swallow the first line of the next outage.
+    this.connectionOutages.forget();
     this.begin();
   }
 
@@ -130,6 +146,7 @@ export abstract class ConnectionLifecycle {
     this.runId++;
     this.running = false;
     this.clearReconnect();
+    this.clearSettle();
     this.teardown();
   }
 
@@ -195,14 +212,72 @@ export abstract class ConnectionLifecycle {
     this.reportedMessage = null;
   }
 
-  /** Attempts since the last success — 0 means "first failure", which the
-   *  services use to log once and then stay quiet while backing off. */
-  protected get attempt(): number {
-    return this.reconnectAttempt;
-  }
+  // NOTE: there is deliberately no `attempt` getter any more.
+  //
+  // It was read by twelve copies of `if (this.attempt === 0) console.warn(...)`.
+  // The counter resets on every success, so an upstream that flaps made every
+  // failure a fresh "first failure" and wrote a line per flap, indefinitely —
+  // the rule repeat-log.ts records costing 3,527 lines in five days. Say a
+  // failure through noteOutage instead; without the getter the old gate does
+  // not compile.
 
+  /** The connection is answering: forgive the back-off, and let the outage log
+   *  see the recovery. Call it on a success, as every integration already did. */
   protected resetBackoff(): void {
     this.reconnectAttempt = 0;
+    this.noteHealthy();
+  }
+
+  /**
+   * Say a failure, once per outage: the first failure of a run is news, the same
+   * failure again is not, a run that goes on is reminded every 15 minutes with
+   * its attempt count, and a recovery is said once it has held (repeat-log.ts).
+   *
+   * @param line what an operator reads, without the `[tag]` — the tag is this
+   *   integration's. Appended with the reminder's tail when there is one.
+   * @param kind what makes two failures DIFFERENT problems. Defaults to the line
+   *   itself; pass something stable when the line carries text that varies per
+   *   attempt, so the variation is not mistaken for news.
+   */
+  protected noteOutage(line: string, kind: string = line): void {
+    this.clearSettle();
+    const said = this.connectionOutages.fail(OUTAGE_KEY, kind, Date.now());
+    if (said.log) console.warn(`[${this.log}] ${line}${said.note}`);
+  }
+
+  /**
+   * A success, for the outage log. Ends the run once a success has held for the
+   * settle window, which is what keeps a flapping upstream one outage.
+   *
+   * A poller calls this on every good poll and would get there on its own; a
+   * socket succeeds ONCE and then stays up, so nothing would ever ask again and
+   * the run would never close. The timer asks again when the window has passed;
+   * any failure in between cancels it (noteOutage), and so does stop().
+   */
+  private noteHealthy(): void {
+    if (!this.connectionOutages.failing(OUTAGE_KEY)) return;
+    if (this.sayRecovered()) return;
+    this.clearSettle();
+    this.settleTimer = setTimeout(() => {
+      this.settleTimer = null;
+      if (this.running) this.sayRecovered();
+    }, DEFAULT_SETTLE_MS);
+    // A recovery line must not hold the process open.
+    this.settleTimer.unref();
+  }
+
+  /** Ask the outage log whether the run is over, and say so if it is. */
+  private sayRecovered(): boolean {
+    const said = this.connectionOutages.ok(OUTAGE_KEY, Date.now());
+    if (said.log) console.log(`[${this.log}] reachable again${said.note}`);
+    return said.log;
+  }
+
+  private clearSettle(): void {
+    if (this.settleTimer) {
+      clearTimeout(this.settleTimer);
+      this.settleTimer = null;
+    }
   }
 
   // NOTE: there is deliberately no `hasSubscribers` here any more.
