@@ -21,7 +21,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installRenderDom } from "../../test-dom.js";
+import { eventually, installRenderDom, settle } from "../../test-dom.js";
 import { ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -58,7 +58,6 @@ const WALL: View = { id: "wall-a", name: "Lobby loop", kind: "custom", surface: 
 const CONSOLE: View = { id: "ctl-a", name: "Booth controls", kind: "custom", surface: "console", createdAt: NOW };
 const STAGE_GROUP = { id: "g-22222222", name: "Stage" };
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 after(async () => {
   cleanup();
   await settle();

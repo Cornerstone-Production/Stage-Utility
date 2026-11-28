@@ -27,7 +27,7 @@
 import { strict as assert } from "node:assert";
 import { after, before, describe, test } from "node:test";
 
-import { eventually, installDom } from "../../test-dom.js";
+import { eventually, installDom, settle } from "../../test-dom.js";
 import { WEEKEND_ATTENDANCE } from "../../test-fixtures/weekend-attendance.js";
 
 const teardown = installDom();
@@ -60,8 +60,6 @@ const router = createRouter({
   history: createMemoryHistory({ initialEntries: ["/"] }),
 });
 await router.load();
-
-const settle = () => new Promise((r) => setTimeout(r, 0));
 
 before(() => {
 });

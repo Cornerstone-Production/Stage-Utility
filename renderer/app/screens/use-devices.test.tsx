@@ -6,7 +6,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installDom, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installDom, settle, unmountAndTeardown } from "../../test-dom.js";
 import { ok, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 
@@ -22,7 +22,6 @@ const { readUpdate } = await import("./machine-update.js");
 type SeenDevice = import("@main/types/kiosk").SeenDevice;
 
 const device = (id: string): SeenDevice => ({ id, macs: [], hostname: id, os: "Linux", ip: "192.0.2.10", firstSeen: 1, lastSeen: 2 });
-const settle = () => new Promise((r) => setTimeout(r, 0));
 
 /** What the server holds now. */
 let server: SeenDevice[];

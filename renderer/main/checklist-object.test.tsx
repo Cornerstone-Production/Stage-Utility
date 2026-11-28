@@ -22,7 +22,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, settle } from "../test-dom.js";
 
 const teardown = installDom();
 
@@ -68,7 +68,6 @@ const { ChecklistObject, checklistRows } = await import("./notes-objects.js");
  * — reported as the FILE failing while every test in it passes, which points
  * nowhere near the cause.
  */
-const settle = () => new Promise((r) => setTimeout(r, 0));
 
 after(async () => {
   await settle();

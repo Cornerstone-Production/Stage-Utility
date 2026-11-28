@@ -33,7 +33,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, before, beforeEach, describe, test } from "node:test";
 
-import { eventually, installDom, isPlumbing, readLedger } from "../test-dom.js";
+import { eventually, installDom, isPlumbing, readLedger, settle } from "../test-dom.js";
 
 const teardown = installDom();
 
@@ -338,7 +338,6 @@ const router = createRouter({
 await router.load();
 const { TOGGLE_PAIRS, PICK_PAIRS } = await import("../app/home/card-toggles.js");
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 before(() => {
 });
 after(async () => { await settle(); teardown(); });

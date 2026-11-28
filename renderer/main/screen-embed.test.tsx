@@ -12,7 +12,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installRenderDom } from "../test-dom.js";
+import { installRenderDom, settle } from "../test-dom.js";
 
 // See installRenderDom for the act flag, the clientHeight and the EventSource
 // stub, which this file and two of its neighbours each wrote out verbatim.
@@ -53,7 +53,6 @@ const STATE: StageState = { ...DEFAULT_STAGE_STATE, views: [ROUTED_VIEW], output
   return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
 };
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 after(async () => { await settle(); teardown(); });
 beforeEach(() => cleanup());
 afterEach(async () => { cleanup(); await settle(); });

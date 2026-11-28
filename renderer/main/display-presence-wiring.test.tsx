@@ -13,7 +13,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installDom } from "../test-dom.js";
+import { eventually, installDom, settle } from "../test-dom.js";
 
 const teardown = installDom();
 
@@ -116,7 +116,6 @@ let holdPresence: Promise<void> | null = null;
   };
 };
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 after(async () => { await settle(); teardown(); });
 beforeEach(() => { cleanup(); presenceReads = []; holdPresence = null; });
 afterEach(async () => { cleanup(); await settle(); });

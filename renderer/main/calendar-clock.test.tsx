@@ -19,7 +19,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, settle } from "../test-dom.js";
 import type { CalendarGrid } from "@main/types/calendar";
 
 const teardown = installDom();
@@ -67,7 +67,6 @@ const React = (await import("react")).default;
 const { CalendarView } = await import("./calendar-view.js");
 const { SERVER_CLOCK_MIN_SPREAD_MS, serverClock } = await import("../lib/server-clock.js");
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 const realNow = Date.now;
 
 beforeEach(() => {

@@ -14,7 +14,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installRenderDom } from "../test-dom.js";
+import { eventually, installRenderDom, settle } from "../test-dom.js";
 import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -40,7 +40,6 @@ const { __resetReplayCacheForTests } = await import("../lib/api.js");
 const { AdvancedRoute, AdvancedTabRoute } = await import("./settings-routes.js");
 const { ALL_DESTINATIONS, NESTED_ROUTES } = await import("./destinations.js");
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 after(async () => {
   cleanup();
   await settle();

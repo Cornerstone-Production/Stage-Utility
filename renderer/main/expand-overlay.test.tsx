@@ -24,7 +24,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installRenderDom } from "../test-dom.js";
+import { installRenderDom, settle } from "../test-dom.js";
 import type { LayoutRenderCtx } from "./layout-renderer";
 
 // See installRenderDom for the act flag, the clientHeight and the EventSource
@@ -75,7 +75,6 @@ const { makeRenderCtx, DEFAULT_STAGE_STATE } = await import("./test-render-ctx.j
 
 const STATE: StageState = { ...DEFAULT_STAGE_STATE };
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 after(async () => { await settle(); teardown(); });
 beforeEach(() => { cleanup(); requests.length = 0; });
 afterEach(async () => {
