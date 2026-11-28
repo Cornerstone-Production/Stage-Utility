@@ -9,8 +9,8 @@
 // LAN address, every screen and view, and the live position carries every item's title
 // and due time. A field that is not named here cannot leave by being forgotten.
 
-import { createHash } from "node:crypto";
 
+import { hash16 } from "./image-files.js";
 import { startOfZonedDay, zonedDateKey } from "./app-timezone.js";
 import { sortUpcoming } from "./upcoming-plans.js";
 import type { PcoLiveDTO, ServiceCueConfig, ServiceSplHistory, ServiceTypeDTO, StageState, UpcomingPlan, UpcomingPlansDTO } from "../types/stage.js";
@@ -188,5 +188,5 @@ export function brandingAssetName(appLogo: unknown): string | null {
 
 /** A short stable fingerprint of a document's text. */
 export function docHash(text: string): string {
-  return createHash("sha256").update(text).digest("hex").slice(0, 16);
+  return hash16(text);
 }

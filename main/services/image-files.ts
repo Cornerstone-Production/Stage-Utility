@@ -94,11 +94,17 @@ function looksLike(mime: string, bytes: Buffer): boolean {
   return imageKind(bytes) === mime;
 }
 
-/** The name saveImage gives `bytes`: the first 16 hex of their SHA-256, and the
- *  extension. Exported for a folder of content-addressed files that are not
- *  images (stage-plot PDF originals), so the naming rule lives in one place. */
+/** The first 16 hex digits of the SHA-256 of `data`: a short, stable name or
+ *  fingerprint for content (a stored file, a published document). */
+export function hash16(data: string | Uint8Array): string {
+  return crypto.createHash("sha256").update(data).digest("hex").slice(0, 16);
+}
+
+/** The name saveImage gives `bytes`: their hash16 and the extension. Exported
+ *  for a folder of content-addressed files that are not images (stage-plot PDF
+ *  originals), so the naming rule lives in one place. */
 export function contentName(bytes: Buffer, ext: string): string {
-  return `${crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 16)}.${ext}`;
+  return `${hash16(bytes)}.${ext}`;
 }
 
 /** The extensions saveImage writes. */
