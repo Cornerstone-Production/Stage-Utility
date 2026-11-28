@@ -54,8 +54,16 @@ const { setSubscriberCheck } = await import("./broadcaster.js");
 setAppTimeZone("America/Chicago");
 const { integrationManager } = await import("./integration-manager.js");
 const { sensourceService } = await import("./sensource-service.js");
-import { errorMessage } from "./errors.js";
 import { OutageLog } from "./repeat-log.js";
+import { captureLeveledConsole } from "./fixtures/capture-console.js";
+import {
+  createClock,
+  recordEmits,
+  resetService as sharedResetService,
+  stubFetch as sharedStubFetch,
+  stubSchedulers,
+  type StubOptions,
+} from "./fixtures/sensource-stub.js";
 import type { PeopleCountDTO } from "../types/live.js";
 import type { SenSourceConfig } from "./sensource-service.js";
 
@@ -109,10 +117,7 @@ const realAttendanceArm = (
 // Stubbed HERE and not only in beforeEach: resetService below calls the real
 // configure(), which restarts the poller, and the first resetService runs
 // before any beforeEach body would have replaced these.
-svc.pollTicker.arm = () => {};
-svc.safeSpaceTicker.arm = () => {};
-svc.attendanceTicker.arm = () => {};
-svc.restart = () => {};
+stubSchedulers(svc);
 
 /** TWO zones, deliberately — the same fixture sensource-day-aggregates.test.ts
  *  uses. The authoritative space total counts the auditorium's doors (1600 in);
@@ -125,13 +130,6 @@ let trafficRows = [
 ];
 const ZONE_ATTENDANCE = 2020;
 const SPACE_ATTENDANCE = 1600;
-const DAY = {
-  results: [
-    { spaceId: "s1", sumins: 1600, sumouts: 90, maxoccupancy: 1511, minoccupancy: 0, avgoccupancy: "812.5" },
-  ],
-};
-const MINUTE = { results: [{ spaceId: "s1", recordDate_minute_1: "2026-09-06T15:00:00", maxoccupancy: 1510 }] };
-const SPACES = { results: [{ spaceId: "s1", name: "Auditorium", locationId: "l1", maxCapacity: 2120 }] };
 
 const CFG: SenSourceConfig = {
   clientId: "test-client",
@@ -150,8 +148,8 @@ const CFG: SenSourceConfig = {
   safeSpacePollSeconds: 10,
 };
 
-let requests: string[] = [];
-let emitted: PeopleCountDTO[] = [];
+const requests: string[] = [];
+const emitted: PeopleCountDTO[] = [];
 let logs: string[] = [];
 
 const realFetch = globalThis.fetch;
@@ -160,101 +158,50 @@ const realFetch = globalThis.fetch;
  *  the instance would otherwise shadow it for every later test in this file,
  *  not just its own. */
 const realPollOnce = svc.pollOnce;
-const realNow = Date.now;
-const realWarn = console.warn;
-const realLog = console.log;
-const realError = console.error;
-let clock = Date.UTC(2026, 8, 6, 15, 0, 0);
+const clock = createClock();
 
-const isAuthHost = (url: string): boolean => new URL(url).hostname === "auth.sensourceinc.com";
 const trafficRequests = (): string[] => requests.filter((u) => u.includes("/data/traffic"));
 
-function json(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status });
-}
-
-interface StubOptions {
-  trafficStatus?: () => number;
-}
-
 function stubFetch(opts: StubOptions = {}): void {
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = String(input);
-    requests.push(url);
-    if (isAuthHost(url)) return json({ access_token: `t${requests.length}`, expires_in: 3600 });
-    if (url.includes("/space")) return json(SPACES);
-    if (url.includes("/sensor") || url.includes("/zone") || url.includes("/site")) return json({ results: [] });
-    if (url.includes("/data/traffic")) {
-      const status = opts.trafficStatus?.() ?? 200;
-      return status === 200 ? json({ results: trafficRows }) : new Response("traffic rejected", { status });
-    }
-    if (url.includes("/data/occupancy")) return url.includes("dateGroupings=minute") ? json(MINUTE) : json(DAY);
-    return json({ results: [] });
-  }) as typeof fetch;
+  sharedStubFetch({ requests }, { traffic: () => ({ results: trafficRows }), ...opts });
 }
 
 /** Reset by driving the REAL configure(), not by listing fields — see the
  *  identical note in sensource-safespace.test.ts on why a hand-written reset
  *  drifts. `restart` is stubbed at module scope above, so this starts no poll. */
 function resetService(cfg: SenSourceConfig = CFG): void {
-  requests = [];
-  emitted = [];
-  logs = [];
+  requests.length = 0;
+  emitted.length = 0;
+  logs.length = 0;
   trafficRows = [
     { zoneId: "z1", name: "Lobby", sumins: 1600, sumouts: 90 },
     { zoneId: "z2", name: "Cafe", sumins: 420, sumouts: 20 },
   ];
-  sensourceService.configure({ ...cfg });
-  svc.running = true;
-  svc.last = { connected: false, updatedAt: null, total: { attendance: null, occupancy: null }, zones: [] };
-  // Not configure()'s to reset — they are runtime flags, not configuration —
-  // so a case that sets one to prove a guard must not leak it into the next.
-  svc.attendanceInFlight = false;
-  svc.mainPollInFlight = false;
-  svc.attendancePolledIdle = false;
+  sharedResetService(svc, cfg);
 }
 
 const poll = (): Promise<void> => svc.connect();
 const readAttendance = async (): Promise<void> => void (await svc.readAttendance());
 const published = (): PeopleCountDTO => emitted.at(-1)!;
 
-function take(level: string) {
-  return (...args: unknown[]): void => {
-    logs.push(`${level} ${args.map((a) => errorMessage(a)).join(" ")}`);
-  };
-}
-
 describe("the attendance interval, split onto its own cadence", () => {
-  beforeEach(() => {
-    clock = Date.UTC(2026, 8, 6, 15, 0, 0);
-    Date.now = () => clock;
-    svc.pollTicker.arm = () => {};
-    svc.safeSpaceTicker.arm = () => {};
-    svc.attendanceTicker.arm = () => {};
-    svc.restart = () => {};
+  beforeEach((t) => {
+    clock.install(t);
+    stubSchedulers(svc);
     resetService();
     // The healthy default. A case that needs a failure calls stubFetch(...)
     // again with its own options — every fetch in this file is stubbed from
     // the first line of a test onward, on purpose: an unstubbed poll here does
     // not fail loudly, it silently reaches for the real Vea host.
     stubFetch();
-    svc.emit = (dto: PeopleCountDTO) => {
-      emitted.push(dto);
-      svc.last = dto;
-    };
-    console.warn = take("warn");
-    console.log = take("log");
-    console.error = take("error");
+    recordEmits(svc, emitted);
+    logs = captureLeveledConsole(t);
   });
 
   afterEach(() => {
     setSubscriberCheck(() => true);
     globalThis.fetch = realFetch;
     svc.pollOnce = realPollOnce;
-    Date.now = realNow;
-    console.warn = realWarn;
-    console.log = realLog;
-    console.error = realError;
     svc.running = false;
     svc.cfg = null;
     // A REAL timer armed by a case that restores the real ticker arm must not
@@ -627,7 +574,7 @@ describe("the attendance interval, split onto its own cadence", () => {
       stubFetch({ trafficStatus: () => 503 });
       for (let i = 0; i < 6; i++) {
         await readAttendance();
-        clock += 10_000;
+        clock.ms += 10_000;
       }
       const failLines = logs.filter((l) => l.includes("the fast attendance read failed"));
       assert.equal(failLines.length, 1, `six failing reads wrote ${failLines.length} lines:\n${logs.join("\n")}`);

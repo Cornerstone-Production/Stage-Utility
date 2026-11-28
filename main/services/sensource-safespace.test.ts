@@ -37,7 +37,16 @@ const { setSubscriberCheck } = await import("./broadcaster.js");
 const { integrationManager } = await import("./integration-manager.js");
 setAppTimeZone("America/Chicago");
 const { sensourceService } = await import("./sensource-service.js");
-import { errorMessage } from "./errors.js";
+import { captureLeveledConsole } from "./fixtures/capture-console.js";
+import {
+  createClock,
+  recordEmits,
+  resetService as sharedResetService,
+  stubFetch as sharedStubFetch,
+  stubSchedulers,
+  TRAFFIC_ONE_ZONE,
+  type StubOptions,
+} from "./fixtures/sensource-stub.js";
 import type { PeopleCountDTO } from "../types/live.js";
 import type { SenSourceConfig } from "./sensource-service.js";
 
@@ -81,10 +90,7 @@ const realSafeSpaceArm = (
 // Stubbed HERE and not only in beforeEach: resetService below calls the real
 // configure(), which restarts the poller, and the first resetService runs before
 // any beforeEach body would have replaced these.
-svc.pollTicker.arm = () => {};
-svc.safeSpaceTicker.arm = () => {};
-svc.attendanceTicker.arm = () => {};
-svc.restart = () => {};
+stubSchedulers(svc);
 
 /** A space id that is unmistakable inside a log line — the point of the
  *  redaction guard is that a substring search finds it if it leaked. */
@@ -105,83 +111,28 @@ const CFG: SenSourceConfig = {
   safeSpacePollSeconds: 10,
 };
 
-/** Vea's answers when it is healthy. Occupancy from the day net is 1510. */
-const TRAFFIC = { results: [{ zoneId: "z1", name: "Lobby", sumins: 1600, sumouts: 90 }] };
-const DAY = {
-  results: [
-    { spaceId: "s1", sumins: 1600, sumouts: 90, maxoccupancy: 1511, minoccupancy: 0, avgoccupancy: "812.5" },
-  ],
-};
-const MINUTE = { results: [{ spaceId: "s1", recordDate_minute_1: "2026-09-06T15:00:00", maxoccupancy: 1510 }] };
-const SPACES = { results: [{ spaceId: "s1", name: "Auditorium", locationId: "l1", maxCapacity: 2120 }] };
 /** What Vea publishes as the occupancy when SafeSpace is not in play. */
 const VEA_OCCUPANCY = 1510;
 
-let requests: string[] = [];
-let emitted: PeopleCountDTO[] = [];
+const requests: string[] = [];
+const emitted: PeopleCountDTO[] = [];
 let logs: string[] = [];
 /** What the integration row was told — the text the Integrations grid renders
  *  through ConnectionBadge, which is where an operator meets this. */
 let reports: { state: string; message: string | null }[] = [];
 
 const realFetch = globalThis.fetch;
-const realNow = Date.now;
-const realWarn = console.warn;
-const realLog = console.log;
-const realError = console.error;
-let clock = Date.UTC(2026, 8, 6, 15, 0, 0);
+const clock = createClock();
 
-const isAuthHost = (url: string): boolean => new URL(url).hostname === "auth.sensourceinc.com";
 const isSafeSpace = (url: string): boolean => new URL(url).hostname === "app.safespace.io";
 const safeSpaceRequests = (): string[] => requests.filter(isSafeSpace);
 /** Every SafeSpace line the service wrote. */
 const fellBack = (): string[] => logs.filter((l) => l.includes("SafeSpace live occupancy unavailable"));
 const cameBack = (): string[] => logs.filter((l) => l.includes("SafeSpace live occupancy is answering again"));
 
-interface StubOptions {
-  /** The SafeSpace body, per request. Return null for a network failure. */
-  safeSpace?: () => string | null;
-  /** The SafeSpace status. */
-  safeSpaceStatus?: () => number;
-  /** Fail the Vea day-aggregate request. */
-  dayStatus?: () => number;
-  /** Rate headers on each SafeSpace response, so a case can drive the quota. */
-  safeSpaceHeaders?: () => Record<string, string>;
-}
-
 function stubFetch(opts: StubOptions = {}): void {
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = String(input);
-    requests.push(url);
-    if (isSafeSpace(url)) {
-      // `?? ` would fold the null case into the default — null IS the case here.
-      const chosen = opts.safeSpace?.();
-      const body = chosen === undefined ? "1234" : chosen;
-      // A transport failure quotes the URL, which carries the space id — the
-      // exact way the credential escapes into an error message.
-      if (body === null) throw new TypeError(`fetch failed: ${url}`);
-      return new Response(body, {
-        status: opts.safeSpaceStatus?.() ?? 200,
-        headers: opts.safeSpaceHeaders?.() ?? {},
-      });
-    }
-    if (isAuthHost(url)) {
-      return new Response(JSON.stringify({ access_token: "t1", expires_in: 3600 }), { status: 200 });
-    }
-    if (url.includes("/space")) return json(SPACES);
-    if (url.includes("/sensor") || url.includes("/zone") || url.includes("/site")) return json({ results: [] });
-    if (url.includes("/data/traffic")) return json(TRAFFIC);
-    if (url.includes("/data/occupancy")) {
-      if (url.includes("dateGroupings=minute")) return json(MINUTE);
-      const st = opts.dayStatus?.() ?? 200;
-      return st === 200 ? json(DAY) : new Response("day rejected", { status: st });
-    }
-    return json({ results: [] });
-  }) as typeof fetch;
-}
-
-function json(body: unknown): Response {
-  return new Response(JSON.stringify(body), { status: 200 });
+  // One zone, and a token that never changes: this file's cases are about SafeSpace.
+  sharedStubFetch({ requests }, { traffic: () => TRAFFIC_ONE_ZONE, token: () => "t1", ...opts });
 }
 
 /**
@@ -199,16 +150,11 @@ function resetService(cfg: SenSourceConfig = CFG): void {
   // Cleared BEFORE configure(), not after. configure() itself writes a line when
   // SafeSpace is switched on with no id, and clearing afterwards erased the one
   // thing the guard for that state has to read.
-  requests = [];
-  emitted = [];
-  logs = [];
+  requests.length = 0;
+  emitted.length = 0;
+  logs.length = 0;
   reports = [];
-  sensourceService.configure({ ...cfg });
-  svc.running = true;
-  // Not configure()'s to reset: a mint counter is not configuration, and `last`
-  // is what has been published rather than what was asked for.
-  svc.tokenGen = 0;
-  svc.last = { connected: false, updatedAt: null, total: { attendance: null, occupancy: null }, zones: [] };
+  sharedResetService(svc, cfg);
 }
 
 const poll = (): Promise<void> => svc.connect();
@@ -216,32 +162,19 @@ const readSafeSpace = async (): Promise<void> => void (await svc.readSafeSpace()
 const published = (): PeopleCountDTO => emitted.at(-1)!;
 
 describe("SafeSpace live occupancy on the SenSource payload", () => {
-  beforeEach(() => {
-    clock = Date.UTC(2026, 8, 6, 15, 0, 0);
-    Date.now = () => clock;
-    svc.pollTicker.arm = () => {};
-    svc.safeSpaceTicker.arm = () => {};
-    svc.attendanceTicker.arm = () => {};
-    svc.restart = () => {};
+  beforeEach((t) => {
+    clock.install(t);
+    stubSchedulers(svc);
     sensourceService.setConnectionListener((state, message) => reports.push({ state, message }));
     resetService();
-    svc.emit = (dto: PeopleCountDTO) => {
-      emitted.push(dto);
-      svc.last = dto;
-    };
-    console.warn = take("warn");
-    console.log = take("log");
-    console.error = take("error");
+    recordEmits(svc, emitted);
+    logs = captureLeveledConsole(t);
   });
 
   afterEach(() => {
     // Back to the "assume watched" default the transport-less process starts in.
     setSubscriberCheck(() => true);
     globalThis.fetch = realFetch;
-    Date.now = realNow;
-    console.warn = realWarn;
-    console.log = realLog;
-    console.error = realError;
     svc.running = false;
     svc.cfg = null;
   });
@@ -377,7 +310,7 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
       // SafeSpace goes quiet and its last reading ages out; the occupancy
       // reverts to Vea and the DTO says so.
       alive = false;
-      clock += 10 * 60_000;
+      clock.ms += 10 * 60_000;
       await readSafeSpace();
       await poll();
       assert.equal(published().total.occupancySource, "vea", "the fallback to Vea never happened");
@@ -400,7 +333,7 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
 
     await readSafeSpace(); // a good reading to hold
     body = "";
-    clock += 10_000;
+    clock.ms += 10_000;
     await readSafeSpace();
     await poll();
 
@@ -420,7 +353,7 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
 
     for (let i = 0; i < 8; i++) {
       await readSafeSpace();
-      clock += 10_000;
+      clock.ms += 10_000;
     }
     await poll();
 
@@ -452,7 +385,7 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
 
     for (let i = 0; i < 12; i++) {
       await readSafeSpace();
-      clock += 10_000;
+      clock.ms += 10_000;
     }
 
     assert.equal(
@@ -480,7 +413,7 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
     for (let i = 0; i < 12; i++) {
       ok = i % 2 === 1;
       await readSafeSpace();
-      clock += 70_000;
+      clock.ms += 70_000;
     }
 
     assert.equal(
@@ -499,7 +432,7 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
 
     ok = true;
     for (let i = 0; i < 20; i++) {
-      clock += 10_000;
+      clock.ms += 10_000;
       await readSafeSpace();
     }
 
@@ -520,7 +453,7 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
     stubFetch({ safeSpace: () => null });
 
     await readSafeSpace();
-    clock += 10_000;
+    clock.ms += 10_000;
     await poll();
 
     assert.ok(fellBack().length >= 1, "the transport failure was not reported at all, so nothing was checked");
@@ -551,7 +484,7 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
     const afterPoll = emitted.length;
 
     body = "512";
-    clock += 10_000;
+    clock.ms += 10_000;
     await readSafeSpace();
 
     assert.ok(emitted.length > afterPoll, "a new SafeSpace reading published nothing");
@@ -612,7 +545,7 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
     // and a fraction of the four hours an hourly Vea poll would have imposed.
     ok = true;
     for (let i = 0; i < 24; i++) {
-      clock += 10_000;
+      clock.ms += 10_000;
       await readSafeSpace();
     }
 
@@ -637,7 +570,7 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
 
     // SafeSpace dies and the held value ages out. No Vea poll in between.
     body = "";
-    clock += 61_000;
+    clock.ms += 61_000;
     await readSafeSpace();
 
     assert.equal(fellBack().length, 1, "the fallback was not reported");
@@ -666,14 +599,14 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
     // A wrong ID is reported and does NOT fail the test — Vea is the integration.
     // Past MIN_EXCHANGE_GAP_MS, because the 30s mint floor holds for the button
     // too and a second press inside it fails on the token, not on SafeSpace.
-    clock += 31_000;
+    clock.ms += 31_000;
     stubFetch({ safeSpaceStatus: () => 404, safeSpace: () => "" });
     const bad = await sensourceService.test({ ...CFG });
     assert.equal(bad.ok, true, "a wrong space ID failed the whole Vea connection test");
     assert.match(bad.message ?? "", /SafeSpace did not answer \(HTTP 404\)/, bad.message);
 
     // ...and with SafeSpace switched OFF Test says nothing about it at all.
-    clock += 31_000;
+    clock.ms += 31_000;
     stubFetch();
     // Counted from HERE: the two presses above legitimately read SafeSpace.
     const before = safeSpaceRequests().length;
@@ -846,7 +779,7 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
 
     // One whole interval later — the moment the next reading is due — and it
     // fails. The one before it has to still be standing.
-    clock += max * 1000;
+    clock.ms += max * 1000;
     body = "";
     await readSafeSpace();
     assert.equal(
@@ -878,7 +811,7 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
     // the read came back with.
     for (let n = 0; n < 3; n++) {
       await svc.safeSpaceTicker.run();
-      clock += 10_000;
+      clock.ms += 10_000;
     }
     assert.deepEqual(armed, [10_000, 10_000, 10_000], "a normal read did not re-arm at the cadence");
 
@@ -905,8 +838,3 @@ describe("SafeSpace live occupancy on the SenSource payload", () => {
   });
 });
 
-function take(level: string) {
-  return (...args: unknown[]): void => {
-    logs.push(`${level} ${args.map((a) => errorMessage(a)).join(" ")}`);
-  };
-}
