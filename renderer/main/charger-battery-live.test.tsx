@@ -9,7 +9,7 @@
 import { strict as assert } from "node:assert";
 import { after, test } from "node:test";
 
-import { installRenderDom, isPlumbing } from "../test-dom.js";
+import { installRenderDom, isPlumbing, settle as sharedSettle } from "../test-dom.js";
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 
 const teardown = installRenderDom();
@@ -31,13 +31,7 @@ const React = await import("react");
 const { ObjectContent } = await import("./layout-renderer.js");
 const { makeRenderCtx, DEFAULT_STAGE_STATE } = await import("./test-render-ctx.js");
 
-const settle = async () => {
-  for (let i = 0; i < 6; i++) {
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
-    });
-  }
-};
+const settle = () => sharedSettle({ turns: 6 });
 
 after(async () => {
   cleanup();

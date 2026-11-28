@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, describe, test } from "node:test";
 
-import { installRenderDom, isPlumbing } from "../test-dom.js";
+import { installRenderDom, isPlumbing, settle as sharedSettle } from "../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -28,9 +28,7 @@ const { TooltipProvider } = await import("./ui/tooltip-provider.js");
 afterEach(cleanup);
 after(() => teardown());
 
-const settle = async () => {
-  for (let i = 0; i < 6; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-};
+const settle = () => sharedSettle({ turns: 6 });
 
 async function mount(flush: () => Promise<boolean>) {
   const root = createRootRoute({

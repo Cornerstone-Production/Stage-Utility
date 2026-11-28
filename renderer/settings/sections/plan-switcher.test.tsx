@@ -20,7 +20,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installRenderDom, isPlumbing } from "../../test-dom.js";
+import { installRenderDom, isPlumbing, settle as sharedSettle } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -135,13 +135,7 @@ const { serverZoneApartFromBrowser } = await import("../../test-fixtures/zones.j
 
 /** Several macrotasks: the state hydrate, the two queries and the re-renders
  *  they cause are separate turns, and one tick left the result order-dependent. */
-const settle = async () => {
-  for (let i = 0; i < 6; i++) {
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
-    });
-  }
-};
+const settle = () => sharedSettle({ turns: 6 });
 
 /** Prints what the editor's hook resolved to, beside the switcher itself. */
 function Probe(): React.ReactElement {

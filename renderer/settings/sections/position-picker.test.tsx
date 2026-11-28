@@ -15,7 +15,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installRenderDom } from "../../test-dom.js";
+import { installRenderDom, settle as sharedSettle } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -77,13 +77,7 @@ const { __setEditingTargetForTests } = await import("./editing-target.js");
 const { __resetForTests } = await import("../../main/use-stage-state.js");
 const { __resetReplayCacheForTests } = await import("../../lib/api.js");
 
-const settle = async () => {
-  for (let i = 0; i < 6; i++) {
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
-    });
-  }
-};
+const settle = () => sharedSettle({ turns: 6 });
 
 /** Holds the slot's positions the way the editor does, and prints them. */
 function Harness({ initial }: { initial: SlotPositionMatch[] }): React.ReactElement {

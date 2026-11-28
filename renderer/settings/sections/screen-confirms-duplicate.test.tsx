@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, describe, test } from "node:test";
 
-import { installRenderDom } from "../../test-dom.js";
+import { installRenderDom, settle as sharedSettle } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -19,9 +19,7 @@ const { ConfirmHost } = await import("../../components/ui/confirm-dialog.js");
 const { TooltipProvider } = await import("../../components/ui/tooltip-provider.js");
 const { askDuplicateView, showsBoards } = await import("./screen-confirms.js");
 
-const settle = async () => {
-  for (let i = 0; i < 4; i++) await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
-};
+const settle = () => sharedSettle({ turns: 4 });
 afterEach(cleanup);
 after(() => teardown());
 

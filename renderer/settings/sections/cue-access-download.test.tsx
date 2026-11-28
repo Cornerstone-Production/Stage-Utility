@@ -15,7 +15,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, describe, test } from "node:test";
 
-import { installRenderDom } from "../../test-dom.js";
+import { installRenderDom, settle as sharedSettle } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -31,18 +31,12 @@ const teardown = installRenderDom();
   return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
 };
 
-const { render, cleanup, act, screen } = await import("@testing-library/react");
+const { render, cleanup, screen } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { CueAccessCard } = await import("./companion-cues.js");
 
-const settle = async () => {
-  for (let i = 0; i < 4; i++) {
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
-    });
-  }
-};
+const settle = () => sharedSettle({ turns: 4 });
 
 let client: InstanceType<typeof QueryClient> | null = null;
 
