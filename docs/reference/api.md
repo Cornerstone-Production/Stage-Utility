@@ -817,7 +817,8 @@ something to change:
 `wireless:channels` · `wireless:chargers` · `calendar:grid` · `displays:presence` · `video:state` ·
 `video:probe` · `messages:state` · `home:snoozes` · `trends:prefs` · `boards:changed` (the last
 write to the slot boards, `{epoch, seq, boards: [{id, meta, targets}]}`; see
-[Network traffic](../ops/network-traffic.md#slot-boards))
+[Network traffic](../ops/network-traffic.md#slot-boards)) · `servicecue:lists` (the last save of
+the ServiceCue layouts or roles, `{epoch, seq}`: a page reads both lists again on a frame)
 
 **Pushed only when something happens:**
 

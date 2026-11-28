@@ -7,6 +7,7 @@ import type { ServiceCueLayout } from "../types/stage.js";
 import { DataStore } from "./data-store.js";
 import { asArray, checked, namedEntries, optional, refuse } from "./restore-check.js";
 import { SERVICECUE_LOG_TAG } from "./servicecue-legacy-names.js";
+import { announceServiceCueListsSaved } from "./servicecue-lists-changed.js";
 import { serviceCueRolesStore } from "./servicecue-roles-store.js";
 import { migrateLayouts } from "./servicecue-layout-migration.js";
 import { assignSlugs, isSlug, prepareLayoutsImport, prepareLayoutsSave } from "./servicecue-slug.js";
@@ -33,6 +34,8 @@ const store = new DataStore<ServiceCueLayout[]>("servicecue-layouts.json", [], "
     return raw;
   }),
 });
+
+store.onSaved(announceServiceCueListsSaved);
 
 async function load(): Promise<ServiceCueLayout[]> {
   const raw = await store.load();

@@ -25,6 +25,7 @@ page first loads.
 | `home:snoozes` | under 1 KB | only when a snooze is set, cleared or lapses, and once on connect |
 | `trends:prefs` | under 0.1 KB | only when somebody chooses the Trends sound metric, sent only to an open History page, and once on connect |
 | `wireless:chargers` | ~0.3 KB per bay | when a bay's reading changes (a charging pack moves about a percent a minute), only to a page drawing bays: a Charger battery widget, the Mic slots page |
+| `servicecue:lists` | under 0.1 KB | once per save of the ServiceCue layouts or roles, sent only to an open ServiceCue screen or rundown page, and once on connect; it carries a sequence number, never the lists, which each page then reads again (two small `GET`s) |
 | `boards:changed` | ~0.1 KB per board named | once per write to the slot boards, sent only to an open Mic slots page, and once on connect; screens do not name it |
 | People's photos | ~1.3 MB total | once, then cached |
 | App bundle | ~900 KB | once per deploy |

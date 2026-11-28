@@ -6,11 +6,14 @@ import { DataStore } from "./data-store.js";
 import { firstFree } from "./first-free.js";
 import { asArray, checked } from "./restore-check.js";
 import { SERVICECUE_LOG_TAG } from "./servicecue-legacy-names.js";
+import { announceServiceCueListsSaved } from "./servicecue-lists-changed.js";
 
 const store = new DataStore<CategoryRole[]>("servicecue-roles.json", [], "config", {
   renamedFrom: { filename: "scriptview-roles.json", logTag: SERVICECUE_LOG_TAG },
   restoreCheck: checked((raw) => cleanRoles(asArray(raw, "the roles"))),
 });
+
+store.onSaved(announceServiceCueListsSaved);
 
 /**
  * What POST /api/servicecue/roles saves of a list: roles with a text id and a
