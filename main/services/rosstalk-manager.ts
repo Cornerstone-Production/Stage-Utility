@@ -53,23 +53,23 @@ export class RossTalkConnection extends ConnectionLifecycle {
 
   protected async connect(): Promise<void> {
     if (!this.running || !this.host) return;
-    // Every handler below asks whether its socket's run is still current: a
-    // restart destroys this socket, and its `close` lands after start() has set
-    // `running` back to true, so a `running` check queued a reconnect that
-    // opened a second socket over the live one.
+    // `close` asks whether its socket's run is still current: a restart destroys
+    // this socket, and its `close` lands after start() has set `running` back to
+    // true, so a `running` check queued a reconnect that opened a second socket
+    // over the live one. `connect` and `error` need no check: a destroyed socket
+    // emits neither, and a replaced run's socket has always been destroyed
+    // (teardown).
     const run = this.run;
     const sock = net.connect({ host: this.host, port: this.port });
     sock.unref(); // an idle output socket must not hold the process open
     this.socket = sock;
     sock.on("connect", () => {
-      if (!this.current(run)) return;
       this.resetBackoff();
       this.report("connected", `Connected to ${this.host}:${this.port}`);
     });
     // Send-only protocol: drain anything the device sends so the buffer can't grow.
     sock.on("data", () => {});
     sock.on("error", (err) => {
-      if (!this.current(run)) return;
       this.noteOutage(`${this.host}:${this.port} unreachable (${err.message})`);
       this.report("error", `Can't reach ${this.host}:${this.port} — ${err.message}`);
     });
