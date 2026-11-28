@@ -57,9 +57,11 @@ function latestOwnMs(rec: OpenRecord): number {
  * for the incoming item. So their own latest stamp sits a second or two into the
  * last item, and a length computed from it is an item that ran for two seconds.
  * Attendance samples every 30 s while the service runs, pre-roll items above
- * SERVICE START included ("pre" in item mode). Taper samples ("post") are the
- * room emptying after the service and are left out. The arrival ramp is "pre"
- * too, but comes before any item, so it is never later than an item change.
+ * SERVICE START included ("pre" in item mode, before serviceStartedAt). Taper
+ * samples ("post") are the room emptying after the service and are left out.
+ * So is a "pre" sample after serviceStartedAt: that is the NEXT occurrence's
+ * arrival ramp, which lands in this record while the recorder holds it
+ * through the service-time change.
  *
  * Walks every attendance record, closed ones too, so a record missing its
  * samples (an import, a hand-edited file) is skipped rather than stopping every
@@ -68,10 +70,13 @@ function latestOwnMs(rec: OpenRecord): number {
 function inServiceWitness(records: ServiceAttendance[]): Map<string, number> {
   const out = new Map<string, number>();
   for (const rec of records) {
+    const serviceStartMs = rec.serviceStartedAt ? Date.parse(rec.serviceStartedAt) : NaN;
     for (const s of rec.samples ?? []) {
       if (!s || s.phase === "post") continue;
       const t = Date.parse(s.t);
-      if (Number.isFinite(t) && t > (out.get(rec.serviceKey) ?? -Infinity)) out.set(rec.serviceKey, t);
+      if (!Number.isFinite(t)) continue;
+      if (s.phase === "pre" && Number.isFinite(serviceStartMs) && t >= serviceStartMs) continue;
+      if (t > (out.get(rec.serviceKey) ?? -Infinity)) out.set(rec.serviceKey, t);
     }
   }
   return out;

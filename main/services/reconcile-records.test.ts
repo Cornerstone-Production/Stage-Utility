@@ -167,7 +167,7 @@ describe("closing a crashed service's records at boot", () => {
     assert.equal(tl?.items[0]?.actualDurationSec, 1202, "a closed item is left as it was");
   });
 
-  it("does not take the taper, or the arrival ramp, as the service running", async () => {
+  it("does not take the taper as the service running", async () => {
     const id = identity();
     await serviceTimelineStore.upsert(openTimeline(id));
     const att = openAttendance(id, MESSAGE_LIVE - 5 * MIN);
@@ -190,7 +190,9 @@ describe("what counts as the service running", () => {
     // as on the arrival ramp; the timeline records that item like any other.
     const id = identity();
     await serviceTimelineStore.upsert(openTimeline(id));
+    // Still in pre-roll at the crash: the service proper never began.
     const att = openAttendance(id, MESSAGE_LIVE - 5 * MIN);
+    att.serviceStartedAt = null;
     att.samples.push({ t: iso(CRASH), attendance: 150, occupancy: 140, phase: "pre" });
     await attendanceStore.upsert(att);
     await reconcileOpenRecords();
@@ -198,6 +200,23 @@ describe("what counts as the service running", () => {
     const message = (await serviceTimelineStore.get(id.serviceKey))?.items.find((it) => it.itemId === "message");
     assert.equal(message?.endedAt, iso(CRASH));
     assert.equal(message?.actualDurationSec, (CRASH - MESSAGE_LIVE) / 1000);
+  });
+
+  it("does not take the next occurrence's arrival ramp as this service running", async () => {
+    // While the recorder holds a closed record through a service-time change,
+    // the next service's ramp samples land in it, tagged "pre" and later than
+    // the service's own start.
+    const id = identity();
+    await serviceTimelineStore.upsert(openTimeline(id));
+    const att = openAttendance(id, MESSAGE_LIVE - 5 * MIN); // serviceStartedAt = T0
+    att.samples.push({ t: iso(CRASH), attendance: 60, occupancy: 50, phase: "pre" });
+    att.endedAt = iso(MESSAGE_LIVE);
+    await attendanceStore.upsert(att);
+    await reconcileOpenRecords();
+
+    const message = (await serviceTimelineStore.get(id.serviceKey))?.items.find((it) => it.itemId === "message");
+    assert.equal(message?.endedAt, iso(SONG_CLOSED));
+    assert.equal(message?.actualDurationSec, null);
   });
 
   it("is not stopped by a stored attendance record with no samples", async () => {

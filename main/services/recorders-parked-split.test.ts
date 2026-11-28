@@ -34,6 +34,7 @@ const { attendanceRecorder } = await import("./attendance-recorder.js");
 const { captureConsole } = await import("./fixtures/capture-console.js");
 const { addBroadcastListener } = await import("./broadcaster.js");
 const { serviceTimelineStore } = await import("./service-timeline-store.js");
+const { sampleArchive } = await import("./archive/sample-archive.js");
 
 type Rec = { serviceKey: string; endedAt: string | null };
 type Held = {
@@ -198,6 +199,17 @@ describe("leaving the service", () => {
     }
     const timeline = serviceTimelineRecorder.getCurrent();
     assert.equal(timeline?.items.find((it) => it.itemId === "message")?.actualDurationSec, 15 * 60);
+  });
+
+  it("names and releases SPL's raw-archive files once, on the close", async (t) => {
+    await tick(T0, "occ-a", "song");
+    const manifests = t.mock.method(sampleArchive, "writeManifest", async () => {});
+    const released = t.mock.method(sampleArchive, "closeService", async () => {});
+    await tickNoItem(T0 + 25 * MIN, "occ-a");
+    await new Promise((r) => setImmediate(r)); // closeService follows writeManifest's promise
+
+    assert.deepEqual(manifests.mock.calls.map((c) => (c.arguments[0] as { serviceKey: string }).serviceKey), [keyFor("occ-a")]);
+    assert.deepEqual(released.mock.calls.map((c) => c.arguments[0]), [keyFor("occ-a")]);
   });
 
   it("does not publish a record deleted in History while its close was saving", async (t) => {
