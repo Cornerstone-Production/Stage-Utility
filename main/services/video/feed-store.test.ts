@@ -1,11 +1,10 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-feeds-"));
-process.env.STAGE_UTILITY_DATA = TMP;
+const TMP = tempDataDir("stage-video-feeds-");
 const { videoFeedsStore, loadFeedsFile } = await import("./feed-store.js");
 
 test("a file with no ports gets every default port", async () => {

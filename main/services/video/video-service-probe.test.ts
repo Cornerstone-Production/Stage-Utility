@@ -4,18 +4,15 @@
 // probe-scheduler.test.ts; the probe itself is probe.test.ts.
 
 import { strict as assert } from "node:assert";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
 import { beforeEach, test, type TestContext } from "node:test";
 
 import { captureConsole } from "../fixtures/capture-console.js";
 import { fakeRelay } from "../fixtures/fake-relay.js";
 import { within } from "../fixtures/within.js";
 import { FakeSupervisor } from "../fixtures/fake-supervisor.js";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-probe-"));
-process.env.STAGE_UTILITY_DATA = TMP;
+tempDataDir("stage-video-probe-");
 
 const { videoService, videoProbeDeps, videoPollDeps } = await import("./video-service.js");
 const { addBroadcastListener } = await import("../broadcaster.js");

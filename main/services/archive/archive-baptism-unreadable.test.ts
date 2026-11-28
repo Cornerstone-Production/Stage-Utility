@@ -10,14 +10,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 
 import { strToU8, zipSync } from "fflate";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-arc-baptism-"));
-process.env.STAGE_UTILITY_DATA = TMP;
-process.env.HOME = path.join(TMP, "home");
+const TMP = tempDataDir("stage-arc-baptism-", { home: true });
 await fs.mkdir(path.join(TMP, "baptism.json"));
 
 const { buildArchive, importArchive } = await import("./archive-bundle.js");

@@ -1,13 +1,10 @@
 import { strict as assert } from "node:assert";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
 import { test } from "node:test";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
 // Before any store is constructed: feed-transfer.ts imports the settings
 // store, which must read this directory and never the default data folder.
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-feed-transfer-"));
-process.env.STAGE_UTILITY_DATA = TMP;
+tempDataDir("stage-feed-transfer-");
 const { planImport, assertVideoBundle } = await import("./feed-transfer.js");
 const { DEFAULT_VIDEO_PORTS } = await import("../../types/video.js");
 type VideoFeed = import("../../types/video.js").VideoFeed;

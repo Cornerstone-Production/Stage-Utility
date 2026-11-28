@@ -4,14 +4,10 @@
 // bodies of the config export and import routes.
 
 import assert from "node:assert/strict";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
 import { test } from "node:test";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-ffmpeg-restore-"));
-process.env.STAGE_UTILITY_DATA = TMP;
-process.env.HOME = path.join(TMP, "home");
+tempDataDir("stage-ffmpeg-restore-", { home: true });
 
 const { configSnapshot } = await import("../config-snapshot.js");
 const { ffmpegPathStore, loadFfmpegPath } = await import("./ffmpeg-path-store.js");

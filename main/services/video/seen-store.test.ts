@@ -1,11 +1,8 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-seen-"));
-process.env.STAGE_UTILITY_DATA = TMP;
+tempDataDir("stage-video-seen-");
 const { videoSeenStore, loadSeen, lastSeenAt, noteSeen, flushSeen, forgetSeen, SEEN_WRITE_INTERVAL_MS } = await import(
   "./seen-store.js"
 );
