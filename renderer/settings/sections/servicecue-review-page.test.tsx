@@ -380,6 +380,28 @@ for (const kind of ["api", "http"] as const) {
   });
 }
 
+test("Copy uses the Public address when one is set", async () => {
+  // As every screen link does: the address a volunteer is handed is the one the
+  // operator set, not whichever the operator's browser happens to use.
+  await withClipboard("api", async (copied) => {
+    const s = serviceCueServer({
+      layouts: LAYOUTS, roles: ROLES, shown: ["sun"], types: TYPES, views: VIEWS,
+      override: (url) =>
+        new URL(url, "http://x").pathname === "/api/state"
+          ? new Response(JSON.stringify({ pcoConfigured: true, views: VIEWS, publicUrl: "http://stage.example.org" }), { status: 200, headers: { "Content-Type": "application/json" } })
+          : undefined,
+    });
+    try {
+      await mount();
+      await openCard("Audio");
+      await click(await eventually(() => within(footer()).getByRole("button", { name: "Copy" })));
+      await eventually(() => assert.deepEqual(copied, ["http://stage.example.org/servicecue/sunday-morning/audio"]));
+    } finally {
+      s.restore();
+    }
+  });
+});
+
 test("a copy the browser refuses says so instead of reading Copied", async () => {
   const win = window as unknown as { isSecureContext: boolean };
   const doc = document as unknown as { execCommand?: unknown };

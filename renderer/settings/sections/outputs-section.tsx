@@ -20,6 +20,7 @@ import {
   Callout,
   Dialog} from "../../components/ui";
 import { copyText } from "../../lib/clipboard";
+import { appBaseUrl } from "../../lib/app-base-url";
 import { IconTint } from "../../components/icon-tint";
 import { iconEntryAt } from "../../components/editable-icon";
 import { NewViewDialog } from "./new-view-dialog";
@@ -819,9 +820,9 @@ export function OutputsSection({
   // way in was the Views list this page replaced.
   const assigned = new Set(outputs.map((o) => o.viewId).filter(Boolean));
   const unassigned = views.filter((v) => !assigned.has(v.id));
-  // Prefer the configured public URL (DNS) so display links match what operators
-  // actually browse to; fall back to the current origin.
-  const baseUrl = stageState.publicUrl || window.location.origin;
+  // The Public address when one is set, so display links match what operators
+  // actually browse to; else the current origin (app-base-url.ts).
+  const baseUrl = appBaseUrl(stageState.publicUrl);
 
   // Live per-display presence (Connected/Offline dot). The server broadcasts the
   // connected-output set on change; kiosk pages heartbeat to keep it fresh.

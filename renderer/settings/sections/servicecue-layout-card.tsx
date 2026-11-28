@@ -10,6 +10,7 @@ import { useRef, type ReactNode, type Ref } from "react";
 import { Button, ErrorNote, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tooltip } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { useCopyFeedback } from "../../lib/use-copy-feedback";
+import { useAppBaseUrl } from "../../lib/app-base-url";
 import { serviceCueUrl } from "../../main/servicecue-index-view";
 import { Grip, TrayChip, useCarried, useLifted, useLiftedOrder, useTrayOn, type DragItem } from "./servicecue-drag";
 import { useNameDraft } from "../../lib/use-name-draft";
@@ -360,13 +361,15 @@ function RowColor({ layout: l, roles, onUpdate }: { layout: ServiceCueLayout; ro
 
 /** The address a rundown for this layout opens at, and the screens set to it. The address
  *  needs a service type, so it uses the one the preview does; without one it shows the
- *  template and Copy is off. Copy takes the full address, this app's origin included. */
+ *  template and Copy is off. Copy takes the full address: the Public address when one is
+ *  set, as every screen link does, else this page's origin (app-base-url.ts). */
 function CardFooter({ layout: l, source: p, views }: { layout: ServiceCueLayout; source: PreviewSource; views: LayoutCardProps["views"] }) {
   const typeName = p.types.find((t) => t.id === p.typeId)?.name;
   const path = typeName ? serviceCueUrl(typeName, l.id, l.slug) : `/servicecue/<service type>/${l.slug ?? l.id}`;
   const { state: copy, copy: copyAddress } = useCopyFeedback();
   const users = views ? layoutUsers(l, views) : null;
-  const onCopy = () => copyAddress(`${window.location.origin}${path}`);
+  const base = useAppBaseUrl();
+  const onCopy = () => copyAddress(`${base}${path}`);
   return (
     <div
       data-layout-foot={l.id}

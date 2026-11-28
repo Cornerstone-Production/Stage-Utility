@@ -18,6 +18,7 @@ import { useMessageGroups } from "../../main/use-message-groups";
 import { useDisplayPresence } from "./use-display-presence";
 import { refreshDevices } from "./use-devices";
 import { QUERY_KEYS } from "../queries";
+import { appBaseUrl } from "../../lib/app-base-url";
 
 /** What the host needs of the page around it. */
 export interface ScreenPanelHostProps {
@@ -120,7 +121,7 @@ export function ScreenPanelHost({
         target={target}
         outputs={outputs}
         views={views}
-        baseUrl={stageState.publicUrl || window.location.origin}
+        baseUrl={appBaseUrl(stageState.publicUrl)}
         online={target?.kind === "edit" && connected.has(target.outputId)}
         messageGroups={messageGroups}
         actions={actions}

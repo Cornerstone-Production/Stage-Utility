@@ -131,8 +131,10 @@ column there, and a line under the preview says which.
 The card ends in its **Address**, `/servicecue/<service type>/<layout>`, with a **Copy**
 button, and **Used by:** the ServiceCue views set to it, in the order Screens lists them
 (the Delete confirm names the same ones), or "no views yet". The address uses the
-service type in **Preview with**, and **Copy** puts this app's full address on the
-clipboard, falling back to a hidden text field on plain HTTP. Without Planning Center
+service type in **Preview with**, and **Copy** puts the full address on the clipboard,
+falling back to a hidden text field on plain HTTP. Like every screen link, it starts
+with the Public address when one is set, and otherwise with the address this browser
+is using. Without Planning Center
 the address shows `<service type>` and **Copy** is off.
 
 Clock, Time, Max SPL and Item keep their places; only roles move. Role columns move by
