@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { pad2 } from "@main/services/duration-format";
 import { Tooltip } from "./ui/tooltip";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
@@ -33,7 +34,7 @@ const DOW = [
 ];
 
 function ymd(y: number, m: number, d: number): string {
-  return `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+  return `${y}-${pad2(m + 1)}-${pad2(d)}`;
 }
 
 /**
@@ -150,7 +151,7 @@ export function HistoryCalendar({
   // rather than a call inside `step`, so the opening month (derived above, from
   // the selection or from today) is reported too; the list beside this
   // calendar cannot derive it for itself.
-  const ym = `${view.y}-${String(view.m + 1).padStart(2, "0")}`;
+  const ym = `${view.y}-${pad2(view.m + 1)}`;
   useEffect(() => {
     onMonthChange?.(ym);
     // `onMonthChange` is a fresh closure on every render of the page above; the

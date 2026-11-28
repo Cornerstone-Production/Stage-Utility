@@ -20,6 +20,7 @@
 // deliberately smaller and denser than the kiosk norm; they are not an oversight
 // waiting to be "fixed" up to stage sizes.
 
+import { pad2 } from "@main/services/duration-format";
 import { useEffect, useMemo, useState } from "react";
 import { AlertCircleIcon, CalendarDaysIcon, ChevronLeftIcon, ChevronRightIcon, Loader2Icon } from "lucide-react";
 
@@ -563,7 +564,7 @@ function monthKeyFor(offset: number, zone: string | undefined): string {
   // Date.UTC normalises month -1 or 12 into the neighbouring year, so no
   // wrap-around case is written by hand.
   const d = new Date(Date.UTC(get("year"), get("month") - 1 + offset, 1));
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}`;
 }
 
 /**
