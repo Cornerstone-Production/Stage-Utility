@@ -113,6 +113,7 @@ import type { PeopleCountDTO, PeopleHistoryPoint, PeopleZoneCount } from "../typ
 import { broadcast } from "./broadcaster.js";
 import { StatusIntegration } from "./integration-base.js";
 import { pinToOrigin } from "./pinned-origin.js";
+import { retryAfterMs } from "./retry-after.js";
 
 
 const AUTH_URL = "https://auth.sensourceinc.com/oauth/token";
@@ -195,7 +196,9 @@ const MIN_EXCHANGE_GAP_MS = 30_000;
 /** How long to hold off the exchange after a 429 that names no Retry-After.
  *  Longer than the poll, so the next poll cannot simply ask again. */
 const EXCHANGE_RATE_LIMIT_MS = 60_000;
-/** Ceiling on a Retry-After we will honour. */
+/** Ceiling on a Retry-After we will honour. The clamp is not paranoia about Vea: a
+ *  Retry-After of a day, or a date read from a box whose clock is wrong, would take
+ *  the people count off the air for the rest of the service with nothing to do about it. */
 const RETRY_AFTER_MAX_MS = 15 * 60_000;
 /** The shared-API-client warning describes a condition that lasts until an
  *  operator changes something, so it is written at most this often. */
@@ -277,19 +280,6 @@ class SenSourceHttpError extends Error {
     super(`SenSource ${path} → HTTP ${status}`);
     this.name = "SenSourceHttpError";
   }
-}
-
-/** A Retry-After header in ms, from either form (delta-seconds or an HTTP date),
- *  clamped to RETRY_AFTER_MAX_MS. Null when absent or unparseable — the caller
- *  has its own floor. The clamp is not paranoia about Vea: a Retry-After of a
- *  day, or a date read from a box whose clock is wrong, would take the people
- *  count off the air for the rest of the service with nothing to do about it. */
-function retryAfterMs(header: string | null): number | null {
-  if (!header) return null;
-  const secs = Number(header.trim());
-  if (Number.isFinite(secs) && secs >= 0) return Math.min(secs * 1000, RETRY_AFTER_MAX_MS);
-  const at = Date.parse(header);
-  return Number.isFinite(at) ? Math.min(Math.max(0, at - Date.now()), RETRY_AFTER_MAX_MS) : null;
 }
 
 /** The 401 in a settled result, or null — the shape the poll's token verdict is
@@ -1744,7 +1734,7 @@ class SenSourceService extends StatusIntegration<PeopleCountDTO> {
       // Vea rate-limits the exchange itself. Honour Retry-After when it sends
       // one; otherwise hold off a full minute, which is longer than the poll and
       // so guarantees the next poll does not simply ask again.
-      const after = retryAfterMs(res.headers.get("retry-after"));
+      const after = retryAfterMs(res.headers.get("retry-after"), Date.now(), RETRY_AFTER_MAX_MS);
       const waitMs = Math.max(after ?? 0, EXCHANGE_RATE_LIMIT_MS);
       this.exchangeBlockedUntil = Date.now() + waitMs;
       const rateLimited = this.failed("token-exchange", new Error("HTTP 429"));

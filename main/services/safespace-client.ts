@@ -38,6 +38,7 @@
 //    everything this module can put in front of an operator goes through it.
 
 import { pinToOrigin } from "./pinned-origin.js";
+import { retryAfterMs } from "./retry-after.js";
 import { scrub } from "./scrub.js";
 
 /** Host serving the raw live-occupancy value. */
@@ -101,9 +102,7 @@ export function resetDelayMs(raw: string | null, now: number): number | null {
   const n = num(raw);
   if (n === null) {
     // Not a number — it may still be the HTTP-date form Retry-After allows.
-    if (raw === null) return null;
-    const at = Date.parse(raw);
-    return Number.isFinite(at) ? clampHold(at - now) : null;
+    return retryAfterMs(raw, now, MAX_HOLD_MS);
   }
   // Three forms, told apart by magnitude, because no header says which it uses:
   // 10^12 is already past in MILLISECONDS, 10^9 is an epoch in SECONDS (10^9s is

@@ -37,6 +37,7 @@ export class PcoAuthError extends Error {
 }
 
 import { scrub } from "./scrub.js";
+import { retryAfterMs } from "./retry-after.js";
 import { backoffMs } from "./timers.js";
 import { PCO_BASE, PcoUrlRefused, isPcoId, pcoAttachmentId, pcoId, pcoSegment, pcoUrl, pcoUrlOf, type PcoUrl } from "./pco-path.js";
 
@@ -881,8 +882,9 @@ class PcoService {
   /** Backoff for a transient failure on attempt N (0-based). Honors PCO's
    *  Retry-After header when present, else exponential (1s, 2s, 4s) + jitter. */
   private backoffMs(attempt: number, retryAfter: string | null): number {
-    const ra = retryAfter ? parseInt(retryAfter, 10) : NaN;
-    if (Number.isFinite(ra) && ra > 0) return Math.min(ra * 1000, 15_000);
+    // A Retry-After of 0 is no instruction here: the exponential backoff still applies.
+    const ra = retryAfterMs(retryAfter, Date.now(), 15_000);
+    if (ra !== null && ra > 0) return ra;
     return backoffMs(attempt + 1, 1000, 8000) + Math.floor(Math.random() * 250);
   }
 
