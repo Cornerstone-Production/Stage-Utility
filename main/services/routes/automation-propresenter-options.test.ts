@@ -12,14 +12,10 @@
 
 import assert from "node:assert/strict";
 import { describe, it, before, after, afterEach } from "node:test";
-import * as fs from "node:fs/promises";
 import * as http from "node:http";
-import * as os from "node:os";
-import * as path from "node:path";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-prop-macro-opts-"));
-process.env.STAGE_UTILITY_DATA = TMP;
-process.env.HOME = path.join(TMP, "home");
+tempDataDir("stage-prop-macro-opts-", { home: true });
 
 const { automationRoutes } = await import("./automation-routes.js");
 const { callRoute } = await import("./route-harness.js");
@@ -57,7 +53,6 @@ before(async () => {
 
 after(async () => {
   server.close();
-  await fs.rm(TMP, { recursive: true, force: true });
 });
 
 afterEach(() => {

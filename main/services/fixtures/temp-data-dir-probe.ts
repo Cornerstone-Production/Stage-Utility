@@ -5,9 +5,9 @@ import { appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { useTempDataDir } from "./temp-data-dir.js";
+import { tempDataDir } from "./temp-data-dir.js";
 
-const dir = useTempDataDir("temp-data-dir-probe-", { home: true });
+const dir = tempDataDir("temp-data-dir-probe-", { home: true });
 
 test("the dir is set while the file runs", () => {
   writeFileSync(join(dir, "marker"), "x");

@@ -15,13 +15,10 @@
 // what is under test is the route's error arm, not the controller.
 
 import assert from "node:assert/strict";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
-import { after, describe, test } from "node:test";
+import { describe, test } from "node:test";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), "pco-outage-"));
-process.env.STAGE_UTILITY_DATA = DIR;
+tempDataDir("pco-outage-");
 
 const { historyRoutes } = await import("./history-routes.js");
 const { stateRoutes } = await import("./state-routes.js");
@@ -30,10 +27,6 @@ const { calendarRoutes } = await import("./calendar-routes.js");
 const { statusRoutes } = await import("./status-routes.js");
 const { callRoute } = await import("./route-harness.js");
 const { stageController } = await import("../stage-controller.js");
-
-after(() => {
-  fs.rmSync(DIR, { recursive: true, force: true });
-});
 
 const OUTAGE = "Planning Center returned 503";
 

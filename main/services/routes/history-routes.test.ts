@@ -9,14 +9,10 @@
 // recorder-forget.test.ts already cover.
 
 import assert from "node:assert/strict";
-import { describe, it, beforeEach, after } from "node:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
+import { describe, it, beforeEach } from "node:test";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-reset-pacing-"));
-process.env.STAGE_UTILITY_DATA = TMP;
-process.env.HOME = path.join(TMP, "home");
+tempDataDir("stage-reset-pacing-", { home: true });
 
 const { historyRoutes } = await import("./history-routes.js");
 const { callRoute } = await import("./route-harness.js");
@@ -30,10 +26,6 @@ const rec = serviceTimelineRecorder as unknown as Held;
 const broadcasts: { channel: string; payload: unknown }[] = [];
 addBroadcastListener((channel, payload) => {
   broadcasts.push({ channel, payload });
-});
-
-after(() => {
-  fs.rm(TMP, { recursive: true, force: true }).catch(() => {});
 });
 
 describe("POST /api/service-timeline/current/reset-pacing", () => {

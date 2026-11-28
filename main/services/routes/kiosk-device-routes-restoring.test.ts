@@ -7,13 +7,11 @@
 
 import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "su-devices-restoring-"));
-process.env.STAGE_UTILITY_DATA = dataDir;
-process.env.HOME = path.join(dataDir, "home");
+const dataDir = tempDataDir("su-devices-restoring-", { home: true });
 
 const { kioskDeviceRoutes } = await import("./kiosk-device-routes.js");
 const { callRoute } = await import("./route-harness.js");
@@ -36,7 +34,6 @@ before(async () => {
 
 after(async () => {
   release();
-  await fs.rm(dataDir, { recursive: true, force: true });
 });
 
 /** What the dispatcher answers for this request: the route's own status, or the one a throw maps to. */

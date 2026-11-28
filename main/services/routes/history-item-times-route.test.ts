@@ -11,16 +11,14 @@
 // poller instead.
 
 import assert from "node:assert/strict";
-import { describe, it, beforeEach, after } from "node:test";
+import { describe, it, beforeEach } from "node:test";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 
 import type { ServiceTimeline } from "../../types/stage.js";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-item-times-"));
-process.env.STAGE_UTILITY_DATA = TMP;
-process.env.HOME = path.join(TMP, "home");
+tempDataDir("stage-item-times-", { home: true });
 
 const { historyRoutes } = await import("./history-routes.js");
 const { callRoute } = await import("./route-harness.js");
@@ -99,10 +97,6 @@ async function post(body: unknown) {
     return { status: handlerErrorStatus(err), body: message, json: { error: message } };
   }
 }
-
-after(() => {
-  fs.rm(TMP, { recursive: true, force: true }).catch(() => {});
-});
 
 describe("POST /api/history/item-times", () => {
   beforeEach(async () => {

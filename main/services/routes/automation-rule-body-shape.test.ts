@@ -9,22 +9,15 @@
 // judges whichever of them it carries.
 
 import assert from "node:assert/strict";
-import { after, before, beforeEach, describe, test } from "node:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
+import { before, beforeEach, describe, test } from "node:test";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "automation-rule-body-shape-"));
-process.env.STAGE_UTILITY_DATA = TMP;
-process.env.HOME = path.join(TMP, "home");
+tempDataDir("automation-rule-body-shape-", { home: true });
 
 const { automationRoutes } = await import("./automation-routes.js");
 const { callRoute } = await import("./route-harness.js");
 const { automationEngine } = await import("../automation-engine.js");
 
-after(async () => {
-  await fs.rm(TMP, { recursive: true, force: true });
-});
 before(async () => {
   await automationEngine.init();
 });

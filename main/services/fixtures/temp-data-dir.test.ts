@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-test("useTempDataDir sets the env, then removes the dir when the file ends", () => {
+test("tempDataDir sets the env, then removes the dir when the file ends", () => {
   const scratch = mkdtempSync(join(tmpdir(), "temp-data-dir-test-"));
   try {
     const report = join(scratch, "report.json");

@@ -8,23 +8,16 @@
 // its query string.
 
 import assert from "node:assert/strict";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import { after, beforeEach, describe, test } from "node:test";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), "pco-id-routes-"));
-process.env.STAGE_UTILITY_DATA = DIR;
+tempDataDir("pco-id-routes-");
 
 const { stateRoutes } = await import("./state-routes.js");
 const { serviceCueRoutes } = await import("./servicecue-routes.js");
 const { callRoute } = await import("./route-harness.js");
 const { stageController } = await import("../stage-controller.js");
 const { captureConsole } = await import("../fixtures/capture-console.js");
-
-after(() => {
-  fs.rmSync(DIR, { recursive: true, force: true });
-});
 
 const ctl = stageController as unknown as { pcoAppId: string | null; pcoSecret: string | null };
 

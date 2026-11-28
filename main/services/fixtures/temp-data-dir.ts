@@ -10,7 +10,7 @@ import { after } from "node:test";
  *  module loads: the stores read the variable when they are imported, so the
  *  service imports after it must be dynamic (`await import(...)`).
  *  `home: true` also sets HOME to `<dir>/home`, for code that reads ~. */
-export function useTempDataDir(prefix: string, opts: { home?: boolean } = {}): string {
+export function tempDataDir(prefix: string, opts: { home?: boolean } = {}): string {
   const dir = mkdtempSync(join(tmpdir(), prefix));
   process.env.STAGE_UTILITY_DATA = dir;
   if (opts.home) process.env.HOME = join(dir, "home");

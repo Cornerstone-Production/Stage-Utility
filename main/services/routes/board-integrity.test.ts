@@ -6,14 +6,10 @@
 // Every id and name is invented.
 
 import assert from "node:assert/strict";
-import { describe, it, before, beforeEach, after } from "node:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
+import { describe, it, before, beforeEach } from "node:test";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-board-integrity-"));
-process.env.STAGE_UTILITY_DATA = TMP;
-process.env.HOME = path.join(TMP, "home");
+tempDataDir("stage-board-integrity-", { home: true });
 
 const { boardRoutes } = await import("./board-routes.js");
 const { viewRoutes } = await import("./view-routes.js");
@@ -77,9 +73,6 @@ before(() => {
   ctl.broadcast = () => {};
 });
 beforeEach(seed);
-after(() => {
-  fs.rm(TMP, { recursive: true, force: true }).catch(() => {});
-});
 
 describe("a custom view's leftover board pointer", () => {
   it("is not a board the view's slot routes write to", async () => {

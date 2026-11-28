@@ -5,13 +5,11 @@
 
 import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
-import { after, before, describe, it } from "node:test";
+import { before, describe, it } from "node:test";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "su-devices-unreadable-"));
-process.env.STAGE_UTILITY_DATA = dataDir;
-process.env.HOME = path.join(dataDir, "home");
+const dataDir = tempDataDir("su-devices-unreadable-", { home: true });
 
 const { kioskDeviceRoutes } = await import("./kiosk-device-routes.js");
 const { callRoute } = await import("./route-harness.js");
@@ -22,10 +20,6 @@ before(async () => {
   await fs.mkdir(path.join(dataDir, "kiosk-devices.json"));
   await kioskDevicesStore.reload();
   assert.equal(kioskDevicesStore.unreadable()?.code, "EISDIR");
-});
-
-after(async () => {
-  await fs.rm(dataDir, { recursive: true, force: true });
 });
 
 describe("device routes with unreadable bindings", () => {

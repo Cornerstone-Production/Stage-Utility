@@ -9,25 +9,18 @@
 // the request the route actually makes of the controller is what is asserted.
 
 import assert from "node:assert/strict";
-import * as fs from "node:fs";
 import fsp from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
-import * as os from "node:os";
-import * as path from "node:path";
-import { after, describe, mock, test } from "node:test";
+import { describe, mock, test } from "node:test";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const DIR = fs.mkdtempSync(path.join(os.tmpdir(), "pco-attachment-link-"));
-process.env.STAGE_UTILITY_DATA = DIR;
+tempDataDir("pco-attachment-link-");
 
 const { proxyRoutes } = await import("./proxy-routes.js");
 const { callRoute } = await import("./route-harness.js");
 const { stageController } = await import("../stage-controller.js");
 const { pcoService } = await import("../pco-service.js");
 const { attachmentEtag, attachmentVersion } = await import("../pco-attachment-cache.js");
-
-after(() => {
-  fs.rmSync(DIR, { recursive: true, force: true });
-});
 
 const realFetch = globalThis.fetch;
 
