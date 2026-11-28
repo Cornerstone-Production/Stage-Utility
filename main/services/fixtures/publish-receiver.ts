@@ -11,7 +11,8 @@
 // sets `respond`, and can fall back to `worker()`.
 
 import assert from "node:assert/strict";
-import * as http from "node:http";
+import type * as http from "node:http";
+import { startHttpFixture, type HttpFixture } from "./http-fixture.js";
 
 // A page on this machine is plain http, which the address rules accept only under this switch (development).
 process.env.STAGE_UTILITY_PUBLISH_ALLOW_LOCAL = "1";
@@ -82,7 +83,7 @@ export class FakeReceiver {
    */
   respond: (req: Received) => Answer | Lost | Promise<Answer | Lost> = (req) => this.worker(req);
 
-  private constructor(private readonly server: http.Server) {}
+  private constructor(private readonly shell: HttpFixture) {}
 
   /** The page as it behaves when nothing is wrong: the Worker's handler, with `extra` laid over its answer (a delay, say). */
   async worker(req: Received, extra: Partial<Answer> = {}): Promise<Answer> {
@@ -106,50 +107,44 @@ export class FakeReceiver {
 
   static async start(): Promise<FakeReceiver> {
     let self!: FakeReceiver;
-    const server = http.createServer((req, res) => {
-      const chunks: Buffer[] = [];
-      req.on("data", (c: Buffer) => chunks.push(c));
-      req.on("end", () => {
-        const bytes = Buffer.concat(chunks);
-        const got: Received = {
-          method: req.method ?? "GET",
-          path: req.url ?? "/",
-          headers: req.headers,
-          body: bytes.toString("utf8"),
-          bytes,
-          at: performance.now(),
-        };
-        self.requests.push(got);
-        res.on("close", () => {
-          if (!res.writableEnded) self.dropped++;
-        });
-        void Promise.resolve(self.respond(got)).then((answer) => {
-          if (answer === "hang") return;
-          if (answer === "drop") {
-            res.socket?.destroy();
+    const shell = await startHttpFixture((req, res, bytes) => {
+      const got: Received = {
+        method: req.method ?? "GET",
+        path: req.url ?? "/",
+        headers: req.headers,
+        body: bytes.toString("utf8"),
+        bytes,
+        at: performance.now(),
+      };
+      self.requests.push(got);
+      res.on("close", () => {
+        if (!res.writableEnded) self.dropped++;
+      });
+      void Promise.resolve(self.respond(got)).then((answer) => {
+        if (answer === "hang") return;
+        if (answer === "drop") {
+          res.socket?.destroy();
+          return;
+        }
+        const reply = () => {
+          if (res.destroyed) return;
+          res.writeHead(answer.status, answer.headers ?? {});
+          if (answer.open) {
+            res.write(answer.body ?? "x");
             return;
           }
-          const reply = () => {
-            if (res.destroyed) return;
-            res.writeHead(answer.status, answer.headers ?? {});
-            if (answer.open) {
-              res.write(answer.body ?? "x");
-              return;
-            }
-            res.end(answer.body ?? "");
-          };
-          if (answer.delayMs) setTimeout(reply, answer.delayMs);
-          else reply();
-        });
+          res.end(answer.body ?? "");
+        };
+        if (answer.delayMs) setTimeout(reply, answer.delayMs);
+        else reply();
       });
     });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-    self = new FakeReceiver(server);
+    self = new FakeReceiver(shell);
     return self;
   }
 
   get origin(): string {
-    return `http://127.0.0.1:${(this.server.address() as { port: number }).port}`;
+    return this.shell.origin;
   }
 
   /** Every document PUT, as [key, body], in order. */
@@ -192,8 +187,7 @@ export class FakeReceiver {
   }
 
   async close(): Promise<void> {
-    this.server.closeAllConnections();
-    await new Promise<void>((resolve) => this.server.close(() => resolve()));
+    await this.shell.close();
   }
 }
 
