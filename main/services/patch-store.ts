@@ -52,13 +52,24 @@ function migrate(raw: PatchFile): PatchFile {
   };
 }
 
+/**
+ * The patch was saved and announced, but something that follows it (the stage plot points) could
+ * not be brought up to date. The message is the whole instruction: saving again retries it.
+ */
+export class PatchLinksNotUpdated extends Error {
+  constructor(cause: unknown) {
+    super("The patch was saved, but the stage plot connection points could not be updated to follow it. Saving the patch again retries it.", { cause });
+    this.name = "PatchLinksNotUpdated";
+  }
+}
+
 /** What a saved patch owes others before it is announced: `before` is the file it replaced. */
 type SavedHook = (before: PatchFile, after: PatchFile) => Promise<void>;
 
 class PatchStore {
   private savedHooks: SavedHook[] = [];
 
-  /** Run, awaited, after every save and before patch:updated goes out. A hook that throws is said on [patch]; the save stands. */
+  /** Run, awaited, after every save and before patch:updated goes out. A hook that throws is said on [patch], and save() throws PatchLinksNotUpdated once the patch is stored and announced. */
   onSaved(hook: SavedHook): void {
     this.savedHooks.push(hook);
   }
@@ -113,7 +124,7 @@ class PatchStore {
 
   /**
    * Replace the whole patch file, stamping updatedAt, and broadcast it on patch:updated.
-   * Returns the saved file. The broadcast is here and not in a route because every saver
+   * Returns the saved file, or throws PatchLinksNotUpdated when the patch is saved and a follower failed. The broadcast is here and not in a route because every saver
    * owes it: /patch, the editor and the stage plots publisher all follow the patch on it,
    * and a view import that saved variants without one left them all on the old patch.
    */
@@ -124,14 +135,17 @@ class PatchStore {
       before = prev;
       return next;
     });
+    let failed: unknown = null;
     for (const hook of this.savedHooks) {
       try {
         await hook(this.read(before), next);
       } catch (err) {
         console.error(`[patch] a follower of the saved patch failed: ${scrub(errorMessage(err))}`);
+        failed ??= err;
       }
     }
     broadcast("patch:updated", next);
+    if (failed !== null) throw new PatchLinksNotUpdated(failed);
     return next;
   }
 }

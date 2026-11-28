@@ -9,7 +9,7 @@ import { type RouteCtx, json, error, readBody, pcoReadFailed } from "./context.j
 import type { PatchFile, ServiceCueLayout, Slot } from "../../types/stage.js";
 import type { CategoryRole } from "../../types/servicecue-roles.js";
 import { SlotsNotFoundError, stageController } from "../stage-controller.js";
-import { patchStore } from "../patch-store.js";
+import { PatchLinksNotUpdated, patchStore } from "../patch-store.js";
 import { patchShapeProblem } from "../patch-shape.js";
 import { parseXlsx } from "../patch-xlsx.js";
 import { exportFilename, exportRows } from "../patch-export.js";
@@ -140,7 +140,13 @@ export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
         return;
       }
       // patchStore.save broadcasts patch:updated, for the editor, /patch and stage plots.
-      json(res, await patchStore.save(file!));
+      try {
+        json(res, await patchStore.save(file!));
+      } catch (err) {
+        if (!(err instanceof PatchLinksNotUpdated)) throw err;
+        // Saved and announced: 500 with a code, so the page can tell it from a save that did not happen.
+        error(res, err.message, 500, "plot-links-not-updated");
+      }
       return;
     }
 

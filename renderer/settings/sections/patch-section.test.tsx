@@ -174,3 +174,30 @@ test("a refused save toasts the server's reason, not a bare failure", async () =
     f.restore();
   }
 });
+
+test("a patch saved while the stage plot points could not follow it says so, and is not shown as unsaved", async () => {
+  let stored: PatchFile = FILE;
+  const message = "The patch was saved, but the stage plot connection points could not be updated to follow it. Saving the patch again retries it.";
+  const f = stubFetchWithLog((url, init) => {
+    if (url.endsWith("/api/patch")) {
+      if (init?.method === "POST") {
+        stored = (JSON.parse(String(init.body)) as { file: PatchFile }).file;
+        return reply(500, { error: message, code: "plot-links-not-updated" });
+      }
+      return ok(stored);
+    }
+    if (url.includes("/api/state")) return ok({ ...PLAN, allowedServiceTypeIds: [], pcoConfigured: true });
+    if (url.includes("/api/service-types")) return ok([{ id: "st1", name: "Weekend" }]);
+    return ok({});
+  });
+  try {
+    await mountEditable();
+    await press(screen.getByRole("button", { name: /New variant/ }));
+    await press(screen.getByRole("button", { name: "Save" }));
+    await eventually(() => assert.ok((document.body.textContent ?? "").includes(message)));
+    assert.ok(!(document.body.textContent ?? "").includes("Couldn't save the patch: The patch was saved"), "a stored patch was reported as not saved");
+    await eventually(() => assert.equal(screen.queryByRole("button", { name: "Save" }), null, "the saved patch is still shown as unsaved"));
+  } finally {
+    f.restore();
+  }
+});

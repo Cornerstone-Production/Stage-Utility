@@ -15,7 +15,7 @@ import { viewsStore } from "./views-store.js";
 import { settingsStore } from "./settings-store.js";
 import { slotsStore, type NewBoard } from "./slots-store.js";
 import { stripResolvedFields } from "./slot-resolver.js";
-import { patchStore } from "./patch-store.js";
+import { PatchLinksNotUpdated, patchStore } from "./patch-store.js";
 import { presetsStore } from "./presets-store.js";
 import { scrub } from "./scrub.js";
 import { notesStore } from "./notes-store.js";
@@ -614,16 +614,22 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
       try {
         await patchStore.save(file);
       } catch (err) {
-        const msg = errorMessage(err);
-        skipped.push(`patch variants — could not be saved: ${msg}`);
-        console.error(`[view-import] patch variants failed: ${scrub(msg)}`);
-        // "kept" and "no-such-sheet" wrote nothing either way, so they are still
-        // true. Everything else described a write that did not happen.
-        const survived = patchOutcomes.filter(
-          (o) => o.outcome === "kept" || o.outcome === "no-such-sheet",
-        );
-        patchOutcomes.length = 0;
-        patchOutcomes.push(...survived);
+        if (err instanceof PatchLinksNotUpdated) {
+          // Stored and announced: every outcome stands. Only the stage plot points did not follow.
+          skipped.push("patch variants — saved, but the stage plot connection points could not be updated to follow the patch; saving the patch again retries it");
+          console.error(`[view-import] patch variants saved, stage plot points not updated: ${scrub(errorMessage(err.cause))}`);
+        } else {
+          const msg = errorMessage(err);
+          skipped.push(`patch variants — could not be saved: ${msg}`);
+          console.error(`[view-import] patch variants failed: ${scrub(msg)}`);
+          // "kept" and "no-such-sheet" wrote nothing either way, so they are still
+          // true. Everything else described a write that did not happen.
+          const survived = patchOutcomes.filter(
+            (o) => o.outcome === "kept" || o.outcome === "no-such-sheet",
+          );
+          patchOutcomes.length = 0;
+          patchOutcomes.push(...survived);
+        }
       }
     }
   }
