@@ -10,6 +10,7 @@
 import { useEffect, useState } from "react";
 import { ChevronRightIcon, ListIcon, MapIcon } from "lucide-react";
 
+import { plural } from "@main/services/plural";
 import { LANDING_PATH, STAGEPLOTS_PATH, readLandingList, type LandingVenue } from "@main/types/servicecue-publish";
 
 import { useTheme } from "../lib/use-theme";
@@ -89,7 +90,7 @@ export function LandingPublicPage() {
               >
                 <span className="min-w-0 truncate">{v.name}</span>
                 <small className="font-mono text-[11.5px] text-fg-subtle tabular-nums">
-                  {v.plots} {v.plots === 1 ? "plot" : "plots"}
+                  {plural(v.plots, "plot")}
                 </small>
                 <ChevronRightIcon className="ml-auto size-4 shrink-0 text-fg-subtle" aria-hidden />
               </a>

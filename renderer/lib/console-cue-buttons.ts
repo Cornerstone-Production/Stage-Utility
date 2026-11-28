@@ -18,6 +18,7 @@
 import { cueKey } from "@main/services/cue-aliases";
 import { errorMessage } from "@main/services/errors";
 import { screensListViews } from "@main/services/home-view";
+import { plural } from "@main/services/plural";
 import { viewIsConsole, type LayoutDTO, type LayoutObject, type View } from "@main/types/views";
 
 import { uid } from "../editor/layout-templates";
@@ -325,7 +326,7 @@ export function repointLogLines(from: string, to: string, results: readonly Repo
   const names = done.slice(0, LOG_NAMES).map((r) => cut(r.name, 30));
   if (done.length > LOG_NAMES) names.push(`${done.length - LOG_NAMES} more`);
   const head =
-    `renamed ${was} to ${now}; repointed ${buttons} button${buttons === 1 ? "" : "s"}` +
+    `renamed ${was} to ${now}; repointed ${plural(buttons, "button")}` +
     (names.length > 0 ? ` on ${names.join(", ")}` : "") +
     (refused.length > 0 ? `; ${refused.length} refused` : "");
   const lines = [head];

@@ -241,6 +241,7 @@ describe("what is in the bundle", () => {
       "main/services/app-timezone.ts",
       "main/services/clamp.ts",
       "main/services/errors.ts",
+      "main/services/plural.ts",
       // The address a layout is found under, shared with the server that assigns it.
       "main/services/servicecue-slug.ts",
       // A plot's height and which plot a plan shows: pure, and imports only types.

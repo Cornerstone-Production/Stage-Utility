@@ -5,6 +5,7 @@ import { AlertCircleIcon, PlusIcon, ChevronLeftIcon, ChevronDownIcon } from "luc
 import { Button, Checkbox, ErrorNote, confirm, SkeletonRows } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { joinWithAnd } from "../../lib/join-with-and";
+import { plural } from "@main/services/plural";
 import { moveTo } from "../../lib/list-move";
 import { invoke } from "../../lib/api";
 import { useFailedReads } from "../../lib/use-failed-reads";
@@ -458,7 +459,7 @@ export function ServiceCueSection() {
     }
     const made = Math.max(0, latest.length - before);
     setFailure("seed", failedTypes.length ? `Couldn't make roles for ${joinWithAnd(failedTypes)}.` : null);
-    announce(`Made ${made} ${made === 1 ? "role" : "roles"}, one for each category.`);
+    announce(`Made ${plural(made, "role")}, one for each category.`);
   }
 
   const roleActions: RoleActions = {
