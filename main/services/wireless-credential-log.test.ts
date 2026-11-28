@@ -13,7 +13,8 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, mock, test } from "node:test";
+import { beforeEach, describe, mock, test } from "node:test";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-wireless-credential-log-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -25,15 +26,8 @@ const { secretsStore } = await import("./secrets.js");
 const { MASK } = await import("./mask.js");
 
 let lines: string[] = [];
-const real = { log: console.log, warn: console.warn };
-beforeEach(() => {
-  lines = [];
-  console.log = (...args: unknown[]) => void lines.push(args.join(" "));
-  console.warn = (...args: unknown[]) => void lines.push(args.join(" "));
-});
-afterEach(() => {
-  console.log = real.log;
-  console.warn = real.warn;
+beforeEach((t) => {
+  lines = captureConsole(t, "log", "warn");
 });
 
 const SECRET = "entered-password";
@@ -42,7 +36,7 @@ async function connection(name: string): Promise<string> {
   const list = await wirelessManager.addConnection({ name, providerId: "sennheiser-spectera" });
   const id = list[list.length - 1]!.id;
   await wirelessManager.updateConnection({ id, patch: { config: { host: "spectera.example", password: SECRET } } });
-  lines = [];
+  lines.length = 0;
   return id;
 }
 const stored = async (id: string) => (await secretsStore.getSecrets(wirelessSecretSlot(id))).password;
