@@ -18,7 +18,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { installRenderDom, settle, unmountAndTeardown, resetClientCaches } from "../../test-dom.js";
 import { alerts, ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -26,16 +26,13 @@ const teardown = installRenderDom();
 const { render, screen, cleanup } = await import("@testing-library/react");
 const React = await import("react");
 const { PatchWeekly } = await import("./patch-weekly.js");
-const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../../lib/api.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 // The panel reads the page's one stage state, which is cached for the whole
 // page; without the resets, one case's state is the next case's starting one.
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 
 const TYPES: ServiceTypeDTO[] = [

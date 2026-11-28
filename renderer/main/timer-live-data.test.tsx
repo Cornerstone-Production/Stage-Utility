@@ -13,7 +13,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
-import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown, resetClientCaches } from "../test-dom.js";
 import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 import { NoStream } from "../test-fixtures/no-stream.js";
 
@@ -29,14 +29,11 @@ const { TooltipProvider } = await import("../components/ui/tooltip-provider.js")
 const { LayoutRenderer } = await import("./layout-renderer.js");
 const { HomeGrid } = await import("../app/home/home-grid.js");
 const { DEFAULT_STAGE_STATE } = await import("./test-render-ctx.js");
-const { __resetForTests: resetStageState } = await import("./use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 
 /** An item with ten minutes, two in: eight left. Stamped with the real clock when

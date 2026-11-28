@@ -16,7 +16,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
-import { eventually, installRenderDom, settle, unmountAndTeardown, mountInAct } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown, mountInAct, resetClientCaches } from "../../test-dom.js";
 import { serviceCueServer } from "../../test-fixtures/servicecue-server.js";
 import { alerts, reply } from "../../test-fixtures/fetch-log.js";
 import type { ServiceCueLayout } from "../../../main/types/pco.js";
@@ -29,14 +29,11 @@ const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query
 const React = await import("react");
 const { ServiceCueSection } = await import("./servicecue-section.js");
 const { TooltipProvider, ConfirmHost } = await import("../../components/ui/index.js");
-const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../../lib/api.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 
 const TYPES = [{ id: "sun", name: "Sunday Morning" }, { id: "wed", name: "Wednesday Night" }, { id: "yth", name: "Youth" }];
@@ -504,8 +501,7 @@ test("keyboard: a layout card moves up, and the new order is what the page reads
     await eventually(() => assert.deepEqual(s.layouts().map((l) => l.id), ["l-light", "l-audio"]));
     // As a reload would: a fresh page reads the order back from the server.
     cleanup();
-    resetStageState();
-    resetReplayCache();
+    await resetClientCaches();
     await mount();
     await eventually(() =>
       assert.deepEqual([...document.querySelectorAll("[data-layout-name]")].map((n) => n.textContent), ["Lighting", "Audio"]),
@@ -1219,8 +1215,7 @@ test("no notice on a first run, or when every category is in a role", async () =
     first.restore();
   }
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
   const covered = serviceCueServer({
     layouts: LAYOUTS,
     roles: [...SETUP_ROLES, { id: "r-gfx", name: "Graphics", members: ["Graphics", "Livestream notes"] }],

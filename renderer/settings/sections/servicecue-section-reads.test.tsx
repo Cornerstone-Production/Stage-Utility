@@ -25,7 +25,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
-import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown, resetClientCaches } from "../../test-dom.js";
 import { alerts, ok, reply, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -37,17 +37,14 @@ const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query
 const React = await import("react");
 const { ServiceCueSection } = await import("./servicecue-section.js");
 const { TooltipProvider } = await import("../../components/ui/index.js");
-const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../../lib/api.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 // The stage state is one cache for the whole page, and the stream replays its
 // last frame to a late subscriber; without both resets, one case's
 // `pcoConfigured` is the next case's starting state.
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 
 const RUNDOWN: ServiceCueRundownDTO = {

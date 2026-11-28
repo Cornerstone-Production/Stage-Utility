@@ -13,7 +13,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown, resetClientCaches } from "../../test-dom.js";
 import { serviceCueServer } from "../../test-fixtures/servicecue-server.js";
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 import { ok } from "../../test-fixtures/fetch-log.js";
@@ -28,16 +28,13 @@ const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query
 const React = await import("react");
 const { AdvancedSection } = await import("./advanced-section.js");
 const { TooltipProvider } = await import("../../components/ui/index.js");
-const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../../lib/api.js");
 const { ADVANCED_TABS } = await import("./advanced-settings.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(async () => {
   await settle();
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 
 /** `eventually` already polls inside act; a second scope around it would nest every one of its own. */

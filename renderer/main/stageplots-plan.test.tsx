@@ -23,7 +23,7 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 import type { StagePlotsView } from "@main/types/stageplots";
 import type { UpcomingPlansDTO } from "@main/types/pco";
 
-import { installRenderDom, settle, unmountAndTeardown, mountInAct } from "../test-dom.js";
+import { installRenderDom, settle, unmountAndTeardown, mountInAct, resetClientCaches } from "../test-dom.js";
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 
 const teardown = installRenderDom();
@@ -65,8 +65,6 @@ const { act } = await import("react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { StagePlotsPage, LAST_VENUE_KEY } = await import("./stageplots-view.js");
 const { DEFAULT_STAGE_STATE } = await import("./test-render-ctx.js");
-const { __resetForTests: resetStageState } = await import("./use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
 const plot = (id: string, venueId: string, name: string) => ({ id, venueId, name, backgroundId: null, bgFade: 0.4, items: [], version: 0 });
 
@@ -157,8 +155,7 @@ beforeEach(() => {
 afterEach(async () => {
   cleanup();
   await settle();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 after(() => unmountAndTeardown(cleanup, teardown));
 

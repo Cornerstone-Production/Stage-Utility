@@ -17,7 +17,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { installRenderDom, settle, unmountAndTeardown, resetClientCaches } from "../test-dom.js";
 import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -29,8 +29,6 @@ const React = await import("react");
 const { ServiceCuePlan } = await import("./servicecue-plan-view.js");
 const { TooltipProvider } = await import("../components/ui/index.js");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
-const { __resetForTests: resetStageState } = await import("./use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 // The stage state is one cache for the whole page, and the stream replays its
@@ -40,11 +38,10 @@ after(() => unmountAndTeardown(cleanup, teardown));
 // app's provider allows. A fresh client per case so one case's cached list is not
 // the next one's starting state.
 let queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-afterEach(() => {
+afterEach(async () => {
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 
 const RUNDOWN: ServiceCueRundownDTO = {

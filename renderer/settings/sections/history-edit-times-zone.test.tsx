@@ -27,7 +27,7 @@ process.env.TZ = "UTC";
 import { strict as assert } from "node:assert";
 import { after, afterEach, before, describe, test } from "node:test";
 
-import { eventually, installDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installDom, settle, unmountAndTeardown, resetClientCaches } from "../../test-dom.js";
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 
 const teardown = installDom();
@@ -138,14 +138,11 @@ function installFetch(w: Window, opts: { refuse?: boolean } = {}) {
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { TooltipProvider, ConfirmHost } = await import("../../components/ui/index.js");
-const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../../lib/api.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 
 const text = (el: Element) => (el.textContent ?? "").replace(/\s+/g, " ").trim();

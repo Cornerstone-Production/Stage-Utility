@@ -21,7 +21,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
-import { eventually, installRenderDom, settle, unmountAndTeardown, mountInAct } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown, mountInAct, resetClientCaches } from "../../test-dom.js";
 import { ok, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -30,14 +30,11 @@ const { render, screen, cleanup, fireEvent, within, act } = await import("@testi
 const React = await import("react");
 const { PatchSection } = await import("./patch-section.js");
 const { ConfirmHost, TooltipProvider } = await import("../../components/ui/index.js");
-const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../../lib/api.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 
 const RACK: PatchDevice = { id: "rack", name: "Main Rack", kind: "rack", inputs: 8, outputs: 4 };

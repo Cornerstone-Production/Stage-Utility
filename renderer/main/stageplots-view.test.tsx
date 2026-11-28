@@ -18,7 +18,7 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 import type { StagePlotsView } from "@main/types/stageplots";
 import type { PatchFile } from "@main/types/patch";
 
-import { installRenderDom, settle, unmountAndTeardown, mountInAct } from "../test-dom.js";
+import { installRenderDom, settle, unmountAndTeardown, mountInAct, resetClientCaches } from "../test-dom.js";
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 
 const teardown = installRenderDom();
@@ -43,8 +43,6 @@ const React = (await import("react")).default;
 const { act } = await import("react");
 const { StagePlotsManagePage, StagePlotsManageVenueRoute, StagePlotsPage, StagePlotsVenueRoute, LAST_VENUE_KEY } = await import("./stageplots-view.js");
 const { PrintSheet, printedDate, printLayout, legendLines } = await import("./stageplots-print.js");
-const { __resetForTests: resetStageState } = await import("./use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 const { isOperatorPath } = await import("@main/services/routes/operator-paths");
 const { DESTINATIONS } = await import("../app/destinations.js");
 const { DEFAULT_SIDEBAR } = await import("@main/services/sidebar-arrangement");
@@ -107,9 +105,8 @@ beforeEach(() => {
 afterEach(async () => {
   cleanup();
   await settle();
-  resetReplayCache();
+  await resetClientCaches();
   // The print sheet reads the app's time zone from the shared stage state.
-  resetStageState();
 });
 after(() => unmountAndTeardown(cleanup, teardown));
 

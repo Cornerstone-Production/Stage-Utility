@@ -19,7 +19,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installRenderDom, settle } from "../../test-dom.js";
+import { eventually, installRenderDom, settle, resetClientCaches } from "../../test-dom.js";
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 
 const teardown = installRenderDom();
@@ -72,8 +72,6 @@ const React = (await import("react")).default;
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { TooltipProvider } = await import("../../components/ui/tooltip-provider.js");
 const { AutomationSection, VIEWS_REREAD_MS } = await import("./automation-section.js");
-const { __resetForTests: resetStage } = await import("../../main/use-stage-state.js");
-const { __resetReplayCacheForTests } = await import("../../lib/api.js");
 
 let client: InstanceType<typeof QueryClient> | null = null;
 async function mount() {
@@ -94,11 +92,10 @@ const push = (channel: string, payload: unknown) =>
     await settle();
   });
 
-beforeEach(() => {
+beforeEach(async () => {
   reads = [];
   VIEWS = [{ id: "booth", name: "Booth", layoutRev: 1 }];
-  resetStage();
-  __resetReplayCacheForTests();
+  await resetClientCaches();
 });
 afterEach(async () => {
   cleanup();

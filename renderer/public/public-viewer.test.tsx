@@ -18,7 +18,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, mock, test } from "node:test";
 
-import { eventually, installRenderDom, settle, unmountAndTeardown, mountInAct } from "../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown, mountInAct, resetClientCaches } from "../test-dom.js";
 import { alerts, ok, reply } from "../test-fixtures/fetch-log.js";
 import { FakeSocket } from "../test-fixtures/fake-socket.js";
 
@@ -44,8 +44,6 @@ const { createPublicRouter } = await import("./public-router.js");
 const { StaleNotice } = await import("./stale-notice.js");
 const live = await import("../lib/public-live.js");
 const pageBuild = await import("../lib/public-build.js");
-const { __resetForTests: resetStageState } = await import("../main/use-stage-state.js");
-const { __resetReplayCacheForTests } = await import("../lib/api.js");
 const { serverClock } = await import("../lib/server-clock.js");
 const { formatClock } = await import("../lib/clock-format.js");
 const { ASSET_PATH_PREFIX, HEARTBEAT_PATH, PUBLIC_STALE_AFTER_MS, docKeyForRequest } = await import("@main/types/servicecue-publish");
@@ -152,7 +150,7 @@ g.fetch = async (input: unknown, init?: RequestInit) => {
  */
 async function load(href: string, { socket = true }: { socket?: boolean } = {}) {
   cleanup();
-  forgetThePage();
+  await forgetThePage();
   const router = createPublicRouter(createMemoryHistory({ initialEntries: [href] }));
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
   render(
@@ -192,10 +190,9 @@ async function onTheChurchsOwnPage(body: () => Promise<void>) {
 }
 
 /** What a page load throws away: everything the previous document held in memory. */
-function forgetThePage() {
+async function forgetThePage() {
   live.__resetPublicLiveForTests();
-  __resetReplayCacheForTests();
-  resetStageState();
+  await resetClientCaches();
   serverClock.reset();
   FakeSocket.instances = [];
 }
@@ -224,10 +221,10 @@ beforeEach(() => {
   unpublished = new Set();
   broken = new Set();
 });
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   mock.timers.reset();
-  forgetThePage();
+  await forgetThePage();
   requests.length = 0;
   document.documentElement.setAttribute("data-servicecue-public", "");
 });
