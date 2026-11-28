@@ -25,7 +25,7 @@ import {
   type QsysBrowseKind,
   type QsysCoreLoad,
 } from "./qsys-core-browser";
-import { channelLabel, channelsOf, matchStrip, problemWords, type Eligibility, type StripChannel, type StripSlot } from "./qsys-strip";
+import { channelLabel, channelsOf, isGainBlock, matchGainBlock, matchStrip, problemWords, type Eligibility, type StripChannel, type StripSlot } from "./qsys-strip";
 import { Row, RowNumber, RowSwitch, RowText, RowToggle, Section } from "./inspector-rows";
 
 export type QsysConfig = Extract<LayoutObjectConfig, { type: `qsys-${string}` }>;
@@ -352,12 +352,17 @@ function StripFill({ c, onConfig }: { c: Of<"qsys-strip">; onConfig: (c: LayoutO
   const load = useQsysCoreLoad(open ? opened : null, true);
   const [component, setComponent] = useState("");
   const [notes, setNotes] = useState<string[]>([]);
-  const withChannels = load.state === "ready" ? load.components.filter((comp) => channelsOf(comp.controls.map((x) => x.Name)).length > 0) : [];
+  const namesOf = (comp: CatalogComponent) => comp.controls.map((x) => x.Name);
+  const withChannels = load.state === "ready" ? load.components.filter((comp) => channelsOf(namesOf(comp)).length > 0 || isGainBlock(comp.type, namesOf(comp))) : [];
   const comp = withChannels.find((x) => x.name === component);
 
-  const apply = (channel: StripChannel) => {
+  const gainBlock = comp ? isGainBlock(comp.type, namesOf(comp)) : false;
+
+  /** `channel` is null for a Gain block, which is one channel with no number. */
+  const apply = (channel: StripChannel | null) => {
     if (!comp || load.state !== "ready") return;
-    const m = matchStrip(comp.controls.map((x) => x.Name), channel, eligibilityOver(comp, load));
+    const eligible = eligibilityOver(comp, load);
+    const m = channel ? matchStrip(namesOf(comp), channel, eligible) : matchGainBlock(namesOf(comp), eligible);
     const at = (slot: StripSlot) => (m[slot].control ? { component: comp.name, control: m[slot].control } : null);
     onConfig({ ...c, name: at("name"), gain: at("gain"), mute: at("mute"), meter: at("meter"), meter2: at("meter2") ?? undefined });
     // A second meter is optional; saying it is missing would be noise.
@@ -373,7 +378,7 @@ function StripFill({ c, onConfig }: { c: Of<"qsys-strip">; onConfig: (c: LayoutO
         <div className="flex flex-col gap-1.5 rounded-md border border-line p-2" data-qsys-strip-fill>
           <CoreLoadNotice load={load} />
           {load.state === "ready" && (withChannels.length === 0 ? (
-            <p className="text-caption2 text-fg-muted">No component has controls named like a channel (input.3.gain, output.1.mute, text.display.3).</p>
+            <p className="text-caption2 text-fg-muted">No component has controls named like a channel (input.3.gain, output.1.mute, text.display.3), and none is a Gain block.</p>
           ) : (
             <>
               <select aria-label="Component" className="h-7 rounded-md border border-line-strong bg-field px-2 text-footnote font-mono" value={component} onChange={(e) => setComponent(e.target.value)}>
@@ -382,7 +387,8 @@ function StripFill({ c, onConfig }: { c: Of<"qsys-strip">; onConfig: (c: LayoutO
               </select>
               {comp && (
                 <div className="flex flex-wrap gap-1" role="group" aria-label="Channel">
-                  {channelsOf(comp.controls.map((x) => x.Name)).map((ch) => (
+                  {gainBlock && <Button variant="filled" size="small" onClick={() => apply(null)}>Gain block</Button>}
+                  {!gainBlock && channelsOf(namesOf(comp)).map((ch) => (
                     <Button key={`${ch.side}${ch.n}`} variant="filled" size="small" onClick={() => apply(ch)}>{channelLabel(ch)}</Button>
                   ))}
                 </div>

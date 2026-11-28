@@ -186,6 +186,9 @@ level, mute, meter and second meter fill from the controls named for that channe
 | Second meter | none: bind it by hand |
 | Name | `SIDE.N.label`, then `text.display.N` |
 
+A **Gain block** (a component of type `gain`) is offered as one channel with no
+number: its level fills from `gain` and its mute from `mute`; it has no meter or name.
+
 These are the names a Core gives a mixer's controls. A crosspoint
 (`input.1.output.2.gain`) is no channel's. A Core's meters are usually on a meter
 component of their own, not on the mixer, so the meter fields mostly stay empty after

@@ -3,7 +3,7 @@
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
-import { breakApartStrip, channelsOf, matchStrip, STRIP_TEMPLATES, type Eligibility } from "./qsys-strip.js";
+import { breakApartStrip, channelsOf, isGainBlock, matchGainBlock, matchStrip, STRIP_TEMPLATES, type Eligibility } from "./qsys-strip.js";
 import { isMeterControl } from "@main/types/qsys";
 import type { LayoutObject } from "@main/types/views";
 
@@ -150,5 +150,22 @@ describe("breakApartStrip", () => {
     const parts = breakApartStrip(strip({ name: null, mute: null, meter: null, meter2: null }), () => "x" + Math.random());
     assert.deepEqual(parts.map((p) => p.config.type), ["qsys-fader"]);
     assert.deepEqual([parts[0]!.x, parts[0]!.y, parts[0]!.w, parts[0]!.h], [0.2, 0.1, 0.1, 0.8]);
+  });
+});
+
+describe("matchGainBlock", () => {
+  const eligible = (verdict: "ok" | "not-allowed"): Eligibility => (slot) => (slot === "mute" ? verdict : "ok");
+  test("a Gain block fills level from gain and mute from mute, and nothing else", () => {
+    const m = matchGainBlock(["gain", "mute"], eligible("ok"));
+    assert.deepEqual([m.gain.control, m.mute.control, m.meter.control, m.name.control], ["gain", "mute", null, null]);
+  });
+  test("a control that is missing or not eligible leaves its slot empty, saying why", () => {
+    assert.equal(matchGainBlock(["gain"], eligible("ok")).mute.problem, "missing");
+    assert.equal(matchGainBlock(["gain", "mute"], eligible("not-allowed")).mute.problem, "not-allowed");
+  });
+  test("only a component of type gain with a gain control is a Gain block", () => {
+    assert.equal(isGainBlock("gain", ["gain", "mute"]), true);
+    assert.equal(isGainBlock("mixer", ["gain", "mute"]), false);
+    assert.equal(isGainBlock("gain", ["mute"]), false);
   });
 });

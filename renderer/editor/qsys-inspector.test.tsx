@@ -60,6 +60,15 @@ const CATALOG = {
         { Name: "input.4.mute", Type: "Boolean" },
       ],
     },
+    // A Gain block: one channel with no number, its level `gain` and its mute `mute`.
+    {
+      name: "Zone_Gain",
+      type: "gain",
+      controls: [
+        { Name: "gain", Type: "Float", ValueMin: -100, ValueMax: 20 },
+        { Name: "mute", Type: "Boolean" },
+      ],
+    },
   ],
 };
 /** What the next catalog read answers: tests add a control that carries Choices. */
@@ -67,7 +76,7 @@ let withChoices = false;
 const allow = (control: string, min: number | null = null, max: number | null = null) => ({ component: MIX, control, label: "", min, max, confirm: "none" });
 const bank = (control: string, min: number | null = null, max: number | null = null) => ({ component: "Input_Bank", control, label: "", min, max, confirm: "none" });
 // input.4.mute is deliberately not allowlisted.
-const ALLOW = { entries: [allow("gain", -100, 0), allow("mute"), allow("load.1"), allow("load.2"), allow("Button 2"), bank("input.3.gain", -100, 0), bank("input.3.mute"), bank("input.4.gain", -100, 0)] };
+const ALLOW = { entries: [allow("gain", -100, 0), allow("mute"), allow("load.1"), allow("load.2"), allow("Button 2"), bank("input.3.gain", -100, 0), bank("input.3.mute"), bank("input.4.gain", -100, 0), { component: "Zone_Gain", control: "gain", label: "", min: -100, max: 0, confirm: "none" }, { component: "Zone_Gain", control: "mute", label: "", min: null, max: null, confirm: "none" }] };
 
 const f = stubFetchWithLog((url) => {
   if (url === "/api/qsys/catalog") {
@@ -253,7 +262,7 @@ describe("the Q-SYS inspector", () => {
     fireEvent.click(r.getByRole("button", { name: "Bind a channel" }));
     await wait();
     const select = r.getByLabelText("Component") as HTMLSelectElement;
-    assert.deepEqual([...select.options].map((o) => o.value), ["", "Lobby_Mixer", "Input_Bank"], "only components with channel-named controls (meter.1 alone makes one)");
+    assert.deepEqual([...select.options].map((o) => o.value), ["", "Lobby_Mixer", "Input_Bank", "Zone_Gain"], "only components with channel-named controls (meter.1 alone makes one), and Gain blocks");
     fireEvent.change(select, { target: { value: "Input_Bank" } });
     await wait();
     fireEvent.click(r.getByRole("button", { name: "Input 4" }));
@@ -272,6 +281,20 @@ describe("the Q-SYS inspector", () => {
     // Any field can be changed afterwards.
     await choose(r, "Mute", "mute");
     assert.deepEqual((r.latest() as Record<string, unknown>).mute, b("mute"));
+  });
+
+  test("Bind a channel offers a Gain block as one channel: level from gain, mute from mute", async () => {
+    const r = mount({ type: "qsys-strip", name: null, label: "", gain: null, mute: null, meter: null });
+    fireEvent.click(r.getByRole("button", { name: "Bind a channel" }));
+    await wait();
+    fireEvent.change(r.getByLabelText("Component"), { target: { value: "Zone_Gain" } });
+    await wait();
+    assert.deepEqual([...r.getByRole("group", { name: "Channel" }).querySelectorAll("button")].map((x) => x.textContent), ["Gain block"]);
+    fireEvent.click(r.getByRole("button", { name: "Gain block" }));
+    await wait();
+    const s = r.latest();
+    const zg = (control: string) => ({ component: "Zone_Gain", control });
+    assert.deepEqual([s.gain, s.mute, s.meter, s.name], [zg("gain"), zg("mute"), null, null]);
   });
 
   test("Break apart is offered on a strip and calls the editor's action", () => {

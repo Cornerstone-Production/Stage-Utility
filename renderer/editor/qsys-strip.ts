@@ -76,6 +76,12 @@ export function channelsOf(names: readonly string[]): StripChannel[] {
 
 export const channelLabel = (c: StripChannel): string => (c.side ? `${c.side[0]!.toUpperCase()}${c.side.slice(1)} ${c.n}` : `Channel ${c.n}`);
 
+/**
+ * A Gain block (component type `gain`) is one channel with no number: its level is the
+ * control `gain` and its mute the control `mute`. It has no meter or name of its own.
+ */
+export const isGainBlock = (componentType: string, names: readonly string[]): boolean => /^gain$/i.test(componentType) && names.includes("gain");
+
 /** Why a slot stayed empty. */
 export type SlotProblem = "missing" | "not-allowed" | "not-writable" | "wrong-kind";
 export interface SlotMatch {
@@ -116,6 +122,18 @@ export function matchStrip(names: readonly string[], channel: StripChannel, elig
     }
   }
   return out;
+}
+
+/** The strip's fields for a Gain block: level from `gain`, mute from `mute`, the rest empty. The same eligibility rule as matchStrip. */
+export function matchGainBlock(names: readonly string[], eligible: Eligibility): Record<StripSlot, SlotMatch> {
+  const have = new Set(names);
+  const slot = (s: StripSlot, control: string): SlotMatch => {
+    if (!have.has(control)) return { control: null, problem: "missing" };
+    const verdict = eligible(s, control);
+    return verdict === "ok" ? { control, problem: null } : { control: null, problem: verdict };
+  };
+  const none: SlotMatch = { control: null, problem: "missing" };
+  return { gain: slot("gain", "gain"), mute: slot("mute", "mute"), meter: none, meter2: none, name: none };
 }
 
 /** A slot's emptiness, in words for the inspector. */
