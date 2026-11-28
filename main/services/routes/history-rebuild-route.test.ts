@@ -193,6 +193,7 @@ describe("POST /api/history/rebuild", () => {
       // and rebuild-baptism-merge.test.ts for the baptism leg itself.
       baptism: { rebuilt: false, items: 0, missing: true },
       failed: [],
+      gapRepair: "none",
     });
 
     // On disk, not just in the answer.
@@ -383,6 +384,7 @@ describe("POST /api/history/rebuild", () => {
       attendance: { rebuilt: true, items: 3, missing: false },
       baptism: { rebuilt: false, items: 0, missing: true },
       failed: [],
+      gapRepair: "none",
     });
     // `items: 1` is the corrupted record, unchanged — and `rebuilt: false` is
     // what stops that number reading as a repair.

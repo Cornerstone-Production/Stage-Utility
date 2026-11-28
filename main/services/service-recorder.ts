@@ -23,6 +23,7 @@
 
 import type { PcoLiveDTO, ServiceTimelineItem } from "../types/stage.js";
 import { clockOf } from "./app-timezone.js";
+import { runLengthSec } from "./history-item-times.js";
 import { inLiveItem, serviceDateKey, serviceRunning, shouldRecordLive } from "./live-service-gate.js";
 import { scrub, scrubError } from "./scrub.js";
 import { stageController } from "./stage-controller.js";
@@ -169,10 +170,7 @@ export function stampItemEnds(items: { endedAt: string | null }[], endIso: strin
  *  negative: PCO's `live_start_at` can sit a moment ahead of this host's clock. */
 export function closeTimelineItem(item: ServiceTimelineItem, endIso: string): void {
   item.endedAt = endIso;
-  const startMs = Date.parse(item.startedAt);
-  const endMs = Date.parse(endIso);
-  item.actualDurationSec =
-    Number.isFinite(startMs) && Number.isFinite(endMs) ? Math.max(0, Math.round((endMs - startMs) / 1000)) : null;
+  item.actualDurationSec = runLengthSec(item.startedAt, endIso);
 }
 
 /**
@@ -216,6 +214,8 @@ export interface ServiceRecord {
 export interface RecorderStore<T> {
   get(serviceKey: string): Promise<T | null>;
   upsert(record: T): Promise<void>;
+  /** Remove one record; true when it was there. */
+  delete(serviceKey: string): Promise<boolean>;
   /** Throws when this key's record is on disk and could not be read. */
   assertReadable(serviceKey: string): Promise<void>;
 }
@@ -241,10 +241,21 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
   protected currentKey: string | null = null;
   /** Last live-item tick, for measuring the gap between services. */
   protected lastLiveAt = 0;
-  /** Last tick that saw the service NOT running (Planning Center left item
-   *  mode, or sat past SERVICE END). Later than the last running tick means the
-   *  service stopped, which silence alone (no ticks at all) does not. */
-  private lastStoppedAt = 0;
+  /** The first tick that saw the service NOT running (Planning Center left
+   *  item mode, or sat past SERVICE END) after the last running tick, or an
+   *  older stop. Later than the last running tick means the service stopped
+   *  there, which silence alone (no ticks at all) does not. */
+  private stoppedAt = 0;
+  /** The record attendance split off when the next service's arrival ramp
+   *  began, and when its service last ran, until the next item goes live: if
+   *  that item is the airing the service stopped on, it goes back there. */
+  private splitOnRamp: {
+    key: string;
+    lastRanMs: number;
+    openingItemId: string | null;
+    /** The record the split opened, when it created it rather than resumed one. */
+    createdKey?: string;
+  } | null = null;
   /** Re-entrancy latch: the poller fires every tick and onLiveTick awaits I/O. */
   protected busy = false;
   private dirty = false;
@@ -438,7 +449,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     const now = Date.now();
     const gap = this.lastLiveAt === 0 ? Infinity : now - this.lastLiveAt;
     if (running) this.lastLiveAt = now;
-    else this.lastStoppedAt = now;
+    else if (this.stoppedAt <= this.lastLiveAt) this.stoppedAt = now;
     return gap;
   }
 
@@ -486,13 +497,15 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    * before it lands loses it, and the log says so.
    */
   protected async saveClosed(record: T): Promise<void> {
-    // `record` is `current` at both callers, so forget() of it bumps this.
+    // forget() of `current` bumps this. A record that is no longer current (the
+    // outgoing one, saved again after takeAfterStop) is told by `forgotten`,
+    // which every establish clears, so an entry there is a delete or an edit.
     const gen = this.generation;
     try {
       await this.store.upsert(record);
       this.unsaved.delete(record.serviceKey);
     } catch (err) {
-      if (gen !== this.generation) {
+      if (gen !== this.generation || this.forgotten.has(record.serviceKey)) {
         // Deleted or edited in History while the write was out. Holding it
         // would write it back over the operator's change once the disk recovers.
         console.error(
@@ -610,7 +623,8 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     const from = this.current?.serviceTimeId ?? null;
     if (serviceTimeId == null || from == null) return true; // no two occurrences to compare
     const startsAtMs = live.serviceTimeStartsAt ? Date.parse(live.serviceTimeStartsAt) : NaN;
-    if (!Number.isFinite(startsAtMs)) return gapSinceLive < SERVICE_GAP_MS;
+    // An Infinity gap is no running tick in this process: no evidence of one.
+    if (!Number.isFinite(startsAtMs)) return !Number.isFinite(gapSinceLive) || gapSinceLive < SERVICE_GAP_MS;
 
     const untilMs = startsAtMs - Date.now();
     const hold = untilMs > SERVICE_GAP_MS;
@@ -621,13 +635,24 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     // opening item's line below gives.
     const lastRanMs = Date.now() - gapSinceLive;
     const ran = Number.isFinite(gapSinceLive);
-    const stopped = this.current?.endedAt != null || this.lastStoppedAt > lastRanMs;
+    const stopped = this.current?.endedAt != null || this.stoppedAt > lastRanMs;
     const endedLongEnough = ran && stopped && gapSinceLive >= SERVICE_GAP_MS;
     const airedSinceItRan = live.currentItemId != null && itemLiveSinceMs(live) > lastRanMs;
+    const ended = this.current?.serviceKey ?? "the open record";
     if (hold && endedLongEnough && airedSinceItRan) {
-      const ended = this.current?.serviceKey ?? "the open record";
       console.log(
         `[service-recorder] ${this.label}: "${scrub(live.label ?? live.currentItemTitle ?? live.currentItemId ?? "")}" went live after the service in ${ended} stopped, ${Math.round(untilMs / 60_000)} min before service time ${serviceTimeId} — the next service's, closing ${ended} and opening a new record`,
+      );
+      return false;
+    }
+    // No item at all (attendance on the next service's arrival ramp): the
+    // stopped service has had its gap, so this is the next one's ramp.
+    if (hold && endedLongEnough && live.currentItemId == null) {
+      if (this.current) {
+        this.splitOnRamp = { key: this.current.serviceKey, lastRanMs, openingItemId: this.current.openingItemId ?? null };
+      }
+      console.log(
+        `[service-recorder] ${this.label}: the service in ${ended} stopped ${Math.round(gapSinceLive / 60_000)} min ago, and service time ${serviceTimeId} starts in ${Math.round(untilMs / 60_000)} min — its arrivals are the next service's, closing ${ended} and opening a new record`,
       );
       return false;
     }
@@ -734,7 +759,45 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     // Separate back-to-back services sharing one plan by the PCO service-time
     // occurrence (9am vs 11am). Fall back to the date when none is known.
     const serviceTimeId = live.serviceTimeId;
-    const key = `${serviceTypeId}:${planId}:${serviceTimeId ?? date}`;
+    let key = `${serviceTypeId}:${planId}:${serviceTimeId ?? date}`;
+
+    // The airing the service stopped on, back after attendance split onto the
+    // next service's ramp (see shouldHoldThroughServiceTimeChange): the item
+    // recorders hold it for that service, so attendance goes back to it. Any
+    // other item is the next service starting. Only to a record of this plan
+    // that is there.
+    //
+    // Only where the item recorders would hold too: the next start still more
+    // than SERVICE_GAP_MS away, and not the record's opening item (both split
+    // there; see shouldHoldThroughServiceTimeChange).
+    const back = live.currentItemId ? this.splitOnRamp : null;
+    if (live.currentItemId) this.splitOnRamp = null;
+    const startsAtMs = live.serviceTimeStartsAt ? Date.parse(live.serviceTimeStartsAt) : NaN;
+    let goingBack = false;
+    let lookedBack = false;
+    if (
+      back &&
+      back.key !== this.currentKey &&
+      back.key.startsWith(`${serviceTypeId}:${planId}:`) &&
+      itemLiveSinceMs(live) <= back.lastRanMs &&
+      live.currentItemId !== back.openingItemId &&
+      startsAtMs - Date.now() > SERVICE_GAP_MS
+    ) {
+      // Cleared here rather than below, so a History delete of that record
+      // during the lookup is still seen after the resume (see forgotten).
+      this.forgotten.clear();
+      lookedBack = true;
+      const there = this.unsaved.has(back.key) || (await this.store.get(back.key)) != null;
+      if (gen !== this.generation) return; // forgotten while we waited
+      if (there) {
+        key = back.key;
+        goingBack = true;
+        console.log(
+          `[service-recorder] ${this.label}: "${scrub(live.label ?? live.currentItemTitle ?? live.currentItemId ?? "")}" came back on the airing ${scrub(back.key)} stopped on — back to that record`,
+        );
+      }
+    }
+
     if (this.currentKey === key && this.current) {
       this.captureOpeningItem(live); // backfill for a record that opened before any item was live
       return;
@@ -751,6 +814,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     // record, after its end, until the hold released ten minutes before the
     // next start.
     if (
+      !goingBack &&
       this.current &&
       (this.current.endedAt == null || inLiveItem(live)) &&
       this.current.serviceTypeId === serviceTypeId &&
@@ -763,13 +827,30 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
 
     // Only one establish runs at a time (each recorder's busy latch), so what
     // was forgotten before this one began cannot matter to it.
-    this.forgotten.clear();
+    if (!lookedBack) this.forgotten.clear();
 
     // Key changed → finalize + persist the outgoing record, then publish it on
-    // this recorder's own channel — see publishClosed's doc above.
+    // this recorder's own channel — see publishClosed's doc above. Closed where
+    // the service stopped, when a tick saw it stop after it last ran: attendance
+    // can hold a record open on the arrival ramp after Planning Center left the
+    // service, and the split that ends that hold comes later.
+    let moveFrom: { outgoing: T; stopIso: string; back?: boolean } | null = null;
     if (this.current) {
-      this.finalizeRecord();
+      // Not going back (the stop belongs to the record being returned to, even
+      // when the ramp record resumed one that opened earlier), and not a stop
+      // from before this record opened.
+      const stoppedSinceItRan =
+        !goingBack &&
+        Number.isFinite(gapSinceLive) &&
+        this.stoppedAt > Date.now() - gapSinceLive &&
+        this.stoppedAt >= Date.parse(this.current.startedAt); // a stop before this record opened is another's
+      const stopIso = stoppedSinceItRan ? new Date(this.stoppedAt).toISOString() : undefined;
+      this.finalizeRecord(stopIso);
       const outgoing = this.current;
+      if (stopIso) moveFrom = { outgoing, stopIso };
+      // Going back: everything the ramp record took is the stopped service's
+      // lull, as the item recorders keep it.
+      else if (goingBack) moveFrom = { outgoing, stopIso: new Date(0).toISOString(), back: true };
       await this.saveClosed(outgoing);
       if (gen !== this.generation) return; // forgotten while we waited
       this.publishClosed(outgoing);
@@ -794,7 +875,9 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     // back so the next tick does not take this one's opener as inherited.
     // Asked of `forgotten`, not of `unsaved`: a retry that saves a held copy
     // meanwhile takes it out of `unsaved` too.
-    if (this.forgotten.has(key)) {
+    // Going back with nothing to resume would create the stopped service's key
+    // with the next occurrence's identity: dropped the same way.
+    if (this.forgotten.has(key) || (goingBack && !resumed)) {
       console.log(`[${this.label}] ${scrub(key)} was changed in History while it was being resumed; read again on the next tick`);
       this.cancelPersist();
       this.current = null;
@@ -823,12 +906,67 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
         live,
       );
     }
+    if (!resumed && this.splitOnRamp && this.splitOnRamp.key !== key) this.splitOnRamp.createdKey = key;
     this.currentKey = key;
     this.loggedServiceTimeChange = null; // the next transition out of THIS record is news again
     this.loggedSkippedOpener = null;
     this.inheritedAiring = priorAiring;
     this.captureOpeningItem(live);
     this.onRecordEstablished();
+
+    // What the outgoing record took after its service stopped belongs to this
+    // one (attendance's arrival counts while it held the stopped service, see
+    // takeAfterStop); going back, what the record left took belongs to the
+    // service it goes back to. The outgoing record is saved and published
+    // again without them, unless History deleted or edited it meanwhile.
+    if (moveFrom && this.current && this.takeAfterStop(moveFrom.outgoing, this.current, moveFrom.stopIso, moveFrom.back === true)) {
+      this.schedulePersist();
+      const outgoing = moveFrom.outgoing;
+      // A ramp record the split itself created, emptied by going back, is no
+      // service and nobody's data: dropped rather than left as an empty row.
+      if (moveFrom.back && back?.createdKey === outgoing.serviceKey && this.isEmptyRecord(outgoing)) {
+        if (await this.dropEmptyRamp(outgoing)) return;
+      }
+      await this.saveClosed(outgoing);
+      if (!this.forgotten.has(outgoing.serviceKey)) this.publishClosed(outgoing);
+    }
+  }
+
+  /** Does this record hold nothing it recorded? Only attendance can say so. */
+  protected isEmptyRecord(_record: T): boolean {
+    return false;
+  }
+
+  /**
+   * Remove a ramp record the split created and going back emptied. Answers
+   * whether it is gone; when the delete fails it is kept (saved, empty) and
+   * that is logged, since a closed empty record is harmless.
+   */
+  private async dropEmptyRamp(record: T): Promise<boolean> {
+    if (this.forgotten.has(record.serviceKey)) return true; // History removed it already
+    this.unsaved.delete(record.serviceKey);
+    try {
+      await this.store.delete(record.serviceKey);
+      console.log(
+        `[service-recorder] ${this.label}: ${scrub(record.serviceKey)} held only the counts it gave back, so it is removed rather than kept as an empty record`,
+      );
+      return true;
+    } catch (err) {
+      console.error(
+        `[service-recorder] ${this.label}: could not remove the emptied ${scrub(record.serviceKey)} (${scrubError(err)}); kept as an empty closed record`,
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Move into `into` what `from` recorded after its service stopped at
+   * `stopIso`, when the split that closed `from` came later than the stop (or,
+   * going back, everything `from` took on the ramp). Answers whether it moved
+   * anything. Only attendance records anything there.
+   */
+  protected takeAfterStop(_from: T, _into: T, _stopIso: string, _back = false): boolean {
+    return false;
   }
 }
 

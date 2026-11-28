@@ -32,6 +32,7 @@ import { archiveRoot, isInside, serviceDirName } from "./archive-paths.js";
 import { unreadableArchiveFile } from "./archive-rows.js";
 import { atomicWrite } from "../write-queue.js";
 import { assertSaved } from "../history-edit.js";
+import { repairArrivedRecords } from "../reconcile-records.js";
 import { encodeRow, parseRows } from "../csv.js";
 import {
   mergeAttendanceRecord,
@@ -110,6 +111,14 @@ export interface ImportResult {
    * but invisible without this. Empty on a clean import and on every replace.
    */
   itemTimeEditsDropped: { serviceKey: string; runs: string[] }[];
+  /**
+   * Imported services whose records a boot-time close had left half-closed,
+   * repaired by the boot repair's rule (see repairBootCloseGaps), which ran at
+   * boot before these records were here. `gapRepairFailed` holds the reason
+   * when the repair could not run, or the services it could not save.
+   */
+  gapsRepaired: string[];
+  gapRepairFailed: string | null;
 }
 
 function pkgVersion(): string {
@@ -541,5 +550,29 @@ export async function importArchive(
   // reported only what had been added.
   const baptismSessionsAdded = await baptismStore.addSessions(freshSessions as never);
 
-  return { added, skipped, merged, replaced, baptismSessionsAdded, rawFilesFailed, itemTimeEditsDropped };
+  // The boot repair ran before these records were here. Its failure is
+  // returned, not thrown: the import itself has landed.
+  let gapsRepaired: string[] = [];
+  let gapRepairFailed: string | null = null;
+  try {
+    const repair = await repairArrivedRecords(touchedKeys);
+    gapsRepaired = repair.repaired;
+    if (repair.waiting) gapRepairFailed = repair.waiting;
+    else if (repair.failed.length) gapRepairFailed = `could not save ${repair.failed.length} repaired record(s)`;
+  } catch (err) {
+    gapRepairFailed = scrub(errorMessage(err));
+    console.warn(`[archive] import: could not repair the boot-close gaps of the imported records: ${gapRepairFailed}`);
+  }
+
+  return {
+    added,
+    skipped,
+    merged,
+    replaced,
+    baptismSessionsAdded,
+    rawFilesFailed,
+    itemTimeEditsDropped,
+    gapsRepaired,
+    gapRepairFailed,
+  };
 }

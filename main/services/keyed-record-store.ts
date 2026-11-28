@@ -308,13 +308,14 @@ export class KeyedRecordStore<T extends Keyed> {
    * first run's result. A record whose file could not be read, or is not there,
    * throws and writes nothing; it is never held beside like a recording's save,
    * since nothing is lost by leaving it alone. The copy's name must not end in
-   * `.json`, or the next load would read it as a record. Written through
+   * `.json`, or the next load would read it as a record. Answers whether it
+   * made the copy (false: an earlier one was kept). Written through
    * atomicWrite rather than a plain copy: a copy torn by a crash would be kept,
    * by the rule above, as "the original".
    */
-  async replaceKeepingPrior(record: T, suffix: string): Promise<void> {
+  async replaceKeepingPrior(record: T, suffix: string): Promise<boolean> {
     if (`.${suffix}`.endsWith(".json")) throw new Error(`a kept copy named *.${suffix} would load as a record`);
-    await this.enqueue(async () => {
+    return this.enqueue(async () => {
       const map = await this.loadAll();
       const unread = this.unreadFor(record.serviceKey);
       if (unread) throw unread;
@@ -330,6 +331,7 @@ export class KeyedRecordStore<T extends Keyed> {
       if (!kept) await atomicWrite(copy, await fs.readFile(file));
       await this.writeOne(record);
       map.set(record.serviceKey, record);
+      return !kept;
     });
   }
 

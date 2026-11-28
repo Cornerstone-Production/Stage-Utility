@@ -411,7 +411,7 @@ thing.
 | GET | `/api/history/live?serviceKey=<key>` | Read-only (`400` without `serviceKey`): `{ live }`, whether any recorder is actively writing this key right now — the same check `assertNotLive` refuses on for the routes in this section that edit a recording (not every route here checks it — milestones and `/api/log/client` never do, and Reset pacing requires the opposite, a LIVE service). A client asks this before offering an action the server would otherwise 409, rather than guessing from a record it already holds |
 | POST | `/api/history/window` | Move a recording's start/end, trimming items and samples outside it: `{serviceKey, startedAt?, endedAt?, trim?}`, ISO strings; an absent stamp is left as it is. An edit that would delete any timeline item, SPL item, attendance sample or item time correction is refused with `409` and `{ error, code: "trims-data" }`, the message naming what would go, and nothing changes; send it again with `trim: true` to apply it. `400` without a string `serviceKey`, for a stamp that is not a time, or for an end not after the start (`code: "invalid-window"`). Answers `{ok: true}` |
 | POST | `/api/history/recalc` | Re-derive attendance aggregates from the stored samples: `{serviceKey}`. Answers `{ok: true}` |
-| POST | `/api/history/rebuild` | Recompute the timing, SPL, attendance and baptism summaries for `serviceKey` from the [raw rows](../data-archive.md). Answers `{ timeline, spl, attendance, baptism, baptismDetail?, failed }`, each of the first four `{ rebuilt, items, missing }`; `409` while the service is recording or when there are no raw rows at all — both carry a body of `{ error, code }`, `code` being `"live"` for the first and `"no-raw-rows"` for the second (see `/api/baptism/rebuild` below) — `500` for any other failure (no detail in the body — the reason is on the server's own log) |
+| POST | `/api/history/rebuild` | Recompute the timing, SPL, attendance and baptism summaries for `serviceKey` from the [raw rows](../data-archive.md). Answers `{ timeline, spl, attendance, baptism, baptismDetail?, failed, gapRepair }`, each of the first four `{ rebuilt, items, missing }`, and `gapRepair` what the boot repair's rule then did to a gap a boot-time close left (`none`, `repaired`, `left`, `waiting` while an attendance record cannot be read, or `failed`; see [What gets recorded](../features/attendance-and-history.md#what-gets-recorded)); `409` while the service is recording or when there are no raw rows at all — both carry a body of `{ error, code }`, `code` being `"live"` for the first and `"no-raw-rows"` for the second (see `/api/baptism/rebuild` below) — `500` for any other failure (no detail in the body — the reason is on the server's own log) |
 | POST | `/api/history/item-counted` | Override whether one item counts toward the service timers: `{serviceKey, itemId, counted}`. Answers `{ok: true}` |
 | POST | `/api/history/item-times` | Correct one run of one item's recorded start/end. `{ serviceKey, itemId, sequence, startedAt?, endedAt? }` — ISO strings, `null` clears that override, an absent field leaves it alone. Answers the updated record with the correction applied |
 | POST | `/api/history/merge` | Merge `sourceKey` into `targetKey` and delete the source, raw samples included. Answers `{ok: true, …}` with what each of the three stores did |
@@ -547,7 +547,11 @@ The import answers what it did and, separately, what it could not do:
 `rawFilesFailed` names archive members it could not write, and
 `itemTimeEditsDropped` names per service any item time corrections whose run
 lost the merge — the local run wins, so the correction describing the run that
-did not survive goes with it. Both are empty on a clean import.
+did not survive goes with it. Both are empty on a clean import. `gapsRepaired`
+names imported services whose records a boot-time close had left half-closed,
+repaired by the boot repair's rule (see
+[What gets recorded](../features/attendance-and-history.md#what-gets-recorded)),
+and `gapRepairFailed` is why it could not run or save, else `null`.
 
 **`/api/update/apply` and `/api/update/track` answer `409`** —
 `{error: "locked", locked: true, reasons}` — while a service is live or any

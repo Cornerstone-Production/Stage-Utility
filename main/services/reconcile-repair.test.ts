@@ -30,7 +30,7 @@ process.env.HOME = path.join(TMP, "home");
 const { settingsStore } = await import("./settings-store.js");
 await settingsStore.patch({ timezone: "America/Chicago" });
 
-const { reconcileOpenRecords } = await import("./reconcile-records.js");
+const { reconcileOpenRecords, repairArrivedRecords } = await import("./reconcile-records.js");
 const { historyRepairsStore } = await import("./history-repairs-store.js");
 const { attendanceStore } = await import("./attendance-store.js");
 const { splHistoryStore } = await import("./spl-history-store.js");
@@ -300,11 +300,12 @@ describe("records the old boot close left half-closed", () => {
   });
 
   it("does not take an operator's edit for the gap", async () => {
-    // A length the window edit could not compute (an unreadable start) ends
-    // somewhere other than the record's end; that is not the old close's shape.
+    // A window edit closes an item at the new end and cannot measure it when
+    // its start cannot be read. Every other close with a readable start
+    // measures, so only that start tells this from a boot close's gap.
     const id = identity();
     const edited = oldClosedTimeline(id);
-    edited.items[1] = { ...edited.items[1]!, endedAt: iso(CRASH - MIN) };
+    edited.items[1] = { ...edited.items[1]!, startedAt: "not a time", endedAt: iso(CRASH - MIN) };
     edited.endedAt = iso(CRASH);
     await serviceTimelineStore.upsert(edited);
     await attendanceStore.upsert(attendance(id, CRASH + 10 * MIN));
@@ -411,7 +412,8 @@ describe("what the repair never touches", () => {
 
   it("never moves a record's end earlier", async () => {
     // An end later than anything attendance saw (an operator's window edit):
-    // the item it left open closes there, and the end stays.
+    // the item it left open closes where attendance last saw the service, as
+    // the recorder's close would have, and the record's end stays.
     const id = identity();
     const spl = oldClosedSpl(id);
     spl.endedAt = iso(CRASH + 20 * MIN);
@@ -421,7 +423,7 @@ describe("what the repair never touches", () => {
 
     const after = await splHistoryStore.get(id.serviceKey);
     assert.equal(after?.endedAt, iso(CRASH + 20 * MIN));
-    assert.equal(after?.items[1]?.endedAt, iso(CRASH + 20 * MIN));
+    assert.equal(after?.items[1]?.endedAt, iso(CRASH));
   });
 
   it("tries again next boot when a record could not be saved, and repairs the rest", async (t) => {
@@ -460,6 +462,139 @@ describe("what the repair never touches", () => {
   });
 });
 
+describe("gaps something else hid, or brought in after the boot repair ran", () => {
+  let lines: string[] = [];
+  beforeEach(async (t) => {
+    lines = captureConsole(t as TestContext, "log", "warn", "error");
+    await notYetRepaired();
+  });
+
+  it("finds the gap in a record whose window was extended since", async () => {
+    // Edit times moved the record's end later; the item the old close left
+    // keeps the end it had, which is no longer the record's.
+    const id = identity();
+    const tl = oldClosedTimeline(id);
+    tl.endedAt = iso(CRASH + 30 * MIN);
+    await serviceTimelineStore.upsert(tl);
+    await attendanceStore.upsert(attendance(id, CRASH));
+    await reconcileOpenRecords();
+
+    const after = await serviceTimelineStore.get(id.serviceKey);
+    assert.deepEqual([after?.items[1]?.endedAt, after?.items[1]?.actualDurationSec], [iso(CRASH), (CRASH - MESSAGE_LIVE) / 1000]);
+    assert.equal(after?.endedAt, iso(CRASH + 30 * MIN), "the operator's end moved");
+  });
+
+  it("leaves an item with no length that was not the one on air at the end", async () => {
+    // Resumed after the old close on another item: the old item keeps its
+    // stamp, and later items run past it. Nothing says how long it ran.
+    const id = identity();
+    const tl = oldClosedTimeline(id);
+    tl.items.push({ itemId: "closing", title: "Closing", sequence: 2, plannedLengthSec: 600, startedAt: iso(CRASH + 5 * MIN), endedAt: iso(CRASH + 15 * MIN), actualDurationSec: 600 });
+    tl.endedAt = iso(CRASH + 15 * MIN);
+    await serviceTimelineStore.upsert(tl);
+    // People counted past every stamp: enough to fill the item on air, if
+    // MESSAGE were taken for it.
+    await attendanceStore.upsert(attendance(id, CRASH + 20 * MIN));
+    const before = await bytes(fileOf("service-timeline", id.serviceKey));
+    await reconcileOpenRecords();
+
+    assert.equal(await bytes(fileOf("service-timeline", id.serviceKey)), before);
+    assert.ok(lines.some((l) => l.startsWith("[reconcile]") && l.includes(id.serviceKey) && l.includes("left as it is")), lines.join("\n"));
+  });
+
+  it("keeps a rebuilt record's unknown length unknown, and repairs it by the same rule", async () => {
+    const id = identity();
+    await reconcileOpenRecords(); // the boot repair has run; the marker is set
+    const tl = oldClosedTimeline(id);
+    await serviceTimelineStore.upsert(tl);
+    await attendanceStore.upsert(attendance(id, CRASH));
+    const { rebuildTimelineRecord } = await import("./archive/rebuild.js");
+    const rows = [
+      { at: iso(T0), source: "pco", kind: "item", detail: "Song", itemId: "song" },
+      { at: iso(MESSAGE_LIVE), source: "pco", kind: "item", detail: "Message", itemId: "message" },
+    ];
+    const rebuilt = rebuildTimelineRecord(tl, rows as never);
+    assert.equal(rebuilt.items[1]?.actualDurationSec, null, "the rebuild measured MESSAGE from the old close's guessed end");
+
+    const { serviceDirPath } = await import("./archive/archive-paths.js");
+    const dir = serviceDirPath(id.serviceKey, "2026-11-08");
+    await fs.mkdir(dir, { recursive: true });
+    await fs.writeFile(path.join(dir, "events.csv"), ["at,source,kind,detail,itemId", ...rows.map((r) => `${r.at},${r.source},${r.kind},${r.detail},${r.itemId}`), ""].join("\n"));
+    const { rebuildServiceRecords } = await import("./history-edit.js");
+    await rebuildServiceRecords(id.serviceKey);
+
+    const after = await serviceTimelineStore.get(id.serviceKey);
+    assert.deepEqual([after?.items[1]?.endedAt, after?.items[1]?.actualDurationSec], [iso(CRASH), (CRASH - MESSAGE_LIVE) / 1000]);
+  });
+
+  it("repairs records an archive import brings in after the boot repair ran", async () => {
+    const id = identity();
+    await serviceTimelineStore.upsert(oldClosedTimeline(id));
+    await splHistoryStore.upsert(oldClosedSpl(id));
+    await attendanceStore.upsert(attendance(id, CRASH));
+    const { buildArchive, importArchive } = await import("./archive/archive-bundle.js");
+    const zip = await buildArchive();
+    for (const store of [serviceTimelineStore, splHistoryStore, attendanceStore]) await store.delete(id.serviceKey);
+    await historyRepairsStore.save({ "old-boot-close-gaps": iso(T0) }); // ran before this import
+
+    const result = await importArchive(zip);
+    assert.ok(result.added.includes(id.serviceKey));
+    const tl = await serviceTimelineStore.get(id.serviceKey);
+    assert.deepEqual([tl?.items[1]?.endedAt, tl?.items[1]?.actualDurationSec], [iso(CRASH), (CRASH - MESSAGE_LIVE) / 1000]);
+    assert.equal((await splHistoryStore.get(id.serviceKey))?.items[1]?.endedAt, iso(CRASH));
+    assert.ok(result.gapsRepaired?.includes(id.serviceKey), "the import result does not say which records it repaired");
+  });
+});
+
+describe("records that arrive after the boot repair ran, when their repair cannot finish", () => {
+  beforeEach(async (t) => {
+    captureConsole(t as TestContext, "log", "warn", "error");
+    await historyRepairsStore.save({ "old-boot-close-gaps": iso(T0) });
+  });
+  it("hands a repair that waits on the people counts to the next start", async (t) => {
+    const { StoreReadError } = await import("./data-store.js");
+    t.mock.method(attendanceStore, "unreadable", () => new StoreReadError("a file in attendance-history", new Error("EIO")));
+    const result = await repairArrivedRecords(new Set(["any"]));
+    assert.ok(result.waiting);
+    assert.equal((await historyRepairsStore.load())["old-boot-close-gaps"], undefined, "the next start will not try again");
+  });
+
+  it("hands a repair whose save failed to the next start", async (t) => {
+    const id = identity();
+    await serviceTimelineStore.upsert(oldClosedTimeline(id));
+    await attendanceStore.upsert(attendance(id, CRASH));
+    t.mock.method(serviceTimelineStore, "replaceKeepingPrior", async () => {
+      throw new Error("disk full");
+    });
+    const result = await repairArrivedRecords(new Set([id.serviceKey]));
+    assert.deepEqual(result.failed, [id.serviceKey]);
+    assert.equal((await historyRepairsStore.load())["old-boot-close-gaps"], undefined, "the next start will not try again");
+  });
+
+  it("hands a repair that threw to the next start, and still throws", async (t) => {
+    t.mock.method(attendanceStore, "list", async () => {
+      throw new Error("EIO listing");
+    });
+    await assert.rejects(repairArrivedRecords(new Set(["any"])), /EIO listing/);
+    assert.equal((await historyRepairsStore.load())["old-boot-close-gaps"], undefined, "the next start will not try again");
+  });
+
+  it("reports the repair's own failure when handing it on fails too", async (t) => {
+    t.mock.method(attendanceStore, "list", async () => {
+      throw new Error("EIO listing");
+    });
+    t.mock.method(historyRepairsStore, "update", async () => {
+      throw new Error("marker disk full");
+    });
+    await assert.rejects(repairArrivedRecords(new Set(["any"])), /EIO listing/);
+  });
+
+  it("leaves the marker when it finished", async () => {
+    await repairArrivedRecords(new Set(["nothing-here"]));
+    assert.ok((await historyRepairsStore.load())["old-boot-close-gaps"]);
+  });
+});
+
 describe("a history store not all read", () => {
   beforeEach(async (t) => {
     captureConsole(t as TestContext, "log", "warn", "error");
@@ -494,6 +629,6 @@ describe("with the people counts not all read", () => {
 
     assert.deepEqual([await bytes(fileOf("service-timeline", id.serviceKey)), await bytes(fileOf("spl-history", id.serviceKey))], before);
     assert.equal((await historyRepairsStore.load())["old-boot-close-gaps"], undefined, "marked done without the witness");
-    assert.ok(lines.some((l) => l.startsWith("[reconcile]") && l.includes("waits for the next boot")), lines.join("\n"));
+    assert.ok(lines.some((l) => l.startsWith("[reconcile]") && l.includes("not repaired while an attendance record cannot be read")), lines.join("\n"));
   });
 });

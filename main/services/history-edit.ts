@@ -31,6 +31,8 @@ import {
   rekeyItemTimeEdits,
 } from "./history-item-times.js";
 import { clockOf } from "./app-timezone.js";
+import { closeTimelineItem } from "./service-recorder.js";
+import { repairArrivedRecords } from "./reconcile-records.js";
 import { plural } from "./plural.js";
 import { attendanceRecorder } from "./attendance-recorder.js";
 import { splRecorder } from "./spl-recorder.js";
@@ -366,11 +368,7 @@ export async function editServiceWindow(
       tl.items = tl.items.filter((it) => Date.parse(it.startedAt) <= endMs); // drop items starting after the end
       trim.items = before - tl.items.length;
       for (const it of tl.items) {
-        if (it.endedAt == null || Date.parse(it.endedAt) > endMs) {
-          it.endedAt = new Date(endMs).toISOString();
-          const s = Date.parse(it.startedAt);
-          if (Number.isFinite(s)) it.actualDurationSec = Math.max(0, Math.round((endMs - s) / 1000));
-        }
+        if (it.endedAt == null || Date.parse(it.endedAt) > endMs) closeTimelineItem(it, new Date(endMs).toISOString());
       }
     }
     // The items have been trimmed to the new window; the corrections OVER them
@@ -667,7 +665,13 @@ export interface RebuildOutcome {
    *  case; a non-empty list means the operator is looking at a half-rebuilt
    *  service and needs to know which half. */
   failed: string[];
+  /** What the boot repair's rule did to the rebuilt records afterwards (see
+   *  repairBootCloseGaps): "none" when there was no gap to fill. */
+  gapRepair?: GapRepairOutcome;
 }
+
+/** See RebuildOutcome.gapRepair. */
+export type GapRepairOutcome = "none" | "repaired" | "left" | "waiting" | "failed";
 
 const NO_RECORD: RebuiltRecord = { rebuilt: false, items: 0, missing: true };
 
@@ -941,6 +945,11 @@ export async function rebuildServiceRecords(serviceKey: string): Promise<Rebuild
     }
   }
 
+  // A rebuilt timeline keeps a boot-time close's unknown length unknown (see
+  // rebuildTimelineRecord), so the gap is filled here by the boot repair's own
+  // rule, from the people counts, as it would have been at boot.
+  outcome.gapRepair = await repairRebuiltGap(serviceKey);
+
   // Written out at both call sites rather than through a `line` variable: the
   // log-injection scan reads the ARGUMENT of a console call, and a variable it
   // cannot follow is exactly the shape that lets an unscrubbed value through.
@@ -950,6 +959,27 @@ export async function rebuildServiceRecords(serviceKey: string): Promise<Rebuild
     console.log(`[history] rebuilt ${scrub(serviceKey)} from raw: ${scrub(summarise(outcome))}`);
   }
   return outcome;
+}
+
+/** repairBootCloseGaps for one rebuilt service, and what it did. Its failure
+ *  is returned, not thrown: the rebuild itself has landed. */
+async function repairRebuiltGap(serviceKey: string): Promise<GapRepairOutcome> {
+  try {
+    const r = await repairArrivedRecords(new Set([serviceKey]));
+    if (r.repaired.includes(serviceKey)) {
+      const tl = await serviceTimelineStore.get(serviceKey);
+      if (tl) broadcastTimeline(tl);
+      const spl = await splHistoryStore.get(serviceKey);
+      if (spl) broadcast("spl:history", spl);
+    }
+    if (r.failed.length) return "failed";
+    if (r.repaired.length) return "repaired";
+    if (r.waiting) return "waiting";
+    return r.leftAsIs.length ? "left" : "none";
+  } catch (err) {
+    console.warn(`[history] rebuild of ${scrub(serviceKey)}: could not repair its boot-close gap: ${scrub(errorMessage(err))}`);
+    return "failed";
+  }
 }
 
 /** The three legs, with the noun each counts. Named once so the log line and
