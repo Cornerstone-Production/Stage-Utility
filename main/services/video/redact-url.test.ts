@@ -40,6 +40,24 @@ const cases: { name: string; text: string; secret: string; expected: string }[] 
     expected: "'rtsp://192.0.2.5/s' is not a valid URL",
   },
   {
+    name: "userinfo whose password holds a /",
+    text: "'rtsp://admin:pa/ss@192.0.2.5/s' is not a valid URL",
+    secret: "ss@",
+    expected: "'rtsp://192.0.2.5/s' is not a valid URL",
+  },
+  {
+    name: "userinfo whose password holds /, ?, # and @ together, inside an error line",
+    text: "dial rtsp://admin:a/b?c#d@e@cam/stream: connection refused",
+    secret: "a/b",
+    expected: "dial rtsp://cam/stream: connection refused",
+  },
+  {
+    name: "two addresses on one line, the second with a / in its password",
+    text: "rtsp://cam1/s ok; rtsp://op:x/y@cam2/s failed",
+    secret: "x/y",
+    expected: "rtsp://cam1/s ok; rtsp://cam2/s failed",
+  },
+  {
     // Accepted over-redaction, not a requirement: with no userinfo at all, an @
     // in the query is indistinguishable from the end of a password containing a
     // ?, and a redactor must resolve that toward taking too much. This case
