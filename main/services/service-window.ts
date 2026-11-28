@@ -19,6 +19,15 @@ import type { ReconnectSchedule } from "../types/stage.js";
 
 const ACTIVE_CAP_MS = 120_000; // 2 min — the busy-window / demand ceiling
 
+/**
+ * The longest a window, or a run of overlapping ones, may hold. A Thursday rehearsal
+ * through Sunday's last service is about three days; nothing real is longer. Past
+ * it the plan times are taken as wrong and the window is cut, said once: what waits
+ * out a window (the scheduled auto-update, the Mac helpers' updates, the page
+ * deploy) would otherwise wait for as long as the bad times said.
+ */
+export const MAX_WINDOW_MS = 4 * 24 * 60 * 60_000;
+
 export const DEFAULT_RECONNECT_SCHEDULE: ReconnectSchedule = {
   enabled: true,
   leadMin: 120,
@@ -42,8 +51,23 @@ class ServiceWindowService {
 
   /** Replace the known windows (controller recomputes from PCO periodically). */
   setWindows(windows: { open: number; close: number }[]): void {
-    this.windows = [...windows].sort((a, b) => a.open - b.open);
+    this.windows = windows
+      .map((w) => {
+        if (w.close - w.open <= MAX_WINDOW_MS) return w;
+        this.sayCut(`window:${w.open}:${w.close}`, `a service window from ${new Date(w.open).toISOString()} runs ${Math.round((w.close - w.open) / 3_600_000)} h, longer than ${MAX_WINDOW_MS / 3_600_000} h: it is cut to ${MAX_WINDOW_MS / 3_600_000} h (a plan's times may be wrong)`);
+        return { open: w.open, close: w.open + MAX_WINDOW_MS };
+      })
+      .sort((a, b) => a.open - b.open);
     this.known = true;
+  }
+
+  /** What has been cut and said, so a cut repeated at every refresh or read is said once. */
+  private cutSaid = new Set<string>();
+  private sayCut(key: string, line: string): void {
+    if (this.cutSaid.has(key)) return;
+    if (this.cutSaid.size > 64) this.cutSaid.clear();
+    this.cutSaid.add(key);
+    console.warn(`[reconnect] ${line}`);
   }
 
   /** The last computation failed (Planning Center could not be read): the windows
@@ -85,11 +109,26 @@ class ServiceWindowService {
    *  ones reads as one. One pass: the windows are sorted by when they open, so any
    *  window that extends the run comes after the one it extends. */
   activeUntil(now = Date.now()): number | null {
-    let until: number | null = null;
+    // Runs of overlapping windows, from their first window's open: sorted by open, so one pass finds them.
+    let runOpen = 0;
+    let runClose = -Infinity;
     for (const w of this.windows) {
-      if (until === null ? now >= w.open && now <= w.close : w.open <= until && w.close > until) until = w.close;
+      if (w.open <= runClose) {
+        runClose = Math.max(runClose, w.close);
+        continue;
+      }
+      if (now >= runOpen && now <= runClose) break; // the run holding now is complete
+      runOpen = w.open;
+      runClose = w.close;
     }
-    return until;
+    if (!(now >= runOpen && now <= runClose)) return null;
+    // A run of overlapping windows is held to the same ceiling as one: chained, they could hold anything for good.
+    if (runClose - runOpen > MAX_WINDOW_MS) {
+      this.sayCut(`run:${runOpen}`, `service windows from ${new Date(runOpen).toISOString()} overlap into a run longer than ${MAX_WINDOW_MS / 3_600_000} h: it is cut to ${MAX_WINDOW_MS / 3_600_000} h`);
+      // Past the ceiling, the run no longer holds anything.
+      return runOpen + MAX_WINDOW_MS >= now ? runOpen + MAX_WINDOW_MS : null;
+    }
+    return runClose;
   }
 
   /**

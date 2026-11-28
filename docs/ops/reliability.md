@@ -43,6 +43,14 @@ nothing planned — the schedule counts as unknown, so reconnects keep the 2-min
 cap and the Planning Center poll stays at 4 seconds rather than going quiet. The
 switch into and out of that mode is logged on the `[reconnect]` tag.
 
+A window, or a run of windows that overlap, is held to four days: a Thursday rehearsal
+through Sunday's last service is about three, and anything longer is taken as wrong plan
+times. It is cut to four days from where it opens, and the cut is logged once on
+`[reconnect]`. What waits out a window (the scheduled auto-update, the Mac helpers'
+updates and the public page's deploy) would otherwise wait for as long as the bad times
+said. A plan whose times fail to read on a refresh keeps the window its last good read
+gave, while that window is still to come.
+
 Tunable under **Settings → Advanced → Schedule**, where switching **Wake around service
 times** off gives every integration a fixed 2-minute retry instead.
 
