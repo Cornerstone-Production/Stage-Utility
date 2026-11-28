@@ -277,6 +277,8 @@ class LivePoller {
     // rather than once a second as an unhandled rejection would. The read itself
     // was good, so the cadence stays the read's: a live item keeps polling every
     // second, because nothing may slow a live service down to the dormant delay.
+    // Logged rather than rethrown: the Ticker is this tick's only caller, and
+    // all it could do with a rejection is the per-tick line this replaces.
     try {
       this.act(live);
       const healed = this.actErrors.ok(Date.now());
