@@ -47,6 +47,8 @@ test("two saves in the same millisecond are stamped in the order they were saved
     assert.equal(patchStore.newest(read), second, "a read of the first save was taken over the second");
     // The last save is its own newest: a read of it is not overtaken by anything.
     assert.equal(patchStore.newest(await patchStore.loadStrict()).sheets[0]!.name, "Second");
+    // A file whose stamp is not a date (hand-written, or an older build's) is older than any save: as text, "h" sorts after "2".
+    assert.equal(patchStore.newest({ ...first, updatedAt: "hand-written" }), second, "a file with no date for a stamp was taken over the last save");
   } finally {
     mock.timers.reset();
   }

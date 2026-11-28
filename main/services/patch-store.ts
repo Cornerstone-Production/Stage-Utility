@@ -34,6 +34,10 @@ const stampMs = (updatedAt: string): number => {
   return Number.isFinite(ms) ? ms : -Infinity;
 };
 
+/** The last moment a Date can hold. A stamp already there (only a hand-edited or restored file) is not stepped past it:
+ *  toISOString() would throw, and every save after it would fail. */
+const LAST_STAMP_MS = 8.64e15;
+
 /**
  * Normalize any stored shape into the current multi-sheet PatchFile:
  *  - New shape (`{ sheets }`) → returned as-is.
@@ -157,7 +161,7 @@ class PatchStore {
       // Stamped after the file it replaces, whatever the clock says: newest() orders by the stamp, and a save in the
       // same millisecond as the last, or after the clock stepped back (across a restart too, or a restore from a
       // machine whose clock ran ahead), would otherwise tie with or sort before the file it overtook.
-      next = { ...file, updatedAt: new Date(Math.max(Date.now(), stampMs(prev.updatedAt) + 1)).toISOString() };
+      next = { ...file, updatedAt: new Date(Math.min(LAST_STAMP_MS, Math.max(Date.now(), stampMs(prev.updatedAt) + 1))).toISOString() };
       return next;
     });
     this.lastSaved = next;
