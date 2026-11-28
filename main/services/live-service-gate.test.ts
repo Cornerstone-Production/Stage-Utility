@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import type { PcoLiveDTO } from "../types/stage.js";
 import { setAppTimeZone } from "./app-timezone.js";
+import { makeLive } from "./fixtures/live-dto.js";
 import {
   SERVICE_START_WINDOW_MS,
   isServiceNearNow,
@@ -12,20 +13,17 @@ import {
 
 /** A live tick for a service that starts at `startsAt`, with an item running. */
 function live(startsAt: string | null, over: Partial<PcoLiveDTO> = {}): PcoLiveDTO {
-  return {
+  return makeLive({
     mode: "item",
     currentItemId: "item-1",
     label: "Prayer",
     lengthSec: 300,
     liveStartAt: startsAt,
-    targetAt: null,
-    serverNow: new Date().toISOString(),
     currentItemTitle: "Prayer",
-    nextItemTitle: null,
     serviceTimeId: "st-1",
     serviceTimeStartsAt: startsAt,
     ...over,
-  } as PcoLiveDTO;
+  });
 }
 
 // The outage this file exists to prevent: a Sunday-evening service in Chicago,

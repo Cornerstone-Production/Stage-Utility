@@ -15,12 +15,13 @@ import * as path from "node:path";
 // getUserDataPath()'s lazy, memoized resolution (see app-paths.ts).
 process.env.STAGE_UTILITY_DATA ??= await fs.mkdtemp(path.join(os.tmpdir(), "stage-automation-actions-"));
 
-import type { BaptismState, PcoLiveDTO } from "../types/stage.js";
+import type { BaptismState } from "../types/stage.js";
 import { AUTOMATION_ACTIONS, liveDeps } from "./automation-actions.js";
 import { advanceGuard } from "./automation-pco-items.js";
 import { reaperDeps } from "./reaper-service.js";
 import { baptismTimerService } from "./baptism-timer-service.js";
 import { baptismStore } from "./baptism-store.js";
+import { makeLive } from "./fixtures/live-dto.js";
 
 describe("advanceGuard", () => {
   it("allows the step when the next item matches", () => {
@@ -59,7 +60,7 @@ describe("pco.live.advance", () => {
   let calls = 0;
   function fakePco(nextItemTitle: string | null, onAdvance?: () => Promise<void>): void {
     calls = 0;
-    liveDeps.getLive = () => ({ nextItemTitle } as PcoLiveDTO);
+    liveDeps.getLive = () => makeLive({ nextItemTitle });
     liveDeps.advance = async () => {
       calls++;
       if (onAdvance) await onAdvance();

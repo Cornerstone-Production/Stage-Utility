@@ -23,6 +23,7 @@ import { describe, it, beforeEach, afterEach, mock } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { feedLiveTick, makeLive } from "./fixtures/live-dto.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-opening-item-split-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -65,34 +66,29 @@ const RECORDERS: { name: string; rec: Held; store: Store }[] = [
   { name: "service-timeline-recorder", rec: serviceTimelineRecorder as unknown as Held, store: serviceTimelineStore as unknown as Store },
 ];
 
-/** One live tick, at `at` (ISO), on `occ`, fed to all three recorders in the
- *  same order live-poller.ts uses (spl, attendance, timeline). */
+/** One live tick, at `at` (ISO), on `occ`, fed to every consumer in
+ *  live-poller.ts's order (see fixtures/live-dto.ts). */
 function tick(
   at: string,
   occ: { id: string | null; startsAt: string | null },
   item: { id: string; title: string; lengthSec?: number | null; liveStartAt?: string },
 ): Promise<unknown> {
   mock.timers.setTime(Date.parse(at));
-  const live = {
-    mode: "item" as const,
-    currentItemId: item.id,
-    label: item.title,
-    itemType: null,
-    lengthSec: item.lengthSec ?? null,
-    liveStartAt: item.liveStartAt ?? at,
-    targetAt: null,
-    serverNow: at,
-    currentItemTitle: item.title,
-    nextItemTitle: null,
-    serviceTimeId: occ.id,
-    serviceTimeStartsAt: occ.startsAt,
-    beforeServiceStart: false,
-  };
-  return Promise.all([
-    splRecorder.onLiveTick(live),
-    attendanceRecorder.onLiveTick(live),
-    serviceTimelineRecorder.onLiveTick(live),
-  ]);
+  return feedLiveTick(
+    makeLive({
+      mode: "item",
+      currentItemId: item.id,
+      label: item.title,
+      itemType: null,
+      lengthSec: item.lengthSec ?? null,
+      liveStartAt: item.liveStartAt ?? at,
+      serverNow: at,
+      currentItemTitle: item.title,
+      serviceTimeId: occ.id,
+      serviceTimeStartsAt: occ.startsAt,
+      beforeServiceStart: false,
+    }),
+  );
 }
 
 describe("a held record splits when the next service's OPENING item goes live", () => {

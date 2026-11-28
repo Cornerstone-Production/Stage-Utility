@@ -10,31 +10,26 @@ import { describe, it } from "node:test";
 
 import type { PcoLiveDTO } from "../types/stage.js";
 import { RAMP_GRACE_MS, classifyPhase, inTaper, type PhaseContext } from "./attendance-phase.js";
+import { makeLive } from "./fixtures/live-dto.js";
 
 const SERVICE_START = Date.parse("2026-08-09T15:30:00Z"); // 10:30 America/Chicago
 const HOUR = 60 * 60_000;
 
 /** No item live, but PCO still reports the service time — the post-benediction state. */
 function preservice(over: Partial<PcoLiveDTO> = {}): PcoLiveDTO {
-  return {
+  return makeLive({
     mode: "preservice",
-    currentItemId: null,
     label: "Service starts",
-    lengthSec: null,
-    liveStartAt: null,
     targetAt: new Date(SERVICE_START).toISOString(),
-    serverNow: new Date().toISOString(),
-    currentItemTitle: null,
-    nextItemTitle: null,
     serviceTimeId: "st-1",
     serviceTimeStartsAt: new Date(SERVICE_START).toISOString(),
     ...over,
-  } as PcoLiveDTO;
+  });
 }
 
 /** A live plan item running. */
 function item(over: Partial<PcoLiveDTO> = {}): PcoLiveDTO {
-  return { ...preservice(), mode: "item", currentItemId: "item-1", label: "Sermon", ...over } as PcoLiveDTO;
+  return { ...preservice(), mode: "item", currentItemId: "item-1", label: "Sermon", ...over };
 }
 
 const ctx = (over: Partial<PhaseContext> = {}): PhaseContext => ({
