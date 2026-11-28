@@ -82,7 +82,7 @@ export function EmbeddedViewRows({
     <>
       <RowSelect
         label="View"
-        hint="Renders that view's content here, natively. Dashboard, stage and SPL-rundown views are configured per screen, not per view — pick an Embedded screen for those instead. A view cannot contain itself, and nesting stops after three levels."
+        hint="Renders that view's content here, natively. A view cannot contain itself, and nesting stops after three levels."
         description={layoutLine}
         value={c.viewId ?? ""}
         options={[

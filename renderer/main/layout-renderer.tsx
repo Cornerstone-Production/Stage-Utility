@@ -2812,7 +2812,7 @@ function ViewEmbedObject({
       <div ref={boxRef} className="w-full h-full">{body(ctx.H, boxH || ctx.H, "tile")}</div>
       {/* Each object gates on the states IT resolves — a missing view here, an
           unrouted or blacked-out screen there. The notices EmbeddedView emits
-          for itself (a per-display kind, a recursion refusal, an empty view) are
+          for itself (a recursion refusal, an empty view) are
           gated by neither, deliberately: the alternative is a second copy of its
           kind switch, which is the duplication this file keeps paying for.
           Expanding one of those enlarges the same sentence, which is harmless;

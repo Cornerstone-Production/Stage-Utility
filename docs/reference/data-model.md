@@ -22,9 +22,9 @@ View kinds:
 | **Custom** | a layout you design in the visual editor |
 
 Every kind also renders inside a custom layout, through the **Embedded view**
-widget — **Calendar** among them. Dashboard, Stage and SPL Rundown are configured
-per display rather than per view, so those three are reached with **Embedded
-screen** instead.
+widget — **Calendar** among them. None needs a screen behind the tile; the SPL
+Rundown names the screen in its header only when there is no plan title and the
+tile follows a screen (**Embedded screen**).
 
 ## Surfaces: displays and consoles
 

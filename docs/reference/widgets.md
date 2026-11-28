@@ -173,9 +173,8 @@ closes one level per press.
 existing screens do not break.
 
 **Embedded view** offers every view kind and draws every one of them, **Calendar**
-included. Dashboard, Stage and SPL Rundown are configured per display rather than
-per view, so an Embedded view pointed at one says so and Embedded screen is the
-way to bring it into a tile — see
+included. Dashboard, Stage and SPL Rundown draw in an Embedded view like any
+other kind, with no screen behind them — see
 [Multiviews](layout-editor.md#multiviews).
 
 A **Calendar** view draws the current month as six weeks, marks today, and

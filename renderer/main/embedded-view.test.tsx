@@ -141,7 +141,7 @@ describe("every kind reaches its own component", () => {
   for (const [kind, marker] of Object.entries(MARKER)) {
     test(`${kind} draws its component, not a notice`, async () => {
       const container = await draw(
-        // displayId is what the per-display kinds need; the others ignore it.
+        // The SPL rundown reads displayId for its header name; the others ignore it.
         React.createElement(EmbeddedView, { view: view(kind), ctx: ctxWith([]), displayId: "d-1" } as never),
       );
       // The view's own component reads its data behind the first paint.
@@ -155,11 +155,22 @@ describe("every kind reaches its own component", () => {
   }
 });
 
-describe("a per-display kind says so rather than drawing an empty box", () => {
-  for (const kind of ["dashboard", "stage", "spl-rundown"]) {
+describe("a view with no screen behind it still draws", () => {
+  // Dashboard and stage take no display at all; SPL rundown reads one only for
+  // its NAME in the header. None of them needs a screen to draw.
+  const NO_SCREEN: Record<string, RegExp> = {
+    dashboard: /Up next/,
+    stage: /Remaining slides/,
+    "spl-rundown": /Max SPL per item/,
+  };
+  for (const [kind, marker] of Object.entries(NO_SCREEN)) {
     test(`${kind} without a screen behind it`, async () => {
-      await draw(React.createElement(EmbeddedView, { view: view(kind), ctx: ctxWith([]) } as never));
-      assert.ok(screen.getByText(/set up per screen/i), `a ${kind} view with no display id drew nothing useful`);
+      const container = await draw(React.createElement(EmbeddedView, { view: view(kind), ctx: ctxWith([]) } as never));
+      await eventually(() => {
+        const text = container.textContent ?? "";
+        assert.match(text, marker, `a ${kind} view with no display id drew a notice instead (drew: ${text.slice(0, 120)})`);
+      });
+      assert.equal(screen.queryByText(/set up per screen/i), null);
     });
   }
 });

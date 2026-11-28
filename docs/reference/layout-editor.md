@@ -319,9 +319,7 @@ itself.
 
 **Embedded screen** follows a display; **Embedded view** pins one view wherever
 it is placed, whatever that view's own display later gets routed to. Dashboard,
-stage and SPL rundown views are configured per display rather than per view, so
-an Embedded view pointed at one says so instead of rendering it — Embedded
-screen is the only way to bring one into a tile.
+stage and SPL rundown views draw in either; they need no screen behind the tile.
 
 The **View** picker names each view with its kind as New view does (`Stage left
 (ServiceCue)`, `Mic wall (Mic Slots)`) and never offers the view being edited, which
