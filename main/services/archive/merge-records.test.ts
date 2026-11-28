@@ -171,7 +171,7 @@ test("attendance merge unions samples by timestamp and re-sorts", () => {
       { t: "2026-07-26T09:30:00.000Z", attendance: 40, occupancy: 35 },
     ],
   };
-  const out = mergeAttendanceRecord(mine, theirs);
+  const out = mergeAttendanceRecord(mine, theirs).record;
   assert.deepEqual(
     out.samples!.map((s) => s.t),
     ["2026-07-26T08:30:00.000Z", "2026-07-26T09:00:00.000Z", "2026-07-26T09:30:00.000Z"],
@@ -184,7 +184,7 @@ test("attendance merge recomputes the peak over the filled gap", () => {
   // A peak taken over a gap is wrong the moment the gap is filled.
   const mine = { samples: [{ t: "t2", attendance: 10, occupancy: 10 }], peakAttendance: 10, peakOccupancy: 10 };
   const theirs = { samples: [{ t: "t1", attendance: 500, occupancy: 480 }] };
-  const out = mergeAttendanceRecord(mine, theirs);
+  const out = mergeAttendanceRecord(mine, theirs).record;
   assert.equal(out.peakAttendance, 500);
   assert.equal(out.peakOccupancy, 480);
 });
@@ -247,11 +247,11 @@ test("a ramp or taper sample never sets the peak", () => {
   };
   const theirs = {
     samples: [
-      { t: "t1", attendance: 1915, occupancy: 1800, phase: "post" },
-      { t: "t3", attendance: 1400, occupancy: 1300, phase: "pre" },
+      { t: "t1", attendance: 1915, occupancy: 1800, phase: "post" as const },
+      { t: "t3", attendance: 1400, occupancy: 1300, phase: "pre" as const },
     ],
   };
-  const out = mergeAttendanceRecord(mine, theirs);
+  const out = mergeAttendanceRecord(mine, theirs).record;
   assert.equal(out.samples!.length, 3, "the tagged samples are still kept");
   assert.equal(out.peakAttendance, 1810, "the taper sample did not raise the peak");
   assert.equal(out.peakOccupancy, 1700);
@@ -260,7 +260,116 @@ test("a ramp or taper sample never sets the peak", () => {
 test("an in-service sample from the other machine does raise the peak", () => {
   const mine = { samples: [{ t: "t2", attendance: 100, occupancy: 90 }], peakAttendance: 100, peakOccupancy: 90 };
   const theirs = { samples: [{ t: "t1", attendance: 500, occupancy: 480 }] }; // untagged = in service
-  const out = mergeAttendanceRecord(mine, theirs);
+  const out = mergeAttendanceRecord(mine, theirs).record;
   assert.equal(out.peakAttendance, 500);
   assert.equal(out.peakOccupancy, 480);
+});
+
+// ── Two boxes, two baselines ────────────────────────────────────────────────
+//
+// Each box stores attendance as the raw daily counter minus ITS OWN baseline:
+// the counter's value when that box's record began. Box A opened the 9am at a
+// raw count of 500; box B, restarted ten minutes in, opened its record at 520.
+// The two boxes stamp samples from separate clocks, so their timestamps almost
+// never match and a union keeps nearly all of both series. Unshifted, every B
+// sample read twenty people lower than its A neighbour and the merged curve
+// saw-toothed across the whole overlap, while lastAttendance and minOccupancy
+// kept A's pre-merge values.
+
+const T9 = Date.parse("2026-07-26T09:00:00.000Z");
+/** The raw daily counter at minute `m`: two people a minute. */
+const rawAt = (m: number) => 500 + 2 * m;
+
+/** A box's record of minutes `from`..`to`, baselined at its own first reading,
+ *  stamped `skewSec` seconds off the minute. */
+function boxRecord(from: number, to: number, skewSec: number, occupancy: (m: number) => number) {
+  const baseline = rawAt(from);
+  const minutes = Array.from({ length: to - from + 1 }, (_, i) => from + i);
+  const samples = minutes.map((m) => ({
+    t: new Date(T9 + m * 60_000 + skewSec * 1000).toISOString(),
+    attendance: rawAt(m) - baseline,
+    occupancy: occupancy(m),
+  }));
+  return {
+    serviceKey: "st1:plan:9am",
+    attendanceBaseline: baseline,
+    totalAttendance: rawAt(to),
+    samples,
+    peakAttendance: rawAt(to) - baseline,
+    peakOccupancy: Math.max(...minutes.map(occupancy)),
+    minOccupancy: Math.min(...minutes.map(occupancy)),
+    lastAttendance: rawAt(to) - baseline,
+    lastOccupancy: occupancy(to),
+  };
+}
+
+test("two boxes with different baselines import to one continuous curve", () => {
+  const a = boxRecord(0, 25, 0, () => 300); // this box: 9:00-9:25, baseline 500
+  const b = boxRecord(10, 30, 7, (m) => (m === 28 ? 250 : 310)); // the archive's box: 9:10-9:30, baseline 520
+
+  const out = mergeAttendanceRecord(a, b).record as ReturnType<typeof boxRecord>;
+
+  // Every sample in ONE frame: the earlier baseline, raw 500.
+  assert.equal(out.attendanceBaseline, 500);
+  const series = out.samples.map((s) => s.attendance);
+  for (let i = 1; i < series.length; i++) {
+    assert.ok(series[i]! >= series[i - 1]!, `saw-tooth at sample ${i}: ${series.slice(Math.max(0, i - 2), i + 2).join(", ")}`);
+  }
+  assert.equal(series.at(-1), rawAt(30) - 500, "the archive's tail reads in this box's frame");
+  assert.equal(out.lastAttendance, rawAt(30) - 500, "last comes from the later of the two recordings");
+  assert.equal(out.lastOccupancy, 310);
+  assert.equal(out.peakAttendance, rawAt(30) - 500);
+  assert.equal(out.minOccupancy, 250, "the archive's lower floor is not lost");
+});
+
+test("an archive whose box started first moves this box's samples into its frame", () => {
+  const a = boxRecord(10, 30, 0, () => 300); // this box restarted: baseline 520
+  const b = boxRecord(0, 20, 7, () => 300); // the archive's box was there from the start: 500
+
+  const out = mergeAttendanceRecord(a, b).record as ReturnType<typeof boxRecord>;
+
+  assert.equal(out.attendanceBaseline, 500, "the earlier baseline");
+  const series = out.samples.map((s) => s.attendance);
+  for (let i = 1; i < series.length; i++) assert.ok(series[i]! >= series[i - 1]!, `saw-tooth at ${i}`);
+  assert.equal(series.at(-1), rawAt(30) - 500);
+  assert.equal(out.peakAttendance, rawAt(30) - 500, "this box's stored peak moved into the merged frame");
+  assert.deepEqual(a.samples[0], { t: new Date(T9 + 10 * 60_000).toISOString(), attendance: 0, occupancy: 300 }, "the local record's own samples are not mutated");
+});
+
+test("a figure a recording stored is a floor the samples cannot lower", () => {
+  // The recorder takes its peak and floor off every reading but keeps a sample
+  // only every 30 seconds, so the stored figures can lie outside the samples.
+  const a = { ...boxRecord(0, 10, 0, () => 300), peakAttendance: 99, peakOccupancy: 410, minOccupancy: 120 };
+  const b = boxRecord(5, 15, 7, () => 300);
+
+  const out = mergeAttendanceRecord(a, b).record;
+
+  assert.equal(out.peakAttendance, Math.max(99, rawAt(15) - 500));
+  assert.equal(out.peakOccupancy, 410);
+  assert.equal(out.minOccupancy, 120);
+});
+
+test("importing a recording that adds nothing leaves the record as it was", () => {
+  const a = { ...boxRecord(0, 20, 0, (m) => 300 + m), peakAttendance: 41, minOccupancy: 290, lastAttendance: 41 };
+  const b = { ...a, samples: a.samples.slice(3, 9) };
+  assert.deepEqual(mergeAttendanceRecord(a, b).record, a);
+});
+
+test("an attendance merge is idempotent across two baselines", () => {
+  const a = boxRecord(0, 25, 0, () => 300);
+  const b = boxRecord(10, 30, 7, (m) => (m === 28 ? 250 : 310));
+  const once = mergeAttendanceRecord(a, b).record;
+  assert.deepEqual(mergeAttendanceRecord(once, b).record, once);
+});
+
+test("a baseline that is not a number shifts nothing, and the merge says it could not align", () => {
+  const a = boxRecord(0, 10, 0, () => 300);
+  const b = { ...boxRecord(5, 15, 7, () => 300), attendanceBaseline: "520" as unknown as number };
+
+  const { record, frames } = mergeAttendanceRecord(a, b);
+
+  assert.equal(frames, "unknown");
+  assert.equal(record.attendanceBaseline, 500);
+  assert.ok(record.samples!.every((s) => Number.isFinite((s as { attendance: number }).attendance)), "no NaN reached a sample");
+  assert.equal(mergeAttendanceRecord(a, boxRecord(5, 15, 7, () => 300)).frames, "aligned");
 });

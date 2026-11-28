@@ -16,6 +16,9 @@
 // item, this keeps the local figures and says so. (The raw CSVs are merged by
 // timestamp, so the samples needed to recompute it properly are retained.)
 
+import type { AttendanceSample } from "../../types/history.js";
+import { alignAttendance, attendanceStats, inServiceSamples } from "../attendance-aggregate.js";
+
 /** Union two arrays of objects by a key field, keeping the local entry on a clash. */
 export function mergeByKey<T>(mine: T[], theirs: T[], key: (v: T) => string | null | undefined): T[] {
   const seen = new Set(mine.map(key).filter((k): k is string => k != null));
@@ -90,44 +93,100 @@ export function mergeSplRecord(mine: SplRecord, theirs: SplRecord): SplRecord {
   };
 }
 
-interface AttendanceSample {
-  t: string;
-}
+/** An attendance record as a bundle carries it: unvalidated, so every field
+ *  this reads is checked rather than trusted. */
 interface AttendanceRecord {
   samples?: AttendanceSample[];
+  attendanceBaseline?: number | null;
   peakAttendance?: number;
   peakOccupancy?: number;
+  minOccupancy?: number | null;
+  lastAttendance?: number;
+  lastOccupancy?: number;
   [k: string]: unknown;
 }
 
+/** What an attendance merge produced, and whether it could align the frames. */
+export interface MergedAttendanceRecord {
+  record: AttendanceRecord;
+  /** "unknown" when one side had no usable baseline, so the two series were
+   *  joined as they stood. Returned so the import can say so; see
+   *  alignAttendance. */
+  frames: "aligned" | "unknown";
+}
+
+const finite = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+
 /**
- * Samples union by timestamp, then re-sorted oldest→newest.
+ * Samples from both recordings, in ONE frame, oldest first; the figures
+ * re-derived over the filled gaps.
  *
- * The peaks are recomputed rather than filled, because a peak taken over a gap is
- * wrong the moment the gap is filled — that is the whole point of merging.
+ * The two boxes' series are first shifted into the earlier of their two
+ * baselines (alignAttendance, shared with History's merge). Each box stores
+ * attendance as the raw counter minus its OWN baseline, so unshifted, a box that
+ * restarted mid-service and opened its record twenty people later read twenty
+ * low across the whole overlap: the curve saw-toothed, and the last and lowest
+ * figures kept this box's pre-merge values.
  *
- * Only IN-SERVICE samples feed a peak. The recorder tags ramp and taper samples
- * with a `phase` and leaves the service proper untagged, precisely so an emptying
- * or filling room does not set the peak (see attendance-recorder.ts). Recomputing
- * over every sample quietly overrode that and inflated the figure — a service whose
- * stored peak was 1810 came back as 1915 off a taper sample.
+ * The figures are recomputed, because a figure taken over a gap is wrong the
+ * moment the gap is filled. Only IN-SERVICE samples feed them: the recorder tags
+ * ramp and taper samples with a `phase` so an emptying or filling room does not
+ * set the peak — a service whose stored peak was 1810 once came back as 1915 off
+ * a taper sample.
+ *
+ * Unlike History's merge, a figure a recording STORED is a floor here, not
+ * something the samples may replace. The recorder takes peak and lowest off
+ * every reading but keeps a sample only every 30 seconds, so a recompute over
+ * samples alone could lower a peak this box actually saw. Each record's stored
+ * figures are shifted into the merged frame first, and count only when that
+ * record has any in-service samples (a ramp-only record's stored 0 means
+ * "none", not "zero people"). Last comes from whichever recording's service
+ * ran later. A union with no in-service samples at all keeps this box's
+ * figures, as before.
+ *
+ * The samples are not re-based to their first reading, as History's
+ * recomputeAttendance does: the merged frame is the earlier record's own, whose
+ * first reading is already its zero, and the rule here is fill, never rewrite.
  */
-export function mergeAttendanceRecord(mine: AttendanceRecord, theirs: AttendanceRecord): AttendanceRecord {
-  const samples = mergeByKey(mine.samples ?? [], theirs.samples ?? [], (s) => s.t).sort((a, b) =>
-    a.t.localeCompare(b.t),
-  );
-  const out = { ...fillMissingFields(mine, theirs, ["samples"]), samples };
-  const inService = samples.filter((s) => (s as unknown as Record<string, unknown>).phase == null);
-  const peakOf = (field: string) =>
-    inService.reduce((m, s) => {
-      const v = (s as unknown as Record<string, unknown>)[field];
-      return typeof v === "number" ? Math.max(m, v) : m;
-    }, 0);
-  if (inService.length) {
-    out.peakAttendance = Math.max(mine.peakAttendance ?? 0, peakOf("attendance"));
-    out.peakOccupancy = Math.max(mine.peakOccupancy ?? 0, peakOf("occupancy"));
-  }
-  return out;
+export function mergeAttendanceRecord(mine: AttendanceRecord, theirs: AttendanceRecord): MergedAttendanceRecord {
+  const aligned = alignAttendance(mine, theirs);
+  const out: AttendanceRecord = {
+    ...fillMissingFields(mine, theirs, ["samples", "attendanceBaseline"]),
+    samples: aligned.samples,
+    attendanceBaseline: aligned.attendanceBaseline,
+  };
+
+  if (inServiceSamples(aligned.samples).length === 0) return { record: out, frames: aligned.frames };
+
+  const stats = attendanceStats(aligned.samples);
+  const sides = [
+    { r: mine, shift: aligned.intoShift },
+    { r: theirs, shift: aligned.fromShift },
+  ].map(({ r, shift }) => {
+    const svc = inServiceSamples(r.samples ?? []);
+    const lastT = svc.length ? Date.parse(svc[svc.length - 1].t) : Number.NaN;
+    return { r, shift, svc: svc.length > 0, lastT };
+  });
+  const stored = (field: "peakAttendance" | "peakOccupancy" | "minOccupancy", shifted: boolean) =>
+    sides.flatMap(({ r, shift, svc }) => {
+      const v = svc ? finite(r[field]) : null;
+      return v == null ? [] : [shifted ? shift(v) : v];
+    });
+
+  out.peakAttendance = Math.max(stats.peakAttendance, ...stored("peakAttendance", true));
+  out.peakOccupancy = Math.max(stats.peakOccupancy, ...stored("peakOccupancy", false));
+  const floors = [stats.minOccupancy, ...stored("minOccupancy", false)].filter((v): v is number => v != null);
+  out.minOccupancy = floors.length ? Math.min(...floors) : null;
+
+  // Last is the later recording's own last reading, which is up to 30 seconds
+  // newer than its last sample; the samples answer only when it stored none.
+  const [m, t] = sides;
+  const later = t.svc && (!m.svc || t.lastT > m.lastT) ? t : m;
+  const lastA = later.svc ? finite(later.r.lastAttendance) : null;
+  const lastO = later.svc ? finite(later.r.lastOccupancy) : null;
+  out.lastAttendance = lastA == null ? stats.lastAttendance : Math.max(0, later.shift(lastA));
+  out.lastOccupancy = lastO ?? stats.lastOccupancy;
+  return { record: out, frames: aligned.frames };
 }
 
 interface TimelineItem {

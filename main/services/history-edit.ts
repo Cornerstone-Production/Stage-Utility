@@ -8,6 +8,7 @@
 import type { AttendanceSample } from "../types/history.js";
 import type { BaptismSession, ServiceAttendance, ServiceItemTimeEdit, ServiceTimeline } from "../types/stage.js";
 import { serviceDirPath } from "./archive/archive-paths.js";
+import { alignAttendance, recomputeAttendance } from "./attendance-aggregate.js";
 import { readArchiveRows } from "./archive/archive-rows.js";
 import { mergeItemRuns } from "./archive/merge-records.js";
 import { rebuildSplRecord, rebuildTimelineRecord } from "./archive/rebuild.js";
@@ -172,42 +173,6 @@ export async function deleteServiceRecords(
   const gone = await Promise.all(stores.map(([, store]) => store.delete(serviceKey)));
   const records = stores.filter((_, i) => gone[i]).map(([name]) => name as string);
   return { deleted: records.length > 0, records };
-}
-
-/** Re-derive attendance aggregates from the (possibly trimmed) sample series. Note:
- *  totalAttendance is a raw daily counter we can't reconstruct from baselined
- *  samples, so it's left as-is. */
-function recomputeAttendance(att: ServiceAttendance): void {
-  const s = att.samples;
-  // Per-service attendance = value − first sample (the count when this window began),
-  // so a service not reset off the prior one reads its own count; on a trim, the new
-  // first in-window sample re-baselines automatically.
-  const base = s.length ? s[0].attendance : 0;
-  // attendanceBaseline is the RAW daily counter at this record's start — that is
-  // what the recorder writes and what a merge needs to convert between two
-  // records' frames. This used to assign `base`, an already-baselined value
-  // (normally 0), without touching the samples: after any Recalculate, window
-  // edit or earlier merge the field no longer meant what its writer meant, and a
-  // later merge reading it as raw shifted the other record by a hundred people.
-  // Advancing it by the same amount the samples are about to be re-based by keeps
-  // raw = sample + baseline true.
-  att.attendanceBaseline = (att.attendanceBaseline ?? 0) + base;
-  if (base !== 0) for (const x of s) x.attendance -= base;
-  // Samples are now expressed against this record's own start, so the aggregates
-  // read them directly. (Clamped only against a negative left by a hand-edited
-  // window.)
-  const perSvc = (v: number) => Math.max(0, v);
-  // Peak/Lowest/Last reflect the SERVICE, not the pre-service arrival ramp or the
-  // post-service emptying room — those tagged samples still draw the curve but must
-  // not drag the "floor" or "last" toward an empty room. Fall back to all samples if
-  // a record has no in-service samples at all (shouldn't happen in practice).
-  const svc = s.filter((x) => !x.phase);
-  const stat = svc.length ? svc : s;
-  att.peakAttendance = stat.reduce((m, x) => Math.max(m, perSvc(x.attendance)), 0);
-  att.peakOccupancy = stat.reduce((m, x) => Math.max(m, x.occupancy), 0);
-  att.minOccupancy = stat.length ? stat.reduce((m, x) => Math.min(m, x.occupancy), stat[0].occupancy) : null;
-  att.lastAttendance = stat.length ? perSvc(stat[stat.length - 1].attendance) : 0;
-  att.lastOccupancy = stat.length ? stat[stat.length - 1].occupancy : 0;
 }
 
 /** The ramp/taper windows the recorder samples with, in ms. */
@@ -1692,31 +1657,18 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     // reading and starts near zero while the target's end near its full count.
     // Concatenating them raw put a cliff to zero at the seam and dragged the
     // service average and lastAttendance down with it — the repair tool producing
-    // a worse record than the split it was invoked to fix.
-    //
-    // Shifting the source into the target's frame is exact: both baselines are the
-    // raw daily counter at their own start, so their difference is the offset.
-    // Read before recomputeAttendance, which rewrites attendanceBaseline.
-    // Shift BOTH into the earlier of the two baselines rather than into the
-    // target's. The merge target is not necessarily the later record — the panel
-    // offers every same-day recording, and merging a spurious leading fragment
-    // INTO the main record is the natural repair — so shifting the source into
-    // the target's frame produced a negative offset, and clamping that at zero
-    // silently flattened the fragment's attendees to nothing. A common floor
-    // makes both shifts non-negative, so no clamp is needed and a bad offset
-    // would surface as a wrong number rather than as deleted data.
-    const srcBase = srcAt.attendanceBaseline;
-    const tgtBase = tgtAt.attendanceBaseline;
-    const shift =
-      srcBase != null && tgtBase != null
-        ? { base: Math.min(srcBase, tgtBase), src: srcBase - Math.min(srcBase, tgtBase), tgt: tgtBase - Math.min(srcBase, tgtBase) }
-        : { base: tgtBase ?? srcBase ?? 0, src: 0, tgt: 0 };
-    const bump = (list: typeof srcAt.samples, by: number) =>
-      by === 0 ? list : list.map((s) => ({ ...s, attendance: s.attendance + by }));
-    tgtAt.attendanceBaseline = shift.base;
-    tgtAt.samples = [...bump(tgtAt.samples, shift.tgt), ...bump(srcAt.samples, shift.src)].sort(
-      (a, b) => Date.parse(a.t) - Date.parse(b.t),
-    );
+    // a worse record than the split it was invoked to fix. alignAttendance shifts
+    // both into the earlier baseline (see there for why not the target's), the
+    // same way an archive import of another box's recording now does.
+    const aligned = alignAttendance(tgtAt, srcAt);
+    if (aligned.frames === "unknown") {
+      console.warn(
+        `[history-edit] merge ${scrub(sourceKey)} -> ${scrub(targetKey)}: one record's attendance has no baseline, ` +
+          "so the two were merged without aligning them.",
+      );
+    }
+    tgtAt.attendanceBaseline = aligned.attendanceBaseline;
+    tgtAt.samples = aligned.samples;
     if (srcAt.endedAt && (!tgtAt.endedAt || Date.parse(srcAt.endedAt) > Date.parse(tgtAt.endedAt))) {
       tgtAt.endedAt = srcAt.endedAt;
     }

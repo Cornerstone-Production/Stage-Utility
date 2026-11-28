@@ -73,7 +73,14 @@ count shown.
 
 Merge is for one service recorded on two machines, neither with the whole thing. It
 unions plan items, attendance samples and raw rows, keeping the local entry on any
-clash, and recomputes attendance peaks over the filled gap.
+clash. Each machine counts attendance from its own start, so the two attendance
+series are first put on a common start (the earlier machine's), the same way
+History's **Merge** joins two recordings; the curve then reads as one service
+rather than two interleaved twenty people apart. Peak, lowest and last attendance
+are recomputed over the filled gap, never below what either machine itself
+recorded. A recording too old to carry its start count is joined as it stands,
+and the import logs an `[archive]` line saying so. Records imported before this
+alignment existed are left as they are.
 
 Merge deliberately does not combine per-item sound levels where both sides recorded
 the same item — those combine correctly only across disjoint time, and two machines

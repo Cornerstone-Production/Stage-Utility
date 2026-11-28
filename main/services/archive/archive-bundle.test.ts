@@ -273,6 +273,50 @@ test("merge is idempotent end to end", async () => {
   assert.equal(JSON.stringify(await splHistoryStore.get("st1:pMerge:t1")), before);
 });
 
+test("merging another box's attendance puts both recordings in one frame", async () => {
+  // Box A opened the 9am at a raw count of 500; box B, restarted ten minutes in,
+  // at 520. Each stores the raw counter minus its own baseline, and their clocks
+  // never stamp the same instant, so an unshifted union read every B sample
+  // twenty people low across the whole overlap. Through the real import.
+  const { attendanceStore } = await import("../attendance-store.js");
+  const key = "st1:pAtt:t1";
+  const t9 = Date.parse("2026-10-18T09:00:00.000Z");
+  const raw = (m: number) => 500 + 2 * m;
+  const box = (from: number, to: number, skewSec: number) => {
+    const minutes = Array.from({ length: to - from + 1 }, (_, i) => from + i);
+    return {
+      ...(record(key, "2026-10-18") as unknown as Record<string, unknown>),
+      items: undefined,
+      attendanceBaseline: raw(from),
+      totalAttendance: raw(to),
+      samples: minutes.map((m) => ({
+        t: new Date(t9 + m * 60_000 + skewSec * 1000).toISOString(),
+        attendance: raw(m) - raw(from),
+        occupancy: 300,
+      })),
+      peakAttendance: raw(to) - raw(from),
+      peakOccupancy: 300,
+      minOccupancy: 300,
+      lastAttendance: raw(to) - raw(from),
+      lastOccupancy: 300,
+    };
+  };
+  await attendanceStore.upsert(box(10, 30, 7) as never); // box B's recording, exported
+  const zip = await buildArchive();
+  await attendanceStore.upsert(box(0, 25, 0) as never); // what this box, A, holds
+
+  const res = await importArchive(zip, { merge: [key] });
+
+  assert.ok(res.merged.includes(key), JSON.stringify(res));
+  const after = (await attendanceStore.get(key))!;
+  assert.equal(after.attendanceBaseline, 500);
+  const series = after.samples.map((s) => s.attendance);
+  for (let i = 1; i < series.length; i++) {
+    assert.ok(series[i]! >= series[i - 1]!, `saw-tooth at sample ${i}: ${series.slice(Math.max(0, i - 2), i + 2).join(", ")}`);
+  }
+  assert.equal(after.lastAttendance, raw(30) - 500);
+});
+
 test("replace wins over merge when a key is somehow in both lists", async () => {
   const res = await importArchive(await buildArchive(), {
     merge: ["st1:pMerge:t1"],

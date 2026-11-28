@@ -435,7 +435,18 @@ export async function importArchive(
     attendance,
     (k) => attendanceStore.get(k) as never,
     (r) => attendanceStore.upsert(r as never),
-    (a, b) => mergeAttendanceRecord(a as never, b as never) as never,
+    (a, b) => {
+      const { record, frames } = mergeAttendanceRecord(a as never, b as never);
+      // Without both baselines the two series cannot be put in one frame, so
+      // they were joined as they stood: the curve may step where they meet.
+      if (frames === "unknown") {
+        console.warn(
+          `[archive] import into ${scrub((a as { serviceKey: string }).serviceKey)}: ` +
+            "one side's attendance has no baseline, so the two recordings were merged without aligning them.",
+        );
+      }
+      return record as never;
+    },
   );
   // A timeline merge can fail to keep a correction: the run it names loses the
   // clash with this box's own, and "fill, never overwrite" takes the correction
