@@ -22,7 +22,6 @@ import { scrub } from "../../services/scrub.js";
 import { createSseReader, keepSocketAlive, SSE_MAX_BUFFER, type SseEvent, type SseReader } from "../../services/sse-reader.js";
 
 import type { DeviceChannel, DeviceProvider } from "../../types/devices.js";
-import type { ConfigField } from "../../types/integrations.js";
 import { DeviceProviderBase, blankChannel, type ChannelState } from "./device-provider-base.js";
 
 const DEBUG = !!process.env.SPECTERA_DEBUG;
@@ -62,25 +61,6 @@ export function specteraTarget(cfg: Record<string, unknown>): { host: string | n
 export class SennheiserSpectera extends DeviceProviderBase implements DeviceProvider {
   readonly id = "sennheiser-spectera";
   readonly label = "Sennheiser Spectera";
-  readonly configSchema: ConfigField[] = [
-    {
-      key: "host",
-      label: "Base Station IP / Hostname",
-      type: "text",
-      placeholder: "192.168.1.130",
-    },
-    {
-      key: "port",
-      label: "HTTPS Port",
-      type: "number",
-      placeholder: "443",
-    },
-    {
-      key: "password",
-      label: "API Password",
-      type: "password",
-    },
-  ];
 
   private host: string | null = null;
   private port = DEFAULT_PORT;

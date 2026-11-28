@@ -20,7 +20,6 @@ import { scrub } from "../../services/scrub.js";
 import * as dgram from "node:dgram";
 
 import type { DeviceChannel, DeviceProvider } from "../../types/devices.js";
-import type { ConfigField } from "../../types/integrations.js";
 import { DeviceProviderBase, blankChannel, type ChannelState } from "./device-provider-base.js";
 
 export const SSC_DEFAULT_PORT = 45;
@@ -37,7 +36,6 @@ export const SSC_DEBUG = !!process.env.SENNHEISER_DEBUG;
 export abstract class SennheiserSscBase extends DeviceProviderBase implements DeviceProvider {
   abstract readonly id: string;
   abstract readonly label: string;
-  abstract readonly configSchema: ConfigField[];
   /** Default channel count when cfg.channels is not supplied. */
   protected abstract readonly defaultChannels: number;
   /** Default device type for channels; charger subclasses override per-channel. */

@@ -6,7 +6,6 @@
 import * as net from "net";
 import { scrub } from "../../services/scrub.js";
 import type { DeviceChannel, DeviceProvider } from "../../types/devices.js";
-import type { ConfigField } from "../../types/integrations.js";
 import { DeviceProviderBase, blankChannel, type ChannelState } from "./device-provider-base.js";
 
 // Per-channel mutable runtime state.
@@ -40,7 +39,6 @@ export const SHURE_MAX_RECEIVE_BUFFER = 64 * 1024;
 export abstract class ShureBaseProvider extends DeviceProviderBase implements DeviceProvider {
   abstract readonly id: string;
   abstract readonly label: string;
-  abstract readonly configSchema: ConfigField[];
   /** Default channel count if cfg.channels is not supplied. */
   protected abstract readonly defaultChannels: number;
   /** Default device type for channels. Override per-subclass. */

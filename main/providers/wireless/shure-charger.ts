@@ -11,20 +11,12 @@
 // BATT_CAPACITY_MAX, BATT_HEALTH, BATT_BARS, BATT_ERROR and BATT_MODULE_TYPE.
 // Every raw frame is logged under SHURE_DEBUG=1.
 
-import type { ConfigField } from "../../types/integrations.js";
 import type { ChannelState } from "./device-provider-base.js";
 import { ShureBaseProvider, batteryMinutesFrom, shureNumber, stripBraces } from "./shure-base.js";
 
 export class ShureCharger extends ShureBaseProvider {
   readonly id = "shure-charger";
   readonly label = "Shure SBC Charger";
-  readonly configSchema: ConfigField[] = [
-    { key: "host", label: "Device IP / Hostname", type: "text", placeholder: "192.168.1.110" },
-    { key: "port", label: "TCP Port", type: "number", placeholder: "2202" },
-    // One SBC220 = 2 bays; up to 4 can be linked behind one IP, reporting bays
-    // 1–8. Set this to 2 × (number of linked units).
-    { key: "channels", label: "Number of Bays", type: "number", placeholder: "8" },
-  ];
 
   protected readonly defaultChannels = 8;
   protected readonly defaultDeviceType = "charger" as const;

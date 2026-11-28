@@ -1,5 +1,11 @@
 // ProviderRegistry — registers DeviceProvider implementations and exposes
 // their descriptors to the UI (via IntegrationManager / wireless handler).
+//
+// The descriptors here are the ONLY form schema for wireless gear: the panel
+// draws its fields from them and wireless-credentials.ts finds the password
+// fields in them. The drivers used to declare a second copy each, which nothing
+// read and which had drifted (the charger's said "Number of Bays", the form
+// said "Number of Channels"); a driver carries no schema now.
 
 import type { DeviceProvider } from "../types/devices.js";
 import type { ConfigField, IntegrationDescriptor } from "../types/integrations.js";
