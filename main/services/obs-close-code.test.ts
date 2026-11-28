@@ -24,6 +24,7 @@ import { after, before, beforeEach, describe, test } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { sleep } from "./fixtures/within.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-utility-obs-close-"));
 process.env.STAGE_UTILITY_DATA = path.join(TMP, "data");
@@ -44,8 +45,6 @@ const fake = new FakeObs();
  * is sized to cover both — and the control test is what proves it is wide enough.
  */
 const RECONNECT_WINDOW_MS = 1600;
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function waitForConnected(): Promise<void> {
   const deadline = Date.now() + 5000;

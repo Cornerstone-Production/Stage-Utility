@@ -21,6 +21,7 @@ import { describe, it, type TestContext } from "node:test";
 
 import { ProdComService } from "./prodcom-service.js";
 import { eventually, startProdComStub, type StubEntry } from "./fixtures/prodcom-stub.js";
+import { sleep } from "./fixtures/within.js";
 
 const NOW = Date.parse("2026-09-24T12:00:00Z");
 
@@ -53,8 +54,6 @@ const spoken = (id: string, offsetMs = 0): StubEntry => ({
 });
 
 const CHANNELS_B = [{ id: "CH-A", name: "Box B Channel", color: "#00F900" }];
-
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /** Run `fn` with console.log/warn/debug captured — the drop notes this file
  *  checks for are debug-level, so this one also captures console.debug. */

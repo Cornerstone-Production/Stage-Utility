@@ -11,6 +11,7 @@ import { afterEach, before, after, describe, it } from "node:test";
 
 import { apiUser, READER_USER, type RelayUser } from "./mediamtx-config.js";
 import { OutageLog } from "../repeat-log.js";
+import { startHttpFixture, type HttpFixture } from "../fixtures/http-fixture.js";
 import { MediaMtxRelay } from "./mediamtx-relay.js";
 import { RelayReconcileError, type RelayFeed } from "./relay.js";
 
@@ -33,7 +34,7 @@ interface Call {
   body: unknown;
 }
 
-let server: http.Server;
+let fixture: HttpFixture;
 let port = 0;
 let calls: Call[] = [];
 /** What every request must carry, as the relay's API user — the fake
@@ -75,25 +76,20 @@ function send(res: http.ServerResponse, status: number, body: unknown): void {
 
 before(async () => {
   bootState();
-  server = http.createServer((req, res) => {
-    const chunks: Buffer[] = [];
-    req.on("data", (c: Buffer) => chunks.push(c));
-    req.on("end", () => {
-      const raw = Buffer.concat(chunks).toString("utf8");
-      const body: unknown = raw.length > 0 ? JSON.parse(raw) : undefined;
-      const method = req.method ?? "GET";
-      const url = req.url ?? "";
-      calls.push({ method, url, body });
-      if (req.headers.authorization !== API_AUTH) return send(res, 401, { error: "authentication error" });
-      handle(method, url, body, res);
-    });
+  fixture = await startHttpFixture((req, res, bytes) => {
+    const raw = bytes.toString("utf8");
+    const body: unknown = raw.length > 0 ? JSON.parse(raw) : undefined;
+    const method = req.method ?? "GET";
+    const url = req.url ?? "";
+    calls.push({ method, url, body });
+    if (req.headers.authorization !== API_AUTH) return send(res, 401, { error: "authentication error" });
+    handle(method, url, body, res);
   });
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  port = (server.address() as { port: number }).port;
+  port = fixture.port;
 });
 
 after(async () => {
-  await new Promise<void>((resolve) => server.close(() => resolve()));
+  await fixture.close();
 });
 
 afterEach(() => {

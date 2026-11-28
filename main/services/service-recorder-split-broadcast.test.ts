@@ -20,6 +20,7 @@ import { describe, it, beforeEach, afterEach, mock } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { feedLiveTick, loadLiveConsumers, makeLive } from "./fixtures/live-dto.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-split-broadcast-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -35,6 +36,7 @@ const { stageController } = await import("./stage-controller.js");
 const { serviceTimelineRecorder } = await import("./service-timeline-recorder.js");
 const { splRecorder } = await import("./spl-recorder.js");
 const { attendanceRecorder } = await import("./attendance-recorder.js");
+await loadLiveConsumers();
 const { addBroadcastListener } = await import("./broadcaster.js");
 
 const OCC_1 = "occ-a";
@@ -62,34 +64,29 @@ addBroadcastListener((channel, payload) => {
   pushes.push({ channel, payload: payload as Rec });
 });
 
-/** One live tick, at `at` (ISO), on `occ`, fed to all three recorders in the
- *  same order live-poller.ts uses (spl, attendance, timeline). */
+/** One live tick, at `at` (ISO), on `occ`, fed to every consumer in
+ *  live-poller.ts's order (see fixtures/live-dto.ts). */
 function tick(
   at: string,
   occ: { id: string | null; startsAt: string | null },
   item: { id: string; title: string },
 ): Promise<unknown> {
   mock.timers.setTime(Date.parse(at));
-  const live = {
-    mode: "item" as const,
-    currentItemId: item.id,
-    label: item.title,
-    itemType: null,
-    lengthSec: null,
-    liveStartAt: at,
-    targetAt: null,
-    serverNow: at,
-    currentItemTitle: item.title,
-    nextItemTitle: null,
-    serviceTimeId: occ.id,
-    serviceTimeStartsAt: occ.startsAt,
-    beforeServiceStart: false,
-  };
-  return Promise.all([
-    splRecorder.onLiveTick(live),
-    attendanceRecorder.onLiveTick(live),
-    serviceTimelineRecorder.onLiveTick(live),
-  ]);
+  return feedLiveTick(
+    makeLive({
+      mode: "item",
+      currentItemId: item.id,
+      label: item.title,
+      itemType: null,
+      lengthSec: null,
+      liveStartAt: at,
+      serverNow: at,
+      currentItemTitle: item.title,
+      serviceTimeId: occ.id,
+      serviceTimeStartsAt: occ.startsAt,
+      beforeServiceStart: false,
+    }),
+  );
 }
 
 describe("a split broadcasts the record it closes", () => {

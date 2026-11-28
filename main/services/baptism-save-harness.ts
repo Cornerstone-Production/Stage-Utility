@@ -63,7 +63,7 @@ export function interceptAddSession(store: { addSession: AddSession }, impl?: Ad
  *  keeping their own copy of the same one-liner. Safe to import statically:
  *  this module touches no store, so it carries none of the ordering risk
  *  interceptAddSession's own doc comment warns about. */
-export const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+export { sleep } from "./fixtures/within.js";
 
 /** Spies on console.log for lines starting with `prefix`, so a silent no-op
  *  guard can be proven to say why it did nothing rather than just that it

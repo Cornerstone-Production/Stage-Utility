@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 
 import { PREP_RETRY_MS, PrepTagBook, buildPrepMap, parsePrepTagName, type TaggedPeople } from "./pco-prep-tags.js";
 import { pcoService } from "./pco-service.js";
+import { restorePcoRequest, stubPcoRequest } from "./fixtures/pco-request.js";
 
 describe("parsePrepTagName", () => {
   it("reads a capsule tag, whatever the case or spacing", () => {
@@ -226,13 +227,9 @@ describe("PrepTagBook", () => {
 });
 
 describe("pcoService.listPersonPrepTags", () => {
-  type Requester = { request: (url: string, appId: string, secret: string) => Promise<unknown> };
-  const svc = pcoService as unknown as Requester;
-  const realRequest = svc.request;
-
   it("reads the second page of a tag's people", async () => {
     pcoService.clearCache();
-    svc.request = async (url: string) => {
+    stubPcoRequest(pcoService, (url) => {
       if (url.endsWith("/tag_groups?per_page=100")) return { data: [{ id: "10", attributes: { tags_for: "person" } }] };
       if (url.includes("/tag_groups/10/tags?")) return { data: [{ id: "100", attributes: { name: "Capsule: KSM9" } }] };
       if (url.includes("/tags/100/people") && url.includes("offset=100")) return { data: [{ id: "3" }] };
@@ -243,21 +240,19 @@ describe("pcoService.listPersonPrepTags", () => {
         };
       }
       throw new Error(`unexpected ${url}`);
-    };
+    });
     try {
       const out = await pcoService.listPersonPrepTags("app", "secret");
       assert.deepEqual(out, [{ tagName: "Capsule: KSM9", personIds: ["1", "2", "3"] }]);
     } finally {
-      svc.request = realRequest;
+      restorePcoRequest(pcoService);
       pcoService.clearCache();
     }
   });
 
   it("reads tag groups, then only person groups' prep tags, then those tags' people", async () => {
     pcoService.clearCache();
-    const urls: string[] = [];
-    svc.request = async (url: string) => {
-      urls.push(url.replace("https://api.planningcenteronline.com/services/v2", ""));
+    const asked = stubPcoRequest(pcoService, (url) => {
       if (url.endsWith("/tag_groups?per_page=100")) {
         return { data: [
           { id: "10", attributes: { tags_for: "person" } },
@@ -274,14 +269,15 @@ describe("pcoService.listPersonPrepTags", () => {
       if (url.includes("/tags/100/people")) return { data: [{ id: "1" }, { id: "2" }] };
       if (url.includes("/tags/101/people")) return { data: [{ id: "2" }] };
       throw new Error(`unexpected ${url}`);
-    };
+    });
+    const urls = (): string[] => asked.urls.map((u) => u.replace("https://api.planningcenteronline.com/services/v2", ""));
     try {
       const out = await pcoService.listPersonPrepTags("app", "secret");
       assert.deepEqual(out, [
         { tagName: "Capsule: KSM9", personIds: ["1", "2"] },
         { tagName: "IEMs: Own", personIds: ["2"] },
       ]);
-      assert.deepEqual(urls, [
+      assert.deepEqual(urls(), [
         "/tag_groups?per_page=100",
         "/tag_groups/10/tags?per_page=100",
         "/tag_groups/10/tags/100/people?per_page=100",
@@ -289,9 +285,9 @@ describe("pcoService.listPersonPrepTags", () => {
       ]);
       // Cached on the LONG tier: a second call is no request at all.
       await pcoService.listPersonPrepTags("app", "secret");
-      assert.equal(urls.length, 4);
+      assert.equal(asked.urls.length, 4);
     } finally {
-      svc.request = realRequest;
+      restorePcoRequest(pcoService);
       pcoService.clearCache();
     }
   });

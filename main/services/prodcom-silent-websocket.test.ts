@@ -39,6 +39,7 @@ import { startProdComStub, type ProdComStub, type StubEntry, type StubOptions } 
 import { addBroadcastListener } from "./broadcaster.js";
 import type { ConnState } from "./integration-base.js";
 import { DEFAULT_RECONNECT_SCHEDULE, serviceWindow } from "./service-window.js";
+import { until, sleep } from "./fixtures/within.js";
 
 const NOW = Date.parse("2026-09-20T13:22:28Z");
 
@@ -176,19 +177,6 @@ async function running(t: TestContext, options: StubOptions = {}): Promise<{ stu
   return { stub, svc };
 }
 
-/** `what` may be a thunk, for a message that should describe the state AT
- *  FAILURE rather than the state when the wait started. */
-async function eventually(ready: () => boolean, what: string | (() => string), timeoutMs = 5000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (ready()) return;
-    await new Promise((r) => setTimeout(r, 5));
-  }
-  assert.fail(`timed out waiting for ${typeof what === "function" ? what() : what}`);
-}
-
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-
 /** Run `fn` with console.log/warn captured. console.debug is left alone: it is
  *  the level log-buffer does not capture, so nothing on it reaches `/log`. */
 async function withLogs(fn: () => Promise<void>): Promise<string[]> {
@@ -273,7 +261,7 @@ function broadcastCarried(broadcasts: unknown[], text: string): boolean {
  * client that never noticed anything.
  */
 async function speaks(stub: ProdComStub, svc: TestProdCom, ...rows: StubEntry[]): Promise<void> {
-  await eventually(() => svc.wsOpenNow, "the websocket to open");
+  await until(() => svc.wsOpenNow, "the websocket to open");
   await svc.wsSettled();
   for (const row of rows) stub.addEntry(row);
 }
@@ -284,7 +272,7 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     // delivered nothing because there is nothing to deliver. ProdCom's history
     // holds only a line from before the socket opened.
     const { stub, svc } = await running(t, { entries: [spoken("said-before-we-connected", -120_000)] });
-    await eventually(() => svc.wsOpenNow, "the websocket to open");
+    await until(() => svc.wsOpenNow, "the websocket to open");
     await svc.wsSettled();
     // Priming already made one read; the assertion below is about the CHECK
     // asking again, so it counts from here rather than from zero.
@@ -331,13 +319,13 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
       now: () => NOW + skew,
       entries: [spoken("said-before-we-connected-on-a-fast-box", -120_000 + skew)],
     });
-    await eventually(() => svc.wsOpenNow, "the websocket to open");
+    await until(() => svc.wsOpenNow, "the websocket to open");
     await svc.wsSettled();
     // Priming already made one read; wait for the check itself to run twice
     // beyond it.
     const afterPriming = transcriptPageReads(stub);
 
-    await eventually(() => transcriptPageReads(stub) >= afterPriming + 2, "the check to run twice");
+    await until(() => transcriptPageReads(stub) >= afterPriming + 2, "the check to run twice");
     assert.equal(svc.wsOpenNow, true, "a healthy socket was torn down by a clock difference");
     assert.equal(stub.sseOpens, 1, "captions were moved off the initial fallback by a clock difference");
     assert.equal(svc.knownSilent, false, "a fast appliance clock was recorded as a broken ProdCom");
@@ -353,12 +341,12 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     await speaks(stub, svc, spoken("said-while-the-socket-was-quiet-on-a-slow-box", 30_000 + skew));
     // Once for the subscribed socket, once for the unsubscribed one it is
     // reopened as — each has to be shown silent while somebody is speaking.
-    await eventually(() => stub.wsUpgrades >= 2, "the socket to be reopened unsubscribed", 6000);
+    await until(() => stub.wsUpgrades >= 2, "the socket to be reopened unsubscribed", 6000);
     await speaks(stub, svc, spoken("and-again-on-the-unsubscribed-socket", 60_000 + skew));
 
     // The verdict, not stub.sseOpens — the SSE stream has been live since
     // connect() and this box's silence never touches it.
-    await eventually(() => svc.knownSilent, "the box to be marked silent", 6000);
+    await until(() => svc.knownSilent, "the box to be marked silent", 6000);
   });
 
   it("does not apply a slow REST answer to the socket that replaced the one it was about", async (t) => {
@@ -391,9 +379,9 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     });
     await speaks(stub, svc, spoken("said-while-the-first-socket-was-up"));
 
-    await eventually(() => transcriptPageReads(stub) >= 2, "the check to put a read in flight");
+    await until(() => transcriptPageReads(stub) >= 2, "the check to put a read in flight");
     stub.wsDropAll();
-    await eventually(() => stub.wsUpgrades >= 2 && svc.wsOpenNow, "the replacement socket to open", 6000);
+    await until(() => stub.wsUpgrades >= 2 && svc.wsOpenNow, "the replacement socket to open", 6000);
     assert.ok(Date.now() < heldAt + HOLD_MS, "precondition: the replacement opened after the held answer landed");
     await sleep(heldAt + HOLD_MS + 300 - Date.now()); // past the held answer
 
@@ -433,14 +421,14 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
       // The vendor bug: this goes to nobody, because the only open socket asked
       // for the transcript stream.
       c.stub.wsTranscript(spoken("swallowed-by-the-filter"));
-      await eventually(() => stub!.wsUpgrades >= 2, "the socket to be reopened");
+      await until(() => stub!.wsUpgrades >= 2, "the socket to be reopened");
       // The stub counts the upgrade before the client's onopen; wsSettled() is
       // the new socket's only once it has opened.
-      await eventually(() => c.svc.wsOpenNow, "the reopened socket to open");
+      await until(() => c.svc.wsOpenNow, "the reopened socket to open");
       await c.svc.wsSettled();
       // The reopened socket sent no subscribe frame, so the stub delivers to it.
       c.stub.wsTranscript(spoken("arrived-with-no-filter"));
-      await eventually(() => c.svc.texts().includes("arrived-with-no-filter"), "the entry to land on the buffer");
+      await until(() => c.svc.texts().includes("arrived-with-no-filter"), "the entry to land on the buffer");
     });
 
     assert.equal(subscribeFrames(stub!), 1, "the reopened socket sent the subscribe frame again");
@@ -469,11 +457,11 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
       stub = c.stub;
       svc = c.svc;
       await speaks(c.stub, c.svc, spoken("nobody-ever-saw-this-over-the-socket"));
-      await eventually(() => c.stub.wsUpgrades >= 2, "the socket to be reopened unsubscribed", 6000);
+      await until(() => c.stub.wsUpgrades >= 2, "the socket to be reopened unsubscribed", 6000);
       await speaks(c.stub, c.svc, spoken("nor-this-one-over-the-unsubscribed-socket", 60_000));
       // The verdict, not stub.sseOpens — the SSE stream has been live since
       // connect() and this box's silence never touches it.
-      await eventually(() => c.svc.knownSilent, "the box to be marked silent", 6000);
+      await until(() => c.svc.knownSilent, "the box to be marked silent", 6000);
     });
 
     assert.equal(svc!.onWebSocketNow, false, "a socket that never proved itself was promoted anyway");
@@ -486,7 +474,7 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     );
     // Waited for, not asserted on the spot: sseOpens above counts the SERVER
     // accepting the stream, and the card is told when the CLIENT sees the 200.
-    await eventually(
+    await until(
       () => cardMessages(svc!).at(-1) === FALLBACK_CARD_MESSAGE,
       `the integration card to stop reporting a plain healthy stream while the socket is the reason ` +
         `captions moved — it says ${JSON.stringify(cardMessages(svc!).at(-1))}`,
@@ -495,12 +483,12 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     // closes it before doing anything else. Nulling the reference alone would
     // leave an open connection to the box for the life of the process, one per
     // re-test, every half hour.
-    await eventually(() => stub!.openWebSockets === 0, "the silent socket to be closed");
+    await until(() => stub!.openWebSockets === 0, "the silent socket to be closed");
 
     // The fallback was never a placeholder — it was already carrying whatever
     // was said the whole time this ran, and still is.
     stub!.sseSend(spoken("spoken-on-the-fallback"));
-    await eventually(() => svc!.texts().includes("spoken-on-the-fallback"), "an SSE event to land");
+    await until(() => svc!.texts().includes("spoken-on-the-fallback"), "an SSE event to land");
   });
 
   it("keeps checking a delivering socket, but does not tear it down over a quiet room", async (t) => {
@@ -513,11 +501,11 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     // whole time, so every window after the one delivery has nothing to
     // demote over.
     const { stub, svc } = await running(t, { entries: [spoken("in-prodcoms-history")] });
-    await eventually(() => svc.wsOpenNow, "the websocket to open");
+    await until(() => svc.wsOpenNow, "the websocket to open");
     await svc.wsSettled();
 
     stub.wsTranscript(spoken("delivered-over-the-socket"));
-    await eventually(() => svc.texts().includes("delivered-over-the-socket"), "the entry to land");
+    await until(() => svc.texts().includes("delivered-over-the-socket"), "the entry to land");
     const afterDelivery = transcriptPageReads(stub);
 
     for (let i = 0; i < 8; i++) {
@@ -544,7 +532,7 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
       await speaks(c.stub, c.svc, spoken("said-while-the-socket-was-quiet"));
       const afterPriming = transcriptPageReads(c.stub);
       c.stub.setFailTranscript(true);
-      await eventually(() => transcriptPageReads(c.stub) > afterPriming, "the check to ask REST");
+      await until(() => transcriptPageReads(c.stub) > afterPriming, "the check to ask REST");
       await sleep(200);
     });
 
@@ -573,16 +561,16 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     // whole life without ever asking again. One transient 500 at the wrong
     // moment was enough to trust a socket that carries nothing indefinitely.
     const { stub, svc } = await running(t, { subscribeFilterBroken: true, failTranscript: true });
-    await eventually(() => svc.wsOpenNow, "the websocket to open");
+    await until(() => svc.wsOpenNow, "the websocket to open");
     await svc.wsSettled();
     assert.equal(svc.baselineNow, null, "precondition: the open-time read failed, so there is no baseline");
 
     // REST recovers. The next check has to read the baseline itself, and the
     // line said after THAT read is one this socket never delivers.
     stub.setFailTranscript(false);
-    await eventually(() => svc.baselineNow !== null, "the check to read the baseline it never had", 2000);
+    await until(() => svc.baselineNow !== null, "the check to read the baseline it never had", 2000);
     stub.addEntry(spoken("said-after-the-baseline-was-read"));
-    await eventually(() => stub.wsUpgrades >= 2, "the silent socket to be reopened without the subscribe frame", 2000);
+    await until(() => stub.wsUpgrades >= 2, "the silent socket to be reopened without the subscribe frame", 2000);
   });
 
   it("broadcasts a line spoken during the websocket's probation minute immediately, via SSE", async (t) => {
@@ -598,11 +586,11 @@ describe("a websocket that delivers nothing is not a healthy connection", () => 
     // the two apart.
     const broadcasts = spyOnTranscriptBroadcasts();
     const { stub, svc } = await running(t);
-    await eventually(() => svc.wsOpenNow, "the websocket to open (unproven, on probation)");
+    await until(() => svc.wsOpenNow, "the websocket to open (unproven, on probation)");
     assert.equal(svc.onWebSocketNow, false, "promoted before it ever delivered anything");
 
     stub.sseSend(spoken("live-during-probation"));
-    await eventually(
+    await until(
       () => broadcastCarried(broadcasts, "live-during-probation"),
       "the SSE line to be broadcast during probation",
     );
@@ -618,14 +606,14 @@ describe("a box whose socket carries nothing stops being preferred", () => {
   ): Promise<{ stub: ProdComStub; svc: TestProdCom }> {
     const { stub, svc } = await running(t, options);
     await speaks(stub, svc, spoken("never-delivered-over-a-socket"));
-    await eventually(() => stub.wsUpgrades >= 2, "the socket to be reopened unsubscribed", 6000);
+    await until(() => stub.wsUpgrades >= 2, "the socket to be reopened unsubscribed", 6000);
     await speaks(stub, svc, spoken("nor-over-the-unsubscribed-one", 60_000));
-    await eventually(() => svc.knownSilent, "the box to be known silent", 6000);
+    await until(() => svc.knownSilent, "the box to be known silent", 6000);
     // The CLIENT's signal, not the stub's: the retry is armed once the give-up
     // completes, a tick or two after the server saw it. Waiting on the server's
     // side and then asserting on the client's is a race that only shows up under
     // load.
-    await eventually(() => svc.retryArmed, "the widened retry to be armed on the fallback");
+    await until(() => svc.retryArmed, "the widened retry to be armed on the fallback");
     return { stub, svc };
   }
 
@@ -674,15 +662,15 @@ describe("a box whose socket carries nothing stops being preferred", () => {
     });
     svc.configure("127.0.0.1", stub.port, null);
     await speaks(stub, svc, spoken("never-delivered-over-a-socket"));
-    await eventually(() => stub.wsUpgrades >= 2, "the socket to be reopened unsubscribed", 6000);
+    await until(() => stub.wsUpgrades >= 2, "the socket to be reopened unsubscribed", 6000);
     await speaks(stub, svc, spoken("nor-over-the-unsubscribed-one", 60_000));
 
-    await eventually(() => svc.knownSilent, "the box to be known silent", 6000);
+    await until(() => svc.knownSilent, "the box to be known silent", 6000);
     const attempts = wsAttempts(stub);
     // Five: past the every-third rule, short of the widened every-twentieth one.
     // It takes about five seconds, because service-window.ts floors every
     // reconnect delay at one second and the reconnectMs seam cannot go under it.
-    await eventually(() => stub.sseOpens >= 5, "the fallback to reconnect several times", 12_000);
+    await until(() => stub.sseOpens >= 5, "the fallback to reconnect several times", 12_000);
 
     assert.equal(
       wsAttempts(stub),
@@ -702,8 +690,8 @@ describe("a box whose socket carries nothing stops being preferred", () => {
     const sseOpensBefore = stub.sseOpens;
 
     const lines = await withLogs(async () => {
-      await eventually(() => svc.wsOpenNow, "the widened retry to re-test the socket", 6000);
-      await eventually(() => !svc.wsOpenNow, "the re-tested socket to be dropped again", 6000);
+      await until(() => svc.wsOpenNow, "the widened retry to re-test the socket", 6000);
+      await until(() => !svc.wsOpenNow, "the re-tested socket to be dropped again", 6000);
     });
 
     // The fallback was never touched to run this re-test at all — it is what
@@ -745,11 +733,11 @@ describe("a box whose socket carries nothing stops being preferred", () => {
     // above for why the buffer alone cannot catch a withheld broadcast.
     const broadcasts = spyOnTranscriptBroadcasts();
     const { stub, svc } = await silenced(t);
-    await eventually(() => svc.wsOpenNow, "the widened retry to re-test the socket", 6000);
+    await until(() => svc.wsOpenNow, "the widened retry to re-test the socket", 6000);
     assert.equal(svc.onWebSocketNow, false, "the re-test took over the live transport merely by opening");
 
     stub.sseSend(spoken("live-during-the-re-test"));
-    await eventually(
+    await until(
       () => broadcastCarried(broadcasts, "live-during-the-re-test"),
       "the SSE line to be broadcast during the re-test",
     );
@@ -778,14 +766,14 @@ describe("a box whose socket carries nothing stops being preferred", () => {
       await stub.close();
     });
     svc.configure("127.0.0.1", stub.port, null);
-    await eventually(() => svc.retryArmed, "the retry to be armed on the fallback");
+    await until(() => svc.retryArmed, "the retry to be armed on the fallback");
 
     stub.setRefuseWebSocket(false); // ProdCom is back
-    await eventually(() => svc.wsOpenNow, "the retry's socket to open");
+    await until(() => svc.wsOpenNow, "the retry's socket to open");
     // Delivering promotes it and disarms the check, so nothing else in this file
     // can drop it.
     stub.wsTranscript(spoken("proof-the-box-works"));
-    await eventually(() => svc.texts().includes("proof-the-box-works"), "the entry to land");
+    await until(() => svc.texts().includes("proof-the-box-works"), "the entry to land");
     assert.equal(svc.onWebSocketNow, true, "delivering a transcript entry did not promote the retry's socket");
 
     const attempts = wsAttempts(stub);
@@ -827,11 +815,11 @@ describe("a box whose socket carries nothing stops being preferred", () => {
     });
 
     svc.configure("127.0.0.1", stubA.port, null);
-    await eventually(() => svc.sseUpNow, "the first SSE stream to come up");
+    await until(() => svc.sseUpNow, "the first SSE stream to come up");
 
     svc.configure("127.0.0.1", stubB.port, null); // reconfigure mid-flight
-    await eventually(() => stubB.sseOpens >= 1, "the new SSE stream to open against the new box");
-    await eventually(() => svc.sseUpNow, "the new SSE stream to come up");
+    await until(() => stubB.sseOpens >= 1, "the new SSE stream to open against the new box");
+    await until(() => svc.sseUpNow, "the new SSE stream to come up");
     // A corrupted this.req does not fail cleanly — it storms: each stale
     // handler nulls this.req, connect() reads that as room for a fresh
     // attempt, and the fresh attempt's own handlers are just as vulnerable to
@@ -845,7 +833,7 @@ describe("a box whose socket carries nothing stops being preferred", () => {
     // teardown would have silently dropped by nulling this.req out from
     // under the new one.
     stubB.sseSend(spoken("after-reconfigure"));
-    await eventually(() => svc.texts().includes("after-reconfigure"), "a line on the NEW box to land");
+    await until(() => svc.texts().includes("after-reconfigure"), "a line on the NEW box to land");
   });
 
   it("names the refusal, not silence, when a known-silent box then refuses the upgrade", async (t) => {
@@ -870,7 +858,7 @@ describe("a box whose socket carries nothing stops being preferred", () => {
     const { stub, svc } = await silenced(t, { sseCloseImmediately: true });
     stub.setRefuseWebSocket(true);
 
-    await eventually(
+    await until(
       () => cardMessages(svc).at(-1) !== FALLBACK_CARD_MESSAGE,
       () =>
         `the card to stop blaming a silent socket for an upgrade that was refused — ` +
@@ -904,13 +892,13 @@ describe("a box whose socket carries nothing stops being preferred", () => {
     // cadence, then require the fallback message to be gone AND stay gone —
     // catching a version that still flips back to it on some later SSE cycle,
     // not just one that is slow to leave it the first time.
-    await eventually(
+    await until(
       () => cardMessages(svc).at(-1) !== FALLBACK_CARD_MESSAGE,
       () => `the refusal to stop the card blaming silence — it says ${JSON.stringify(cardMessages(svc).at(-1))}`,
       15_000,
     );
     await new Promise((r) => setTimeout(r, 2_000));
-    await eventually(
+    await until(
       () => cardMessages(svc).at(-1) !== FALLBACK_CARD_MESSAGE,
       () => `the refusal to stop the card blaming silence, past the widened retry cadence too — it says ${JSON.stringify(cardMessages(svc).at(-1))}`,
     );
@@ -935,7 +923,7 @@ describe("a box whose socket carries nothing stops being preferred", () => {
     const before = subscribeFrames(stub);
 
     // Two more re-tests, each dropped again by probation.
-    await eventually(() => stub.wsUpgrades >= 4, "two further re-tests", 12_000);
+    await until(() => stub.wsUpgrades >= 4, "two further re-tests", 12_000);
 
     assert.ok(
       subscribeFrames(stub) > before,
@@ -949,9 +937,9 @@ describe("a box whose socket carries nothing stops being preferred", () => {
     // permanent: one transcript entry over a socket clears it.
     const { stub, svc } = await silenced(t);
     const lines = await withLogs(async () => {
-      await eventually(() => svc.wsOpenNow, "the widened retry to re-test the socket", 6000);
+      await until(() => svc.wsOpenNow, "the widened retry to re-test the socket", 6000);
       stub.wsTranscript(spoken("the-box-was-fixed"));
-      await eventually(() => svc.texts().includes("the-box-was-fixed"), "the entry to land");
+      await until(() => svc.texts().includes("the-box-was-fixed"), "the entry to land");
       // Past the one-second reconnect floor, not merely past the probation
       // interval. At 300 ms this passed while the beside-retry was opening a
       // second socket over the adopted one about a second later — the guard
@@ -971,13 +959,13 @@ describe("a box whose socket carries nothing stops being preferred", () => {
     // The socket proved itself — it carried the transcript until the network
     // blipped — so the card must not go back to saying it carried nothing.
     const { stub, svc } = await silenced(t);
-    await eventually(() => svc.wsOpenNow, "the widened retry to re-test the socket", 6000);
+    await until(() => svc.wsOpenNow, "the widened retry to re-test the socket", 6000);
     stub.wsTranscript(spoken("the-box-was-fixed"));
-    await eventually(() => svc.onWebSocketNow, "the re-test to be promoted");
+    await until(() => svc.onWebSocketNow, "the re-test to be promoted");
     const mark = svc.reports.length;
 
     stub.wsDropAll(); // a plain drop, not a verdict
-    await eventually(
+    await until(
       () => !svc.onWebSocketNow && svc.reports.slice(mark).some((r) => r.state === "connected"),
       "SSE to take over again",
     );
@@ -999,7 +987,7 @@ describe("a box whose socket carries nothing stops being preferred", () => {
     svc.configure("127.0.0.1", stub.port, null);
 
     assert.equal(svc.knownSilent, false, "a verdict about the old box survived a reconfigure");
-    await eventually(() => svc.wsOpenNow, "the fresh attempt to open a socket");
-    await eventually(() => subscribeFrames(stub) >= 2, "the fresh attempt to send the documented subscribe frame");
+    await until(() => svc.wsOpenNow, "the fresh attempt to open a socket");
+    await until(() => subscribeFrames(stub) >= 2, "the fresh attempt to send the documented subscribe frame");
   });
 });

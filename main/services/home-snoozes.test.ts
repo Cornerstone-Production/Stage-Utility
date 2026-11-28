@@ -34,7 +34,16 @@ const logged: string[] = [];
 mock.method(console, "log", (...a: unknown[]) => void logged.push(a.map(String).join(" ")));
 
 const live = (mode: "item" | "preservice" | "none") => broadcast("pco:live", { mode });
-const settle = () => new Promise((r) => setTimeout(r, 40));
+/** Wait for every write already queued on `h`, by queueing one behind them: a
+ *  clear the service-start listener started has applied, or has failed, by the
+ *  time this returns. A fixed wait could not tell "the clear never ran" from "the
+ *  clear is late", so the tests that assert a snooze SURVIVED passed on a clear
+ *  that merely lost the race. The barrier's own failure is ignored: the failed-
+ *  save cases leave the file unwritable on purpose. */
+async function drained(h: InstanceType<typeof HomeSnoozes> = homeSnoozes): Promise<void> {
+  await h.snooze("barrier:drain", "warn", true).catch(() => {});
+  await h.unsnooze("barrier:drain").catch(() => {});
+}
 
 before(async () => {
   await homeSnoozes.start();
@@ -91,10 +100,10 @@ describe("home snoozes", () => {
     const n = keys(homeSnoozes.state()).length;
     assert.ok(n >= 2);
     live("preservice");
-    await settle();
+    await drained();
     assert.equal(keys(homeSnoozes.state()).length, n, "pre-service is not the service starting");
     live("item");
-    await settle();
+    await drained();
     assert.deepEqual(keys(homeSnoozes.state()), []);
     assert.deepEqual(await onDisk(), []);
     assert.ok(logged.includes(`[home] cleared ${n} snoozes: service started`), logged.join("\n"));
@@ -102,7 +111,7 @@ describe("home snoozes", () => {
     // Snoozed DURING the service, it stays: item after item is not a new start.
     await homeSnoozes.snooze("screen:b", "warn", true);
     live("item");
-    await settle();
+    await drained();
     assert.deepEqual(keys(homeSnoozes.state()), ["screen:b"]);
   });
 
@@ -113,7 +122,7 @@ describe("home snoozes", () => {
     await restarted.start();
     assert.ok(keys(restarted.state()).includes("screen:c"), "the snooze survives the restart (loaded from the file)");
     live("item");
-    await settle();
+    await drained(restarted);
     assert.ok(keys(restarted.state()).includes("screen:c"), "the first frame only sets the baseline");
   });
 
@@ -169,7 +178,7 @@ describe("home snoozes", () => {
       await homeSnoozes.snooze("lapse:pco", "warn", true);
       mock.timers.tick(SNOOZE_NO_PCO_MS + 1000);
       mock.timers.reset();
-      await settle();
+      await drained();
       assert.deepEqual(keys(homeSnoozes.state()), ["lapse:pco"]);
       assert.ok(logged.includes("[home] cleared 1 snooze: lapsed"), logged.join("\n"));
     } finally {
@@ -186,7 +195,7 @@ describe("home snoozes", () => {
     const errs: string[] = [];
     const errors = mock.method(console, "error", (...a: unknown[]) => void errs.push(a.map(String).join(" ")));
     live("item");
-    await settle();
+    await drained();
     errors.mock.restore();
     await fs.rmdir(FILE);
     assert.deepEqual(keys(homeSnoozes.state()), [], "the service has started: the snoozes are over");
@@ -200,7 +209,7 @@ describe("home snoozes", () => {
     await fs.mkdir(FILE);
     const errors = mock.method(console, "error", () => {});
     live("item");
-    await settle();
+    await drained();
     errors.mock.restore();
     await fs.rmdir(FILE);
     assert.deepEqual(keys(homeSnoozes.state()), []);
@@ -217,7 +226,7 @@ describe("home snoozes", () => {
     await fs.mkdir(FILE);
     const errors = mock.method(console, "error", () => {});
     live("item");
-    await settle();
+    await drained();
     await fs.rmdir(FILE);
     await (homeSnoozes as unknown as { lapse: () => Promise<void> }).lapse();
     errors.mock.restore();

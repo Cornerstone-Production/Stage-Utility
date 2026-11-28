@@ -22,6 +22,7 @@ import { test, describe, after, before } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { until } from "./fixtures/within.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-rules-disk-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -105,22 +106,6 @@ after(async () => {
 });
 
 const live = (mode: string) => ({ mode, currentItemTitle: null, serviceTimeId: "st1" });
-
-/**
- * Wait for `ready`, or give up after a second.
- *
- * broadcast() does not await the listener, so there is nothing to await here
- * either. A fixed sleep was flaky under a loaded test run; polling a condition
- * with a deadline says what it is waiting FOR, and still fails rather than
- * hanging if the thing never happens.
- */
-async function until(ready: () => boolean, what: string): Promise<void> {
-  const deadline = Date.now() + 1000;
-  while (!ready()) {
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((r) => setTimeout(r, 5));
-  }
-}
 
 describe("a restored rules file naming prototype members", () => {
   test("the engine loaded it rather than dropping it on the floor", () => {

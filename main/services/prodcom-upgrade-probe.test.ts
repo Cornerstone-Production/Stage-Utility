@@ -22,6 +22,7 @@ import type { Duplex } from "node:stream";
 import { describe, it, type TestContext } from "node:test";
 
 import { ProdComService, PROBE_USER_AGENT } from "./prodcom-service.js";
+import { until } from "./fixtures/within.js";
 
 /** RFC 6455's fixed handshake GUID. */
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -160,15 +161,6 @@ async function serverAnswering(answer: ProbeAnswer): Promise<{
   };
 }
 
-async function eventually(ready: () => boolean, what: string, timeoutMs = 4000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (ready()) return;
-    await new Promise((r) => setTimeout(r, 5));
-  }
-  assert.fail(`timed out waiting for ${what}`);
-}
-
 async function against(t: TestContext, answer: ProbeAnswer) {
   const server = await serverAnswering(answer);
   const svc = new TestProdCom();
@@ -177,7 +169,7 @@ async function against(t: TestContext, answer: ProbeAnswer) {
     await server.close();
   });
   svc.configure("127.0.0.1", server.port, null);
-  await eventually(() => svc.downs.length > 0, "the fallback decision to be made");
+  await until(() => svc.downs.length > 0, "the fallback decision to be made");
   return { server, svc };
 }
 
@@ -218,7 +210,7 @@ describe("a refused upgrade is diagnosed before falling back", () => {
     await dead.close();
 
     svc.configure("127.0.0.1", port, null);
-    await eventually(() => svc.downs.length > 0, "the fallback decision to be made");
+    await until(() => svc.downs.length > 0, "the fallback decision to be made");
     assert.match(svc.downs[0]!.reason, /^probe failed: /);
     assert.equal(svc.downs[0]!.detail, null);
   });
@@ -244,8 +236,8 @@ describe("a refused upgrade is diagnosed before falling back", () => {
     });
     svc.configure("127.0.0.1", server.port, null);
 
-    await eventually(() => svc.downs.length > 0, "the fallback decision to be made", 3000);
-    await eventually(() => server.sseOpens() > 0, "the SSE fallback to open", 3000);
+    await until(() => svc.downs.length > 0, "the fallback decision to be made", 3000);
+    await until(() => server.sseOpens() > 0, "the SSE fallback to open", 3000);
     // No status to report — the body never finished — so the bare close reason
     // stands rather than a half-read one.
     assert.match(svc.downs[0]!.reason, /closed before open \(code \d+\)$/);
@@ -265,7 +257,7 @@ describe("a refused upgrade is diagnosed before falling back", () => {
     const started = Date.now();
     svc.configure("127.0.0.1", server.port, null);
 
-    await eventually(() => svc.downs.length > 0, "the fallback decision to be made", 3000);
+    await until(() => svc.downs.length > 0, "the fallback decision to be made", 3000);
     assert.equal(svc.downs[0]!.reason, "upgrade refused with HTTP 503 (Service Unavailable)");
     assert.ok(
       Date.now() - started < 400,
@@ -295,12 +287,12 @@ describe("a refused upgrade is diagnosed before falling back", () => {
       await server.close();
     });
     svc.configure("127.0.0.1", server.port, null);
-    await eventually(() => probes(server) === 1, "the probe to go out");
+    await until(() => probes(server) === 1, "the probe to go out");
     assert.equal(svc.downs.length, 0, "a down event was reported before the probe ever answered");
 
     svc.stop();
     // What is under test is that STOPPING takes the socket with it.
-    await eventually(() => server.probeSocketClosed(), "the probe socket to be destroyed by stop()", 2000);
+    await until(() => server.probeSocketClosed(), "the probe socket to be destroyed by stop()", 2000);
 
     // The destroyed socket's answer, unguarded, has had time to arrive and act.
     await new Promise((r) => setTimeout(r, 500));
@@ -323,12 +315,12 @@ describe("a refused upgrade is diagnosed before falling back", () => {
       await server.close();
     });
     svc.configure("127.0.0.1", server.port, null);
-    await eventually(() => probes(server) === 1, "the first probe to go out");
+    await until(() => probes(server) === 1, "the first probe to go out");
 
     // A second attempt, refused the same way, while the first probe is still
     // reading.
     await svc.reconnectNow();
-    await eventually(() => svc.downs.length > 0, "a fallback decision", 3000);
+    await until(() => svc.downs.length > 0, "a fallback decision", 3000);
     assert.equal(probes(server), 1, "a second probe went out while one was already in flight");
   });
 
@@ -354,12 +346,12 @@ describe("a refused upgrade is diagnosed before falling back", () => {
     });
 
     svc.configure("127.0.0.1", old.port, null);
-    await eventually(() => probes(old) === 1, "the probe against the old box");
+    await until(() => probes(old) === 1, "the probe against the old box");
 
     svc.configure("127.0.0.1", next.port, null); // the operator repoints it
     // next's own refusal is fast, so its down event lands well before old's
     // trickle probe reaches its 400 ms deadline.
-    await eventually(() => svc.downs.length === 1, "the new box's own down event");
+    await until(() => svc.downs.length === 1, "the new box's own down event");
     assert.equal(probes(next), 1, "the new box's first socket was not the one probed");
 
     // Comfortably past old's 400 ms deadline: its stale answer, unguarded, has
@@ -380,10 +372,10 @@ describe("a refused upgrade is diagnosed before falling back", () => {
     // transcript entry), so it is worth ONE outage line same as a refusal would
     // be — the SSE fallback carried captions the whole time regardless.
     const { stub, svc } = await onARealWebSocket(t);
-    await eventually(() => svc.wsOpenNow, "the websocket to open");
+    await until(() => svc.wsOpenNow, "the websocket to open");
     const before = stub.requests.filter((r) => r.headers["user-agent"] === PROBE_USER_AGENT).length;
     stub.wsDropAll();
-    await eventually(() => !svc.wsOpenNow, "the drop to be noticed");
+    await until(() => !svc.wsOpenNow, "the drop to be noticed");
     await new Promise((r) => setTimeout(r, 50));
     assert.equal(
       stub.requests.filter((r) => r.headers["user-agent"] === PROBE_USER_AGENT).length,

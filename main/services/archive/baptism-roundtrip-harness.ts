@@ -14,6 +14,7 @@
 import type { BaptismSession } from "../../types/stage.js";
 import { baptismTimerService } from "../baptism-timer-service.js";
 import { serviceTimelineRecorder } from "../service-timeline-recorder.js";
+import { sleep } from "../fixtures/within.js";
 
 export interface ServiceCtx {
   serviceKey: string;
@@ -22,7 +23,7 @@ export interface ServiceCtx {
 
 type Held = { current: { serviceKey: string; serviceDate: string; endedAt: string | null } | null };
 
-export const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+export { sleep };
 
 let ctxCounter = 0;
 /**

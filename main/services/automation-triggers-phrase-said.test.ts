@@ -15,6 +15,7 @@ import { ProdComService } from "./prodcom-service.js";
 import { startProdComStub, type StubEntry } from "./fixtures/prodcom-stub.js";
 import { addBroadcastListener, addChannelDemandSource } from "./broadcaster.js";
 import { AUTOMATION_TRIGGERS } from "./automation-triggers.js";
+import { sleep } from "./fixtures/within.js";
 
 const NOW = Date.parse("2026-09-23T12:00:00Z");
 
@@ -39,8 +40,6 @@ const entry = (text: string, inProgress: boolean): StubEntry => ({
   inProgress,
   date: new Date(NOW).toISOString(),
 });
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 it("'let us pray' said mid-utterance fires the phrase trigger", async (t: TestContext) => {
   // The demand-gating rule (demand-gating.test.ts) requires an in-process
   // consumer registered before prodcom-service will push the channel at all.

@@ -9,7 +9,8 @@
 // A test that needs a failure sets `respond`, which sees each request first and may answer it, or
 // `lose`, which sees it once the fake has done it and may lose the answer.
 
-import * as http from "node:http";
+import type * as http from "node:http";
+import { startHttpFixture, type HttpFixture } from "./http-fixture.js";
 
 import { errorMessage } from "../errors.js";
 
@@ -83,36 +84,30 @@ export class FakeCloudflare {
   private wanted = new Set<string>();
   private nextSession = 0;
 
-  private constructor(private readonly server: http.Server) {}
+  private constructor(private readonly shell: HttpFixture) {}
 
   static async start(): Promise<FakeCloudflare> {
     const holder: { fake?: FakeCloudflare } = {};
-    const server = http.createServer((req, res) => {
-      const chunks: Buffer[] = [];
-      req.on("data", (c: Buffer) => chunks.push(c));
-      req.on("end", () => {
-        void holder.fake!.handle(req, Buffer.concat(chunks)).then((a) => {
-          if (a === "drop") {
-            res.socket?.destroy();
-            return;
-          }
-          res.writeHead(a.status, { "Content-Type": "application/json", ...a.headers });
-          res.end(JSON.stringify(a.body));
-        });
+    const shell = await startHttpFixture((req, res, body) => {
+      void holder.fake!.handle(req, body).then((a) => {
+        if (a === "drop") {
+          res.socket?.destroy();
+          return;
+        }
+        res.writeHead(a.status, { "Content-Type": "application/json", ...a.headers });
+        res.end(JSON.stringify(a.body));
       });
     });
-    holder.fake = new FakeCloudflare(server);
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    holder.fake = new FakeCloudflare(shell);
     return holder.fake;
   }
 
   get origin(): string {
-    return `http://127.0.0.1:${(this.server.address() as { port: number }).port}`;
+    return this.shell.origin;
   }
 
   close(): Promise<void> {
-    this.server.closeAllConnections();
-    return new Promise((resolve) => this.server.close(() => resolve()));
+    return this.shell.close();
   }
 
   /** Forget every request, upload and put, and hold nothing: a fresh account. */

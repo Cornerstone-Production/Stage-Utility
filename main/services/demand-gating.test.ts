@@ -29,6 +29,7 @@ import * as path from "node:path";
 
 import type { DeviceStatus } from "../types/devices.js";
 import type { Rule } from "../types/automation.js";
+import { sleep } from "./fixtures/within.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-demand-gate-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -48,8 +49,6 @@ const { addBroadcastListener, channelDemandSourceCount, channelInDemand, setSubs
 // behaviour before the transport registers a check — which is the opposite of
 // the state every one of these bugs lived in.
 setSubscriberCheck(() => false);
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Rules are what create in-process demand, so each case installs its own. */
 async function setRules(rules: Partial<Rule>[]): Promise<void> {

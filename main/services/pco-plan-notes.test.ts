@@ -11,10 +11,7 @@ import assert from "node:assert/strict";
 import { describe, it, beforeEach } from "node:test";
 
 import { pcoService } from "./pco-service.js";
-
-type Requester = { request: (url: string, appId: string, secret: string) => Promise<unknown> };
-const svc = pcoService as unknown as Requester;
-const realRequest = svc.request;
+import { jsonApi, restorePcoRequest, stubPcoRequest } from "./fixtures/pco-request.js";
 
 const TEAMS = [
   { id: "t-prod", type: "Team", attributes: { name: "Production" } },
@@ -35,11 +32,7 @@ let urls: string[] = [];
 
 /** Stub PCO with a fixed payload; returns the urls it was asked for. */
 function stub(data: unknown[], included: unknown[] = TEAMS) {
-  urls = [];
-  svc.request = async (url: string) => {
-    urls.push(url);
-    return { data, included };
-  };
+  urls = stubPcoRequest(pcoService, () => jsonApi(data, included)).urls;
 }
 
 describe("a plan's notes", () => {
@@ -115,5 +108,5 @@ describe("a plan's notes", () => {
 // Put the real requester back, so a stub cannot leak into another test file
 // sharing this module instance.
 process.on("exit", () => {
-  svc.request = realRequest;
+  restorePcoRequest(pcoService);
 });

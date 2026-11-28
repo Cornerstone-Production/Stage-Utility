@@ -20,6 +20,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, before, describe, test } from "node:test";
+import { udpPort } from "./fixtures/free-port.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-responder-dup-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -37,14 +38,6 @@ const THIS_MAC = "02:00:00:00:00:aa";
 const OTHER_MAC = "02:00:00:00:00:bb";
 const RECHECK_MS = 120;
 const WINDOW_MS = 60;
-
-async function freePort(): Promise<number> {
-  const s = dgram.createSocket("udp4");
-  await new Promise<void>((resolve) => s.bind(0, "127.0.0.1", resolve));
-  const { port } = s.address();
-  await new Promise<void>((resolve) => s.close(() => resolve()));
-  return port;
-}
 
 async function until(what: string, ok: () => boolean, ms = 3000): Promise<void> {
   const end = Date.now() + ms;
@@ -89,7 +82,7 @@ before(async () => {
   });
   await new Promise<void>((resolve) => peer.bind(0, "127.0.0.1", resolve));
   peerPort = peer.address().port;
-  responderPort = await freePort();
+  responderPort = await udpPort();
   startKioskResponder({
     serverId: () => currentId,
     serverName: "This box",

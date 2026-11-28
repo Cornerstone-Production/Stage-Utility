@@ -18,6 +18,7 @@ import * as path from "node:path";
 
 import type { DeviceStatus } from "../types/devices.js";
 import type { ChargerBayDTO } from "../types/state.js";
+import { sleep } from "./fixtures/within.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-charger-live-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -26,8 +27,6 @@ process.env.HOME = path.join(TMP, "home");
 const { stageController } = await import("./stage-controller.js");
 const { addBroadcastListener, setSubscriberCheck } = await import("./broadcaster.js");
 const { CHARGER_BAYS_CHANNEL } = await import("../types/devices.js");
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Every bay list a browser was sent, on whichever channel carried it. */
 const heard: { channel: string; bays: ChargerBayDTO[] }[] = [];

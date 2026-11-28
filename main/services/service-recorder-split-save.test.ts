@@ -17,6 +17,7 @@ import { describe, it, beforeEach, afterEach, mock, type TestContext } from "nod
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { feedLiveTickSettled, loadLiveConsumers, makeLive } from "./fixtures/live-dto.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-split-save-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -29,6 +30,7 @@ const { stageController } = await import("./stage-controller.js");
 const { serviceTimelineRecorder } = await import("./service-timeline-recorder.js");
 const { splRecorder } = await import("./spl-recorder.js");
 const { attendanceRecorder } = await import("./attendance-recorder.js");
+await loadLiveConsumers();
 const { addBroadcastListener } = await import("./broadcaster.js");
 const { captureConsole } = await import("./fixtures/capture-console.js");
 const { serviceTimelineStore } = await import("./service-timeline-store.js");
@@ -76,33 +78,24 @@ addBroadcastListener((channel, payload) => {
 });
 
 function liveAt(at: string, occ: string, item: string | null) {
-  return {
-    mode: item ? ("item" as const) : ("none" as const),
+  return makeLive({
+    mode: item ? "item" : "none",
     currentItemId: item,
     label: item,
     itemType: null,
-    lengthSec: null,
     liveStartAt: item ? at : null,
-    targetAt: null,
     serverNow: at,
     currentItemTitle: item,
-    nextItemTitle: null,
     serviceTimeId: occ,
-    serviceTimeStartsAt: null,
     beforeServiceStart: false,
-  };
+  });
 }
 
-/** One tick to all three recorders, in live-poller.ts order. Each is settled
- *  separately so a rejection shows which recorder threw. */
+/** One tick to every consumer, in live-poller.ts order. Each is settled
+ *  separately so a rejection shows which one threw. */
 async function tick(at: string, occ: string, item: string | null): Promise<PromiseSettledResult<void>[]> {
   mock.timers.setTime(Date.parse(at));
-  const live = liveAt(at, occ, item);
-  return Promise.allSettled([
-    splRecorder.onLiveTick(live),
-    attendanceRecorder.onLiveTick(live),
-    serviceTimelineRecorder.onLiveTick(live),
-  ]);
+  return feedLiveTickSettled(liveAt(at, occ, item));
 }
 
 /** keyed-record-store.ts's safeName, for the keys used here. */
