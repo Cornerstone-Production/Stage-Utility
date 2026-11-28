@@ -17,6 +17,7 @@
 //    same-origin page still works. Half of that is easy to break silently.
 
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { after, before, beforeEach, describe, test, type TestContext } from "node:test";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -777,6 +778,27 @@ describe("confirmRequired", () => {
     assert.equal(replay.status, 202, "a spent confirmation ran the cue again");
     assert.notEqual((replay.body as { confirm: string }).confirm, token, "the same token came back");
     assert.equal(presses.length, 1, "a replayed confirmation pressed a second time");
+  });
+
+  test("a confirmation is compared in constant time, right or wrong", async (t) => {
+    // Watched at crypto.timingSafeEqual, as every presented secret is (see
+    // secret-compare.test.ts). A bare `===` never calls it.
+    await withCue({ confirmRequired: true, cooldownSec: 0 });
+    const first = await automationEngine.callByName("projectors_on", { caller: "test", now: 1_000 });
+    const spy = t.mock.method(crypto, "timingSafeEqual");
+    const wrong = await automationEngine.callByName("projectors_on", { caller: "test", confirm: "not-the-token", now: 2_000 });
+    assert.equal(wrong.status, 202);
+    assert.notEqual((first.body as { confirm: string }).confirm, (wrong.body as { confirm: string }).confirm);
+    const right = await automationEngine.callByName("projectors_on", {
+      caller: "test",
+      confirm: (wrong.body as { confirm: string }).confirm,
+      now: 3_000,
+    });
+    assert.equal(right.status, 200);
+    assert.deepEqual(
+      spy.mock.calls.map((c) => [(c.arguments[0] as Buffer).length, (c.arguments[1] as Buffer).length]),
+      [[32, 32], [32, 32]],
+    );
   });
 
   test("a confirmation EXPIRES after 30 seconds", async () => {

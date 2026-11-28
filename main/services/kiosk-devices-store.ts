@@ -13,15 +13,13 @@
 // the store, so the rules that matter — one device per output, a claim moves
 // rather than duplicates — are testable without a filesystem.
 
-
-import crypto from "node:crypto";
-
 import { sameOutput } from "./kiosk-discovery.js";
 import { announceDevices } from "./kiosk-presence.js";
 import { mergeScreen, sameScreen, screenFrom } from "./kiosk-screen-size.js";
 import type { BoundDevice, DeviceOutput, ScreenSize } from "../types/kiosk.js";
 import { DataStore } from "./data-store.js";
 import { isSafeKey } from "./safe-key.js";
+import { secretsMatch } from "./secret-compare.js";
 import { asArray, asObject, checked, refuse } from "./restore-check.js";
 import { toError } from "./errors.js";
 
@@ -88,19 +86,6 @@ export function authorise(
   // next load, on a LAN this server already trusts for reads.
   if (device.token === "") return device;
   return secretsMatch(secret, device.token) ? device : null;
-}
-
-/**
- * Two secrets, compared in constant time.
- *
- * `===` stops at the first differing byte, so how long a wrong guess took says how
- * much of it was right. timingSafeEqual needs equal lengths and throws otherwise,
- * so each side is hashed first: the digests are always 32 bytes, and the length of
- * a stored secret is not something a caller can probe either.
- */
-function secretsMatch(presented: string, stored: string): boolean {
-  const digest = (s: string) => crypto.createHash("sha256").update(s).digest();
-  return crypto.timingSafeEqual(digest(presented), digest(stored));
 }
 
 /** Pin the secret a device presented, if it has not got one yet. Returns the

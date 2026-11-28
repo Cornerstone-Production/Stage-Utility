@@ -65,29 +65,10 @@ test("and what is still not a bearer header at all", () => {
   assert.equal(bearerOf(undefined), null);
 });
 
-// ── WHAT IS NOT TESTED HERE, and why ─────────────────────────────────────────
+// ── The comparison itself ────────────────────────────────────────────────────
 //
-// `hashesMatch` (cue-tokens.ts) compares the two SHA-256 hex digests with
-// `crypto.timingSafeEqual` behind a length pre-check, so a wrong token cannot
-// be narrowed one character at a time by measuring the reply. There is NO GUARD
-// for that property in this repo, deliberately, and a green one would be a lie:
-//
-//  - swapping `timingSafeEqual` for `===` changes NOTHING observable. Both
-//    return the same boolean for every input the function can receive (the
-//    length pre-check is what makes timingSafeEqual total — it throws on
-//    unequal byte lengths), so no functional assertion can tell them apart.
-//  - the difference is timing, and it is not measurable from here. `hashesMatch`
-//    is module-private; the only way in is `cueTokens.verify`, which runs a
-//    SHA-256 of the presented token first. That hash costs orders of magnitude
-//    more than the tens of nanoseconds that separate a 64-character `===`
-//    short-circuiting at the first byte from one short-circuiting at the last,
-//    and it is per-call noise, not a constant to subtract. A statistical test
-//    over it would be a coin flip on a loaded CI box — which is a flaky guard,
-//    which is worse than none.
-//  - a test that READ the source for the word `timingSafeEqual` is the exact
-//    shape this repo has shipped vacuous four times over: a comment satisfies
-//    it, and it goes on passing with the line that does the work deleted.
-//
-// What holds it instead: the comparison is three lines, in one place, with the
-// reason on it, and there is exactly one caller. If it grows a second
-// implementation, that is the thing to catch — not this.
+// That a token is compared in constant time is pinned in secret-compare.test.ts,
+// by running cueTokens.verify with crypto.timingSafeEqual spied on. The cue
+// token, the screen device secret and the log token share one comparison
+// (secret-compare.ts), so a second implementation would have to be written on
+// purpose.

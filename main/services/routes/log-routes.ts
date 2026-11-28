@@ -12,6 +12,7 @@ import { buildLogChecks } from "../log-checks.js";
 import { integrationManager } from "../integration-manager.js";
 import { renderLogPage } from "../log-page.js";
 import { pcoService } from "../pco-service.js";
+import { secretsMatch } from "../secret-compare.js";
 import { SERVER_VERSION } from "../server-version.js";
 import { type RouteCtx, error, json } from "./context.js";
 import { CANONICAL_LOG_PATH, LOG_PAGE_PATHS } from "./log-paths.js";
@@ -29,7 +30,7 @@ import { CANONICAL_LOG_PATH, LOG_PAGE_PATHS } from "./log-paths.js";
  */
 export function logAuthed(url: URL): boolean {
   const token = process.env.STAGE_UTILITY_LOG_TOKEN || null;
-  return !token || url.searchParams.get("token") === token;
+  return !token || secretsMatch(url.searchParams.get("token") ?? "", token);
 }
 
 /** `?since=` as a number, or null for "give me everything". */
