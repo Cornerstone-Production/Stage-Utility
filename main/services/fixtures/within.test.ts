@@ -47,7 +47,7 @@ describe("untilValue", () => {
 
   it("gives up naming what it waited for, with Date and setTimeout mocked", { timeout: 3000 }, async (t) => {
     t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });
-    await assert.rejects(untilValue(() => false, "a value that never comes", 30), /gave up after 30 ms waiting for a value that never comes/);
+    await assert.rejects(untilValue(() => false, "a value that never comes", 30), /timed out waiting for a value that never comes/);
   });
 });
 

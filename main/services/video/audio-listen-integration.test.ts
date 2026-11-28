@@ -88,7 +88,15 @@ async function withRelay(
   await fs.writeFile(configPath, JSON.stringify(relayConfig({ ports, lanIp: "127.0.0.1", users: relayUsers(feeds0, apiPass), rtsp: true })));
   start(binary.path, [configPath]);
   const relay = new MediaMtxRelay(api, apiPass);
-  await untilValue(async () => (await relay.status(), true), "the relay's API", 15_000);
+  await untilValue(
+    async () => {
+      await relay.status();
+      return true;
+    },
+    "the relay's API",
+    15_000,
+    150,
+  );
   try {
     const reconcile = async (feed: Partial<RelayFeed>) => relay.reconcile([{ id: "cam", kind: "push", password, ...feed } as RelayFeed]);
     await reconcile({});
@@ -99,7 +107,7 @@ async function withRelay(
       "-c:a", "aac", "-ac", "2", "-b:a", "128k", "-f", "rtsp", "-rtsp_transport", "tcp", `rtsp://video:${password}@127.0.0.1:${rtsp}/cam`,
     ]);
     // What the app does on learning the codec: read it from the relay's own track list.
-    const audio = await untilValue(async () => (await relay.status()).find((p) => p.name === "cam" && p.ready)?.audio, "the source's audio track", 20_000);
+    const audio = await untilValue(async () => (await relay.status()).find((p) => p.name === "cam" && p.ready)?.audio, "the source's audio track", 20_000, 150);
     assert.equal(audio, "MPEG-4 Audio", "the relay did not report the test source's AAC");
     const resolved = resolveAudio(
       planAudio({ conversion: "auto", audio, sourceUrl: settings.audioSourceUrl }, "cam"),
@@ -138,7 +146,7 @@ test("AAC in, Opus out: one ffmpeg per feed shared by two readers, started by th
     holder.kill("SIGKILL");
 
     // Ended after the last reader (10 s grace).
-    await untilValue(async () => (await converters(rtsp)) === 0, "the converter to stop after the last reader left", 25_000);
+    await untilValue(async () => (await converters(rtsp)) === 0, "the converter to stop after the last reader left", 25_000, 150);
   }, wrapper, {});
 });
 
