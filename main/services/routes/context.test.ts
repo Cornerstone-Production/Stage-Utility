@@ -7,6 +7,9 @@ import {
   error,
   json,
   readBody,
+  readBodyOrEmpty,
+  readBodyTolerant,
+  readJsonObject,
   readRawBody,
 } from "./context.js";
 import { callRoute } from "./route-harness.js";
@@ -263,4 +266,44 @@ test("the default limits are what the routes actually get", async () => {
   // A regression here would silently restore the unbounded behaviour.
   assert.ok(MAX_JSON_BODY_BYTES > 0 && MAX_JSON_BODY_BYTES <= 16 * 1024 * 1024);
   assert.ok(MAX_UPLOAD_BODY_BYTES >= MAX_JSON_BODY_BYTES, "an upload may be larger than JSON");
+});
+
+test("a body that is not JSON rejects with a status of 400, so no route has to catch it to answer 400", async () => {
+  // handlerErrorStatus answers 500 for an error that declares no status, and many
+  // routes read the body with a bare `await readBody(req)`.
+  const out = await callRoute(
+    async ({ req, res }) => {
+      try {
+        await readBody(req);
+      } catch (e) {
+        json(res, { status: (e as { status?: number }).status });
+      }
+    },
+    "/x",
+    { method: "POST", raw: "{ not json" },
+  );
+  assert.equal((out.json as { status: number }).status, 400);
+});
+
+test("readJsonObject refuses null, an array and a scalar with a status of 400", async () => {
+  for (const raw of ["null", "[1]", "5", '"x"']) {
+    await assert.rejects(
+      callRoute(async ({ req }) => void (await readJsonObject(req)), "/x", { method: "POST", raw }),
+      (e: unknown) => (e as { status?: number }).status === 400,
+      raw,
+    );
+  }
+  const ok = await callRoute(async ({ req, res }) => json(res, await readJsonObject(req)), "/x", { method: "POST", body: { a: 1 } });
+  assert.deepEqual(ok.json, { a: 1 });
+});
+
+test("readBodyOrEmpty reads only an object; readBodyTolerant keeps an array an array", async () => {
+  const via = async (read: typeof readBodyOrEmpty | typeof readBodyTolerant, raw: string) =>
+    (await callRoute(async ({ req, res }) => json(res, { v: await read(req) }), "/x", { method: "POST", raw })).json;
+  assert.deepEqual(await via(readBodyOrEmpty, "[1]"), { v: {} });
+  assert.deepEqual(await via(readBodyOrEmpty, "5"), { v: {} });
+  assert.deepEqual(await via(readBodyOrEmpty, "{ not json"), { v: {} });
+  assert.deepEqual(await via(readBodyOrEmpty, '{"a":1}'), { v: { a: 1 } });
+  assert.deepEqual(await via(readBodyTolerant, "[1]"), { v: [1] });
+  assert.deepEqual(await via(readBodyTolerant, "null"), { v: {} });
 });

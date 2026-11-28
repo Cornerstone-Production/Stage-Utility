@@ -149,12 +149,6 @@ const REQUEST_FACING = [
   // name the URL, and the URL parser drops a newline before it checks the host,
   // so one with a newline in it is still fetched and still logged.
   "photo-cache.ts",
-  // Photo themes. Their lines name a theme name and prompt-free reasons from
-  // POST /api/photo-themes bodies, a person's name off a Planning Center roster,
-  // and the base-URL override; every one is scrubbed. None ever names the key.
-  "photo-themes/openai-client.ts",
-  "photo-themes/openai-connection.ts",
-  "photo-themes/service.ts",
   // Its one line names the origin of a request URL a caller built wrongly, and a
   // credentialed fetch is handed URLs made from a host or id the operator typed
   // into Settings over HTTP.
@@ -205,8 +199,6 @@ const REQUEST_FACING = [
   // messages-service.ts's, above. Listed because every routes/ file is.
   "routes/messages-routes.ts",
   "routes/operator-paths.ts",
-  // Logs nothing itself; the theme and connection lines are photo-themes/'s, above.
-  "routes/photo-theme-routes.ts",
   "routes/plan-routes.ts",
   "routes/preset-routes.ts",
   "routes/proxy-routes.ts",
@@ -565,10 +557,6 @@ function requestFacingFiles(): string[] {
     // Its one warning names the stored groups and quick messages that break a
     // limit, text the operator typed into PUT /api/messaging.
     path.join(HERE, "messaging-store.ts"),
-    // Its lines name the base-URL override, scrubbed. Never the key.
-    path.join(HERE, "photo-themes/openai-client.ts"),
-    // Its lines name the key's hint and OpenAI's mapped reason. Never the key.
-    path.join(HERE, "photo-themes/openai-connection.ts"),
     // Every line names a file it serves (an allowlisted name) and what the release
     // host or the disk said back, which is text from outside.
     path.join(HERE, "output-helper-download.ts"),
@@ -610,9 +598,6 @@ function requestFacingFiles(): string[] {
     // and, for the timeline, on the carried-over-item line. A title is typed
     // into Planning Center and reaches this process in an HTTP response body.
     path.join(HERE, "service-timeline-recorder.ts"),
-    // Theme names typed into POST /api/photo-themes and people's names off a
-    // Planning Center roster reach its lines, scrubbed; see REQUEST_FACING.
-    path.join(HERE, "photo-themes/service.ts"),
     // Its lines name what Cloudflare answered; see REQUEST_FACING.
     path.join(HERE, "servicecue-deployer.ts"),
     // Its lines name the host of the page address typed into POST /api/servicecue/publish

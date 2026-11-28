@@ -13,6 +13,7 @@ import { readPublishToken, servicecuePublishStore } from "./servicecue-publish-s
 import { stageController } from "./stage-controller.js";
 import { readStagePlotImage, stagePlotsView } from "./stageplots-files.js";
 import { StagePlotsPublisher, type PublishTarget } from "./stageplots-publish.js";
+import { stampDoc } from "./stageplots-patch-link.js";
 import { stageplotsStore } from "./stageplots-store.js";
 import type { PatchFile } from "../types/patch.js";
 import { STAGEPLOTS_CHANNEL, type StagePlotsDoc, type StagePlotsView } from "../types/stageplots.js";
@@ -67,3 +68,17 @@ export function stagePlotsViewNow(doc: StagePlotsDoc): StagePlotsView {
 export function broadcastStagePlots(doc: StagePlotsDoc): void {
   broadcast(STAGEPLOTS_CHANNEL, stagePlotsViewNow(doc));
 }
+
+// A linked point keeps the last name and colour its device had. The patch is what changes them,
+// so each patch save writes them onto the stored points: against the patches it replaced first,
+// oldest first (a device this save removes is stamped as it was), then against the new one (a
+// device that is still there is stamped as it now is). A plot's version is not bumped.
+patchStore.onSaved(async (befores, after) => {
+  let changed = false;
+  const next = await stageplotsStore.update((doc) => {
+    const stamped = [...befores, after].reduce((d, file) => stampDoc(d, { ok: true, file }), doc);
+    changed = stamped !== doc;
+    return stamped;
+  });
+  if (changed) broadcastStagePlots(next);
+});

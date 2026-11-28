@@ -184,8 +184,8 @@ export interface PlotItem {
 /**
  * A connection point's link to a device on a patch sheet. Read-only: the point takes the
  * device's name and colour while the sheet can be read and the device is there, and lists
- * the channels whose path runs through it. lastName and lastColor are what it showed when
- * the plot was last saved, and what it shows ("unlinked") when the sheet cannot be read or
+ * the channels whose path runs through it. lastName and lastColor are what the device had at
+ * the last patch save, and what the point shows ("unlinked") when the sheet cannot be read or
  * the device is gone. See docs/features/stageplots.md#patch-link.
  */
 export interface PatchLink {

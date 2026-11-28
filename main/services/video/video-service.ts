@@ -12,6 +12,7 @@ import { withoutDataDir } from "../app-paths.js";
 import { addSubscriptionListener, broadcast, channelInDemand, channelNamedByClient } from "../broadcaster.js";
 import { errorMessage } from "../errors.js";
 import { plural } from "../plural.js";
+import { isRecord } from "../../types/is-record.js";
 import { getLanIp } from "../lan-ip.js";
 import { relayArchivePresent, relayBinaryPresent } from "./acquire.js";
 import { OutageLog } from "../repeat-log.js";
@@ -280,7 +281,7 @@ function mergedFeedPatch(
   existing: VideoFeed,
   body: unknown,
 ): { name: unknown; source: unknown; password: unknown; audioConversion: unknown; audioSourceUrl: unknown } {
-  const obj = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
+  const obj = (isRecord(body) ? body : {});
   return {
     // Present means supplied, whatever its type: a name that is not text
     // must be refused by the name rule, not quietly replaced by the old one.
@@ -2370,7 +2371,7 @@ class VideoService {
    * hears about it once, at the end.
    */
   async importFeeds(body: unknown): Promise<{ ok: true; report: ImportReport } | { ok: false; error: string }> {
-    const req = (typeof body === "object" && body !== null ? body : {}) as Record<string, unknown>;
+    const req = (isRecord(body) ? body : {});
     if (req.ports !== undefined && typeof req.ports !== "boolean") return { ok: false, error: "ports must be true or false." };
     // A Map, never an object keyed by what the body supplied.
     const choices = new Map<string, ImportChoice>();

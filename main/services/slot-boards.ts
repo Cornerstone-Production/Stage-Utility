@@ -14,6 +14,7 @@
 import type { LayoutObject, LayoutObjectConfig, Slot, SlotBoardMeta, SlotsLayout, View } from "../types/stage.js";
 import type { SlotsFile, SlotsOverride } from "./slots-store.js";
 import { walkLayoutObjects } from "./view-refs.js";
+import { isRecord } from "../types/is-record.js";
 
 type GridConfig = Extract<LayoutObjectConfig, { type: "slots-grid" }>;
 
@@ -180,8 +181,8 @@ function layoutOf(slot: Slot): Record<string, unknown> {
 /** JSON with every object's keys sorted, so key order is not a difference. */
 function canonical(v: unknown): string {
   return JSON.stringify(v, (_k, val: unknown) => {
-    if (!val || typeof val !== "object" || Array.isArray(val)) return val;
-    return Object.fromEntries(Object.entries(val as Record<string, unknown>).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+    if (!isRecord(val)) return val;
+    return Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
   });
 }
 

@@ -12,6 +12,7 @@
 // fetches, and a picker that silently listed nothing would otherwise be a bug
 // nothing could catch without a server.
 
+import { cueKey } from "@main/services/cue-aliases";
 import {
   Select,
   SelectContent,
@@ -64,7 +65,7 @@ export function CuePicker({
   hide?: ReadonlySet<string>;
   onChange: (cue: string) => void;
 }) {
-  const entries = cuePickerEntries(cues).filter((e) => e.id === value || !hide?.has(e.id.toLowerCase()));
+  const entries = cuePickerEntries(cues).filter((e) => e.id === value || !hide?.has(cueKey(e.id)));
   const builtIn = entries.filter((e) => e.builtin);
   const mine = entries.filter((e) => !e.builtin);
   const label = (e: Entry) => `${e.name}${e.room ? ` · ${e.room}` : ""} (${e.kind})`;

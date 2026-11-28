@@ -15,7 +15,7 @@ import { viewsStore } from "./views-store.js";
 import { settingsStore } from "./settings-store.js";
 import { slotsStore, type NewBoard } from "./slots-store.js";
 import { stripResolvedFields } from "./slot-resolver.js";
-import { patchStore } from "./patch-store.js";
+import { PatchLinksNotUpdated, patchStore } from "./patch-store.js";
 import { presetsStore } from "./presets-store.js";
 import { scrub } from "./scrub.js";
 import { notesStore } from "./notes-store.js";
@@ -43,8 +43,8 @@ import type { NotesContent } from "./notes-store.js";
  * would otherwise reject on its own write path are rejected here too.
  */
 function assertBundle(b: unknown): asserts b is ViewBundle {
-  const o = b as Record<string, unknown> | null;
-  if (!o || typeof o !== "object" || Array.isArray(o)) throw new Error("import — not a JSON object");
+  if (!isRecord(b)) throw new Error("import — not a JSON object");
+  const o = b;
   if (o.kind !== "stage-utility-view") {
     // Named, because picking the config snapshot by mistake is the likely error
     // and "invalid file" would teach nobody anything.
@@ -128,8 +128,8 @@ function assertBundle(b: unknown): asserts b is ViewBundle {
       if (typeof e.sheetId !== "string" || typeof e.sheetName !== "string") {
         throw new Error("import — a patch variant entry does not name its sheet");
       }
-      const v = e.variant as Record<string, unknown> | null;
-      if (!v || typeof v !== "object" || Array.isArray(v)) {
+      const v = e.variant;
+      if (!isRecord(v)) {
         throw new Error(`import — the patch variant for "${e.sheetName}" is not an object`);
       }
       if (typeof v.id !== "string" || !v.id || typeof v.name !== "string") {
@@ -614,16 +614,22 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
       try {
         await patchStore.save(file);
       } catch (err) {
-        const msg = errorMessage(err);
-        skipped.push(`patch variants — could not be saved: ${msg}`);
-        console.error(`[view-import] patch variants failed: ${scrub(msg)}`);
-        // "kept" and "no-such-sheet" wrote nothing either way, so they are still
-        // true. Everything else described a write that did not happen.
-        const survived = patchOutcomes.filter(
-          (o) => o.outcome === "kept" || o.outcome === "no-such-sheet",
-        );
-        patchOutcomes.length = 0;
-        patchOutcomes.push(...survived);
+        if (err instanceof PatchLinksNotUpdated) {
+          // Stored and announced: every outcome stands. Only the stage plot points did not follow.
+          skipped.push("patch variants — saved, but the stage plot connection points could not be updated to follow the patch; saving the patch again retries it");
+          console.error(`[view-import] patch variants saved, stage plot points not updated: ${scrub(errorMessage(err.cause))}`);
+        } else {
+          const msg = errorMessage(err);
+          skipped.push(`patch variants — could not be saved: ${msg}`);
+          console.error(`[view-import] patch variants failed: ${scrub(msg)}`);
+          // "kept" and "no-such-sheet" wrote nothing either way, so they are still
+          // true. Everything else described a write that did not happen.
+          const survived = patchOutcomes.filter(
+            (o) => o.outcome === "kept" || o.outcome === "no-such-sheet",
+          );
+          patchOutcomes.length = 0;
+          patchOutcomes.push(...survived);
+        }
       }
     }
   }

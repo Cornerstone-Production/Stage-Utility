@@ -15,7 +15,7 @@ View kinds:
 | **Slots** | the mic channel grid — its own slot set per service type |
 | **Dashboard** | clock, service countdown, ProPresenter now/next |
 | **Stage** | confidence view — slide text, section, chords, thumbnail, timers |
-| **Captions** | full-screen auto-scrolling transcription |
+| **Captions** | full-screen transcription that follows the newest line; scroll up to read back, and back to the bottom to follow again |
 | **ServiceCue** | the full rundown with note columns, headers, lengths, live countdown |
 | **SPL Rundown** | a compact item-plus-level list for the live service |
 | **Calendar** | a month of [Planning Center Calendar](../integrations/planning-center.md#calendar) events, filtered by calendar and tag |
@@ -423,7 +423,6 @@ class means for backups.
 | `notes.json` | config | What was typed into notes and checklist objects, keyed by object |
 | `osc-targets.json` | config | [OSC](../integrations/osc.md) targets |
 | `patch.json` | config | The [patch sheet](../patch-sheet/README.md) |
-| `photo-themes.json` | config | [Photo themes](../features/photo-themes.md): each theme's name, prompt and people's photos (approved, and waiting for review or failed), and each plan's theme and Original / Themed switch |
 | `presets.json` | config | Slot presets |
 | `rosstalk-settings.json` | config | The RossTalk simulate switch |
 | `rosstalk-targets.json` | config | [RossTalk](../integrations/rosstalk.md) targets |
@@ -453,9 +452,9 @@ class means for backups.
 The three recordings are keyed stores: the name in the table is the legacy
 single-document file a pre-split install may still hold, and the live data is the
 folder beside it (`attendance-history/`, `service-timeline/`, `spl-history/`).
-Uploaded logos, layout images, stage-plot backgrounds and themed photos are files in
-`branding-images/`, `layout-images/`, `stageplot-images/` and `photo-theme-images/`,
-named by content hash and carried by a config snapshot. Uploaded stage-plot PDFs are in
+Uploaded logos, layout images and stage-plot backgrounds are files in
+`branding-images/`, `layout-images/` and `stageplot-images/`, named by content hash
+and carried by a config snapshot. Uploaded stage-plot PDFs are in
 `stageplot-originals/`, carried by a snapshot and never served.
 
 The custom tab and home-screen icon is nine `settings.json` fields: `appIcon`

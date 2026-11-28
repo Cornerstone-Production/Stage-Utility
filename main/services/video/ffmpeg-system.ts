@@ -35,6 +35,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
 import type { FfmpegStatus } from "../../types/video.js";
+import { isRecord } from "../../types/is-record.js";
 import { errorMessage } from "../errors.js";
 import { scrub } from "../scrub.js";
 import { ffmpegPathStore, loadFfmpegPath } from "./ffmpeg-path-store.js";
@@ -358,7 +359,7 @@ export type ParsedFfmpegPath = { ok: true; path: string } | { ok: false; error: 
  *  configuredPathProblem). Existence is not checked here; the check reports a
  *  path that does not run. */
 export function parseFfmpegPath(body: unknown, platform: NodeJS.Platform = process.platform): ParsedFfmpegPath {
-  const raw = typeof body === "object" && body !== null ? (body as Record<string, unknown>).path : undefined;
+  const raw = isRecord(body) ? body.path : undefined;
   if (typeof raw !== "string") return { ok: false, error: "path must be text." };
   const p = raw.trim();
   if (p === "") return { ok: true, path: "" };

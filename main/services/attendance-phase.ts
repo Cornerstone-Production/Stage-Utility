@@ -7,7 +7,9 @@
 //
 //   1. LATCH — a live plan item with an open record is the service proper, decided
 //      by live-service-gate. The plan's own SERVICE END / SERVICE START headers
-//      reclassify it to post/pre; nothing time-based may.
+//      reclassify it to post/pre; no clock may demote it. Once the record has
+//      closed, an item parked past SERVICE END is the emptying room, and falls
+//      through to the taper below, which bounds it.
 //
 //   2. ARRIVAL RAMP — no live item, but a service is coming up within the lead
 //      window. Tested BEFORE the taper on purpose: when two services are close
@@ -69,6 +71,19 @@ export interface PhaseContext {
   postMs: number;
 }
 
+/**
+ * Is `nowMs` inside the post-service taper of a record that ended at `endedAt`?
+ *
+ * The one test of the taper window: classifyPhase asks it to decide what to
+ * sample, and the recorder asks it to decide whether it still wants fresh
+ * people counts. Inclusive at the far edge; a window of 0 is no taper.
+ */
+export function inTaper(endedAt: string | null, postMs: number, nowMs: number = Date.now()): boolean {
+  if (!endedAt || postMs <= 0) return false;
+  const ended = Date.parse(endedAt);
+  return Number.isFinite(ended) && nowMs - ended <= postMs;
+}
+
 export function classifyPhase(
   live: PcoLiveDTO,
   ctx: PhaseContext,
@@ -77,9 +92,16 @@ export function classifyPhase(
   // 1. The latch. An already-open record plus a live item is ALWAYS the service —
   // that is the rule from the outage, and no clock may demote it to a taper.
   if (shouldRecordLive(live, ctx.hasOpenRecord, nowMs)) {
-    if (live.serviceEnded) return "post"; // parked on an item past SERVICE END
-    if (live.beforeServiceStart) return "pre"; // pre-roll item above SERVICE START
-    return "service";
+    if (!live.serviceEnded) {
+      return live.beforeServiceStart ? "pre" : "service"; // "pre": a pre-roll item above SERVICE START
+    }
+    // Parked on an item past SERVICE END. With the record still open this is
+    // the close, and the recorder stamps the end on it. Once it has closed, PCO
+    // stays parked there until somebody moves it, and that is the taper (step 3),
+    // bounded by its window. Answering "post" here for a closed record kept
+    // sampling for as long as the start window allowed, 12 h past the start,
+    // with the taper switched off too.
+    if (ctx.hasOpenRecord) return "post";
   }
 
   // 2. The arrival ramp.
@@ -97,10 +119,7 @@ export function classifyPhase(
   // arrival ramp has no serviceStartedAt, which is what keeps a late-starting
   // service from tapering its own arrival crowd (see the field's doc). "Filling
   // for the next" is already handled above: the ramp is tested first, on purpose.
-  if (ctx.postMs > 0 && ctx.endedAt && ctx.heldServiceStartedAt) {
-    const ended = Date.parse(ctx.endedAt);
-    if (Number.isFinite(ended) && nowMs - ended <= ctx.postMs) return "post";
-  }
+  if (ctx.heldServiceStartedAt && inTaper(ctx.endedAt, ctx.postMs, nowMs)) return "post";
 
   return null;
 }

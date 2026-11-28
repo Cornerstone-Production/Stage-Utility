@@ -163,17 +163,24 @@ describe("TranscriptFeed re-renders only the lines that changed", () => {
 // without `id` in it. Keeping the field is defensive, not load-bearing, and a
 // test asserting it is load-bearing would be asserting something false.
 
-describe("the scrollable feed's auto-scroll does not assume scrollIntoView exists", () => {
-  test("renders and updates without throwing when the element has no scrollIntoView", () => {
-    // jsdom ships no scrollIntoView at all (confirmed: typeof is "undefined",
-    // not a no-op stub) — the same gap flagged in service-history-section.tsx
-    // and worked around in flash.ts. No stub is installed here on purpose: an
-    // unguarded `endRef.current.scrollIntoView(...)` throws inside the
-    // passive effect the moment this renders, which is the point of the test.
-    const lines = buildBuffer(3);
-    assert.doesNotThrow(() => {
-      const { rerender } = render(<TranscriptFeed lines={lines} scrollable />);
-      rerender(<TranscriptFeed lines={[...lines, makeLine("L3", "a new line")]} scrollable />);
-    });
+describe("the scrollable feed's follow does not assume a ResizeObserver", () => {
+  test("renders and updates without throwing when the browser has no ResizeObserver", () => {
+    // installDom stubs ResizeObserver for every test; a kiosk browser need not
+    // have one, and an unguarded `new ResizeObserver` would throw inside the
+    // layout effect the moment this mounts. Removed here on purpose.
+    // installDom copies jsdom's window globals onto globalThis, which is where
+    // the component reads it from.
+    const g = globalThis as unknown as Record<string, unknown>;
+    const saved = g.ResizeObserver;
+    delete g.ResizeObserver;
+    try {
+      const lines = buildBuffer(3);
+      assert.doesNotThrow(() => {
+        const { rerender } = render(<TranscriptFeed lines={lines} scrollable />);
+        rerender(<TranscriptFeed lines={[...lines, makeLine("L3", "a new line")]} scrollable />);
+      });
+    } finally {
+      g.ResizeObserver = saved;
+    }
   });
 });

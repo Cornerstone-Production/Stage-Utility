@@ -12,7 +12,8 @@ or more is gzipped when the request sends `Accept-Encoding: gzip`, as every
 browser does; one that does not ask gets it plain.
 
 Failures answer `{error}` with the status that says whose problem it is: `400`
-for a body or query the caller got wrong, `409` for something the server cannot
+for a body or query the caller got wrong (a body that is not JSON is a `400` on every route that
+requires one), `409` for something the server cannot
 do right now (editing a service that is recording), `413` for an over-limit
 body, and `502` for a read that only failed because Planning Center could not be
 reached — every `/api/pco/*` read, plus `/api/service-types`, `/api/plans`,
@@ -408,7 +409,7 @@ thing.
 |--------|------|---------|
 | DELETE | `/api/service-timeline/:key` \| `/api/attendance/history/:key` \| `/api/spl/history/:key` | Delete the recording. Any of the three deletes **all three**; the response is `{ deleted, records }` naming what was removed |
 | GET | `/api/history/live?serviceKey=<key>` | Read-only (`400` without `serviceKey`): `{ live }`, whether any recorder is actively writing this key right now — the same check `assertNotLive` refuses on for the routes in this section that edit a recording (not every route here checks it — milestones and `/api/log/client` never do, and Reset pacing requires the opposite, a LIVE service). A client asks this before offering an action the server would otherwise 409, rather than guessing from a record it already holds |
-| POST | `/api/history/window` | Move a recording's start/end, trimming items and samples outside it: `{serviceKey, startedAt?, endedAt?}`, ISO strings (`400` without a string `serviceKey`). Answers `{ok: true}` |
+| POST | `/api/history/window` | Move a recording's start/end, trimming items and samples outside it: `{serviceKey, startedAt?, endedAt?, trim?}`, ISO strings; an absent stamp is left as it is. An edit that would delete any timeline item, SPL item, attendance sample or item time correction is refused with `409` and `{ error, code: "trims-data" }`, the message naming what would go, and nothing changes; send it again with `trim: true` to apply it. `400` without a string `serviceKey`, for a stamp that is not a time, or for an end not after the start (`code: "invalid-window"`). Answers `{ok: true}` |
 | POST | `/api/history/recalc` | Re-derive attendance aggregates from the stored samples: `{serviceKey}`. Answers `{ok: true}` |
 | POST | `/api/history/rebuild` | Recompute the timing, SPL, attendance and baptism summaries for `serviceKey` from the [raw rows](../data-archive.md). Answers `{ timeline, spl, attendance, baptism, baptismDetail?, failed }`, each of the first four `{ rebuilt, items, missing }`; `409` while the service is recording or when there are no raw rows at all — both carry a body of `{ error, code }`, `code` being `"live"` for the first and `"no-raw-rows"` for the second (see `/api/baptism/rebuild` below) — `500` for any other failure (no detail in the body — the reason is on the server's own log) |
 | POST | `/api/history/item-counted` | Override whether one item counts toward the service timers: `{serviceKey, itemId, counted}`. Answers `{ok: true}` |
@@ -471,7 +472,7 @@ routes, not this server's.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET / POST | `/api/patch` | The whole patch file / replace it. A save whose variants, overrides or assignments are not the shape the editor writes (an override that is not an object, a null where a list or object belongs) is `400` naming the first, logged on `[patch]`, and saves nothing; a `patch.json` already holding one is read without it, each value left out logged on `[patch]` once |
+| GET / POST | `/api/patch` | The whole patch file / replace it. A save whose variants, overrides or assignments are not the shape the editor writes (an override that is not an object, a null where a list or object belongs) is `400` naming the first, logged on `[patch]`, and saves nothing; a `patch.json` already holding one is read without it, each value left out logged on `[patch]` once. A save writes each linked stage plot point's last name and colour from the devices it holds; if that step fails the patch is still saved and announced and the answer is `500` with code `plot-links-not-updated`, logged on `[patch]`, and the next save retries it, devices the failed save removed included (the server remembers them until it restarts) |
 | GET | `/api/patch/export?sheetId=…&format=csv\|xlsx[&variantId=&includeUnused=1&planId=&serviceTypeId=]` | One sheet as a file. Unknown sheet, variant or format is `400` |
 | POST | `/api/patch/parse-xlsx` | Read a spreadsheet into `{headers, rows}` for the import mapper. Writes nothing |
 
@@ -683,7 +684,7 @@ nothing. A body that is not a JSON object is a `400`.
 | POST | `/api/stageplots/plots/:id/duplicate` | An independent copy named `"<name> copy"`, placed after the original. `201` with the copy; `400` past 20 plots in the venue |
 | PATCH | `/api/stageplots/plots/:id` | Any of `{name, backgroundId, bgFade}`, `backgroundId` an existing background or `null`, `bgFade` 0 to 1. Bumps the plot's `version`. A background that makes the plot shorter moves any item that no longer fits wholly on it up until it does (a cable's points below the new edge come up to it) |
 | DELETE | `/api/stageplots/plots/:id` | Removes every plan's override naming it, and answers `{ok: true, clearedPlans, defaultPlotId}` with those plans' ids. Deleting the venue's default makes the first plot left in tab order the default: `defaultPlotId` is the venue's default after the delete (the plot that took over, or the unchanged default when another plot was deleted), and is `null` only when no plot is left |
-| PUT | `/api/stageplots/plots/:id/items` | `{version, items}`: the plot's whole item list, saved against the `version` it was loaded at. `200` with `{plot}`, its `version` one higher; an unchanged list saves nothing and keeps the version. `409` with `{error: "changed elsewhere", version}` when the plot changed since, storing nothing. `400` naming the first item that breaks a rule (see [Items](#stage-plot-items)), or a `version` that is not a whole number. Each refusal is logged on `[stageplots]` |
+| PUT | `/api/stageplots/plots/:id/items` | `{version, items}`: the plot's whole item list, saved against the `version` it was loaded at. `200` with `{plot}`, its `version` one higher; an unchanged list saves nothing and keeps the version. `409` with `{error: "changed elsewhere", version}` when the plot changed since, storing nothing. `400` naming the first item that breaks a rule (see [Items](#stage-plot-items)), or a `version` that is not a whole number. A linked point's name and colour are the patch's as it is now, or, for a device gone from the patch, the ones already stored: a draft opened before a patch save never puts an older name back, unless it unlinked or relinked the point. Each refusal is logged on `[stageplots]` |
 | GET | `/api/stageplots/drafts` | `{drafts: [{plotId, baseVersion, items, savedAt}]}`: the editor's [kept drafts](../features/stageplots.md#save-and-discard), one per plot. A draft whose plot is not in the document is left out and logged on `[stageplots]`, and never deleted by this read: a `stageplots.json` that cannot be parsed reads as no plots at all |
 | PUT | `/api/stageplots/plots/:id/draft` | `{baseVersion, items}`: keep the plot's unsaved items as its draft, replacing any. The items are held to a save's rules and limits (`400` naming the first that breaks one), `baseVersion` is the plot version the draft was drawn on, and an unknown plot is `404`; each refusal is logged on `[stageplots]`. `200` with `{plotId, baseVersion, savedAt}`. A draft never changes the plot, never broadcasts `stageplots:updated` and is never published. A saved item list (`PUT …/items`, changed or not) deletes the plot's draft; a rename, a fade or a background change that moved no item carries the draft's `baseVersion` to the new version |
 | DELETE | `/api/stageplots/plots/:id/draft` | Delete the plot's draft (Discard). `{ok: true}`, also when there is none. Deleting a plot or a venue deletes the drafts of the plots it removed. A saved item list deletes its plot's draft, and a rename, fade or background change that moved no item moves the draft onto the new version; when the drafts file cannot be written then, that save, rename or delete still answers `200`, with `draftNotice` saying what was left undone (also logged on `[stageplots]`) |
@@ -718,43 +719,6 @@ characters with no control characters, `lastName` up to 60 characters and `lastC
 swatch or `null`. It is never checked against the patch, so a link to a device that is
 gone saves; on any other type it is a `400`. A plot holds up to 500 items, each `id`
 once. Any other field is dropped.
-
-### Photo themes
-
-Themed mic slot photos and the OpenAI key that makes them. See
-[Photo themes](../features/photo-themes.md). A theme id is the one these routes
-issue (`th-` and twelve hex digits); a person id is a Planning Center person id
-and a plan or service type id a Planning Center id (digits only). An id of the
-wrong shape is a `400` before anything is looked up; an unknown theme, or a person
-with no photo in it, is a `404`. A refusal is `{error}` naming the field or saying
-why: `409` for something not possible now (no key, a key OpenAI rejected, a plan
-with no theme, nothing waiting for review), `502` when the plan's roster cannot be
-read from Planning Center, `503` while `photo-themes.json` cannot be used or a
-config restore is landing. No answer carries the key: the connection is always
-described by its hint.
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/api/openai` | The connection: `{method, hint, state, reason, checkedAt}`. `method` is `api-key` or `null`, `hint` the key's last four characters (`sk-…3f2a`), `state` one of `not-connected`, `unchecked`, `connected`, `invalid-key`, `out-of-credits`, `forbidden`, `unreachable` |
-| PUT | `/api/openai/key` | `{apiKey}`: save the key, replacing any. Trimmed; 20 to 512 printable characters with no space, else `400`. Answers the connection |
-| DELETE | `/api/openai/key` | Remove the key. Answers the connection |
-| POST | `/api/openai/test` | Lists OpenAI's models with the key, which costs nothing. Answers the connection, its `reason` saying why when it does not work |
-| GET | `/api/photo-themes` | `{themes, plans, connection, running, queued}`. Each theme is `{id, name, prompt, promptChanged, createdAt, lastUsedDate, keptUntil, plans, people}`; `keptUntil` is the last day (app time zone) its photos are kept, `plans` the plans using it, and each person `{personId, name, status, promptChanged, approved, pending, originalUrl}`: `promptChanged` is true when their photo (the edit waiting for review, else the approved one) was made under an earlier prompt and has been neither redone nor kept, and a theme's `promptChanged` is true while any person's is; `originalUrl` is their Planning Center photo as this server last saw it, else the one their edit was made from, or `null`; `status` is `none`, `generating`, `ready`, `approved`, `stale` or `failed`, `approved` is `{url, fromPlanId, fromDate, approvedAt, stale}` or `null`, `pending` `{status, url, file, reason, planId}` or `null`, `file` being the stored edit's name that an approval sends back. Each plan choice is `{planId, serviceTypeId, sortDate, themeId, show}` |
-| POST | `/api/photo-themes/themes` | `{name, prompt}`: a name of 1 to 80 characters on one line, a prompt of 1 to 2000. `201` with the theme |
-| PATCH | `/api/photo-themes/themes/:id` | Any of `{name, prompt}`, held to the same rules. A new prompt on a theme with photos sets `promptChanged` on each person whose photo was made under another |
-| DELETE | `/api/photo-themes/themes/:id` | The theme and its photos; plans using it go back to their original photos. `{plans, photos}`: how many of each |
-| POST | `/api/photo-themes/themes/:id/keep-prompt` | Keep the photos made under an earlier prompt, everyone's on every plan: clears `promptChanged` |
-| POST | `/api/photo-themes/themes/:id/people/:personId/approve` | `{file}`, the stored edit that was shown for review (its `pending.file`). Approve it: it replaces any approved photo and goes on screens. `409` when none is waiting, or when the edit waiting is no longer that file (a Redo landed after it was shown); nothing is approved |
-| POST | `/api/photo-themes/themes/:id/people/:personId/keep` | Keep an approved photo made from an older Planning Center photo. `409` when their current photo is not known yet |
-| POST | `/api/photo-themes/themes/:id/people/:personId/redo` | `{planId, serviceTypeId}` (both or neither): make their photo again from their Planning Center photo on that plan (`404` when they are not on it, `502` with the reason when its roster cannot be read), or, with neither, from the last one the server saw. `202` with the person. `409` while one is already being made |
-| POST | `/api/photo-themes/themes/:id/people/:personId/move` | `{to}`, another theme: move their approved photo there, replacing any photo they have there. `409` when they have no approved photo, or one is being made |
-| POST | `/api/photo-themes/themes/:id/people/:personId/copy` | `{to}`: the same, leaving this theme's photo in place. A copy shares the stored file |
-| DELETE | `/api/photo-themes/themes/:id/people/:personId` | Take them out of the theme; every plan using it shows their original again. An edit of theirs being made is cancelled, and not sent if it has not been yet (this works for someone whose first photo is still being made). `404` when they have neither a photo nor one being made |
-| GET | `/api/photo-themes/plans/:planId?serviceTypeId=` | `{planId, serviceTypeId, choice, roster, reason?, people, toGenerate}`: the people the plan's shown boards put in a slot, each as a theme person plus `originalUrl` (their Planning Center photo, or `null`), and how many a Generate would send (people with a Planning Center photo, no approved photo and none waiting for review). `roster` is `live`, `plan` or `unavailable` with a `reason` |
-| PATCH | `/api/photo-themes/plans/:planId` | `{serviceTypeId, sortDate?, themeId?, show?}`, at least one of `themeId` and `show`. `themeId` a theme or `null`; choosing one sets `show` to `themed`. `show` is `original` or `themed`. `sortDate` is the plan's Planning Center sort date (an ISO date and time) or `null`; omitted, the one already stored is kept, or the current plan's is filled in. Answers the plan choice |
-| POST | `/api/photo-themes/plans/:planId/generate` | `{serviceTypeId, mode?}`. `mode` `missing` (the default) sends only people with no approved photo in the plan's theme and none waiting for review (an approved photo is reused, even after a failed Redo); `all` also sends the people on this plan whose photo has `promptChanged`, which clears it for them; people on other plans keep theirs until they are redone or kept. The plan's people read carries `toRedoAll` beside `toGenerate`: how many `all` would send, by the same rule. `202` with `{queued, reused, skipped: [{personId, name, reason}]}`. Progress arrives on `photo-themes:changed` |
-| POST | `/api/photo-themes/plans/:planId/approve-all` | `{people: [{personId, file}]}`, the ready edits that were shown, at most 500, each person once. Approves each that is still that file, waiting for review and made for this plan; an edit that landed after they were shown is left for review. `{approved, skipped}`, `skipped` naming the person ids left. `409` when none of them could be approved |
-| GET | `/api/photo-themes/images/:file` | A stored edit, ready or approved, served immutable with the stored-image policy. `404` for a name that is not one |
 
 ## Channels
 
@@ -853,12 +817,7 @@ something to change:
 `wireless:channels` · `wireless:chargers` · `calendar:grid` · `displays:presence` · `video:state` ·
 `video:probe` · `messages:state` · `home:snoozes` · `trends:prefs` · `boards:changed` (the last
 write to the slot boards, `{epoch, seq, boards: [{id, meta, targets}]}`; see
-[Network traffic](../ops/network-traffic.md#slot-boards)) · `photo-themes:changed`
-(`{epoch, seq, running, queued, active: [{themeId, personId}], connection}`: theme
-photos being made or waiting, and the OpenAI connection as `GET /api/openai` answers
-it, sent when the queue, a theme or the connection changes and only while somebody is
-subscribed; a `seq` that is not the next one, or a new `epoch`, says a change was
-missed and `GET /api/photo-themes` should be read again)
+[Network traffic](../ops/network-traffic.md#slot-boards))
 
 **Pushed only when something happens:**
 
@@ -915,7 +874,7 @@ Either channel having a subscriber starts the five-second read.
 
 | Method | Path | Purpose |
 |--------|------|---------|
-| GET | `/photos?u=…[&s=N]` | Cached Planning Center photo proxy. `u` must be an `https` URL on `planningcenteronline.com`; anything else, and any redirect, is refused — it is not a general-purpose proxy (`400` without `u`, `404` for a photo it will not serve, `500` for a failed read). The `200` is `public, max-age=31536000, immutable`, except a full-size photo standing in for a smaller one Planning Center would not give, which is `no-cache`. `s` is the longest side the photo is drawn at, in device pixels, rounded up to 128, 192, 256, 384, 512 or 768; it scales `u`'s geometry down, never up, and anything else is ignored. See [Photos](../integrations/planning-center.md#photos). A `u` of `photo-theme:<file>` is an approved [themed photo](../features/photo-themes.md#what-screens-show), served from the server's own store as it was made (`s` is ignored), immutable, `404` for a name it does not hold |
+| GET | `/photos?u=…[&s=N]` | Cached Planning Center photo proxy. `u` must be an `https` URL on `planningcenteronline.com`; anything else, and any redirect, is refused — it is not a general-purpose proxy (`400` without `u`, `404` for a photo it will not serve, `500` for a failed read). The `200` is `public, max-age=31536000, immutable`, except a full-size photo standing in for a smaller one Planning Center would not give, which is `no-cache`. `s` is the longest side the photo is drawn at, in device pixels, rounded up to 128, 192, 256, 384, 512 or 768; it scales `u`'s geometry down, never up, and anything else is ignored. See [Photos](../integrations/planning-center.md#photos) |
 | GET | `/log` | The server's recent output, as a page, with a health strip and level/source filters. Token-gated when `STAGE_UTILITY_LOG_TOKEN` is set |
 | GET | `/logs` | Redirects to `/log`, query string intact. Same gate, checked before the redirect — an unauthorised request is a 401, never a 302 into one |
 | GET | `/api/log[?since=N]` | `{ lines, reset, latestSeq, checks }`. Same gate. Omit `since` for the whole buffer; pass the previous `latestSeq` to get only what is newer. `reset: true` means replace rather than append — you asked for everything, the buffer rolled past your cursor, or your cursor is above the newest line, which means it came from before a restart (`seq` is per-process and starts again at 1). `checks` is the health snapshot the page draws: version, uptime, app time zone, warning and error counts, and one entry per configured integration |
@@ -930,7 +889,7 @@ Either channel having a subscriber starts the five-second read.
 | GET | `/manifest.webmanifest` | The web app manifest, built per request: `name` and `short_name` are the app name, so renaming the app renames the home-screen label on Android. `no-cache` |
 | GET | `/apple-touch-icon.png` \| `/icon-192.png` \| `/icon-512.png` \| `/icon-maskable-512.png` | The home-screen icons the pages and the manifest name. The operator's own [tab and home-screen icon](../features/operator-app.md#branding) when one is set, else the built-in file, and the built-in file too when the stored one is missing. A query string is ignored. `no-cache`, so a new icon reaches the next install. The operator's icon carries the uploaded images' `Content-Security-Policy` |
 | POST | `/api/layout-images` | Store an image and return its URL |
-| GET | `/api/history/export` | The service report as a spreadsheet (`?from=&to=&include=…`, `include` a comma-separated choice of `services`, `attendance`, `items`, `spl` and `baptisms`; names it does not know are ignored) |
+| GET | `/api/history/export` | The service report as a spreadsheet (`?from=&to=&include=…`, `include` a comma-separated choice of `services`, `attendance`, `items`, `spl` and `baptisms`; names it does not know are ignored). `from` and `to` are inclusive `YYYY-MM-DD` days, either left out or empty for an open end; anything else, including a day that does not exist, is a 400 |
 
 Everything else is the app itself: `/<display id>` and `/<slug>` render a
 screen, and the operator pages render the app — see
