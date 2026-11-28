@@ -17,7 +17,7 @@ import { useServerNow } from "@renderer/lib/server-clock";
 import { Popover as PopoverPrimitive } from "radix-ui";
 
 import { confirm, EmptyState, ErrorNote, Skeleton, SkeletonRows, Button, toast, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
-import { copyText } from "../../lib/clipboard";
+import { copyReport } from "../../lib/copy-report";
 import { prefersReducedMotion } from "../../lib/reduced-motion";
 import { HistoryCalendar } from "../../components/history-calendar";
 import { AppLink } from "../../app/app-link";
@@ -1247,16 +1247,14 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     const sections = linkedBap.length > 0
       ? [SERVICE_SECTIONS[0], { id: "history-baptisms", label: "Baptisms" }, ...SERVICE_SECTIONS.slice(1)]
       : SERVICE_SECTIONS;
-    async function copyReport() {
+    async function copyServiceReport() {
       // The page opens before the attendance and sound are read, and a report
       // copied then would leave them out without saying so.
       if (reading("attendance") || splPending) {
         toast.info("This service is still loading — copy the report once its charts appear");
         return;
       }
-      const ok = await copyText(buildReport(det, attendance, spl, linkedBap));
-      if (ok) toast.success("Report copied to clipboard");
-      else toast.error("Couldn't copy the report");
+      await copyReport(buildReport(det, attendance, spl, linkedBap));
     }
     function startEditTimes() {
       // In the APP's zone, the one the server dates the service in. This
@@ -1570,7 +1568,7 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
           sections={sections}
           onBack={() => setSelectedKey(null)}
           onEditTimes={startEditTimes}
-          onCopyReport={copyReport}
+          onCopyReport={copyServiceReport}
           onMerge={mergeCandidates.length > 0 ? () => { setMerging((v) => !v); setEditingTimes(false); } : undefined}
           onRebuild={rebuildFromRaw}
           onDelete={() => void deleteService(det.serviceKey, det.planTitle ?? det.serviceKey)}

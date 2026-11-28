@@ -26,7 +26,7 @@ import { CopyIcon, DownloadIcon, WrenchIcon } from "lucide-react";
 
 import { cn } from "../../../lib/cn";
 import { Button, toast } from "../../../components/ui";
-import { copyText } from "../../../lib/clipboard";
+import { copyReport } from "../../../lib/copy-report";
 import { useServerNow } from "../../../lib/server-clock";
 import { fmtBaptizeMs, fmtClock, fmtDate } from "../../../main/use-baptism-state";
 import { RecordingPill, useSectionNav, useHeaderInset } from "../history-service-header";
@@ -144,9 +144,7 @@ export function BaptismHeader({
   const displayed = hoverFigures ?? shown;
 
   async function onCopyReport() {
-    const ok = await copyText(baptismReportText(state, allFigures));
-    if (ok) toast.success("Report copied to clipboard");
-    else toast.error("Couldn't copy the report");
+    await copyReport(baptismReportText(state, allFigures));
   }
 
   function onExport() {
