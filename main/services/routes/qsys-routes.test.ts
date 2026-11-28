@@ -286,6 +286,9 @@ describe("/api/qsys", () => {
       const press = await quietly(() => write({ component: "Lobby_Mixer", control: "mute", value: true, lease: true, cid: "page-9", panelId: "panel-m" }));
       assert.equal((press.json as { ok: boolean }).ok, true);
       assert.equal(qsysWriter.leases.has(MUTE_ADDR), true, "the press took no lease");
+      const latency = ((await callRoute(qsysRoutes, "/api/qsys/status")).json as { latency: { write: { count: number; p95: number | null } } }).latency;
+      assert.ok(latency.write.count >= 1 && latency.write.p95 !== null, "the status reports no write latency after a write");
+      assert.equal("broadcast" in latency, false, "the status reports a broadcast figure that times a synchronous loop");
       const stranger = await callRoute(qsysRoutes, "/api/qsys/lease", { method: "POST", body: { component: "Lobby_Mixer", control: "mute", cid: "page-8" } });
       assert.deepEqual(stranger.json, { held: false }, "another page's stream renewed it");
       const renew = await callRoute(qsysRoutes, "/api/qsys/lease", { method: "POST", body: { component: "Lobby_Mixer", control: "mute", cid: "page-9" } });

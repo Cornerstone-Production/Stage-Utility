@@ -34,6 +34,7 @@ import type { QrcControl } from "./qrc-types.js";
 import { isAddressPart, qsysAllowlist } from "./qsys-allowlist-store.js";
 import { qsysService, type QsysCatalog } from "./qsys-service.js";
 import { qsysWatch } from "./qsys-watch.js";
+import { LatencyWindow, type LatencyStats } from "./qsys-latency.js";
 import { QsysLeases, type Lease, type LeaseEnd, type ReleaseCause } from "./qsys-leases.js";
 import { PRE_SEND_REFUSALS, qsysWriteLog } from "./qsys-write-log.js";
 
@@ -83,6 +84,8 @@ export interface WriteSource {
   /** Which Core the settings name; a release owed to one Core is never sent to another. */
   readonly core: string | null;
   getCatalog(): QsysCatalog | null;
+  /** Each time the connection is torn down; the hourly latency timer is cleared from here. Optional for stand-ins. */
+  onDisconnect?(cb: () => void): () => void;
 }
 
 /** What the writer needs from the watch. QsysWatch satisfies it. */
@@ -106,6 +109,9 @@ const MAX_TEXT = 1024;
 export const OWED_MAX_ATTEMPTS = 5;
 /** On a live connection a failed try is retried after this, doubling each time. */
 export const OWED_RETRY_MS = 500;
+
+/** How often the write latency is written to the log, while connected and only if there were writes. */
+export const LATENCY_LINE_INTERVAL_MS = 60 * 60_000;
 
 /** A numeric read-back this close to what was sent is the same value (the Core's float precision is unverified). */
 const READBACK_TOLERANCE = 0.01;
@@ -240,6 +246,11 @@ export class QsysWriter {
    */
   loadViews: () => Promise<View[]> = () => viewsStore.loadStrict();
   private readonly stopListening: () => void;
+  private readonly stopDisconnectListening: () => void;
+  /** Send-to-reply time of each write the Core answered. */
+  private readonly confirmLatency = new LatencyWindow();
+  /** The hourly latency line's timer: armed by a write, so none runs while nothing is written. */
+  private latencyTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     private readonly source: WriteSource,
@@ -247,14 +258,44 @@ export class QsysWriter {
     private readonly now: () => number = Date.now,
   ) {
     this.stopListening = watch.onReady?.(() => void this.sendOwed()) ?? (() => {});
+    this.stopDisconnectListening = source.onDisconnect?.(() => this.clearLatencyTimer()) ?? (() => {});
   }
 
   /** Stop hearing readiness and forget every lease and owed release; for tests and shutdown. */
   dispose(): void {
     this.stopListening();
+    this.stopDisconnectListening();
+    this.clearLatencyTimer();
     this.leases.clear();
     for (const o of this.owed.values()) if (o.retry) clearTimeout(o.retry);
     this.owed.clear();
+  }
+
+  /** Write confirm time (send to the Core's reply) over the last writes, for the status. */
+  latencyStats(): LatencyStats {
+    return this.confirmLatency.stats();
+  }
+
+  /** No timer is pending while the Core is away. Writes already counted stay counted; the next write arms it again and the line then reports them. */
+  private clearLatencyTimer(): void {
+    if (this.latencyTimer) clearTimeout(this.latencyTimer);
+    this.latencyTimer = null;
+  }
+
+  private noteConfirmed(ms: number): void {
+    this.confirmLatency.record(ms);
+    if (this.latencyTimer) return;
+    this.latencyTimer = setTimeout(() => this.reportLatency(), LATENCY_LINE_INTERVAL_MS);
+    this.latencyTimer.unref?.();
+  }
+
+  /** One line per hour: written only if the Core is connected. The timer exists only because a write armed it, so there were writes; the next write arms it again. */
+  private reportLatency(): void {
+    this.latencyTimer = null;
+    // Counted writes are kept until a line reports them: not taken while the Core is away.
+    if (!this.source.transport) return;
+    const writes = this.confirmLatency.takeSince();
+    console.log(`[qsys] write p95 ${scrub(this.confirmLatency.stats().p95)} ms (${scrub(writes)} writes)`);
   }
 
   /** The server's own release write: one control to false, as its own write-log entry. */
@@ -585,11 +626,13 @@ export class QsysWriter {
         this.leases.hold({ component, control, cid: req.cid ?? null, connection, panelId: req.panelId, device: req.device, remote: req.remote, designCode, core });
       }
     };
+    const sentAt = performance.now();
     const sending = t.send("Component.Set", { Name: component, Controls: [{ Name: control, Value: checked.send }], ResponseValues: true });
 
     let reply: unknown;
     try {
       reply = await sending;
+      this.noteConfirmed(performance.now() - sentAt);
     } catch (err) {
       if (err instanceof QrcError) return refuse("core-error", `the Core refused the write to ${where}: ${err.message}`);
       // It may have landed: a momentary press takes its lease all the same, so it is released.
