@@ -19,7 +19,7 @@ import { LayoutRenderer } from "./layout-renderer";
 import { viewSurface, KIND_DRAWS_TOP_BAR, type ViewKind } from "@main/types/views";
 import { Loader2Icon, AlertCircleIcon, MonitorIcon } from "lucide-react";
 import { resolveDisplayId } from "./resolve-display";
-import { isPreviewSlug, previewOutputId, previewViewIdFromSlug } from "./preview-url";
+import { currentSlug, isPreviewSlug, previewOutputId, previewViewIdFromSlug } from "./preview-url";
 import { ownScreen, resolveScreen, type OwnScreen, type ScreenChrome, type StageScreen } from "./stage-screen";
 import { MessageAlertOverlay } from "./message-alert-overlay";
 import { anyPlaying, drainReportsInTime, onAnyPlayingChange, VIDEO_HEARTBEAT_MS } from "./video/playback-reports";
@@ -27,7 +27,7 @@ import { anyPlaying, drainReportsInTime, onAnyPlayingChange, VIDEO_HEARTBEAT_MS 
 // Resolve which display this kiosk window is showing. Prefers the clean path
 // form (/display-1), falling back to the legacy ?display= query, then default.
 function getDisplayId(): string {
-  const slug = window.location.pathname.replace(/^\/+|\/+$/g, "");
+  const slug = currentSlug();
   if (slug && slug !== "settings") return slug;
   return new URLSearchParams(window.location.search).get("display") ?? "display-1";
 }

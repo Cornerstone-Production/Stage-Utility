@@ -13,7 +13,7 @@
 import assert from "node:assert/strict";
 import { test, describe } from "node:test";
 
-import { isPreviewSlug, previewOutputId, previewSrc, previewViewIdFromSlug } from "./preview-url.js";
+import { currentSlug, isPreviewSlug, previewOutputId, previewSrc, previewViewIdFromSlug } from "./preview-url.js";
 import { RESERVED_SLUG_PREFIX } from "../../main/services/reserved-slugs.js";
 
 /**
@@ -100,5 +100,15 @@ describe("isPreviewSlug", () => {
     assert.equal(isPreviewSlug(slug), true);
     assert.equal(isPreviewSlug("display-2"), false);
     assert.equal(isPreviewSlug("settings"), false);
+  });
+});
+
+describe("currentSlug", () => {
+  test("trims slashes at both ends, so a trailing slash names the same page", () => {
+    assert.equal(currentSlug("/preview-x/"), "preview-x");
+    assert.equal(currentSlug("/preview-x"), "preview-x");
+    assert.equal(currentSlug("//display-2//"), "display-2");
+    assert.equal(currentSlug("/"), "");
+    assert.equal(previewViewIdFromSlug(currentSlug("/preview-x/")), "x", "the view id must not keep a slash");
   });
 });

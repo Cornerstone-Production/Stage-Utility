@@ -26,7 +26,7 @@
 // read guard, so every listener checks origin, sender and view the same way.
 
 import { useEffect, useState } from "react";
-import { previewViewIdFromSlug } from "./preview-url";
+import { currentSlug, previewViewIdFromSlug } from "./preview-url";
 
 const DRAFT = "stage-utility:preview-draft";
 const READY = "stage-utility:preview-ready";
@@ -89,7 +89,7 @@ export function readPreviewMessage(e: MessageEvent, from: Window | null | undefi
 
 /** The view this page previews, from its own address, or null on a real display. */
 function ownPreviewViewId(): string | null {
-  let slug = window.location.pathname.slice(1);
+  let slug = currentSlug();
   try {
     slug = decodeURIComponent(slug);
   } catch {
