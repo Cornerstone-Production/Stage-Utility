@@ -23,6 +23,7 @@ import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-m
 import { useContextMenuState, useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
 import { confirm } from "../../components/ui/confirm-dialog";
 import { Input } from "../../components/ui/input";
+import { moveTo } from "../../lib/list-move";
 import { cn } from "../../lib/cn";
 import { usePressDrag } from "../../lib/use-press-drag";
 import { tabClass } from "../../main/stageplots/doc-helpers";
@@ -43,13 +44,6 @@ function Star() {
 /** Why a row cannot be chosen, after its label. */
 function Why({ children }: { children: string }) {
   return <small className="ml-auto pl-3 text-[11px] text-fg-subtle">{children}</small>;
-}
-
-/** `ids` with `id` moved to sit at `to` (an index into the list without it). */
-export function moved(ids: readonly string[], id: string, to: number): string[] {
-  const rest = ids.filter((x) => x !== id);
-  const at = Math.max(0, Math.min(to, rest.length));
-  return [...rest.slice(0, at), id, ...rest.slice(at)];
 }
 
 /** What the delete confirm says: what goes, which plot takes over as default, which plans fall back. */
@@ -173,7 +167,7 @@ export function PlotTabs({
     slop: DRAG_SLOP_PX,
     axis: "x",
     onMove: (id, e) => setDropAt({ id, index: slotAt(id, e.clientX, e.clientY) }),
-    onDrop: (id, e) => void reorder(moved(shown.map((p) => p.id), id, slotAt(id, e.clientX, e.clientY))),
+    onDrop: (id, e) => void reorder(moveTo(shown.map((p) => p.id), id, slotAt(id, e.clientX, e.clientY))),
     onEnd: () => setDropAt(null),
   });
   const onTabPointerDown = (e: ReactPointerEvent<HTMLButtonElement>, id: string) => {
@@ -190,8 +184,8 @@ export function PlotTabs({
       { label: "Rename", rename: true, run: () => setRenaming(p.id) },
       { label: "Duplicate", disabled: plots.length >= STAGEPLOT_LIMITS.plotsPerVenue, run: () => void duplicate(p) },
       { label: "Set as default", disabled: isDefault, why: isDefault ? "Already the default" : undefined, run: () => void run(() => stageplotsApi.setDefault(venue.id, p.id)) },
-      { label: "Move left", disabled: index === 0, run: () => void reorder(moved(ids, p.id, index - 1)) },
-      { label: "Move right", disabled: index === shown.length - 1, run: () => void reorder(moved(ids, p.id, index + 1)) },
+      { label: "Move left", disabled: index === 0, run: () => void reorder(moveTo(ids, p.id, index - 1)) },
+      { label: "Move right", disabled: index === shown.length - 1, run: () => void reorder(moveTo(ids, p.id, index + 1)) },
       { label: "Delete…", danger: true, separated: true, run: () => void remove(p) },
     ];
   };

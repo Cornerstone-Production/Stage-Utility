@@ -8,7 +8,7 @@ import { describe, test } from "node:test";
 import type { ServiceCueLayout } from "../../../main/types/pco.js";
 import type { CategoryRole } from "../../../main/types/servicecue-roles.js";
 import { insertIndex, stackIndex, type Rect } from "./servicecue-drag.js";
-import { columnPatch, copyName, duplicateLayout, moveTo, noticeGroups, noticeText, placeDrawn, reorderLayouts, trayItems, unassignedByType } from "./servicecue-layouts-model.js";
+import { columnPatch, copyName, duplicateLayout, noticeGroups, noticeText, placeDrawn, reorderLayouts, trayItems, unassignedByType } from "./servicecue-layouts-model.js";
 
 const box = (left: number, top: number, w = 80, h = 30): Rect => ({ left, top, right: left + w, bottom: top + h });
 
@@ -44,12 +44,6 @@ describe("where a pointer drop lands", () => {
 const layout = (id: string, order: number, extra: Partial<ServiceCueLayout> = {}): ServiceCueLayout => ({ id, name: id, order, ...extra });
 
 describe("what a change saves", () => {
-  test("moveTo counts the list without the item moved", () => {
-    assert.deepEqual(moveTo(["a", "b", "c"], "a", 2), ["b", "c", "a"]);
-    assert.deepEqual(moveTo(["a", "b", "c"], "c", 0), ["c", "a", "b"]);
-    assert.deepEqual(moveTo(["a", "b"], "z", 1), ["a", "z", "b"], "an item not in the list is inserted");
-  });
-
   const role = (id: string): CategoryRole => ({ id, name: id.toUpperCase(), members: [id] });
   const ROLES = ["a", "b", "c"].map(role);
 

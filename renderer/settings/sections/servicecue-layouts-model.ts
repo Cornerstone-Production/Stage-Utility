@@ -9,6 +9,7 @@
 import { firstFree } from "@main/services/first-free";
 import { layoutNameKey } from "@main/services/servicecue-slug";
 import { joinWithAnd } from "../../lib/join-with-and.js";
+import { moveTo } from "../../lib/list-move.js";
 import type { ServiceCueLayout } from "../../../main/types/pco.js";
 import type { CategoryRole } from "../../../main/types/servicecue-roles.js";
 import { norm, unassignedCategoryRoles } from "../../main/role-resolve";
@@ -80,13 +81,6 @@ export function trayItems(l: ServiceCueLayout, roles: readonly CategoryRole[]): 
     ...roles.filter((r) => !shown.has(r.id)).map((r): TrayItem => ({ kind: "role", id: r.id, name: r.name, empty: r.members.length === 0 })),
     ...fixed("showMaxSpl"),
   ];
-}
-
-/** `item` moved to `index` of the list without it. */
-export function moveTo<T>(list: readonly T[], item: T, index: number): T[] {
-  const out = list.filter((x) => x !== item);
-  out.splice(Math.max(0, Math.min(index, out.length)), 0, item);
-  return out;
 }
 
 /** One change to a layout's Columns row. `index` counts the role columns DRAWN (layoutRoles),

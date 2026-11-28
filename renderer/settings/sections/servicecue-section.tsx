@@ -5,6 +5,7 @@ import { AlertCircleIcon, PlusIcon, ChevronLeftIcon, ChevronDownIcon } from "luc
 import { Button, Checkbox, ErrorNote, confirm, SkeletonRows } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { joinWithAnd } from "../../lib/join-with-and";
+import { moveTo } from "../../lib/list-move";
 import { invoke } from "../../lib/api";
 import { useFailedReads } from "../../lib/use-failed-reads";
 import { useInAppLink } from "../../lib/use-search-param";
@@ -26,7 +27,6 @@ import {
   duplicateLayout,
   FIXED_LABEL,
   layoutRoles,
-  moveTo,
   newLayout,
   noticeText,
   noticeGroups as noticeGroupsOf,
