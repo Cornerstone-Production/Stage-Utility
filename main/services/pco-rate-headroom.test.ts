@@ -14,6 +14,7 @@
 
 import assert from "node:assert/strict";
 import { test, describe, beforeEach, afterEach } from "node:test";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 import { buildLogChecks } from "./log-checks.js";
 import {
@@ -32,8 +33,6 @@ let inFlight = 0;
 let peak = 0;
 
 const realFetch = globalThis.fetch;
-const realWarn = console.warn;
-const realLog = console.log;
 let warns: string[] = [];
 let logs: string[] = [];
 
@@ -72,22 +71,18 @@ async function burst(n: number): Promise<void> {
 }
 
 describe("PCO rate headroom", () => {
-  beforeEach(() => {
+  beforeEach((t) => {
     headers = rate(1);
     inFlight = 0;
     peak = 0;
-    warns = [];
-    logs = [];
-    console.warn = (...args: unknown[]) => void warns.push(args.map(String).join(" "));
-    console.log = (...args: unknown[]) => void logs.push(args.map(String).join(" "));
+    warns = captureConsole(t, "warn");
+    logs = captureConsole(t, "log");
     pcoService.clearCache();
     stubFetch();
   });
 
   afterEach(() => {
     globalThis.fetch = realFetch;
-    console.warn = realWarn;
-    console.log = realLog;
     pcoService.clearCache();
     // Leave the shared singleton clear — a tight flag carried into another file's
     // tests would throttle them and read as a flake.

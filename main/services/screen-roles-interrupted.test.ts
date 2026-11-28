@@ -14,6 +14,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, describe, it } from "node:test";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-screen-roles-interrupted-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -40,7 +41,7 @@ describe("a start that dies after saving a copy, before the screens are written"
     await fs.rm(TMP, { recursive: true, force: true });
   });
 
-  it("reuses the copy it left, says so, and makes no second one", async () => {
+  it("reuses the copy it left, says so, and makes no second one", async (t) => {
     await fs.writeFile(
       path.join(TMP, "settings.json"),
       JSON.stringify({
@@ -71,11 +72,8 @@ describe("a start that dies after saving a copy, before the screens are written"
       if ("outputs" in partial) throw new Error("the process died");
       return real(partial);
     };
-    const lines: string[] = [];
-    const realLog = console.log;
-    const realWarn = console.warn;
-    console.log = (...a: unknown[]) => { lines.push(a.map(String).join(" ")); };
-    console.warn = () => {};
+    const lines = captureConsole(t, "log");
+    captureConsole(t, "warn");
     try {
       await assert.rejects(() => stageController.init(), /the process died/);
       const savedViews = JSON.parse(await fs.readFile(path.join(TMP, "views.json"), "utf8")) as { name: string }[];
@@ -88,8 +86,6 @@ describe("a start that dies after saving a copy, before the screens are written"
       lines.length = 0;
       await stageController.init();
     } finally {
-      console.log = realLog;
-      console.warn = realWarn;
       settingsStore.patch = real;
     }
 

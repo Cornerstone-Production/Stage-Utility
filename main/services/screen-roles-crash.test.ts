@@ -18,6 +18,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, describe, it } from "node:test";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-screen-roles-crash-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -40,7 +41,7 @@ describe("a start that dies after the screens were written", () => {
     await fs.rm(TMP, { recursive: true, force: true });
   });
 
-  it("leaves every live screen live and every read-only screen read-only on the start after", async () => {
+  it("leaves every live screen live and every read-only screen read-only on the start after", async (t) => {
     await fs.writeFile(
       path.join(TMP, "settings.json"),
       JSON.stringify({
@@ -75,17 +76,13 @@ describe("a start that dies after the screens were written", () => {
       if ("outputs" in partial) screensWritten = true;
       return result;
     };
-    const realLog = console.log;
-    const realWarn = console.warn;
-    console.log = () => {};
-    console.warn = () => {};
+    captureConsole(t, "log");
+    captureConsole(t, "warn");
     try {
       await stageController.init().catch(() => undefined);
       settingsStore.patch = real;
       await stageController.init();
     } finally {
-      console.log = realLog;
-      console.warn = realWarn;
       settingsStore.patch = real;
     }
 

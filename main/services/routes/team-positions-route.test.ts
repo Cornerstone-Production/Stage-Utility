@@ -12,6 +12,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, beforeEach, describe, test } from "node:test";
+import { captureConsole } from "../fixtures/capture-console.js";
 
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), "team-positions-route-"));
 process.env.STAGE_UTILITY_DATA = DIR;
@@ -52,12 +53,11 @@ let warned: string[] = [];
 
 const realTypes = pco.listServiceTypes;
 const realPositions = pco.listTeamPositions;
-const realWarn = console.warn;
 
-beforeEach(() => {
+beforeEach((t) => {
   asked = [];
   failing = new Set();
-  warned = [];
+  warned = captureConsole(t, "warn");
   ctl.pcoAppId = "app";
   ctl.pcoSecret = "secret";
   ctl.state = { ...ctl.state, serviceTypeId: "101" };
@@ -67,15 +67,11 @@ beforeEach(() => {
     if (failing.has(id)) throw new Error("Planning Center returned 503");
     return POSITIONS[id] ?? [];
   };
-  console.warn = (...args: unknown[]) => {
-    warned.push(args.map(String).join(" "));
-  };
 });
 
 after(() => {
   pco.listServiceTypes = realTypes;
   pco.listTeamPositions = realPositions;
-  console.warn = realWarn;
 });
 
 describe("GET /api/team-positions", () => {

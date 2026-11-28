@@ -8,6 +8,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, describe, test } from "node:test";
+import { captureConsole } from "../fixtures/capture-console.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stageplots-last-name-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -175,40 +176,35 @@ describe("the edges of keeping a last name", () => {
     assert.equal((await stored(plotId)).lastName, "Snare Box", "the plot save resolved against the patch it read before the patch save");
   });
 
-  test("a plot saved while the patch cannot be read keeps the stored names and says so on [stageplots]", async () => {
+  test("a plot saved while the patch cannot be read keeps the stored names and says so on [stageplots]", async (t) => {
     const plotId = await linkedPlot("Old Box");
     await patchStore.save(patchOf([{ id: "sb1", name: "Drum Box" }]));
     const real = patchStore.loadStrict.bind(patchStore);
     patchStore.loadStrict = async () => {
       throw new Error("patch.json was damaged");
     };
-    const lines: string[] = [];
-    const warn = console.warn;
-    console.warn = (...a: unknown[]) => void lines.push(a.map(String).join(" "));
+    const lines = captureConsole(t, "warn");
     try {
       const r = await draftPut(plotId, "Old Box");
       assert.equal(r.status, 200, r.body);
     } finally {
       patchStore.loadStrict = real;
-      console.warn = warn;
     }
     assert.equal((await stored(plotId)).lastName, "Drum Box");
     assert.ok(lines.some((l) => l.startsWith("[stageplots]") && l.includes("could not be read") && l.includes("patch.json was damaged")), lines.join(" / "));
   });
 
-  test("a retry after a failed follower still stamps the device the failed save removed", async () => {
+  test("a retry after a failed follower still stamps the device the failed save removed", async (t) => {
     const plotId = await linkedPlot("Old Box");
     await patchStore.save(patchOf([{ id: "sb1", name: "Mid Box", color: "#e5484d" }]));
     await stale(plotId, "Old Box");
     const real = stageplotsStore.update.bind(stageplotsStore);
     stageplotsStore.update = () => Promise.reject(new Error("disk full"));
-    const quiet = console.error;
-    console.error = () => undefined;
+    captureConsole(t, "error");
     try {
       await assert.rejects(patchStore.save(patchOf([])), PatchLinksNotUpdated);
     } finally {
       stageplotsStore.update = real;
-      console.error = quiet;
     }
     assert.equal((await stored(plotId)).lastName, "Old Box", "the failed save stamped anyway");
     await patchStore.save(patchOf([]));

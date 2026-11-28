@@ -11,6 +11,7 @@
 
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, it } from "node:test";
+import { captureConsole } from "../fixtures/capture-console.js";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -27,7 +28,6 @@ const { pkgVersion } = await import("../updater.js");
 
 const RUNNING = `v${pkgVersion()}`;
 const realFetch = globalThis.fetch;
-const realWarn = console.warn;
 
 const notice = {
   version: RUNNING,
@@ -46,17 +46,16 @@ const whatsNew = async () => {
   return out.json as { ok: boolean; version: string; notes?: { lines: string[] }[]; releaseUrl: string };
 };
 
-beforeEach(async () => {
+beforeEach(async (t) => {
   clearReleaseCache();
   // GitHub is never reachable here: every answer below comes from the store.
   globalThis.fetch = (async () => {
     throw new Error("getaddrinfo ENOTFOUND api.github.com");
   }) as typeof fetch;
-  console.warn = () => {};
+  captureConsole(t, "warn");
   await updateNoticesStore.save({ announcedTag: null, justUpdated: null, releaseNotes: null });
 });
 afterEach(() => {
-  console.warn = realWarn;
   globalThis.fetch = realFetch;
 });
 after(() => fs.rm(TMP, { recursive: true, force: true }).catch(() => {}));

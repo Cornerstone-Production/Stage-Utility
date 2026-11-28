@@ -24,6 +24,7 @@
 
 import assert from "node:assert/strict";
 import { describe, test, before, beforeEach, afterEach } from "node:test";
+import { captureConsole } from "./fixtures/capture-console.js";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -40,14 +41,12 @@ const {
 } = await import("./integration-manager.js");
 const { settingsStore } = await import("./settings-store.js");
 const { secretsStore } = await import("./secrets.js");
-import { errorMessage } from "./errors.js";
 import type { IntegrationState } from "../types/integrations.js";
 
 const SPACE_ID = "ss-invented-never-real-0003";
 const VEA_SECRET = "vea-invented-client-secret-0003";
 
 const realSetMany = secretsStore.setManySecrets.bind(secretsStore);
-const realError = console.error;
 let logs: string[] = [];
 
 /** sensource's stored config as settings.json actually holds it. */
@@ -68,15 +67,11 @@ describe("a credential migration that cannot write", () => {
     });
   });
 
-  beforeEach(() => {
-    logs = [];
-    console.error = (...args: unknown[]) => {
-      logs.push(args.map((a) => errorMessage(a)).join(" "));
-    };
+  beforeEach((t) => {
+    logs = captureConsole(t, "error");
   });
 
   afterEach(() => {
-    console.error = realError;
     secretsStore.setManySecrets = realSetMany;
   });
 

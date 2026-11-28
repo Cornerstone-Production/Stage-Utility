@@ -12,7 +12,8 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, test } from "node:test";
+import { beforeEach, test } from "node:test";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-restore-credentials-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -32,11 +33,9 @@ const pull = (id: string, url: string) => ({ id, name: `Feed ${id}`, source: { k
 const push = (id: string) => ({ id, name: `Feed ${id}`, source: { kind: "push" as const, protocol: "srt" as const } });
 
 let warned: string[] = [];
-const realWarn = console.warn;
 
-beforeEach(async () => {
-  warned = [];
-  console.warn = (...args: unknown[]) => void warned.push(args.join(" "));
+beforeEach(async (t) => {
+  warned = captureConsole(t, "warn");
   await settingsStore.patchIntegrationConfig("obs", { host: "obs-a.example", port: 4455 });
   await settingsStore.patchIntegrationConfig("prodcom", { host: "prodcom-a.example", port: 8000 });
   await secretsStore.setManySecrets({
@@ -64,10 +63,6 @@ beforeEach(async () => {
     ],
     ports: DEFAULT_VIDEO_PORTS,
   });
-});
-
-afterEach(() => {
-  console.warn = realWarn;
 });
 
 const snapshotOf = (files: Record<string, unknown>) => ({ kind: "stage-utility-config", version: 1, createdAt: "2026-10-20T00:00:00.000Z", files });

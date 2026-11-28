@@ -41,6 +41,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { captureConsole } from "../fixtures/capture-console.js";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -497,7 +498,7 @@ describe("rebuildServiceBaptisms — the MAX_SESSIONS cap", () => {
   // had no room for must be counted under `full`, not `added`, and the log
   // must say the store is full rather than naming an eviction that never
   // happened.
-  it("does not add a new session when the store is full, and logs how many it could not add", async () => {
+  it("does not add a new session when the store is full, and logs how many it could not add", async (t) => {
     const KEY = "cap-drops-its-own-svc";
     const DATE = "2026-09-23";
     await serviceTimelineStore.upsert(timeline(KEY, DATE));
@@ -529,16 +530,9 @@ describe("rebuildServiceBaptisms — the MAX_SESSIONS cap", () => {
       "",
     ].join("\n"));
 
-    const warnings: string[] = [];
-    const realWarn = console.warn;
-    console.warn = (...args: unknown[]) => void warnings.push(args.map(String).join(" "));
+    const warnings = captureConsole(t, "warn");
     try {
-      let outcome: Awaited<ReturnType<typeof rebuildServiceBaptisms>>;
-      try {
-        outcome = await rebuildServiceBaptisms(KEY);
-      } finally {
-        console.warn = realWarn;
-      }
+      const outcome = await rebuildServiceBaptisms(KEY);
       const forService = (await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY);
 
       assert.equal(outcome.added, 0, "the store is full — this rebuild's own new session must not be added");

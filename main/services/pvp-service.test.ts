@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import { readFileSync } from "node:fs";
 import { afterEach, describe, test } from "node:test";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 import { addBroadcastListener } from "./broadcaster.js";
 import { PvpService } from "./pvp-service.js";
@@ -348,19 +349,13 @@ describe("configure() and the image duration default", () => {
     assert.equal(svc.getLatest().imageDurationSec, 45);
   });
 
-  test("A VALUE OUTSIDE 1-3600s IS IGNORED, LOGS, AND FALLS BACK TO 20", async () => {
+  test("A VALUE OUTSIDE 1-3600s IS IGNORED, LOGS, AND FALLS BACK TO 20", async (t) => {
     const svc = new PvpService();
     started.push(svc);
     globalThis.fetch = (async () => new Response(FIXTURE_TEXT, { status: 200, headers: { "content-type": "application/json" } })) as typeof fetch;
-    const originalWarn = console.warn;
-    const warnings: string[] = [];
-    console.warn = (msg: string) => warnings.push(msg);
-    try {
-      svc.configure("pvp.invalid", 1, false, null, 0);
-      await settle();
-    } finally {
-      console.warn = originalWarn;
-    }
+    const warnings = captureConsole(t, "warn");
+    svc.configure("pvp.invalid", 1, false, null, 0);
+    await settle();
     assert.equal(svc.getLatest().imageDurationSec, 20);
     assert.ok(
       warnings.some((w) => /\[pvp\] image duration 0 ignored, using 20/.test(w)),

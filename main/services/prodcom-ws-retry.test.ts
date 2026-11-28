@@ -15,6 +15,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it, type TestContext } from "node:test";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 import { ProdComService, PROBE_USER_AGENT } from "./prodcom-service.js";
 import { startProdComStub, type ProdComStub, type StubOptions } from "./fixtures/prodcom-stub.js";
@@ -127,12 +128,7 @@ describe("the fallback retries the websocket on a timer", () => {
       sse: stub.sseOpens,
       rest: stub.requests.filter((r) => !r.url.startsWith("/api/v1/ws")).length,
     };
-    const lines: string[] = [];
-    const realDebug = console.debug;
-    console.debug = (...a: unknown[]) => lines.push(a.map(String).join(" "));
-    t.after(() => {
-      console.debug = realDebug;
-    });
+    const lines = captureConsole(t, "debug");
 
     await eventually(() => wsAttempts(stub) > before.ws, "the timer's attempt");
     // Settle past the refusal, so anything the old design would have done has

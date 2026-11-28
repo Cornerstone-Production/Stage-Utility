@@ -14,7 +14,8 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, test } from "node:test";
+import { beforeEach, describe, test } from "node:test";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-device-credential-moves-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -29,13 +30,8 @@ const { secretsStore } = await import("./secrets.js");
 const { MASK } = await import("./mask.js");
 
 let warned: string[] = [];
-const realWarn = console.warn;
-beforeEach(() => {
-  warned = [];
-  console.warn = (...args: unknown[]) => void warned.push(args.join(" "));
-});
-afterEach(() => {
-  console.warn = realWarn;
+beforeEach((t) => {
+  warned = captureConsole(t, "warn");
 });
 
 describe("a Spectera connection", () => {

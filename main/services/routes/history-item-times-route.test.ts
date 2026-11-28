@@ -12,6 +12,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it, beforeEach, after } from "node:test";
+import { captureConsole } from "../fixtures/capture-console.js";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -200,33 +201,21 @@ describe("POST /api/history/item-times", () => {
     assert.equal((await serviceTimelineStore.get(KEY))!.itemTimeEdits, undefined);
   });
 
-  it("logs a reason when it refuses, naming the run", async () => {
+  it("logs a reason when it refuses, naming the run", async (t) => {
     // The operator sees the sentence in a toast and nobody else does. "I typed a
     // time and it did not save", with nothing in /log, is the whole story an
     // operator can tell at 9am on a Sunday.
-    const lines: string[] = [];
-    const warn = console.warn;
-    console.warn = (...a: unknown[]) => void lines.push(a.map(String).join(" "));
-    try {
-      await post({ serviceKey: KEY, itemId: "vid-1", sequence: 0, endedAt: "2026-09-17T23:00:00.000Z" });
-    } finally {
-      console.warn = warn;
-    }
+    const lines = captureConsole(t, "warn");
+    await post({ serviceKey: KEY, itemId: "vid-1", sequence: 0, endedAt: "2026-09-17T23:00:00.000Z" });
     const refusal = lines.find((l) => l.includes("[history]") && l.includes("refused"));
     assert.ok(refusal, `no refusal was logged: ${JSON.stringify(lines)}`);
     assert.match(refusal!, /vid-1#0/, "the log line does not name the run that was refused");
     assert.match(refusal!, /outside the recording's own window/, "and does not say why");
   });
 
-  it("names the run on the success line too", async () => {
-    const lines: string[] = [];
-    const log = console.log;
-    console.log = (...a: unknown[]) => void lines.push(a.map(String).join(" "));
-    try {
-      await post({ serviceKey: KEY, itemId: "vid-1", sequence: 0, endedAt: FIXED_END });
-    } finally {
-      console.log = log;
-    }
+  it("names the run on the success line too", async (t) => {
+    const lines = captureConsole(t, "log");
+    await post({ serviceKey: KEY, itemId: "vid-1", sequence: 0, endedAt: FIXED_END });
     const line = lines.find((l) => l.includes("times edited by operator"));
     assert.ok(line, `nothing logged the edit: ${JSON.stringify(lines)}`);
     assert.match(line!, /vid-1#0/, "an item can run twice; the title alone cannot say which row moved");

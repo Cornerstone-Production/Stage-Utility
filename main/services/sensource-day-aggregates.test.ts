@@ -40,8 +40,16 @@ const { setAppTimeZone, zonedDateKey } = await import("./app-timezone.js");
 // without it, and every other case's fixtures are built from the same helper.
 setAppTimeZone("America/Chicago");
 const { sensourceService } = await import("./sensource-service.js");
-import { errorMessage } from "./errors.js";
 import { OutageLog } from "./repeat-log.js";
+import { captureLeveledConsole } from "./fixtures/capture-console.js";
+import {
+  createClock,
+  recordEmits,
+  resetService as sharedResetService,
+  stubFetch as sharedStubFetch,
+  stubSchedulers,
+  type StubOptions,
+} from "./fixtures/sensource-stub.js";
 import type { PeopleCountDTO } from "../types/live.js";
 import type { SenSourceConfig } from "./sensource-service.js";
 
@@ -118,47 +126,25 @@ const CFG: SenSourceConfig = {
   safeSpacePollSeconds: 10,
 };
 
-/**
- * The settle window at CFG's 15s poll — what the service derives for itself in
- * configure(), pinned here because most of the log assertions below depend on it.
- *
- * A failing endpoint is ONE outage until a success has held this long. Eight
- * polls, so the alternating 401/200 that these cases are built from can never
- * reach it, and a genuine recovery is announced two minutes in.
- */
-const SETTLE_MS = 2 * 60_000;
-
+// The settle window is whatever configure() derives from CFG's 15s poll: a
+// failing endpoint is ONE outage until a success has held that long, so the
+// alternating 401/200 these cases are built from never ends it.
 /** Every request the stub saw, in order. */
 /** The token endpoint, matched on the exact host — not a substring, which CodeQL
  *  rightly flags: "auth.sensourceinc.com" can appear inside any URL. */
 const isAuthHost = (url: string): boolean => new URL(url).hostname === "auth.sensourceinc.com";
 
-let requests: string[] = [];
+const requests: string[] = [];
 /** DTOs the service actually published this run. */
-let emitted: PeopleCountDTO[] = [];
+const emitted: PeopleCountDTO[] = [];
 /** Console lines the service wrote, joined per call. */
 let logs: string[] = [];
 /** The Authorization header each /data/traffic request carried, in order. */
-let trafficAuth: string[] = [];
+const trafficAuth: string[] = [];
 
 const realFetch = globalThis.fetch;
-const realNow = Date.now;
-const realWarn = console.warn;
-const realLog = console.log;
-const realError = console.error;
 /** Wall clock the service reads; every case advances it explicitly. */
-let clock = Date.UTC(2026, 8, 6, 15, 0, 0);
-
-function captureConsole(): void {
-  const take =
-    (level: string) =>
-    (...args: unknown[]): void => {
-      logs.push(`${level} ${args.map((a) => (a instanceof Error ? errorMessage(a) : String(a))).join(" ")}`);
-    };
-  console.warn = take("warn");
-  console.log = take("log");
-  console.error = take("error");
-}
+const clock = createClock();
 
 /** Rows the two data endpoints answer with when they are healthy.
  *
@@ -166,93 +152,13 @@ function captureConsole(): void {
  * (1600 in); the zone endpoint also sees a cafe nobody is counting attendance
  * from (420 more). The two sources therefore disagree by 420, which is what
  * makes a silent switch between them visible instead of invisible. */
-const TRAFFIC = {
-  results: [
-    { zoneId: "z1", name: "Lobby", sumins: 1600, sumouts: 90 },
-    { zoneId: "z2", name: "Cafe", sumins: 420, sumouts: 20 },
-  ],
-};
 /** Σ ins over both zones — what buildDto derives before any override. */
 const ZONE_ATTENDANCE = 2020;
 /** Σ sumins over the spaces — what the authoritative total publishes. */
 const SPACE_ATTENDANCE = 1600;
-const DAY = {
-  results: [
-    { spaceId: "s1", sumins: 1600, sumouts: 90, maxoccupancy: 1511, minoccupancy: 0, avgoccupancy: "812.5" },
-  ],
-};
-const MINUTE = { results: [{ spaceId: "s1", recordDate_minute_1: "2026-09-06T15:00:00", maxoccupancy: 1510 }] };
-const SPACES = { results: [{ spaceId: "s1", name: "Auditorium", locationId: "l1", maxCapacity: 2120 }] };
-
-function json(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
-  return new Response(JSON.stringify(body), { status, headers });
-}
-
-interface StubOptions {
-  /** Decide the response for a /data/occupancy day-aggregate request. */
-  dayStatus?: () => number;
-  /** Decide the response for a /data/traffic request. */
-  trafficStatus?: () => number;
-  /** Decide the response for every /data/… request (401 → auth failure). */
-  dataStatus?: () => number;
-  /** Response for the token exchange. */
-  exchange?: () => Response;
-  /** Hold the traffic response back this long — the poll's requests are issued
-   *  together, so this is how "which answer arrived first" is controlled. */
-  trafficDelayMs?: number;
-  /** Answer the /space listing with nothing, i.e. a site with no spaces. */
-  noSpaces?: boolean;
-  /** Answer the /space listing with this status instead of a listing. */
-  spaceStatus?: () => number;
-  /** Answer the /sensor listing with this status (the zone→location join). */
-  sensorStatus?: () => number;
-  /** The body of a rejected response — vary it to prove the log is not keyed on
-   *  the text, which is how a timestamped body defeated the old cap. */
-  rejectBody?: () => string;
-}
-
-/** Stand in for the whole Vea API. Records each request path, and the token each
- *  one carried, so a test can assert that a retry reused the same one. */
+/** The shared Vea stub, recording into this file's request and traffic-auth lists. */
 function stubFetch(opts: StubOptions = {}): void {
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input);
-    requests.push(url);
-    const auth = new Headers(init?.headers ?? {}).get("authorization") ?? "";
-    if (url.includes("/data/traffic")) trafficAuth.push(auth);
-    if (isAuthHost(url)) {
-      return opts.exchange?.() ?? json({ access_token: `t${requests.length}`, expires_in: 3600 });
-    }
-    const dataStatus = opts.dataStatus?.() ?? 200;
-    if (dataStatus !== 200) {
-      if (opts.trafficDelayMs && url.includes("/data/traffic")) {
-        await new Promise((r) => setTimeout(r, opts.trafficDelayMs));
-      }
-      return new Response(opts.rejectBody?.() ?? "token is invalid or expired", { status: dataStatus });
-    }
-    if (url.includes("/space")) {
-      const st = opts.spaceStatus?.() ?? 200;
-      if (st !== 200) return new Response("space listing rejected", { status: st });
-      return json(opts.noSpaces ? { results: [] } : SPACES);
-    }
-    if (url.includes("/sensor")) {
-      const st = opts.sensorStatus?.() ?? 200;
-      return st === 200 ? json({ results: [] }) : new Response("sensor listing rejected", { status: st });
-    }
-    if (url.includes("/zone") || url.includes("/site")) return json({ results: [] });
-    if (url.includes("/data/traffic")) {
-      if (opts.trafficDelayMs) await new Promise((r) => setTimeout(r, opts.trafficDelayMs));
-      const status = opts.trafficStatus?.() ?? 200;
-      return status === 200 ? json(TRAFFIC) : new Response("traffic rejected", { status });
-    }
-    if (url.includes("/data/occupancy")) {
-      if (url.includes("dateGroupings=minute")) return json(MINUTE);
-      const status = opts.dayStatus?.() ?? 200;
-      return status === 200
-        ? json(DAY)
-        : new Response(opts.rejectBody?.() ?? "day aggregates rejected", { status });
-    }
-    return json({ results: [] });
-  }) as typeof fetch;
+  sharedStubFetch({ requests, trafficAuth }, opts);
 }
 
 const dayRequests = (): string[] =>
@@ -260,30 +166,14 @@ const dayRequests = (): string[] =>
 const trafficRequests = (): string[] => requests.filter((u) => u.includes("/data/traffic"));
 const exchangeRequests = (): string[] => requests.filter(isAuthHost);
 
-/** Reset every scrap of poller state a previous case could have left behind. */
+/** Reset every scrap of poller state a previous case could have left behind:
+ *  the shared reset drives the real configure(), so nothing is listed by hand. */
 function resetService(): void {
-  svc.cfg = { ...CFG };
-  svc.running = true;
-  svc.token = null;
-  svc.tokenExpiresAt = 0;
-  svc.tokenIssuedAt = 0;
-  svc.tokenGen = 0;
-  svc.authInFlight = null;
-  svc.lastExchangeAt = 0;
-  svc.exchangeBlockedUntil = 0;
-  svc.lastSharedClientLogAt = 0;
-  svc.carriedDay = null;
-  svc.outages.forget();
-  svc.outages.settleAfter(SETTLE_MS);
-  svc.zonesCache = null;
-  svc.spacesCache = null;
-  // goOffline() emits only when the last snapshot was connected, so a previous
-  // case leaving it connected would put an OFFLINE frame in `emitted` here.
-  svc.last = { connected: false, updatedAt: null, total: { attendance: null, occupancy: null }, zones: [] };
-  requests = [];
-  trafficAuth = [];
-  emitted = [];
-  logs = [];
+  requests.length = 0;
+  trafficAuth.length = 0;
+  emitted.length = 0;
+  logs.length = 0;
+  sharedResetService(svc, CFG);
 }
 
 /** One poll, with the scheduler stubbed out so nothing is left pending. */
@@ -298,28 +188,18 @@ const carriedLines = (): string[] => logs.filter((l) => l.includes("day aggregat
 const backLines = (): string[] => logs.filter((l) => l.includes("day aggregates are available again"));
 
 describe("SenSource day aggregates", () => {
-  beforeEach(() => {
+  beforeEach((t) => {
+    stubSchedulers(svc);
     resetService();
-    clock = Date.UTC(2026, 8, 6, 15, 0, 0);
-    Date.now = () => clock;
+    clock.install(t);
     // The poll re-arms itself through these; a test must not leave a timer live.
-    svc.pollTicker.arm = () => {};
-    svc.safeSpaceTicker.arm = () => {};
-    svc.attendanceTicker.arm = () => {};
-    svc.restart = () => {};
-    svc.emit = (dto: PeopleCountDTO) => {
-      emitted.push(dto);
-      svc.last = dto;
-    };
-    captureConsole();
+    stubSchedulers(svc);
+    recordEmits(svc, emitted);
+    logs = captureLeveledConsole(t);
   });
 
   afterEach(() => {
     globalThis.fetch = realFetch;
-    Date.now = realNow;
-    console.warn = realWarn;
-    console.log = realLog;
-    console.error = realError;
     svc.running = false;
     svc.cfg = null;
   });
@@ -335,7 +215,7 @@ describe("SenSource day aggregates", () => {
     stubFetch({ dayStatus: () => (dayOk ? 200 : 401) });
 
     for (let i = 0; i < 4; i++) {
-      clock += 15_000;
+      clock.ms += 15_000;
       dayOk = i % 2 === 0;
       await poll();
     }
@@ -376,7 +256,7 @@ describe("SenSource day aggregates", () => {
     // run, says how much it cost, and says it once.
     dayOk = true;
     for (let i = 0; i < 10; i++) {
-      clock += 15_000;
+      clock.ms += 15_000;
       await poll();
     }
     assert.equal(
@@ -393,7 +273,7 @@ describe("SenSource day aggregates", () => {
     // And the run really ENDED rather than the log merely going quiet: the next
     // failure is news again.
     dayOk = false;
-    clock += 15_000;
+    clock.ms += 15_000;
     await poll();
     assert.equal(
       carriedLines().length,
@@ -409,7 +289,7 @@ describe("SenSource day aggregates", () => {
     // that line the rule holds at the default interval and nowhere else.
     svc.configure({ ...CFG, pollSeconds: 300 });
 
-    const t = clock;
+    const t = clock.ms;
     svc.outages.fail("k", "HTTP 401", t);
     assert.equal(
       svc.outages.ok("k", t + 5 * 60_000).log,
@@ -435,7 +315,7 @@ describe("SenSource day aggregates", () => {
     stubFetch({ dayStatus: () => (dayOk ? 200 : 401) });
 
     for (let i = 0; i < 6; i++) {
-      clock += 300_000;
+      clock.ms += 300_000;
       dayOk = i % 2 === 0;
       await poll();
     }
@@ -471,7 +351,7 @@ describe("SenSource day aggregates", () => {
     stubFetch({ dayStatus: () => (dayOk ? 200 : 401) });
 
     for (let i = 0; i < 4; i++) {
-      clock += 15_000;
+      clock.ms += 15_000;
       dayOk = i === 0;
       await poll();
     }
@@ -502,7 +382,7 @@ describe("SenSource day aggregates", () => {
     stubFetch({ trafficStatus: () => (trafficOk ? 200 : 500) });
 
     for (let i = 0; i < 8; i++) {
-      clock += 15_000;
+      clock.ms += 15_000;
       trafficOk = i % 2 === 0;
       await poll();
     }
@@ -517,7 +397,7 @@ describe("SenSource day aggregates", () => {
     // And a poll that stays up past the settle window says so, once.
     trafficOk = true;
     for (let i = 0; i < 10; i++) {
-      clock += 15_000;
+      clock.ms += 15_000;
       await poll();
     }
     const back = logs.filter((l) => l.includes("the poll is answering again"));
@@ -537,7 +417,7 @@ describe("SenSource day aggregates", () => {
     for (let i = 0; i < 4; i++) {
       dayOk = i % 2 === 0;
       await poll();
-      clock += 15_000;
+      clock.ms += 15_000;
       seen.push(emitted.at(-1)!.total.attendance!);
     }
 
@@ -564,8 +444,8 @@ describe("SenSource day aggregates", () => {
       attendance: SPACE_ATTENDANCE,
       // 120 fewer than the fixture reports now, i.e. 120 have entered since.
       zoneAttendance: ZONE_ATTENDANCE - 120,
-      at: clock - 60_000,
-      dateKey: zonedDateKey(clock),
+      at: clock.ms - 60_000,
+      dateKey: zonedDateKey(clock.ms),
     };
 
     await poll();
@@ -587,8 +467,8 @@ describe("SenSource day aggregates", () => {
       capacity: 2120,
       attendance: SPACE_ATTENDANCE,
       zoneAttendance: ZONE_ATTENDANCE,
-      at: clock - 11 * 60_000,
-      dateKey: zonedDateKey(clock),
+      at: clock.ms - 11 * 60_000,
+      dateKey: zonedDateKey(clock.ms),
     };
 
     await poll();
@@ -609,8 +489,8 @@ describe("SenSource day aggregates", () => {
     // service day, and the carry must survive. A host-clock date key says the
     // 7th and throws away a peak recorded ninety minutes earlier. The production
     // box runs UTC, so this is the normal case at every Sunday evening service.
-    clock = Date.UTC(2026, 8, 7, 3, 0, 0);
-    assert.equal(zonedDateKey(clock), "2026-09-06", "the fixture is not the case it claims to be");
+    clock.ms = Date.UTC(2026, 8, 7, 3, 0, 0);
+    assert.equal(zonedDateKey(clock.ms), "2026-09-06", "the fixture is not the case it claims to be");
     stubFetch({ dayStatus: () => 401 });
     svc.carriedDay = {
       peak: 1511,
@@ -620,7 +500,7 @@ describe("SenSource day aggregates", () => {
       attendance: SPACE_ATTENDANCE,
       zoneAttendance: ZONE_ATTENDANCE,
       // One minute old, so the ten-minute rule is not what is being tested here.
-      at: clock - 60_000,
+      at: clock.ms - 60_000,
       dateKey: "2026-09-06",
     };
 
@@ -645,7 +525,7 @@ describe("SenSource day aggregates", () => {
     for (let i = 0; i < 3; i++) {
       svc.zonesCache = null; // the 5-minute cache has expired, so the join re-runs
       await poll();
-      clock += 15_000;
+      clock.ms += 15_000;
     }
 
     const said = logs.filter((l) => l.includes("/sensor join failed"));
@@ -661,7 +541,7 @@ describe("SenSource day aggregates", () => {
 
     for (let i = 0; i < 3; i++) {
       await poll();
-      clock += 15_000;
+      clock.ms += 15_000;
     }
 
     const said = logs.filter((l) => l.includes("no zones map to it"));
@@ -682,7 +562,7 @@ describe("SenSource day aggregates", () => {
 
     spaceOk = false;
     svc.spacesCache = null; // the 5-minute cache has expired
-    clock += 15_000;
+    clock.ms += 15_000;
     await poll();
 
     assert.equal(emitted.at(-1)!.total.capacity, 2120, "an unreadable listing blanked a known capacity");
@@ -698,7 +578,7 @@ describe("SenSource day aggregates", () => {
 
     for (let i = 0; i < 3; i++) {
       await poll();
-      clock += 15_000;
+      clock.ms += 15_000;
     }
 
     const said = logs.filter((l) => l.includes("space listing could not be read"));
@@ -722,10 +602,10 @@ describe("SenSource day aggregates", () => {
       capacity: 2120,
       attendance: SPACE_ATTENDANCE,
       zoneAttendance: ZONE_ATTENDANCE,
-      at: clock - 60_000,
+      at: clock.ms - 60_000,
       dateKey: "2026-09-05",
     };
-    assert.notEqual(zonedDateKey(clock), "2026-09-05", "the fixture must be a DIFFERENT day");
+    assert.notEqual(zonedDateKey(clock.ms), "2026-09-05", "the fixture must be a DIFFERENT day");
 
     await poll();
 
@@ -747,7 +627,7 @@ describe("SenSource day aggregates", () => {
 
     for (let i = 0; i < 8; i++) {
       await poll();
-      clock += 15_000;
+      clock.ms += 15_000;
     }
 
     assert.equal(trafficRequests().length, 8, "traffic must be asked for on every poll");
@@ -763,27 +643,17 @@ describe("SenSource day aggregates", () => {
 });
 
 describe("SenSource token rejection", () => {
-  beforeEach(() => {
+  beforeEach((t) => {
+    stubSchedulers(svc);
     resetService();
-    clock = Date.UTC(2026, 8, 6, 15, 0, 0);
-    Date.now = () => clock;
-    svc.pollTicker.arm = () => {};
-    svc.safeSpaceTicker.arm = () => {};
-    svc.attendanceTicker.arm = () => {};
-    svc.restart = () => {};
-    svc.emit = (dto: PeopleCountDTO) => {
-      emitted.push(dto);
-      svc.last = dto;
-    };
-    captureConsole();
+    clock.install(t);
+    stubSchedulers(svc);
+    recordEmits(svc, emitted);
+    logs = captureLeveledConsole(t);
   });
 
   afterEach(() => {
     globalThis.fetch = realFetch;
-    Date.now = realNow;
-    console.warn = realWarn;
-    console.log = realLog;
-    console.error = realError;
     svc.running = false;
     svc.cfg = null;
   });
@@ -799,8 +669,8 @@ describe("SenSource token rejection", () => {
     // token that was rejected still the one in hand", and generation 0 means
     // "none was ever minted", which is not what this case is about.
     svc.tokenGen = 1;
-    svc.tokenIssuedAt = clock - 5_000;
-    svc.tokenExpiresAt = clock + 59 * 60_000;
+    svc.tokenIssuedAt = clock.ms - 5_000;
+    svc.tokenExpiresAt = clock.ms + 59 * 60_000;
 
     await poll();
 
@@ -816,13 +686,13 @@ describe("SenSource token rejection", () => {
     assert.equal(svc.token, null, "the rejected token was not marked due for the next poll");
 
     // The NEXT poll is where a new one is minted — deferred, not inline.
-    clock += 15_000;
+    clock.ms += 15_000;
     await poll();
     assert.equal(exchangeRequests().length, 1, "the deferred re-mint never happened");
 
     // And the poll after that is held by the 30s floor, so two instances trading
     // rejections cannot walk the exchange endpoint into a 429 between them.
-    clock += 15_000;
+    clock.ms += 15_000;
     await poll();
     assert.equal(
       exchangeRequests().length,
@@ -849,7 +719,7 @@ describe("SenSource token rejection", () => {
     assert.notEqual(proven, null, "the first poll did not obtain a token");
 
     dayOk = false;
-    clock += 15_000;
+    clock.ms += 15_000;
     await poll();
 
     assert.equal(svc.token, proven, "an endpoint's 401 threw away a token that was working");
@@ -876,15 +746,15 @@ describe("SenSource token rejection", () => {
       rejectBody: () => {
         if (!expired) {
           expired = true;
-          svc.tokenExpiresAt = clock - 1;
+          svc.tokenExpiresAt = clock.ms - 1;
         }
         return "token is invalid or expired";
       },
     });
     svc.token = "the-one-that-was-sent";
     svc.tokenGen = 1;
-    svc.tokenIssuedAt = clock - 30 * 60_000;
-    svc.tokenExpiresAt = clock + 200;
+    svc.tokenIssuedAt = clock.ms - 30 * 60_000;
+    svc.tokenExpiresAt = clock.ms + 200;
 
     await poll();
 
@@ -923,11 +793,11 @@ describe("SenSource token rejection", () => {
     );
 
     // Still held at 14 minutes...
-    clock += 14 * 60_000;
+    clock.ms += 14 * 60_000;
     await poll();
     assert.equal(exchanges, 1, "the cap released the exchange early");
     // ...and released just past 15.
-    clock += 70_000;
+    clock.ms += 70_000;
     await poll();
     assert.equal(exchanges, 2, "the exchange never resumed after the cap");
   });
@@ -946,8 +816,8 @@ describe("SenSource token rejection", () => {
     });
     svc.token = "old";
     svc.tokenGen = 1;
-    svc.tokenIssuedAt = clock - 30 * 60_000;
-    svc.tokenExpiresAt = clock + 40 * 60_000;
+    svc.tokenIssuedAt = clock.ms - 30 * 60_000;
+    svc.tokenExpiresAt = clock.ms + 40 * 60_000;
 
     await poll();
 
@@ -969,8 +839,8 @@ describe("SenSource token rejection", () => {
     stubFetch({ dataStatus: () => 401, trafficDelayMs: 400 });
     svc.token = "gen-one";
     svc.tokenGen = 1;
-    svc.tokenIssuedAt = clock - 30 * 60_000;
-    svc.tokenExpiresAt = clock + 40 * 60_000;
+    svc.tokenIssuedAt = clock.ms - 30 * 60_000;
+    svc.tokenExpiresAt = clock.ms + 40 * 60_000;
 
     const inFlight = poll();
     // Mid-flight, a token from somewhere else in the process: the settings page
@@ -978,8 +848,8 @@ describe("SenSource token rejection", () => {
     await new Promise((r) => setTimeout(r, 200));
     svc.token = "gen-two";
     svc.tokenGen = 2;
-    svc.tokenIssuedAt = clock;
-    svc.tokenExpiresAt = clock + 59 * 60_000;
+    svc.tokenIssuedAt = clock.ms;
+    svc.tokenExpiresAt = clock.ms + 59 * 60_000;
     await inFlight;
 
     assert.equal(svc.token, "gen-two", "a token minted mid-poll was thrown away by an older request's 401");
@@ -1004,12 +874,12 @@ describe("SenSource token rejection", () => {
     assert.equal(emitted.length, 0, "a poll that could not authenticate published a count");
 
     // 90s later — inside the 120s Retry-After.
-    clock += 90_000;
+    clock.ms += 90_000;
     await poll();
     assert.equal(exchanges, 1, `a second exchange went out ${90}s into a 120s Retry-After`);
 
     // Past it, the exchange is allowed again.
-    clock += 40_000;
+    clock.ms += 40_000;
     await poll();
     assert.equal(exchanges, 2, "the exchange never resumed after the Retry-After elapsed");
 
@@ -1027,8 +897,8 @@ describe("SenSource token rejection", () => {
     stubFetch({ trafficStatus: () => 401 });
     svc.token = "old-but-unexpired";
     svc.tokenGen = 1;
-    svc.tokenIssuedAt = clock - 30 * 60_000;
-    svc.tokenExpiresAt = clock + 20 * 60_000;
+    svc.tokenIssuedAt = clock.ms - 30 * 60_000;
+    svc.tokenExpiresAt = clock.ms + 20 * 60_000;
 
     await poll();
 
@@ -1060,7 +930,7 @@ describe("SenSource token rejection", () => {
 
     // Five minutes later, past FRESH_TOKEN_MS: everything it carries is refused.
     allOk = false;
-    clock += 5 * 60_000;
+    clock.ms += 5 * 60_000;
     await poll();
 
     assert.equal(
@@ -1081,7 +951,7 @@ describe("SenSource token rejection", () => {
 
     for (let i = 0; i < 4; i++) {
       await poll();
-      clock += 15_000;
+      clock.ms += 15_000;
     }
 
     assert.equal(
@@ -1106,7 +976,7 @@ describe("SenSource token rejection", () => {
 
     for (let i = 0; i < 3; i++) {
       await poll();
-      clock += 15_000;
+      clock.ms += 15_000;
     }
 
     const said = logs.filter((l) => l.includes("day aggregates unavailable"));
@@ -1129,12 +999,12 @@ describe("SenSource token rejection", () => {
     stubFetch({ dayStatus: () => (dayOk ? 200 : 401) });
     svc.token = "old";
     svc.tokenGen = 1;
-    svc.tokenIssuedAt = clock - 30 * 60_000;
-    svc.tokenExpiresAt = clock + 40 * 60_000;
+    svc.tokenIssuedAt = clock.ms - 30 * 60_000;
+    svc.tokenExpiresAt = clock.ms + 40 * 60_000;
 
     for (let i = 0; i < 3; i++) {
       await poll();
-      clock += 15_000;
+      clock.ms += 15_000;
     }
     assert.equal(
       logs.filter((l) => l.includes("HTTP 401 from")).length,
@@ -1146,7 +1016,7 @@ describe("SenSource token rejection", () => {
     dayOk = true;
     for (let i = 0; i < 12; i++) {
       await poll();
-      clock += 15_000;
+      clock.ms += 15_000;
     }
 
     const back = logs.filter((l) => l.includes("is answering again"));
@@ -1164,12 +1034,12 @@ describe("SenSource token rejection", () => {
     stubFetch({ dayStatus: () => 401, rejectBody: () => `rejected at 10:0${n++} — request ${n}` });
     svc.token = "old";
     svc.tokenGen = 1;
-    svc.tokenIssuedAt = clock - 30 * 60_000;
-    svc.tokenExpiresAt = clock + 40 * 60_000;
+    svc.tokenIssuedAt = clock.ms - 30 * 60_000;
+    svc.tokenExpiresAt = clock.ms + 40 * 60_000;
 
     for (let i = 0; i < 12; i++) {
       await poll();
-      clock += 15_000;
+      clock.ms += 15_000;
     }
 
     const bodies = logs.filter((l) => l.includes("HTTP 401 from"));

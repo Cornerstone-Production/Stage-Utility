@@ -26,6 +26,7 @@
 
 import assert from "node:assert/strict";
 import { after, beforeEach, describe, test } from "node:test";
+import { captureConsole } from "./fixtures/capture-console.js";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -245,21 +246,15 @@ describe("the elapsed clock", () => {
 // ── The join is allowed to fail ─────────────────────────────────────────────
 
 describe("when the broadcast list stops answering", () => {
-  test("the live readout survives it, and the operator gets a line to read", async () => {
+  test("the live readout survives it, and the operator gets a line to read", async (t) => {
     const now = Date.now();
     encodersPayload = encoderRows(now, [ENC_PRIMARY]);
     eventsPayload = [];
     eventsStatus = 500;
 
-    const warnings: string[] = [];
-    const realWarn = console.warn;
-    console.warn = (...args: unknown[]) => void warnings.push(args.map(String).join(" "));
+    const warnings = captureConsole(t, "warn");
     let snap: StreamStatusDTO;
-    try {
-      snap = await poll();
-    } finally {
-      console.warn = realWarn;
-    }
+    snap = await poll();
 
     assert.equal(snap.connected, true, "a names lookup failure took the whole integration down");
     assert.equal(snap.live, true, "a names lookup failure took the live readout down");

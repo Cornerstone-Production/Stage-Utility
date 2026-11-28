@@ -7,6 +7,7 @@
 
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 import { decide, describe as sentence, MachineUpdates, MAX_MACHINES, parseCheck, REPORT_TTL_MS, type CheckInput, type Gate } from "./machine-updates.js";
 import { setAppTimeZone } from "./app-timezone.js";
@@ -91,19 +92,16 @@ describe("MachineUpdates", () => {
   let lines: string[];
   let changes: number;
   let updates: MachineUpdates;
-  const realLog = console.log;
   const check = (over: Partial<CheckInput> = {}): CheckInput => ({ machine: "5f1c09ab-7e22-4c1d", platform: "macos", host: "booth-mini", have: "1.26.0", state: "idle", ...over });
   const gate = { want: "1.27.0", auto: true, live: false, windowCloses: null, serviceTimesKnown: true };
 
-  beforeEach(() => {
-    lines = [];
+  beforeEach((t) => {
+    lines = captureConsole(t, "log");
     changes = 0;
-    console.log = (...a: unknown[]) => void lines.push(a.join(" "));
     updates = new MachineUpdates(() => changes++);
     setAppTimeZone("America/Chicago");
   });
   afterEach(() => {
-    console.log = realLog;
     setAppTimeZone(null);
   });
 

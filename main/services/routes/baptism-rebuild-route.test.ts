@@ -9,6 +9,7 @@
 
 import assert from "node:assert/strict";
 import { after, beforeEach, describe, it } from "node:test";
+import { captureConsole } from "../fixtures/capture-console.js";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -173,7 +174,7 @@ describe("POST /api/baptism/rebuild", () => {
   // The standalone rebuild must wrap its write exactly like
   // rebuildServiceRecords does — no absolute path, no raw fs error message,
   // reaching the response or (by extension) the header's toast.
-  it("wraps a write failure: no path in the response, and a [baptism] line names the reason", async () => {
+  it("wraps a write failure: no path in the response, and a [baptism] line names the reason", async (t) => {
     const dir = serviceDirPath(KEY, DATE);
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, "baptism.csv"), BAPTISM_CSV, "utf8");
@@ -182,11 +183,7 @@ describe("POST /api/baptism/rebuild", () => {
     baptismStore.mergeRebuilt = async () => {
       throw new Error("EACCES: permission denied, open '/var/data/.baptism.json.21844.2.tmp'");
     };
-    const warnings: string[] = [];
-    const realWarn = console.warn;
-    console.warn = (...args: unknown[]) => {
-      warnings.push(args.map(String).join(" "));
-    };
+    const warnings = captureConsole(t, "warn");
     let thrown: unknown;
     try {
       await callRoute(historyRoutes, "/api/baptism/rebuild", { method: "POST", body: { serviceKey: KEY } });
@@ -194,7 +191,6 @@ describe("POST /api/baptism/rebuild", () => {
       thrown = err;
     } finally {
       baptismStore.mergeRebuilt = original;
-      console.warn = realWarn;
     }
 
     assert.ok(thrown, "a write failure answered as though it had succeeded");
