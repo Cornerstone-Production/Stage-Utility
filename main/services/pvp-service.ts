@@ -487,7 +487,7 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
       // restart had just scheduled replaced by a back-off. Nothing to report and
       // nothing to schedule: the new target's own poll is already running.
       if (!this.running || this.target !== t) return;
-      if (this.attempt === 0) console.warn(`[pvp] ${t.host}:${t.port} unreachable (${msg}) — backing off quietly`);
+      this.noteOutage(`${t.host}:${t.port} unreachable (${msg}) — backing off quietly`);
       this.report("error", `Can't reach ${t.host}:${t.port} — ${msg}`);
       this.goOffline();
       this.scheduleReconnect();

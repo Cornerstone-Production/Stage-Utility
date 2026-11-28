@@ -78,6 +78,7 @@ import type {
 } from "../types/stage.js";
 import type { CategoryRole } from "../types/servicecue-roles.js";
 import type { PublishProblem, PublisherStatus, SourceProblem } from "../types/servicecue-publish-status.js";
+import { backoffMs } from "./timers.js";
 import { FIXED_DOC_KEYS, FRAME_DOCS, PUBLISH_UPCOMING_DAYS, assetContentType, isFrameChannel, rundownKey, type FrameChannel, type PublicState } from "../types/servicecue-publish.js";
 
 // ── Cadence ──────────────────────────────────────────────────────────────────
@@ -134,10 +135,9 @@ export const DEFAULT_TIMINGS: PublisherTimings = {
   requestTimeoutMs: PUBLISH_REQUEST_TIMEOUT_MS,
 };
 
-/** How long to wait after `failures` failures in a row: 5 s, 10 s, 20 s … up to the ceiling. */
-export function backoffMs(failures: number, minMs: number, maxMs: number): number {
-  return Math.min(maxMs, minMs * 2 ** Math.max(0, failures - 1));
-}
+// Re-exported for servicecue-deployer.ts, which still imports it from here; the
+// formula itself is timers.ts's.
+export { backoffMs };
 
 // ── What the publisher reads ─────────────────────────────────────────────────
 

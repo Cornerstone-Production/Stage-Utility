@@ -22,6 +22,13 @@ Stage keeps one persistent TCP socket per enabled target. Because it is TCP, the
 connection badge is honest — a successful connect really does prove the device is
 reachable, unlike OSC where "connected" can only mean "configured".
 
+A dropped or refused socket reconnects with exponential backoff from 3 s to a fixed
+30 s ceiling. The ceiling does not follow the service window the other
+integrations use: nothing subscribes to an output, so that cap would read it as
+dormant and leave a switcher powered on mid-week unreachable for half an hour. An
+unreachable target is logged as `[rosstalk] <host>:<port> unreachable (…)` once
+per outage, on the rule in [Connection outages](../ops/updates-and-logs.md#connection-outages).
+
 Commands come from a **catalogue** (`rosstalk-commands.ts`) — pure formatters with
 typed parameters, so the UI renders a form and the wire string is validated before a
 socket is touched. That matters more than usual here: a malformed command produces no

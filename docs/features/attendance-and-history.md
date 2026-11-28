@@ -706,6 +706,24 @@ A service's window is editable if a capture went wrong (**Edit times**),
 individual items can be excluded from the timers, and the service report is
 copyable (**Copy report**).
 
+The Start and End fields, and each item's own, read in the app's
+[time zone](../ops/install-and-config.md#time-zone) (the server's clock when
+none is set), whatever zone the browser is in. When the two differ the form's
+hint names the zone; the rundown's read-only times stay in the browser's. Save
+sends only the fields that changed, so saving an untouched form changes
+nothing. A time is put on the day nearest the one it replaces, and the End on
+the first such time after the Start, so a service that ran past midnight keeps
+its end on the next day.
+
+Moving the window trims what falls outside it: timeline and SPL items that
+start after the new end, and attendance samples beyond the ramp and taper
+either side. Rebuild from raw can bring the items back from the raw rows, but
+not the samples: it re-derives attendance from these same stored samples, so a
+dropped sample is gone for good. So a window that would delete anything is not
+applied straight away: History names what would go and asks, and only **Trim**
+applies it. The server log carries a `[history]` line for
+each trim, with what it dropped, and for each edit refused.
+
 The rundown itself is a table of every item as it ran: number, title, planned
 length, actual, the difference, and the times it started and ended. A table too
 narrow for all of them keeps the title, actual and difference. An item excluded

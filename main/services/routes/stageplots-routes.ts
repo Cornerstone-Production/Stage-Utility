@@ -105,6 +105,7 @@ import { STAGEPLOTS_PATH } from "../../types/servicecue-publish.js";
 import { broadcast, channelHasSubscribers } from "../broadcaster.js";
 import { plotDraftsStore } from "../stageplot-drafts-store.js";
 import { patchStore } from "../patch-store.js";
+import { keepNewerLinks } from "../stageplots-patch-link.js";
 import { errorMessage } from "../errors.js";
 import { contentName } from "../image-files.js";
 import { scrub } from "../scrub.js";
@@ -531,6 +532,14 @@ async function saveItems(c: RouteCtx, id: string): Promise<void> {
   const body = await readBodyOrSay(c, `items refused for plot ${scrub(id)}`);
   if (!body) return;
   const version = body.version;
+  // The patch the saved points' last names are held to. Unreadable: the stored names stay (keepNewerLinks), said on [stageplots].
+  const read = await patchStore.loadStrict().then(
+    (file) => file,
+    (err: unknown) => {
+      console.warn(`[stageplots] plot ${scrub(id)} saved without checking its linked points against the patch, which could not be read: ${scrub(errorMessage(err))}; the points keep the names stored`);
+      return null;
+    },
+  );
   await mutate(
     c.res,
     (doc) => {
@@ -544,6 +553,9 @@ async function saveItems(c: RouteCtx, id: string): Promise<void> {
         refuseItems(id, 400, errorMessage(err));
       }
       if (version !== p.version) refuseItems(id, 409, "changed elsewhere", { version: p.version });
+      // An editor opened before a patch save sends the last names it loaded: the stored ones are newer.
+      // The patch as it is at write time: a patch save that landed since the read is newer.
+      items = keepNewerLinks(items, p.items, read ? { ok: true, file: patchStore.newest(read) } : null);
       if (JSON.stringify(items) === JSON.stringify(p.items)) return doc;
       return replaceIn<Plot>(doc, "plots", { ...p, items, version: p.version + 1 });
     },
