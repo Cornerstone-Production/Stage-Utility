@@ -719,6 +719,24 @@ describe("patch variants", () => {
     }
   });
 
+  test("a patch saved while the stage plot points could not follow it keeps its outcomes, and says so", async () => {
+    await blankPatch();
+    const { PatchLinksNotUpdated } = await import("./patch-store.js");
+    const store = patchStore as unknown as { save: unknown };
+    const real = store.save;
+    store.save = async () => { throw new PatchLinksNotUpdated(new Error("stageplots.json is damaged")); };
+    const quiet = console.error;
+    console.error = () => undefined;
+    try {
+      const report = await applyViewBundle(withVariant());
+      assert.ok(report.skipped.some((k) => k.startsWith("patch variants — saved, but the stage plot connection points")), JSON.stringify(report.skipped));
+      assert.ok(report.patchVariants.some((p) => p.outcome === "added"), "a saved variant was dropped from the report");
+    } finally {
+      store.save = real;
+      console.error = quiet;
+    }
+  });
+
   test("a malformed variant refuses the whole file before anything is written", async () => {
     await blankPatch();
     await assert.rejects(

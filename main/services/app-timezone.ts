@@ -132,6 +132,86 @@ function zoneOffsetMs(ms: number, tz: TimeZone): number {
 }
 
 /**
+ * The two instants a wall-clock reading in `tz` can mean, earlier first.
+ *
+ * `wall` is the reading written as if it were UTC (`Date.UTC(y, m, d, h, mi)`).
+ * Exactly two candidates, because there are exactly two offsets in play: the one
+ * in force at the naive guess, and the one in force where that guess lands. They
+ * are equal on all but two days a year. Which of them the caller wants — and
+ * what to do when neither reads back as the wall time asked for — is the caller's
+ * decision, so this answers both and decides nothing.
+ */
+function wallCandidates(wall: number, tz: TimeZone): [number, number] {
+  const naive = wall - zoneOffsetMs(wall, tz);
+  const corrected = wall - zoneOffsetMs(naive, tz);
+  return [Math.min(naive, corrected), Math.max(naive, corrected)];
+}
+
+/**
+ * The instant a clock in `tz` reads `hour:minute:second` on `dateKey`.
+ *
+ * On a fall-back date the reading happens twice, and this is the first. On a
+ * spring-forward date a reading inside the skipped hour never happens at all, and
+ * this is the same reading moved past the gap: 02:30 becomes 03:30, where a
+ * clock nobody had moved forward would have been.
+ *
+ * @throws if `dateKey` is not a bare YYYY-MM-DD.
+ */
+export function zonedWallTime(
+  dateKey: string,
+  hour: number,
+  minute: number,
+  second = 0,
+  tz: TimeZone = appTimeZone(),
+): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
+  if (!m) throw new Error(`zonedWallTime expects a YYYY-MM-DD date, got "${dateKey}"`);
+  const wall = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), hour, minute, second);
+  // The offsets a day either side, as well as wallCandidates' two: east of UTC
+  // both of those can land after a fall-back change and agree on the SECOND
+  // reading (02:30 in Berlin on 25 Oct), and the first would never be tried.
+  const DAY = 86_400_000;
+  const candidates = [
+    ...new Set([...wallCandidates(wall, tz), wall - zoneOffsetMs(wall - DAY, tz), wall - zoneOffsetMs(wall + DAY, tz)]),
+  ].sort((a, b) => a - b);
+  const reads = (ms: number) => {
+    const p = zonedParts(ms, tz);
+    return zonedDateKey(ms, tz) === dateKey && p.hour === hour && p.minute === minute;
+  };
+  return candidates.find(reads) ?? candidates[candidates.length - 1]!;
+}
+
+/**
+ * The instant nearest `anchorMs` at which a clock in `tz` reads
+ * `hour:minute:second`.
+ *
+ * What a bare time field means when it edits an instant that already exists: a
+ * correction to a stamp, which is close to the stamp it corrects. Resolving it
+ * onto a fixed date instead is how an evening service's times came back a day
+ * out, from a browser whose calendar had already rolled past the app zone's, and
+ * how an item that ran after midnight was put on the evening before. Looking one
+ * day either side of the anchor's own date is enough: no two readings of the same
+ * time are further than a day apart, so the nearest one is always among the three.
+ */
+export function zonedTimeNear(
+  anchorMs: number,
+  hour: number,
+  minute: number,
+  second = 0,
+  tz: TimeZone = appTimeZone(),
+): number {
+  const day = zonedParts(anchorMs, tz);
+  let best = Number.NaN;
+  for (const shift of [-1, 0, 1]) {
+    const d = new Date(Date.UTC(day.year, day.month - 1, day.day + shift));
+    const key = `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+    const at = zonedWallTime(key, hour, minute, second, tz);
+    if (Number.isNaN(best) || Math.abs(at - anchorMs) < Math.abs(best - anchorMs)) best = at;
+  }
+  return best;
+}
+
+/**
  * The instant local midnight begins on `dateKey` ("YYYY-MM-DD") in `tz`.
  *
  * The inverse of {@link zonedDateKey}, and the reason it lives here rather than
@@ -151,15 +231,7 @@ function zoneOffsetMs(ms: number, tz: TimeZone): number {
 export function startOfZonedDay(dateKey: string, tz: TimeZone = appTimeZone()): number {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
   if (!m) throw new Error(`startOfZonedDay expects a YYYY-MM-DD date, got "${dateKey}"`);
-  const wall = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-
-  // Exactly two candidates, because there are exactly two offsets in play: the
-  // one in force at the naive guess, and the one in force where that guess
-  // lands. They are equal on all but two days a year.
-  const naive = wall - zoneOffsetMs(wall, tz);
-  const corrected = wall - zoneOffsetMs(naive, tz);
-  const earlier = Math.min(naive, corrected);
-  const later = Math.max(naive, corrected);
+  const [earlier, later] = wallCandidates(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])), tz);
 
   // The EARLIEST instant that reads as this date locally — on a fall-back date
   // that is the first of the two 00:00s, not the second.

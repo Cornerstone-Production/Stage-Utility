@@ -469,14 +469,16 @@ export function PublicLinkCard({
     if (!dto || working) return;
     const changed = originOf(addr) !== originOf(dto.url);
     if (!changed && typedToken === null) return;
-    if (changed && typedToken === null) {
+    // An emptied address needs no token: the server takes it as it is, and removes the saved token and switches publishing off with it.
+    const cleared = addr.trim() === "";
+    if (changed && typedToken === null && !cleared) {
       // The server would refuse it, and says so; this says it before anything is sent.
       setHint("A different address needs its token: paste it again.");
       return;
     }
     if (changed && !(await movingIsOk(addr))) return;
     await write(async () =>
-      adopt(await invoke<PublishSettingsDTO>("servicecue:setPublish", { ...(changed ? { url: addr.trim() } : {}), token: typedToken })),
+      adopt(await invoke<PublishSettingsDTO>("servicecue:setPublish", { ...(changed ? { url: addr.trim() } : {}), ...(typedToken !== null && !cleared ? { token: typedToken } : {}) })),
     );
   }
 

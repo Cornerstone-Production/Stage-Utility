@@ -222,8 +222,13 @@ describe("leaving the service", () => {
     await tickNoItem(T0 + 25 * MIN, "occ-a");
     await new Promise((r) => setImmediate(r)); // closeService follows writeManifest's promise
 
-    assert.deepEqual(manifests.mock.calls.map((c) => (c.arguments[0] as { serviceKey: string }).serviceKey), [keyFor("occ-a")]);
-    assert.deepEqual(released.mock.calls.map((c) => c.arguments[0]), [keyFor("occ-a")]);
+    // Only this test's service counts. An earlier test's close (its record was
+    // closed by a mode drop) chains a real manifest write before closeService,
+    // and under load that write can finish after this test has mocked both, so
+    // its key lands in these calls. Each test has its own plan id.
+    const mine = (key: string) => key.startsWith(`75953:${planId}:`);
+    assert.deepEqual(manifests.mock.calls.map((c) => (c.arguments[0] as { serviceKey: string }).serviceKey).filter(mine), [keyFor("occ-a")]);
+    assert.deepEqual(released.mock.calls.map((c) => c.arguments[0] as string).filter(mine), [keyFor("occ-a")]);
   });
 
   it("does not publish a record deleted in History while its close was saving", async (t) => {

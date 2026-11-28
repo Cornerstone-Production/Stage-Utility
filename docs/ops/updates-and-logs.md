@@ -220,9 +220,9 @@ The strip is state, not text scraped from the log: the running version, uptime,
 the time zone every timestamp is drawn in, how many warnings and errors the
 buffer holds, and one chip per **configured** integration with its connection
 state and message, worst first. Integrations nobody has set up are left out.
-This matters because a connection that has been retrying for days is silent by
-design — the services log the first failure and then back off quietly — so the
-log alone cannot tell you a box is unreachable.
+This matters because a connection that has been retrying for days is mostly
+silent by design (see [Connection outages](#connection-outages)), so the log alone
+cannot tell you a box is unreachable right now.
 
 One further chip, when Planning Center has answered at least once: **PCO quota**,
 the requests used against the limit PCO reported on its last response
@@ -238,6 +238,27 @@ runs over all of them, and the count says so.
 Timestamps are drawn in the **app time zone** (Settings → Advanced → General), which the
 header names. Not the server's UTC and not the viewer's browser zone: a log is
 read against a service that happened at a wall-clock time in the building.
+
+### Connection outages
+
+The integrations that hold a connection or poll for one (OBS, ProPresenter,
+ProVideoPlayer, REAPER, RossTalk, Smaart and Ross TSL on the LAN; Resi, Scores
+and YouTube over the internet) log an outage on one rule:
+
+- The first failure of an outage is a warning: `[reaper] Can't reach
+  192.168.1.50:8080 — … — backing off quietly`.
+- The same failure again is not logged. A different failure inside the same
+  outage (refused, then timing out) is.
+- An outage that goes on is reminded every 15 minutes, with
+  `— still failing after N attempts (M min)` on the end of the line.
+- A recovery is logged once no failure has followed it for two minutes:
+  `[reaper] reachable again after N failed attempts (M min)`. Integrations that
+  poll slower wait longer: four minutes for Resi, ten for YouTube, an hour for
+  Scores. A box that answers and fails in turn inside that window stays one
+  outage, so a flapping device writes one line rather than one per flap.
+- Starting an integration again, which saving its settings does, starts a fresh
+  outage, so the first failure after a save is logged again. ProPresenter is
+  started again only when its host or port changes.
 
 ### Log tags
 
@@ -321,7 +342,7 @@ a path or a credential. If you see one, report it.
 | `[relaunch]` | The server exiting on purpose and expecting its service manager to bring it back: the Restart button, a config import, a snapshot recall, a crash. On macOS (Homebrew and one-line installs) launchd can park the automatic respawn, so each of those exits is paired with a `launchctl kickstart`, and one line names the job being kicked (`com.stageutility.server`, or `com.cornerstone.stage-utility` on an install made before that name; `homebrew.mxcl.<formula>` on Homebrew). `cannot kick this server back up through launchd: …` means the job could not be identified: either none of the known jobs is loaded, or `launchctl` could not be run (the reason says which). Nothing was kicked, so launchd may leave the server stopped until `sudo launchctl kickstart system/<label>` is run by hand; the restart, import and recall replies carry the same reason. Also the warning when nothing will start the server again. An update does not use this path: on a one-line install the installer signals the server and launchd relaunches it, and a Homebrew update kickstarts the service itself |
 | `[remote-server]` | The HTTP/SSE server listening, a port conflict and its retries, kiosk discovery failing to start, the server id being made when discovery first starts, and (under `STAGE_UTILITY_DEBUG`) every request |
 | `[resi]` | Encoder status polling, and broadcast-list availability for encoder names: [Resi](../integrations/resi.md) |
-| `[rosstalk]` | Connection state to a Carbonite or Ultrix device: [RossTalk](../integrations/rosstalk.md) |
+| `[rosstalk]` | Connection state to a Carbonite or Ultrix device, and an unreachable one once per outage ([Connection outages](#connection-outages)): [RossTalk](../integrations/rosstalk.md) |
 | `[routes]` | An HTTP handler attempting a second reply after one was already sent — internal plumbing, not an operator signal |
 | `[scores]` | Followed teams, and ESPN reachability: [Scores](../integrations/scores.md) |
 | `[screens]` | Server-side. A one-time pass on the first start after an upgrade that takes the role an older build stored on each screen out of the data: one line for each screen it had to do something for (kept read-only behind a wall copy of a console, or kept live by making its view a console or giving it a control-surface copy, either of which is kept out of the sidebar and given the `contain` fit its layout had), `reused the copy left by an interrupted upgrade: "<name>"` for a copy a start that died part-way had already saved, then `role from view: N screens checked, M changed`, and nothing when no screen carries a stored role: [The view decides what a screen is](../reference/data-model.md#surfaces-displays-and-consoles). And one line whenever a write changes whether a screen's buttons work, from routing a screen to another view, from changing what a view is for, or from deleting a view a control surface was showing: `"Lobby TV" is now a control surface (shows "Booth controls")`, or `… is now read-only (shows …)` (`shows nothing` after a delete). Browser-side, the Screens page failing to start, renew or stop its scan for displays on the network: [Kiosk devices](../kiosk-devices.md) |
@@ -353,7 +374,7 @@ a path or a credential. If you see one, report it.
 | `[store-registry]` | Start-up refusing to run: two stores over one file name that disagree about being `config` or `runtime`. A programming error, never an operator one: [Contributing](../contributing.md) |
 | `[stream-starts]` | The first-seen live timestamp for a streaming platform failing to persist or clear |
 | `[surface-migration]` | A one-time pass that makes a view holding a button a console, and so the screens showing it control surfaces, on an install that predates surfaces: [Upgrading an existing install](../reference/data-model.md#upgrading-an-existing-install) |
-| `[tsl]` | Connection state to a Ross multiviewer over TSL UMD: [Ross MultiViewer](../integrations/ross-tsl.md) |
+| `[tsl]` | Connection state to a Ross multiviewer over TSL UMD, and an unreachable one once per outage ([Connection outages](#connection-outages)): [Ross MultiViewer](../integrations/ross-tsl.md) |
 | `[updater]` | The update flow described above; an update, track switch or restart that went ahead of a service under way by override (`… went ahead while a service is under way (…): the update lock was overridden, as asked`); a tag held back until its release is published, and the releases being unreadable so none is; What's new failing to read the running release's notes (`could not load the release notes for v<version>: <why>`), or reading them and failing to keep them (`fetched the release notes for v<version> but could not keep them: <why>`); a file `.gitattributes` pins (`-text`) checked out again because, with every CRLF made LF, it was byte for byte the committed file, before the dirty-tree check, and each such file it could not check (`could not check <file> for line ends .gitattributes pins`, with why); and (browser side) the update lock failing to read, and What's new's request for the notes failing (`could not read the release notes for What's new: <why>`) |
 | `[video-export]` | Exporting video feeds: the count, and whether passwords or relay ports were included: [Moving feeds between servers](../integrations/video-feeds.md#moving-feeds-between-servers) |
 | `[video-import]` | Importing video feeds: how many were added, replaced, kept, already the same or skipped (with the reason), and whether passwords or relay ports were applied: [Moving feeds between servers](../integrations/video-feeds.md#moving-feeds-between-servers) |

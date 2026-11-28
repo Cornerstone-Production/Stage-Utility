@@ -61,7 +61,7 @@ import { errorMessage } from "./errors.js";
 import { plural } from "./plural.js";
 import { scrub } from "./scrub.js";
 import { createPushClient, mayHaveLanded, type PushClient, type PushFailure, type PushResult } from "./servicecue-publish-client.js";
-import { backoffMs } from "./servicecue-publisher.js";
+import { backoffMs } from "./timers.js";
 import { docHash } from "./servicecue-publish-docs.js";
 import type { PublishOrigin } from "./servicecue-publish-rules.js";
 import { resolvePlot } from "./stageplots-doc.js";
@@ -262,7 +262,7 @@ const aboutThePage = (f: PushFailure) => f.kind !== "refused" || f.status === 40
 type SendResult =
   | { ok: true; sent: number; held: string[]; unpublished: { hash: string; why: string }[]; warnings: string[] }
   /** `sent`: how many requests went out before it failed, so a caller knows whether there is anything to take back. */
-  | { ok: false; status: 400 | 502; message: string; sent: number };
+  | { ok: false; status: 400 | 502; message: string; sent: number; unsure?: true };
 
 interface SendOptions {
   /** Send every doc, every background and the keep list, whatever this process last sent. */
@@ -1425,9 +1425,11 @@ export class StagePlotsPublisher {
   private async finish(venueId: string, venue: Venue, r: SendResult, host: string, secrets: string[], what: string): Promise<PublishOutcome> {
     const at = this.at();
     if (!r.ok) {
-      say("warn", secrets, `"${venue.name}" could not be ${what}: ${r.message}; the page keeps what it had`);
-      const saved = await this.savePublish(venueId, (p) => ({ ...p, lastError: errorAt(at, r.message, secrets) }));
-      return { ok: false, status: saved ? r.status : 404, error: saved ? hide(r.message, secrets) : "no such venue" };
+      // A send whose answer was lost may have been stored: the page keeps what it had only when it refused.
+      const message = r.unsure ? `${r.message} Whether the page took it is not known.` : r.message;
+      say("warn", secrets, `"${venue.name}" could not be ${what}: ${message}${r.unsure ? "" : "; the page keeps what it had"}`);
+      const saved = await this.savePublish(venueId, (p) => ({ ...p, lastError: errorAt(at, message, secrets) }));
+      return { ok: false, status: saved ? r.status : 404, error: saved ? hide(message, secrets) : "no such venue" };
     }
     const saved = await this.savePublish(venueId, (p) => stateAfterSend(p.secret, p.origin, at, p.linkAt ?? p.publishedAt, r, secrets, p.listed));
     if (!saved) return { ok: false, status: 404, error: "no such venue" };
@@ -1507,7 +1509,14 @@ export class StagePlotsPublisher {
     let took = 0;
     // A Worker from before StagePlots answers every path 404 and stored nothing, so there is nothing
     // to take back; a 404 after the page took something is a refusal like any other, and what went up goes back.
-    const fail = (r: PushFailure): SendResult => ({ ok: false, status: 502, message: sentence(r, host), sent: r.kind === "refused" && r.status === 404 && took === 0 ? 0 : count });
+    const fail = (r: PushFailure): SendResult => ({
+      ok: false,
+      status: 502,
+      message: sentence(r, host),
+      sent: r.kind === "refused" && r.status === 404 && took === 0 ? 0 : count,
+      // Its answer may have been lost after the page took it: said so, as the ServiceCue deploy says it.
+      ...(mayHaveLanded(r) ? { unsure: true as const } : {}),
+    });
 
     // Backgrounds first: a plot names one only once the page holds it.
     const needed = venueImages(doc, venue);
