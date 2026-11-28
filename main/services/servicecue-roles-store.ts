@@ -4,6 +4,7 @@
 import type { CategoryRole } from "../types/servicecue-roles.js";
 import { DataStore } from "./data-store.js";
 import { firstFree } from "./first-free.js";
+import { slugText } from "./slug.js";
 import { asArray, checked } from "./restore-check.js";
 import { SERVICECUE_LOG_TAG } from "./servicecue-legacy-names.js";
 
@@ -32,7 +33,7 @@ export function cleanRoles(roles: readonly unknown[]): CategoryRole[] {
  *  loses its category, and two names can reduce to one id ("A&V", "A V"), so the bare
  *  id may already belong to another role. */
 function idFor(name: string, taken: Set<string>): string {
-  const base = `role-${name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+  const base = `role-${slugText(name)}`;
   const id = firstFree(base, (s) => taken.has(s));
   taken.add(id);
   return id;

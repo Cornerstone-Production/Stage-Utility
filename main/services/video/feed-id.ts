@@ -1,6 +1,7 @@
 // main/services/video/feed-id.ts — a feed's permanent id, from its first name.
 
-import { firstFree } from "../first-free.js";
+import { firstFree, truncatingJoin } from "../first-free.js";
+import { slugText } from "../slug.js";
 
 export const FEED_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
 const MAX_ID_LENGTH = 40;
@@ -22,22 +23,11 @@ export const feedOwnerOf = (path: string): string => listenOwnerOf(path) ?? path
 export const feedSecretSlot = (feedId: string): string => `video:${feedId}`;
 
 export function feedIdFor(name: string, taken: ReadonlySet<string>): string {
-  const base =
-    name
-      .normalize("NFKD")
-      .replace(/\p{M}+/gu, "")
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 36)
-      .replace(/-+$/g, "") || "feed";
+  const base = slugText(name, { fold: "marks", max: 36, fallback: "feed" });
   return firstFree(
     base,
     (s) => taken.has(s) || (s === base && isReservedFeedId(s)),
-    (b, n) => {
-      // The base gives up characters to the suffix, so the id still fits.
-      const suffix = `-${n}`;
-      return `${b.slice(0, MAX_ID_LENGTH - suffix.length).replace(/-+$/g, "")}${suffix}`;
-    },
+    // The base gives up characters to the suffix, so the id still fits.
+    truncatingJoin(MAX_ID_LENGTH),
   );
 }

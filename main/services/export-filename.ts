@@ -5,6 +5,7 @@
 // value is built, so no route can put unchecked text into that header.
 
 import { zonedDateKey } from "./app-timezone.js";
+import { slugText } from "./slug.js";
 
 /**
  * Operator-supplied text, safe to put in a quoted Content-Disposition value.
@@ -14,8 +15,8 @@ import { zonedDateKey } from "./app-timezone.js";
  * a path component at 255 bytes.
  */
 export function filenameSlug(name: string): string {
-  // Trimmed again after the cut, which can land on the hyphen a space became.
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60).replace(/-+$/, "");
+  // slugText trims again after the cut, which can land on the hyphen a space became.
+  return slugText(name, { max: 60 });
 }
 
 /** `<prefix>-<slug>-2026-08-17.json`, or `<prefix>-2026-08-17.json` for an empty slug.
