@@ -134,15 +134,18 @@ describe("a wireless teardown detaches its own listeners and only its own", () =
     );
   });
 
-  it("Spectera drops both handlers on the request", async () => {
+  it("Spectera drops its handlers on the request", async () => {
     const p = new SennheiserSpectera();
     await p.connect({ host: LOCAL, port: DEAD_PORT, password: "" });
     const req = (p as unknown as { req: http.ClientRequest | null }).req;
     assert.ok(req, "connect() built no request, so this case proves nothing");
     assert.ok(req.listenerCount("error") > 0, "openStream() never attached 'error'");
     assert.ok(req.listenerCount("response") > 0, "https.request() never attached 'response'");
+    assert.ok(req.listenerCount("socket") > 0, "keepSocketAlive() never attached 'socket'");
 
     await p.disconnect();
+
+    assert.equal(req.listenerCount("socket"), 0, "abortStream() left keepSocketAlive's 'socket' listener attached");
 
     assert.equal(
       req.listenerCount("response"),

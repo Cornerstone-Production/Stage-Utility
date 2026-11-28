@@ -4,8 +4,8 @@
 // leading `<` / whitespace and trim; tokenise by spaces. Ignore partial/empty.
 
 import * as net from "net";
+import { scrub } from "../../services/scrub.js";
 import type { DeviceChannel, DeviceProvider } from "../../types/devices.js";
-import type { ConfigField } from "../../types/integrations.js";
 import { DeviceProviderBase, blankChannel, type ChannelState } from "./device-provider-base.js";
 
 // Per-channel mutable runtime state.
@@ -26,11 +26,19 @@ const CONNECT_TIMEOUT_MS = 10_000;
 // the socket level (setKeepAlive), so this app-level probe only needs to be a
 // slow backstop; halving it trims idle command chatter to each receiver.
 const HEARTBEAT_INTERVAL_MS = 60_000;
+/**
+ * Most characters held while waiting for a frame's closing `>`.
+ *
+ * A real frame is under a few hundred characters; a `GET 0 ALL` dump arrives as
+ * many frames, not one. Without a cap, a peer on 2202 streaming bytes with no `>`
+ * grew the buffer for as long as the socket stayed up and re-split all of it on
+ * every chunk. sse-reader.ts caps every SSE consumer the same way.
+ */
+export const SHURE_MAX_RECEIVE_BUFFER = 64 * 1024;
 
 export abstract class ShureBaseProvider extends DeviceProviderBase implements DeviceProvider {
   abstract readonly id: string;
   abstract readonly label: string;
-  abstract readonly configSchema: ConfigField[];
   /** Default channel count if cfg.channels is not supplied. */
   protected abstract readonly defaultChannels: number;
   /** Default device type for channels. Override per-subclass. */
@@ -38,9 +46,10 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
 
   private socket: net.Socket | null = null;
   private receiveBuffer = "";
+  /** True from a buffer overflow until the `>` that ends the dropped run. */
+  private resyncing = false;
   // Consecutive failed connect attempts, for exponential reconnect back-off.
   private reconnectAttempts = 0;
-  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   // Has this connection already reported a `< REP ERR >`? Reset per socket, so a
   // reconnect to a device that still refuses the command says so again.
   private rejectionLogged = false;
@@ -60,14 +69,19 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
   async connect(cfg: Record<string, unknown>): Promise<void> {
     this.enabled = true;
     this.cfg = this.parseCfg(cfg);
+    this.forgetFailures();
     this.initChannelStates(this.cfg.channels);
     await this.openSocket();
+  }
+
+  protected logTag(): string {
+    return `[shure:${this.id}]`;
   }
 
   async disconnect(): Promise<void> {
     this.enabled = false;
     this.reconnectAttempts = 0;
-    this.clearTimers();
+    this.stopAllTimers();
     this.destroySocket();
     this.setState("disconnected");
     this.markAllChannelsOffline();
@@ -336,6 +350,7 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
     const socket = new net.Socket();
     this.socket = socket;
     this.receiveBuffer = "";
+    this.resyncing = false;
     this.rejectionLogged = false;
 
     socket.setEncoding("utf8");
@@ -356,12 +371,12 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
     });
 
     socket.on("timeout", () => {
-      if (this.reconnectAttempts === 0) console.warn(`[shure:${this.id}] socket timeout`);
+      this.reportFailure("timeout", "socket timeout");
       socket.destroy();
     });
 
     socket.on("error", (err) => {
-      if (this.reconnectAttempts === 0) console.warn(`[shure:${this.id}] socket error: ${err.message}`);
+      this.reportFailure(`error ${(err as NodeJS.ErrnoException).code ?? err.message}`, `socket error: ${scrub(err.message)}`);
       this.setState("error");
       // Tear down so 'close' fires and we reconnect with back-off, rather than
       // leaving a half-open socket lingering.
@@ -370,7 +385,9 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
 
     socket.on("close", () => {
       if (this.reconnectAttempts === 0) console.log(`[shure:${this.id}] socket closed`);
-      this.stopHeartbeat();
+      // Every timer of this link — the heartbeat and anything a driver added,
+      // such as the charger's bay poll. A queued retry is not one of them.
+      this.stopLinkTimers();
       this.markAllChannelsOffline();
       if (this.getConnectionState() !== "disconnected") {
         this.setState("disconnected");
@@ -384,12 +401,34 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
   }
 
   private handleData(chunk: string): void {
+    this.reportWorking();
     this.receiveBuffer += chunk;
 
     // Messages are delimited by `>`. Split on it; last segment is a partial frame.
     const segments = this.receiveBuffer.split(">");
     // Keep the final incomplete segment in the buffer.
     this.receiveBuffer = segments.pop() ?? "";
+
+    // The first `>` after an overflow closes the run that was dropped, so what
+    // precedes it is that run's tail, not a frame. Parsed, it could read as a
+    // real report.
+    if (this.resyncing && segments.length > 0) {
+      segments.shift();
+      this.resyncing = false;
+    }
+
+    // Complete frames are drained first, so the cap bounds one unterminated run,
+    // never a burst of whole frames.
+    if (this.receiveBuffer.length > SHURE_MAX_RECEIVE_BUFFER) {
+      if (!this.resyncing) {
+        console.warn(
+          `[shure:${this.id}] receive buffer passed ${SHURE_MAX_RECEIVE_BUFFER} characters with no frame end; ` +
+            "dropping it and resuming at the next frame",
+        );
+      }
+      this.resyncing = true;
+      this.receiveBuffer = "";
+    }
 
     for (const segment of segments) {
       // Strip leading `<` and any surrounding whitespace.
@@ -496,22 +535,7 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
   }
 
   private startHeartbeat(): void {
-    this.stopHeartbeat();
-    this.heartbeatTimer = setInterval(() => {
-      this.send(this.heartbeatCommand());
-    }, HEARTBEAT_INTERVAL_MS);
-  }
-
-  private stopHeartbeat(): void {
-    if (this.heartbeatTimer !== null) {
-      clearInterval(this.heartbeatTimer);
-      this.heartbeatTimer = null;
-    }
-  }
-
-  private clearTimers(): void {
-    this.stopHeartbeat();
-    this.clearReconnect();
+    this.every("heartbeat", HEARTBEAT_INTERVAL_MS, () => this.send(this.heartbeatCommand()));
   }
 
   private destroySocket(): void {
@@ -533,6 +557,7 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
       this.socket = null;
     }
     this.receiveBuffer = "";
+    this.resyncing = false;
   }
 }
 

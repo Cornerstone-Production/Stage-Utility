@@ -192,9 +192,9 @@ The strip is state, not text scraped from the log: the running version, uptime,
 the time zone every timestamp is drawn in, how many warnings and errors the
 buffer holds, and one chip per **configured** integration with its connection
 state and message, worst first. Integrations nobody has set up are left out.
-This matters because a connection that has been retrying for days is silent by
-design — the services log the first failure and then back off quietly — so the
-log alone cannot tell you a box is unreachable.
+This matters because a connection that has been retrying for days is mostly
+silent by design (see [Connection outages](#connection-outages)), so the log alone
+cannot tell you a box is unreachable right now.
 
 One further chip, when Planning Center has answered at least once: **PCO quota**,
 the requests used against the limit PCO reported on its last response
@@ -210,6 +210,27 @@ runs over all of them, and the count says so.
 Timestamps are drawn in the **app time zone** (Settings → Advanced → General), which the
 header names. Not the server's UTC and not the viewer's browser zone: a log is
 read against a service that happened at a wall-clock time in the building.
+
+### Connection outages
+
+The integrations that hold a connection or poll for one (OBS, ProPresenter,
+ProVideoPlayer, REAPER, RossTalk, Smaart and Ross TSL on the LAN; Resi, Scores
+and YouTube over the internet) log an outage on one rule:
+
+- The first failure of an outage is a warning: `[reaper] Can't reach
+  192.168.1.50:8080 — … — backing off quietly`.
+- The same failure again is not logged. A different failure inside the same
+  outage (refused, then timing out) is.
+- An outage that goes on is reminded every 15 minutes, with
+  `— still failing after N attempts (M min)` on the end of the line.
+- A recovery is logged once no failure has followed it for two minutes:
+  `[reaper] reachable again after N failed attempts (M min)`. Integrations that
+  poll slower wait longer: four minutes for Resi, ten for YouTube, an hour for
+  Scores. A box that answers and fails in turn inside that window stays one
+  outage, so a flapping device writes one line rather than one per flap.
+- Starting an integration again, which saving its settings does, starts a fresh
+  outage, so the first failure after a save is logged again. ProPresenter is
+  started again only when its host or port changes.
 
 ### Log tags
 
@@ -293,14 +314,14 @@ a path or a credential. If you see one, report it.
 | `[relaunch]` | The server exiting on purpose and expecting its service manager to bring it back: the Restart button, a config import, a snapshot recall, a crash. On macOS (Homebrew and one-line installs) launchd can park the automatic respawn, so each of those exits is paired with a `launchctl kickstart`, and one line names the job being kicked (`com.stageutility.server`, or `com.cornerstone.stage-utility` on an install made before that name; `homebrew.mxcl.<formula>` on Homebrew). `cannot kick this server back up through launchd: …` means the job could not be identified: either none of the known jobs is loaded, or `launchctl` could not be run (the reason says which). Nothing was kicked, so launchd may leave the server stopped until `sudo launchctl kickstart system/<label>` is run by hand; the restart, import and recall replies carry the same reason. Also the warning when nothing will start the server again. An update does not use this path: on a one-line install the installer signals the server and launchd relaunches it, and a Homebrew update kickstarts the service itself |
 | `[remote-server]` | The HTTP/SSE server listening, a port conflict and its retries, kiosk discovery failing to start, the server id being made when discovery first starts, and (under `STAGE_UTILITY_DEBUG`) every request |
 | `[resi]` | Encoder status polling, and broadcast-list availability for encoder names: [Resi](../integrations/resi.md) |
-| `[rosstalk]` | Connection state to a Carbonite or Ultrix device: [RossTalk](../integrations/rosstalk.md) |
+| `[rosstalk]` | Connection state to a Carbonite or Ultrix device, and an unreachable one once per outage ([Connection outages](#connection-outages)): [RossTalk](../integrations/rosstalk.md) |
 | `[routes]` | An HTTP handler attempting a second reply after one was already sent — internal plumbing, not an operator signal |
 | `[scores]` | Followed teams, and ESPN reachability: [Scores](../integrations/scores.md) |
 | `[screens]` | Server-side. A one-time pass on the first start after an upgrade that takes the role an older build stored on each screen out of the data: one line for each screen it had to do something for (kept read-only behind a wall copy of a console, or kept live by making its view a console or giving it a control-surface copy, either of which is kept out of the sidebar and given the `contain` fit its layout had), `reused the copy left by an interrupted upgrade: "<name>"` for a copy a start that died part-way had already saved, then `role from view: N screens checked, M changed`, and nothing when no screen carries a stored role: [The view decides what a screen is](../reference/data-model.md#surfaces-displays-and-consoles). And one line whenever a write changes whether a screen's buttons work, from routing a screen to another view, from changing what a view is for, or from deleting a view a control surface was showing: `"Lobby TV" is now a control surface (shows "Booth controls")`, or `… is now read-only (shows …)` (`shows nothing` after a delete). Browser-side, the Screens page failing to start, renew or stop its scan for displays on the network: [Kiosk devices](../kiosk-devices.md) |
 | `[safespace]` | `BUG: a request URL for <origin> was sent to <origin> instead`, written when a SafeSpace request had to be moved back onto SafeSpace's own host. Never carries a path, which is the credential: [Code scanning](../reference/code-scanning.md#safespace) |
 | `[secrets]` | `secrets.bin` unreadable, or a credential save failing: [When a credential will not save](reliability.md#when-a-credential-will-not-save) |
 | `[security]` | The host-name check: refusal on or off at start-up and when switched, and `host-names.json` unreadable (refusal then off until it reads); a name not on the list the first time it is answered (the request and the address it came from); a name's first refusal, then one line an hour with how many more, and a `Host` that is not a name refused the same way; the seen list reaching its 50-name cap and the name it forgot (these three share five lines a minute, and the rest are counted on one line); refusal turned on with how many names were kept and how many left out, and each name added to or taken off the list by that confirmation; event streams closed because their name is now refused; a name added, accepted, removed or dismissed by the operator; the seen list failing to save (it is retried each minute): [SECURITY.md](../../SECURITY.md) |
-| `[sennheiser:<id>]` | A Sennheiser wireless connection's protocol trace, only under `SENNHEISER_DEBUG`: [Wireless](../integrations/wireless.md) |
+| `[sennheiser:<id>]` | A Sennheiser SSC connection's failures, once per outage: a socket error, a receiver that stops answering, a frame it could not read. The raw protocol trace only under `SENNHEISER_DEBUG`: [Wireless](../integrations/wireless.md) |
 | `[sensource]` | Poll cadence for occupancy and SafeSpace, and an idle consumer waking the poller. Also `BUG: a request URL for <origin> was sent to <origin> instead`, written when a token or API request had to be moved back onto SenSource's own host: [SenSource](../integrations/sensource.md) |
 | `[server]` | Process-level boot and shutdown: the data directory in use, unhandled rejections, and uncaught exceptions |
 | `[service-recorder]` | The shared logic all three service recordings share: whether a live-service boundary was held or split, and why, and an item already on air before a record opened not taken as its opening item: [Back-to-back services on one plan](../features/attendance-and-history.md#back-to-back-services-on-one-plan) |
@@ -310,13 +331,13 @@ a path or a credential. If you see one, report it.
 | `[servicecue-bundle]` | The build preparing the public ServiceCue page for upload (`build/servicecue/`): its failing, which leaves the update itself to go on and this server with nothing to upload: [The copy every build prepares](servicecue-on-the-web.md#the-copy-every-build-prepares) |
 | `[servicecue-deploy]` | Keeping the public ServiceCue page itself up to date ([Keeping it up to date](servicecue-on-the-web.md#keeping-it-up-to-date)): each decision once (deploying and why, the page current, left alone as newer or another build, waiting for a live service, the service window or the service times), the files uploaded and already held, the build deployed, a deploy that left the page on the old build, every failure with Cloudflare's code and words and when it is tried again, an update with no answer (or a 5xx) that Cloudflare was then found to hold, or whose outcome could not be read, a token set or cleared, and the Cloudflare credentials removed with a change of page address. Never the token |
 | `[servicecue-layouts]` | A one-time migration of saved columns from category names to roles: [Category roles](../features/servicecue-and-baptisms.md#category-roles) |
-| `[shure:<id>]` | A Shure wireless or charger connection's init and per-channel state: [Wireless](../integrations/wireless.md) |
+| `[shure:<id>]` | A Shure wireless or charger connection's init and per-channel state, socket errors and timeouts once per outage, and a receive buffer dropped for overflowing: [Wireless](../integrations/wireless.md) |
 | `[sidebar]` | The sidebar's arrangement: a save refused, with the reason; ids it names that this server no longer has (a page a release removed, a console deleted), left out and said once until the next save; and a `sidebar-config.json` that breaks the rules at start-up, copied aside as `sidebar-config.json.invalid-<time>` and drawn from what in it can be read: [Customizing the sidebar](../features/operator-app.md#customizing-the-sidebar) |
 | `[slots]` | Plan-to-service-type checks and override pruning: [Switching plans in the editor](../slots.md#switching-plans-in-the-editor) |
 | `[slots-store]` | `slots.json` migrations: the move onto named boards with its counts, each pair of identical boards merged, each unused board kept, each pointer at a board that does not exist set to none, a merge an interrupted start recorded and the next one finished or kept, and a write that could not be saved (which file, and that the next start finishes it): [Slots](../reference/data-model.md#slots) |
 | `[slug-migration]` | A display renamed off a URL now reserved by `/log` or `/logs`: [Friendly URLs](../display-urls.md#friendly-urls) |
 | `[smaart]` | Connection state to a Smaart measurement server: [Smaart](../integrations/smaart.md) |
-| `[spectera]` | A Sennheiser Spectera wireless connection's protocol trace, only under `SPECTERA_DEBUG` (an SSE buffer-overflow resync always shows): [Wireless](../integrations/wireless.md) |
+| `[spectera]` | A Sennheiser Spectera connection's failures, once per outage: a refused API password, an unexpected status, a stream error, a refused subscription, a base station that went silent; and an SSE buffer-overflow resync. The raw protocol trace only under `SPECTERA_DEBUG`: [Wireless](../integrations/wireless.md) |
 | `[spl-history]` | The SPL records' own files, as for `[attendance-history]`: [When a recorded file cannot be read](reliability.md#when-a-recorded-file-cannot-be-read) |
 | `[spl-recorder]` | The SPL recording resumed or rebuilt from the archive, or resumed from its stored record because the archive could not be read, and archive-close failures: [Sound levels](../features/attendance-and-history.md#sound-levels). A closed record that could not be saved, held and retried until it is: [When a recorded service cannot be saved](reliability.md#when-a-recorded-service-cannot-be-saved) |
 | `[spl-series]` | A raw SPL sample series failing to read: [Sound levels](../features/attendance-and-history.md#sound-levels) |
@@ -325,13 +346,13 @@ a path or a credential. If you see one, report it.
 | `[store-registry]` | Start-up refusing to run: two stores over one file name that disagree about being `config` or `runtime`. A programming error, never an operator one: [Contributing](../contributing.md) |
 | `[stream-starts]` | The first-seen live timestamp for a streaming platform failing to persist or clear |
 | `[surface-migration]` | A one-time pass that makes a view holding a button a console, and so the screens showing it control surfaces, on an install that predates surfaces: [Upgrading an existing install](../reference/data-model.md#upgrading-an-existing-install) |
-| `[tsl]` | Connection state to a Ross multiviewer over TSL UMD: [Ross MultiViewer](../integrations/ross-tsl.md) |
+| `[tsl]` | Connection state to a Ross multiviewer over TSL UMD, and an unreachable one once per outage ([Connection outages](#connection-outages)): [Ross MultiViewer](../integrations/ross-tsl.md) |
 | `[updater]` | The update flow described above; a tag held back until its release is published, and the releases being unreadable so none is; What's new failing to read the running release's notes (`could not load the release notes for v<version>: <why>`), or reading them and failing to keep them (`fetched the release notes for v<version> but could not keep them: <why>`); a file `.gitattributes` pins (`-text`) checked out again because, with every CRLF made LF, it was byte for byte the committed file, before the dirty-tree check, and each such file it could not check (`could not check <file> for line ends .gitattributes pins`, with why); and (browser side) the update lock failing to read, and What's new's request for the notes failing (`could not read the release notes for What's new: <why>`) |
 | `[video-export]` | Exporting video feeds: the count, and whether passwords or relay ports were included: [Moving feeds between servers](../integrations/video-feeds.md#moving-feeds-between-servers) |
 | `[video-import]` | Importing video feeds: how many were added, replaced, kept, already the same or skipped (with the reason), and whether passwords or relay ports were applied: [Moving feeds between servers](../integrations/video-feeds.md#moving-feeds-between-servers) |
 | `[video]` | Relay starts (once per process), exits and restarts, downloads and checksums, port conflicts, a relay left over from the last run, the relay not answering, reconcile and proxy failures, feeds going live, delayed or offline, a pull feed's device not answering the relay's dial or the page's camera check, B-frames detected, a push feed's password rotating, a pull feed's stored password cleared because its address moved to another camera or off an encrypted scheme, or because a new feed landed on the slot of an earlier one, a screen struggling with a feed or playing it smoothly again, and a screen lagging on a feed (holding the delay in its own browser) or no longer; browser-side, a Video widget's feed failing on a screen (once per failing streak: the first failure, a reminder at most every 5 minutes, the recovery), a feed falling back to HLS on a screen and back to WebRTC, a feed refused by a screen's own HLS switch and allowed again, a screen's playback stats failing to read and reading again, and a widget crashing: [Video feeds](../integrations/video-feeds.md#logging) |
 | `[view-import]` | Importing a view: plan retyping, patch variants, and preset counts: [Moving a view between installs](../moving-a-view.md) |
-| `[wireless]` | Connection setup, credential migration, a stored password cleared because the connection's address or provider changed, and meter-rate changes: [Wireless](../integrations/wireless.md) |
+| `[wireless]` | Connection setup, credential migration, a stored password cleared (by the operator, or because the connection's address or provider changed), a non-string credential ignored, and meter-rate changes: [Wireless](../integrations/wireless.md) |
 | `[youtube]` | The device-code connect flow: code issued, approved, or refused: [YouTube](../integrations/youtube.md) |
 
 ### Why a value on the page can read `\n`

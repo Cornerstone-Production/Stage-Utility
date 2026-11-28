@@ -6,7 +6,7 @@
 // powered off). The properties pinned below are the ones the services rely on.
 
 import assert from "node:assert/strict";
-import { test, describe, beforeEach, afterEach } from "node:test";
+import { test, describe, beforeEach, afterEach, type TestContext } from "node:test";
 
 import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
 import { StatusIntegration, type ConnState } from "./integration-base.js";
@@ -41,7 +41,12 @@ class Fake extends StatusIntegration<Dto> {
   }
 
   // Surface protected bits the tests need to observe.
-  get attemptCount(): number { return this.attempt; }
+  get runNow(): number { return this.run; }
+  isCurrent(run: number): boolean { return this.current(run); }
+  callRestart(): void { this.restart(); }
+  say(line: string, kind?: string): void { this.noteOutage(line, kind); }
+  healthy(): void { this.resetBackoff(); }
+  retry(): void { this.scheduleReconnect(); }
   callScheduleIn(ms: number): void { this.scheduleIn(ms); }
   nextDelay(): number { return this.nextReconnectDelayMs(); }
   stopTimers(): void { this.clearReconnect(); }
@@ -119,14 +124,33 @@ describe("ConnectionLifecycle", () => {
     f.shouldFail = true;
     f.start();
     await Promise.resolve();
-    assert.equal(f.attemptCount, 1, "one failure recorded");
+    // The delay is how the counter shows: 3 s doubled once for one failure.
+    assert.equal(f.nextDelay(), 6000, "one failure recorded");
 
     f.shouldFail = false;
     f.stopTimers();
     f.callScheduleIn(1);
     await new Promise((r) => setTimeout(r, 30));
-    assert.equal(f.attemptCount, 0, "a success must clear the back-off counter");
+    assert.equal(f.nextDelay(), 3000, "a success must clear the back-off counter");
     f.stop();
+  });
+
+  test("a run captured before a restart is not current after it, though `running` is", () => {
+    // restart() is stop() then start() in one tick, so `running` cannot tell a
+    // read started before it from one started after. The run can.
+    const f = new Fake();
+    f.shouldFail = true;
+    try {
+      f.start();
+      const before = f.runNow;
+      assert.equal(f.isCurrent(before), true);
+      f.callRestart();
+      assert.equal(f.isCurrent(before), false, "a read from before the restart still counted as current");
+      assert.equal(f.isCurrent(f.runNow), true);
+    } finally {
+      f.stop();
+    }
+    assert.equal(f.isCurrent(f.runNow), false, "a stopped integration has no current run");
   });
 
   test("repeat reports of the same state are suppressed", async () => {
@@ -261,5 +285,76 @@ describe("StatusIntegration", () => {
 
     assert.equal(sent.length, 2, "expected a connected snapshot then an offline one");
     assert.deepEqual(sent[1], { ...OFFLINE, rev: 2 });
+  });
+});
+
+describe("the outage log the base keeps", () => {
+  /** A started Fake whose own connect() stays out of the way, and its [fake] lines. */
+  function started(t: TestContext): { f: Fake; lines: string[] } {
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+    const lines: string[] = [];
+    const { warn, log } = console;
+    const keep = (...a: unknown[]) => {
+      const line = a.map(String).join(" ");
+      if (line.startsWith("[fake]")) lines.push(line);
+    };
+    console.warn = keep;
+    console.log = keep;
+    const f = new Fake();
+    f.start();
+    t.after(() => {
+      console.warn = warn;
+      console.log = log;
+      f.stop();
+    });
+    lines.length = 0;
+    return { f, lines };
+  }
+
+  test("a different failure inside one outage is news; the same one again is not", (t) => {
+    const { f, lines } = started(t);
+    f.say("refused", "refused");
+    f.say("refused", "refused");
+    f.say("timed out", "timeout");
+    f.say("refused", "refused");
+    assert.deepEqual(lines, ["[fake] refused", "[fake] timed out"]);
+  });
+
+  test("stop() cancels a recovery that has not been said yet", (t) => {
+    const { f, lines } = started(t);
+    f.say("refused");
+    f.healthy(); // arms the settle check
+    f.stop();
+    t.mock.timers.tick(10 * 60_000);
+    assert.deepEqual(lines, ["[fake] refused"], "a stopped integration announced a recovery");
+  });
+
+  test("a success after a retry gap as long as the window is not a recovery until it has held", (t) => {
+    const { f, lines } = started(t);
+    f.say("refused");
+    t.mock.timers.tick(10 * 60_000); // a long back-off
+    f.healthy();
+    f.say("refused"); // and down again before it held
+    assert.deepEqual(lines, ["[fake] refused"], "a flap after a long back-off was a recovery and a new outage");
+  });
+
+  test("a retry cancels a pending recovery, though no failure was said", (t) => {
+    // A socket the far end closes cleanly says no failure; it just retries.
+    const { f, lines } = started(t);
+    f.shouldFail = true; // the retries fail quietly from here
+    f.say("refused");
+    f.healthy();
+    f.retry();
+    t.mock.timers.tick(3 * 60_000);
+    assert.deepEqual(lines, ["[fake] refused"], "a connection that dropped was announced as recovered");
+  });
+
+  test("start() forgets the outage, so the first failure after a restart is said again", (t) => {
+    const { f, lines } = started(t);
+    f.say("refused");
+    f.say("refused");
+    f.callRestart();
+    f.say("refused");
+    assert.deepEqual(lines, ["[fake] refused", "[fake] refused"]);
   });
 });

@@ -125,25 +125,56 @@ export function withSecrets(
   return { ...safe, ...secret };
 }
 
+/** What folding a patch into the stored credentials did. Key NAMES only. */
+export interface SecretFold {
+  /** The credentials to store. */
+  next: Record<string, string>;
+  /** Keys that held a value and were cleared by an explicit blank. */
+  cleared: string[];
+  /** Keys whose incoming value was not a string, with its type; left as they were. */
+  ignored: { key: string; type: string }[];
+}
+
 /**
  * Fold an incoming patch into the stored credentials.
  *
  * A masked or absent value keeps what is already stored; an empty string is an
  * explicit clear. Without this an operator editing only the IP would blank the
  * password, because the form posts back the mask it was given.
+ *
+ * Returns what it cleared and what it ignored, so the caller can say so: a
+ * cleared credential has no other trace, and a silently skipped one is how an
+ * operator concludes the field is broken. integration-manager's fold logs both.
  */
+export function foldSecrets(
+  providerId: string,
+  incoming: Record<string, unknown>,
+  stored: Record<string, string>,
+): SecretFold {
+  const next = { ...stored };
+  const cleared: string[] = [];
+  const ignored: { key: string; type: string }[] = [];
+  for (const key of credentialKeys(providerId)) {
+    if (!(key in incoming)) continue;
+    const value = incoming[key];
+    if (isMask(value)) continue; // unchanged
+    if (isBlankSecret(value)) { // explicit clear — whitespace is empty
+      if (hasSecretValue(next[key])) cleared.push(key);
+      delete next[key];
+    } else if (typeof value === "string") {
+      next[key] = value;
+    } else {
+      ignored.push({ key, type: value === null ? "null" : typeof value });
+    }
+  }
+  return { next, cleared, ignored };
+}
+
+/** The credentials {@link foldSecrets} would store, for a caller with nothing to report. */
 export function mergeSecrets(
   providerId: string,
   incoming: Record<string, unknown>,
   stored: Record<string, string>,
 ): Record<string, string> {
-  const next = { ...stored };
-  for (const key of credentialKeys(providerId)) {
-    if (!(key in incoming)) continue;
-    const value = incoming[key];
-    if (isMask(value)) continue; // unchanged
-    if (isBlankSecret(value)) delete next[key]; // explicit clear — whitespace is empty
-    else if (typeof value === "string") next[key] = value;
-  }
-  return next;
+  return foldSecrets(providerId, incoming, stored).next;
 }

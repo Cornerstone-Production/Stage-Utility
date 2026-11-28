@@ -1,5 +1,11 @@
 // ProviderRegistry — registers DeviceProvider implementations and exposes
 // their descriptors to the UI (via IntegrationManager / wireless handler).
+//
+// The descriptors here are the ONLY form schema for wireless gear: the panel
+// draws its fields from them and wireless-credentials.ts finds the password
+// fields in them. The drivers used to declare a second copy each, which nothing
+// read and which had drifted (the charger's said "Number of Bays", the form
+// said "Number of Channels"); a driver carries no schema now.
 
 import type { DeviceProvider } from "../types/devices.js";
 import type { ConfigField, IntegrationDescriptor } from "../types/integrations.js";
@@ -12,11 +18,18 @@ import { ShureCharger } from "./wireless/shure-charger.js";
 import { ShurePsm } from "./wireless/shure-psm.js";
 import { ShureUlxd } from "./wireless/shure-ulxd.js";
 
-// Common host/port/channels fields shared across Shure providers.
+// The address fields every Shure provider asks for.
+function shureAddress(hostPlaceholder = "192.168.1.100"): ConfigField[] {
+  return [
+    { key: "host", label: "Device IP / Hostname", type: "text", placeholder: hostPlaceholder },
+    { key: "port", label: "TCP Port", type: "number", placeholder: "2202" },
+  ];
+}
+
+// Common host/port/channels fields shared across Shure receivers.
 function shureFields(channelsPlaceholder: string): ConfigField[] {
   return [
-    { key: "host", label: "Device IP / Hostname", type: "text", placeholder: "192.168.1.100" },
-    { key: "port", label: "TCP Port", type: "number", placeholder: "2202" },
+    ...shureAddress(),
     { key: "channels", label: "Number of Channels", type: "number", placeholder: channelsPlaceholder },
   ];
 }
@@ -71,7 +84,17 @@ const PROVIDER_DESCRIPTORS = new Map<string, IntegrationDescriptor>([
       kind: "wireless",
       label: "Shure SBC Charger",
       docs: "wireless",
-      configSchema: shureFields("2"),
+      configSchema: [
+        ...shureAddress("192.168.1.110"),
+        {
+          key: "channels",
+          label: "Number of Bays",
+          type: "number",
+          // The driver's own default (ShureCharger.defaultChannels).
+          placeholder: "8",
+          help: "One SBC220 has 2 bays, and up to four can be linked behind one IP, reporting bays 1-8. Set this to 2 x the number of linked units. Bays past this number still appear once the charger reports them.",
+        },
+      ],
     },
   ],
   [

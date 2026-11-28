@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, type CSSProperties } from "react";
+import { memo, useLayoutEffect, useRef, type CSSProperties, type RefObject } from "react";
 import { cn } from "../lib/cn";
 import { lineColor } from "./channel-color";
 
@@ -6,8 +6,9 @@ interface TranscriptFeedProps {
   lines: TranscriptLineDTO[];
   /** Cap to the last N lines (compact layout object). Omit to show all (full view). */
   maxLines?: number;
-  /** Allow the viewer to scroll history; auto-follows newest only when at bottom
-   *  (full transcription view). Default false (compact object — no scrollbar). */
+  /** Allow the viewer to scroll history; follows the newest line until they
+   *  scroll up, and again once they scroll back to the bottom (full
+   *  transcription view). Default false (compact object — no scrollbar). */
   scrollable?: boolean;
   /** Show the small speaker/channel label prefix. Defaults to auto (on if any
    *  line carries a channel/name). */
@@ -111,6 +112,135 @@ const TranscriptLineRow = memo(
     sameColorOverrides(prev.colorOverrides, next.colorOverrides),
 );
 
+/** How close to the bottom counts as AT the bottom, for turning following back
+ *  on. A scroll to the end lands exactly on it; this only absorbs the
+ *  fractional scrollTop a zoomed page can report. */
+const AT_BOTTOM_PX = 4;
+
+/** How long after wheel, touch or key input a scroll that moved up is taken to
+ *  be the viewer's, at a pin that lands before that scroll's own event. */
+const INPUT_WINDOW_MS = 250;
+
+type Box<T> = { current: T };
+
+/** Record the viewer's intent, and let scroll anchoring act only while they
+ *  read back (see useFollowNewest). */
+function setFollowing(el: HTMLElement, following: Box<boolean>, on: boolean): void {
+  following.current = on;
+  el.style.overflowAnchor = on ? "none" : "";
+}
+
+/**
+ * Scroll to the very bottom, and remember where that left scrollTop so the next
+ * scroll event is not read as the viewer scrolling up.
+ *
+ * Unless the viewer has just started scrolling up: input arrived a moment ago
+ * and scrollTop already sits above where the last pin left it, but the scroll
+ * event saying so has not been delivered yet. Pinning then would pull them back
+ * down mid-gesture, so following ends here instead. Input alone ends nothing: a
+ * pinch, a tap or a key that moved nothing leaves the feed following.
+ */
+function pinOrRelease(el: HTMLElement, following: Box<boolean>, lastTop: Box<number>, inputAt: Box<number>): void {
+  if (!following.current) return;
+  if (el.scrollTop < lastTop.current && performance.now() - inputAt.current < INPUT_WINDOW_MS) {
+    setFollowing(el, following, false);
+    lastTop.current = el.scrollTop;
+    return;
+  }
+  el.scrollTop = el.scrollHeight;
+  lastTop.current = el.scrollTop;
+}
+
+/**
+ * Keep a scroller on its newest content while the viewer wants that, and leave
+ * them where they are once they have scrolled up to read back.
+ *
+ * "Following" is the VIEWER'S intent, so only the viewer changes it. It turns
+ * off when a scroll moves up that this hook did not make, and back on when a
+ * scroll lands at the bottom. Nothing this hook does, and no line arriving or
+ * leaving, can turn it off.
+ *
+ * It used to be recomputed from layout on every scroll event. Under real
+ * caption traffic a scroll event often reaches the page after another push has
+ * been committed and before the follow ran: it read the new, taller content as
+ * "scrolled away from the bottom", following turned off, and the page stopped
+ * on an old line for good.
+ *
+ * Following pins in a LAYOUT effect, so the pin lands in the same task as the
+ * commit, before paint and before any scroll event can read the new content
+ * unfollowed. A line that wraps taller without a new line arriving (a font
+ * loading, the box resizing) is followed by the ResizeObserver.
+ *
+ * Scroll anchoring is off while following and on while reading back. Once the
+ * buffer is full every new line evicts one at the top, and anchoring answers
+ * by moving scrollTop up by the evicted line's height, a scroll nobody asked
+ * for. In WebKit that adjustment's scroll event was what turned following off.
+ * While reading back, anchoring is what holds the operator's line still as
+ * lines are evicted above it.
+ */
+function useFollowNewest(
+  scrollRef: RefObject<HTMLDivElement | null>,
+  contentRef: RefObject<HTMLDivElement | null>,
+  enabled: boolean,
+  hasLines: boolean,
+  lines: TranscriptLineDTO[],
+): (() => void) | undefined {
+  const followingRef = useRef(true);
+  /** scrollTop as of the last scroll event or pin, to tell an upward scroll. */
+  const lastTopRef = useRef(0);
+  /** When the viewer last used the wheel, touch or a key (see pinOrRelease). */
+  const inputAtRef = useRef(-Infinity);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (enabled && el) pinOrRelease(el, followingRef, lastTopRef, inputAtRef);
+  }, [scrollRef, enabled, lines]);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    const content = contentRef.current;
+    if (!enabled || !el) return;
+    setFollowing(el, followingRef, followingRef.current);
+    const onInput = () => {
+      inputAtRef.current = performance.now();
+    };
+    // Keys go to whatever has focus, and the feed takes none, so they are
+    // heard on the document.
+    const doc = el.ownerDocument;
+    el.addEventListener("wheel", onInput, { passive: true });
+    el.addEventListener("touchmove", onInput, { passive: true });
+    doc.addEventListener("keydown", onInput);
+    // Guarded: not every embedded or kiosk browser this app runs in has it, and
+    // the follow on each new line does not depend on it.
+    const ro =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(() => pinOrRelease(el, followingRef, lastTopRef, inputAtRef));
+    ro?.observe(el);
+    if (content) ro?.observe(content);
+    return () => {
+      el.style.overflowAnchor = "";
+      ro?.disconnect();
+      el.removeEventListener("wheel", onInput);
+      el.removeEventListener("touchmove", onInput);
+      doc.removeEventListener("keydown", onInput);
+    };
+  }, [scrollRef, contentRef, enabled, hasLines]);
+
+  if (!enabled) return undefined;
+  return () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const top = el.scrollTop;
+    if (el.scrollHeight - top - el.clientHeight <= AT_BOTTOM_PX) setFollowing(el, followingRef, true);
+    // Upward, and not by us: every pin records where it left scrollTop,
+    // anchoring is off while following, and a browser's own clamp when content
+    // shrinks lands at the bottom, above.
+    else if (top < lastTopRef.current) setFollowing(el, followingRef, false);
+    lastTopRef.current = top;
+  };
+}
+
 /**
  * Bottom-anchored, multi-speaker transcript feed: newest line at the bottom,
  * older lines shifting up. Shared by the full-screen transcription view and the
@@ -132,28 +262,15 @@ export function TranscriptFeed({
   const visible = maxLines != null ? lines.slice(-maxLines) : lines;
   const labels = showLabels ?? visible.some((l) => l.channelName || l.channel);
 
-  // Follow the newest line only while already at the bottom; if the viewer
-  // scrolls up to read history, leave them there until they return.
   const scrollRef = useRef<HTMLDivElement>(null);
-  const endRef = useRef<HTMLDivElement>(null);
-  const atBottomRef = useRef(true);
-  function onScroll() {
-    const el = scrollRef.current;
-    if (!el) return;
-    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
-  }
-  useEffect(() => {
-    // Guarded the way service-history-section.tsx is: jsdom has no
-    // scrollIntoView at all, and neither does every embedded/kiosk browser this
-    // codebase already treats specially (see docs/integrations/ultritouch.md) —
-    // unguarded, every live caption push would throw inside this effect there.
-    if (scrollable && atBottomRef.current) endRef.current?.scrollIntoView?.({ block: "end" });
-  }, [lines, scrollable]);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const hasLines = !(visible.length === 0 && emptyText);
+  const onScroll = useFollowNewest(scrollRef, contentRef, scrollable, hasLines, lines);
 
   return (
     <div
       ref={scrollRef}
-      onScroll={scrollable ? onScroll : undefined}
+      onScroll={onScroll}
       style={scrollable ? textStyle : { ...textStyle, overflow: "clip" }}
       className={cn(
         "flex flex-col min-h-0",
@@ -189,7 +306,7 @@ export function TranscriptFeed({
         // That collapse is exactly why it is wrong for the clipped feed: with no
         // scrollbar to recover them, the overflowing lines spilled off the
         // BOTTOM and cut off the newest one mid-sentence.
-        <div className={cn(scrollable && "mt-auto", "flex flex-col", gapClassName)}>
+        <div ref={contentRef} className={cn(scrollable && "mt-auto", "flex flex-col", gapClassName)}>
           {visible.map((l) => (
             <TranscriptLineRow
               key={l.id}
@@ -200,7 +317,6 @@ export function TranscriptFeed({
               lineClassName={lineClassName}
             />
           ))}
-          {scrollable && <div ref={endRef} />}
         </div>
       )}
     </div>

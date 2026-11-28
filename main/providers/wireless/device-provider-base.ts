@@ -20,6 +20,8 @@ import type { ConnectionState } from "../../types/integrations.js";
 import type { DeviceStatus } from "../../types/devices.js";
 import { channelHasSubscribers } from "../../services/broadcaster.js";
 import { serviceWindow } from "../../services/service-window.js";
+import { cleared } from "../../services/timers.js";
+import { OutageLog } from "../../services/repeat-log.js";
 
 /**
  * Per-channel telemetry, shared by every driver.
@@ -98,6 +100,13 @@ export function blankChannel(
   };
 }
 
+/**
+ * What a failure is a failure OF, so one cannot end or hide another: the link
+ * itself, a Spectera telemetry subscription, an SSC frame the driver could not
+ * read. A union, so a typo cannot open an outage nobody closes.
+ */
+export type OutageKey = "link" | "subscribe" | "frame";
+
 /** The SSE channel the wireless panel listens on — see reconnectDelayMs. */
 const WIRELESS_CHANNEL = "wireless:connections-changed";
 
@@ -105,7 +114,13 @@ export abstract class DeviceProviderBase {
   private statusCb: ((s: DeviceStatus) => void) | null = null;
   private connCb: ((state: ConnectionState) => void) | null = null;
   private connState: ConnectionState = "disconnected";
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectTimer: NodeJS.Timeout | null = null;
+  private readonly intervals = new Map<string, NodeJS.Timeout>();
+  private watchdog: NodeJS.Timeout | null = null;
+  private readonly outages = new OutageLog();
+
+  /** The tag every line from this driver starts with, e.g. `[shure:shure-ulxd]`. */
+  protected abstract logTag(): string;
 
   onStatus(cb: (s: DeviceStatus) => void): void {
     this.statusCb = cb;
@@ -165,12 +180,88 @@ export abstract class DeviceProviderBase {
   }
 
   protected clearReconnect(): void {
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    this.reconnectTimer = null;
+    this.reconnectTimer = cleared(this.reconnectTimer);
   }
 
   /** Is a retry already queued? */
   protected get reconnectPending(): boolean {
     return this.reconnectTimer !== null;
+  }
+
+  // ── Timers that belong to one link ──────────────────────────────────────────
+  //
+  // Held here, not by each driver, because a driver-held timer is one only that
+  // driver remembers to stop. A driver asks for a timer by name;
+  // stopLinkTimers() ends every one of them.
+
+  /** Run `fn` every `ms` while this link is up. A second call under the same
+   *  `name` replaces the first, so a reconnect cannot stack two. */
+  protected every(name: string, ms: number, fn: () => void): void {
+    const prev = this.intervals.get(name);
+    if (prev) clearInterval(prev);
+    this.intervals.set(name, setInterval(fn, ms));
+  }
+
+  /**
+   * (Re)arm the silence watchdog: `onSilent` runs if nothing re-arms it within
+   * `ms`. Re-arm on every sign of life from the device. One per provider: a link
+   * has one "is anyone there" question.
+   */
+  protected armWatchdog(ms: number, onSilent: () => void): void {
+    this.watchdog = cleared(this.watchdog);
+    this.watchdog = setTimeout(() => {
+      this.watchdog = null;
+      onSilent();
+    }, ms);
+  }
+
+  /** Stop the link's timers: every interval and the watchdog. Not a queued
+   *  retry — that belongs to the next link, and a socket closing is exactly when
+   *  one gets queued. */
+  protected stopLinkTimers(): void {
+    for (const t of this.intervals.values()) clearInterval(t);
+    this.intervals.clear();
+    this.watchdog = cleared(this.watchdog);
+  }
+
+  /** Everything, a queued retry included. For disconnect(). */
+  protected stopAllTimers(): void {
+    this.stopLinkTimers();
+    this.clearReconnect();
+  }
+
+  // ── Saying a link failed ────────────────────────────────────────────────────
+  //
+  // Once per OUTAGE, through the shared OutageLog (services/repeat-log.ts): the
+  // first failure of a run, the first of each new kind, a reminder every 15
+  // minutes, and one line when the link has held again. Not under a debug
+  // variable: Spectera and SSC used to write their failures only under
+  // SPECTERA_DEBUG / SENNHEISER_DEBUG, so a wrong password or a wrong address
+  // left the panel saying "error" and /log saying nothing.
+
+  /**
+   * Report a failure. `kind` separates problems that must not hide one another
+   * (a refused password, then an unreachable host). `key` separates failures
+   * that are not the link's — a frame the driver could not read is not an
+   * outage, and must not end or extend one. `message` is the operator's line,
+   * without the tag; every device- or operator-supplied value in it is scrubbed
+   * by the caller.
+   */
+  protected reportFailure(kind: string, message: string, key: OutageKey = "link"): void {
+    const d = this.outages.fail(key, kind, Date.now());
+    if (d.log) console.warn(`${this.logTag()} ${message}${d.note}`);
+  }
+
+  /** The link is working: the device sent something. Cheap enough to call on
+   *  every chunk, and ends a run only once it has held. */
+  protected reportWorking(key: OutageKey = "link"): void {
+    const d = this.outages.ok(key, Date.now());
+    if (d.log) console.log(`${this.logTag()} working again${d.note}`);
+  }
+
+  /** A new configuration: nothing learned about the old address or password is
+   *  true of the new one, so the next failure is news. */
+  protected forgetFailures(): void {
+    this.outages.forget();
   }
 }
