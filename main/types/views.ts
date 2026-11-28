@@ -78,7 +78,7 @@ export function everyViewKind<const T extends readonly ViewKind[]>(kinds: T & Ex
  *
  * The bar carries the brand, the plan context and the QR link home — it is the
  * operator's way off a wall screen. The full-bleed kinds suppress it so their
- * content owns the whole panel; only `slots` and `custom` keep it.
+ * content owns the whole panel; `slots`, `custom`, `dashboard`, `stage` and `transcription` keep it.
  *
  * This is deliberately a `Record` over every kind rather than a list of the
  * true ones: a list says nothing about a kind left out, and a new ViewKind that
@@ -100,8 +100,8 @@ export const KIND_DRAWS_TOP_BAR: Record<ViewKind, boolean> = externKeyed({
   slots: true,
   custom: true,
   dashboard: true,
-  stage: false,
-  transcription: false,
+  stage: true,
+  transcription: true,
   script: false,
   "spl-rundown": false,
   calendar: false,

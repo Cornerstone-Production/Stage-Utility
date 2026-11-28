@@ -259,7 +259,7 @@ export function resolveScreen(input: ScreenInput): StageScreen {
 
   // Dashboard- and stage-kind displays render entirely different views, as do
   // transcription, script and spl-rundown — each its own component, keyed only
-  // by the display id and (for script) the View it resolved to.
+  // by the display id (spl-rundown) and (for script) the View it resolved to.
   if (
     kind === "dashboard" ||
     kind === "stage" ||

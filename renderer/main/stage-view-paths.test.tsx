@@ -192,6 +192,23 @@ const says = (c: HTMLElement, text: string) => (c.textContent ?? "").includes(te
 /** The top bar's way home — stripped on a locked output, present otherwise. */
 const hasHomeLink = (c: HTMLElement) => !!c.querySelector('a[href="/"]');
 /**
+ * Whether the screen draws ScreenTopBar's bar, and ONLY that bar.
+ *
+ * Throws when a screen draws two bars, or draws the brand strip's controls
+ * (any link to "/" or "/settings": the way home, the settings QR) outside the bar: that is a view with its
+ * own inline copy, which ignores Top bar, Lock and ?kiosk=1. Counting the bar
+ * alone would pass it, which is what the old text-based check did.
+ */
+function hasTopBar(c: HTMLElement): boolean {
+  const bars = c.querySelectorAll('[data-testid="kiosk-top-bar"]').length;
+  assert.ok(bars <= 1, `${bars} top bars drawn on one screen`);
+  const stray = [...c.querySelectorAll('a[href="/"], a[href="/settings"]')]
+    .filter((a) => !a.closest('[data-testid="kiosk-top-bar"]'))
+    .map((a) => a.getAttribute("aria-label"));
+  assert.deepEqual(stray, [], "the screen draws brand-strip links outside ScreenTopBar, so Top bar, Lock and ?kiosk=1 do not reach them");
+  return bars === 1;
+}
+/**
  * Whether a press can reach the layout's controls.
  *
  * A BOOLEAN, deliberately, and so is every other DOM assertion in this file. An
@@ -621,12 +638,12 @@ describe("StageView honours a display's hidden top bar", () => {
   // can never see the flag set; it has its own case after the table, which says
   // why rather than leaving it looking like a hole.
   //
-  // The observable is the bar's own context label, "<service>: <plan>", which
-  // nothing else on any of these screens draws. Not a class and not a test id:
-  // those keep passing when a seventh render site draws a bar without the gate,
-  // and the words on the screen are what the operator is looking at.
-  const TOP_BAR = "Weekend: A plan";
-  const hasTopBar = (c: HTMLElement) => says(c, TOP_BAR);
+  // The observable is STRUCTURAL: ScreenTopBar's one root (`kiosk-top-bar`), and
+  // `hasTopBar` fails outright when a screen also draws the brand strip's links
+  // (the way home, the settings QR) anywhere else. The first version of this
+  // guard looked for the bar's context label, "<service>: <plan>", which only
+  // KioskTopBar prints, so three views drawing their own inline bar passed every
+  // row here.
 
   /**
    * Every screen a display can land on, and whether it draws a top bar.
@@ -647,8 +664,8 @@ describe("StageView honours a display's hidden top bar", () => {
     { name: "a custom view with nothing drawn on it", bar: true, state: () => ofKind("custom") },
     { name: "an unrouted display", bar: true, state: () => stageState({ resolvedByOutput: { "display-1": resolved({ viewId: null }) } }) },
     { name: "dashboard", bar: true, state: () => ofKind("dashboard") },
-    { name: "stage", bar: false, state: () => ofKind("stage") },
-    { name: "transcription", bar: false, state: () => ofKind("transcription") },
+    { name: "stage", bar: true, state: () => ofKind("stage") },
+    { name: "transcription", bar: true, state: () => ofKind("transcription") },
     { name: "script", bar: false, state: () => ofKind("script", { serviceCueLayoutId: "sl1" }) },
     { name: "spl-rundown", bar: false, state: () => ofKind("spl-rundown") },
     { name: "calendar", bar: false, state: () => ofKind("calendar") },
@@ -681,6 +698,29 @@ describe("StageView honours a display's hidden top bar", () => {
         false,
         `${screen.name} still drew its top bar with hideTopBar set — a render site is missing the gate`,
       );
+    });
+  }
+
+  // The three views that once drew their own bar. A locked screen and a
+  // ?kiosk=1 link both strip the way home and the settings link, on every one.
+  for (const kind of ["dashboard", "stage", "transcription"] as const) {
+    test(`${kind}: Lock and ?kiosk=1 strip the way home from the bar it draws`, async () => {
+      const open = await showScreen("/display-1", ofKind(kind));
+      assert.equal(hasTopBar(open), true, `${kind} lost its bar`);
+      assert.equal(hasHomeLink(open), true, `${kind}'s bar has no way home when unlocked`);
+      cleanup();
+
+      const locked = await showScreen("/display-1", {
+        ...ofKind(kind),
+        resolvedByOutput: { "display-1": resolved({ kind, locked: true }) },
+      });
+      assert.equal(hasTopBar(locked), true);
+      assert.equal(hasHomeLink(locked), false, `a Locked ${kind} still offers the way home`);
+      cleanup();
+
+      const shared = await showScreen("/display-1?kiosk=1", ofKind(kind));
+      assert.equal(hasTopBar(shared), true);
+      assert.equal(hasHomeLink(shared), false, `a ?kiosk=1 ${kind} still offers the way home`);
     });
   }
 
@@ -829,9 +869,6 @@ describe("KIND_DRAWS_TOP_BAR is what the arms actually render", () => {
   // It loops the MAP, not a hand-written list, so a ViewKind added tomorrow is
   // rendered here the moment it is given a value — there is no row to forget.
   // The map's type already refuses a kind with no value at all.
-  const TOP_BAR = "Weekend: A plan";
-  const hasTopBar = (c: HTMLElement) => says(c, TOP_BAR);
-
   /** What each kind needs on its View before its arm will draw anything. */
   const EXTRAS: Partial<Record<ViewKind, Record<string, unknown>>> = {
     custom: { layout: { canvas: { width: 1920, height: 1080, background: null }, objects: [] } },
