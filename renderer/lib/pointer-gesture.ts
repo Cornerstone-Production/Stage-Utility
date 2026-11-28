@@ -43,16 +43,9 @@ export function bindGesture(
     move: (e: globalThis.PointerEvent) => void;
     end: (e: globalThis.PointerEvent, cancelled: boolean) => void;
   },
-  /**
-   * `capture: false` leaves the pointer uncaptured until the caller takes it (a
-   * drag that must keep a plain press a click until it has travelled). The window
-   * listeners and the pointerId filter are the same, and `cancel` and `end` still
-   * release a capture the caller took.
-   */
-  options?: { capture?: boolean },
 ): GestureHandle {
   // jsdom does not implement pointer capture; a browser always does.
-  if (options?.capture !== false && typeof el.setPointerCapture === "function") el.setPointerCapture(pointerId);
+  if (typeof el.setPointerCapture === "function") el.setPointerCapture(pointerId);
   const onMove = (e: globalThis.PointerEvent) => {
     if (e.pointerId === pointerId) handlers.move(e);
   };

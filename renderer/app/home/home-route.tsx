@@ -110,16 +110,14 @@ export function startCardDrag(
   let moved = false;
 
   // On the window and filtered to this pointer, so a second finger cannot steer
-  // the drag and a release off the card still ends it. Not captured at the press:
-  // until the pointer has travelled, everything under it must keep behaving normally.
+  // the drag and a release off the card still ends it. bindGesture also captures the
+  // pointer, so the drag keeps reporting where it went when it leaves the grid; the
+  // controls that need their own click were already refused above.
   return bindGesture(el, e.pointerId, {
     move: (ev) => {
       if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < DRAG_START_PX) return;
       if (!moved) {
         moved = true;
-        // Captured only once this IS a drag, so it still reports where it went
-        // and still ends when it leaves the grid.
-        el.setPointerCapture(ev.pointerId);
         cancelPress?.();
         cb.onDragStart(id);
       }
@@ -132,7 +130,7 @@ export function startCardDrag(
       if (moved && !cancelled) cb.onDrop(id, ev.clientX, ev.clientY);
       else cb.onEnd();
     },
-  }, { capture: false });
+  });
 }
 
 export function HomeRoute() {
