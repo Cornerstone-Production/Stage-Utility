@@ -828,6 +828,19 @@ function AllowlistSection({
       took(r);
       setMessage({ tone: "ok", text: `Imported ${r.entries.length} control${r.entries.length === 1 ? "" : "s"}.` });
     } catch (err) {
+      if ((err as { code?: string }).code === "rev-changed") {
+        // The list moved since this page read it: read it again, so a second try names the
+        // revision that is stored now instead of 409-ing until a reload.
+        logToServer("qsys", "an allowlist import was stopped: the list changed since this page read it; the page shows it as it is now");
+        try {
+          took(await invoke<AllowRead>("qsys:allowlist"));
+          setMessage({ tone: "error", text: "Nothing was imported: the list was changed somewhere else. It is shown as it is now; choose the file again to replace it." });
+        } catch (readErr) {
+          logReadFailure("qsys", "the allowlist for /qsys/manage", readErr);
+          setMessage({ tone: "error", text: "Nothing was imported: the list was changed somewhere else, and it could not be read again. Reload the page." });
+        }
+        return;
+      }
       logToServer("qsys", `an allowlist import was refused: ${errorMessage(err)}`);
       setMessage({ tone: "error", text: `Nothing was imported: ${errorMessage(err)}` });
     } finally {

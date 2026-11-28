@@ -183,7 +183,10 @@ const f = stubFetchWithLog((url, init) => {
   }
   if (url === "/api/qsys/allowlist/export") return ok({ format: "stage-utility-qsys-allowlist", version: 1, entries: server.allow.entries });
   if (url === "/api/qsys/allowlist/import") {
-    server.imports.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+    const sent = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+    // As the server does: an import naming a revision other than the stored one is refused.
+    if (sent.rev !== undefined && sent.rev !== server.allow.rev) return reply(409, { error: "the allowlist was changed since this list was read", code: "rev-changed" });
+    server.imports.push(sent);
     if (server.importAnswer) return reply(server.importAnswer.status, server.importAnswer.body);
     const entries = (server.imports.at(-1)!.entries ?? []) as unknown[];
     server.allow = { entries, invalid: null, rev: "imported" };
@@ -878,6 +881,32 @@ describe("/qsys/manage", () => {
     await wait(40);
     assert.equal(server.imports.length, sent);
     assert.match(screen.getByRole("alert").textContent ?? "", /not JSON/);
+  });
+
+  test("an import refused because the list changed elsewhere reads it again, so the next try goes through", async () => {
+    render(React.createElement(ConfirmHost));
+    await open("/qsys/manage");
+    await wait(60);
+    const body = { format: "stage-utility-qsys-allowlist", version: 1, entries: [{ component: MIX, control: "meter", label: "m", min: -100, max: 20, confirm: "none" }] };
+    const importOnce = async () => {
+      act(() => {
+        fireEvent.change(screen.getByLabelText("Allowlist file to import"), { target: { files: [new File([JSON.stringify(body)], "list.json", { type: "application/json" })] } });
+      });
+      await wait(40);
+      act(() => {
+        fireEvent.click(screen.getByText("Replace the list"));
+      });
+      await wait(60);
+    };
+    // Someone saves after this page read the list.
+    server.allow = { entries: [{ component: MIX, control: "talk", label: "", min: null, max: null, confirm: "none" }], invalid: null, rev: "elsewhere" };
+    await importOnce();
+    assert.equal(server.imports.length, 0, "the stale import went through");
+    assert.match(screen.getByRole("alert").textContent ?? "", /Nothing was imported: .*changed somewhere else/);
+    assert.match(document.querySelector("[data-qsys-allowlist]")?.textContent ?? "", /talk/, "the page kept showing the list it read before");
+    await importOnce();
+    assert.deepEqual(server.imports.at(-1), { ...body, rev: "elsewhere" }, "the retry did not name the list as it is now");
+    assert.match(document.body.textContent ?? "", /Imported 1 control\./);
   });
 
   test("a panel's settings save its kind and address and keep its siblings and return time", async () => {
