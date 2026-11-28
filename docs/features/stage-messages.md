@@ -32,7 +32,7 @@ Up to 20 groups, each name 1–40 characters, unique without regard to case.
 Both lists are edited the same way: add at the bottom, click a row to edit it,
 and move a row with the arrows to change the order consoles offer it in. Every
 change is saved at once. A change the server refuses — a duplicate group name, a
-list past its limit — says why and leaves what you typed where it is.
+list past its limit — says why and puts the saved text back in the row. A new group, quick message or reply that could not be added stays in its add box.
 
 If the page is open in two windows, the one that saves second is told the
 config changed since the page loaded, reloads what is stored, and saves nothing:

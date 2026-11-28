@@ -9,8 +9,9 @@
 // happened. The controls stay on meanwhile, so a click on another row's button
 // that blurred a box (and so started a save) is not lost to a disabled button.
 //
-// A save that fails toasts, says so on /log, and KEEPS what was typed: a name
-// that the server refused is still in its box to fix, not gone.
+// A save that fails toasts and says so on /log, and the row goes back to what is
+// stored, as the name fields on the Screens page do: a box left showing a name the
+// app does not have reads as saved. Typing that resumed meanwhile is kept.
 //
 // Every save carries the version of the config it was built from. A 409 means
 // the page is behind (another window saved first, or this page's own save went
@@ -45,7 +46,7 @@ import { Button, ErrorNote, Input, confirm, toast } from "../../components/ui";
 import { invoke, type ApiError } from "../../lib/api";
 import { logToServer } from "../../lib/client-log";
 import { useFailedReads } from "../../lib/use-failed-reads";
-import { useResyncOn } from "../../lib/use-resync-on";
+import { useNameDraft } from "../../lib/use-name-draft";
 
 /** What a save changes: any of the three lists, worked out from the config it is
  *  applied to. A group the server has not met carries no id. */
@@ -102,22 +103,10 @@ function EditRow({
   onRemove: () => void;
   groupId?: string;
 }) {
-  const [draft, setDraft] = useState(text);
-  // What the server holds changed under this row (a move, a save from another
-  // tab): show it. A draft that failed to save is NOT reset by this, because
-  // the stored text did not change.
-  useResyncOn([text], () => setDraft(text));
-
-  async function commit() {
-    const next = draft.trim();
-    // Unchanged is nothing to save. An emptied row is put back rather than
-    // deleted: removing is the trash can.
-    if (next === text || next === "") {
-      setDraft(text);
-      return;
-    }
-    await onEdit(next);
-  }
+  // The draft, its resync to what the server holds, and the save on blur are the
+  // name fields' own (useNameDraft). A refused save (onEdit answers false) puts
+  // the stored text back, unless typing has resumed since.
+  const { draft, setDraft, commit } = useNameDraft(text, onEdit);
 
   return (
     <li data-group-row={groupId} className="flex items-center gap-1.5">
@@ -126,7 +115,7 @@ function EditRow({
         maxLength={maxLength}
         aria-label={`${editLabel} ${text}`}
         onChange={(e) => setDraft(e.target.value)}
-        onBlur={() => void commit()}
+        onBlur={commit}
         onKeyDown={(e) => {
           if (e.key === "Enter") e.currentTarget.blur();
           if (e.key === "Escape") setDraft(text);
@@ -359,7 +348,7 @@ export function MessagesSection({
    * Save a change to the config, after every save before it. `change` is given the
    * config as it stands when this one's turn comes and returns what to replace
    * (null: nothing, the thing it named is gone). Resolves true when it landed; on
-   * a refusal the reason is toasted and logged and the caller keeps what it typed.
+   * a refusal the reason is toasted and logged and the caller restores the stored text.
    */
   function save(change: (current: MessagingConfig) => ConfigChange | null): Promise<boolean> {
     const run = async (): Promise<boolean> => {
