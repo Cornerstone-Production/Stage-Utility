@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
+import { errorMessage } from "@main/services/errors";
+import { logToServer } from "../lib/client-log";
 
 interface QrHintProps {
   url: string;
@@ -61,7 +63,9 @@ export function QrHint({ url, compact = false, sizeCss, solid = false }: QrHintP
         canvas.style.height = display;
       })
       .catch((err: unknown) => {
-        console.error("[QrHint] QR generation error", err);
+        // Never the URL: it may carry a token. The operator sees an empty box,
+        // so this line is the only evidence the code was not drawn.
+        logToServer("qr", `could not draw the QR code: ${errorMessage(err)}`);
       });
   }, [url, backing, display, compact, solid, themeTick]);
 

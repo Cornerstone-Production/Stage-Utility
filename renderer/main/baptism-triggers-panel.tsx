@@ -15,6 +15,8 @@ import {
 import { usePlanItems } from "./use-plan-items";
 import { useStageState } from "./use-stage-state";
 import { errorMessage } from "@main/services/errors";
+import { logReadFailure } from "../lib/client-log";
+import { logFailure } from "../lib/report-failure";
 
 /**
  * Which items in THIS plan start each phase of the timer.
@@ -49,6 +51,7 @@ export function BaptismTriggersPanel() {
       await invoke("settings:setBaptismAutoStart", partial);
     } catch (err) {
       toast.error(`Couldn't save: ${errorMessage(err)}`);
+      logFailure("baptism", "save the auto-start setting", err);
     }
   }
 
@@ -68,8 +71,8 @@ export function BaptismTriggersPanel() {
       // triggers read as "none set" for months while the channel was unwired.
       .catch((err) => {
         if (cancelled) return;
-        console.error("[baptism-triggers] load failed:", err);
         toast.error("Couldn't load the saved triggers");
+        logReadFailure("baptism", "the saved triggers", err);
         setLoaded(true);
       });
     return () => {
@@ -87,6 +90,7 @@ export function BaptismTriggersPanel() {
       });
     } catch (err) {
       toast.error(`Couldn't save: ${errorMessage(err)}`);
+      logFailure("baptism", "save the triggers", err);
     }
   }
 

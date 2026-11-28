@@ -62,7 +62,9 @@ import {
   toast,
 } from "../../components/ui";
 import { SETTINGS_CARD } from "../../lib/card-classes";
-import { copyText } from "../../lib/clipboard";
+import { copyWithToast } from "../../lib/clipboard";
+import { logToServer } from "../../lib/client-log";
+import { logFailure } from "../../lib/report-failure";
 import { companionButtonsQuery, type ButtonsReply } from "../../lib/companion-buttons";
 import { CompanionPageBody, CompanionPageSelect, listedPages, type CompanionPick } from "../../components/companion-pages";
 import { Segmented } from "../../editor/inspector-rows";
@@ -424,9 +426,11 @@ function ButtonPickerDialog({
           `Read Companion, but could not save ${failed.length} command status(es): ` +
             `${failed.map((f) => f.label).join(", ")}`,
         );
+        logToServer("companion", `read Companion, but could not save ${failed.length} command status(es)`);
       }
     } catch (e) {
       toast.error(errorMessage(e));
+      logFailure("companion", "refresh the Companion buttons", e);
     }
   }
 
@@ -1045,6 +1049,7 @@ export function ImportPairsDialog({
       close();
     } catch (e) {
       toast.error(errorMessage(e));
+      logFailure("companion", "import the commands", e);
     } finally {
       setBusy(false);
     }
@@ -1248,16 +1253,21 @@ export function CueAccessCard() {
       refresh();
     } catch (e) {
       toast.error(errorMessage(e));
+      logFailure("companion", "mint a token", e);
     }
   }
 
   async function showYaml() {
     try {
       const r = await invoke<{ yaml: string }>("cues:homeAssistantYaml");
-      await copyText(r.yaml);
-      toast.success("Home Assistant config copied to the clipboard");
+      await copyWithToast(r.yaml, {
+        tag: "companion",
+        ok: "Home Assistant config copied to the clipboard",
+        fail: "Could not copy the Home Assistant config — try again, or copy it by hand",
+      });
     } catch (e) {
       toast.error(errorMessage(e));
+      logFailure("companion", "build the Home Assistant config", e);
     }
   }
 
@@ -1299,8 +1309,13 @@ export function CueAccessCard() {
                 variant="transparent"
                 size="small"
                 onClick={async () => {
-                  await copyText(minted);
-                  toast.success("Copied");
+                  // The token is shown once and is not stored. A copy that did not
+                  // happen must say so and leave it here, or Done loses it.
+                  await copyWithToast(minted, {
+                    tag: "companion",
+                    ok: "Copied",
+                    fail: "Could not copy — the token is still here; select it and copy it by hand",
+                  });
                 }}
               >
                 <CopyIcon className="size-3.5" /> Copy
@@ -1333,6 +1348,7 @@ export function CueAccessCard() {
                       refresh();
                     } catch (e) {
                       toast.error(errorMessage(e));
+                      logFailure("companion", "revoke a token", e, t.id);
                     }
                   }}
                 >

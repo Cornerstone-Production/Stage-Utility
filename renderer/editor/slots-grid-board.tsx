@@ -15,6 +15,7 @@ import { invoke } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
 import { gridBoardId, pointedGrid } from "@main/services/slot-boards";
 import { Row, RowNumber, RowSelect } from "./inspector-rows";
+import { logFailure } from "../lib/report-failure";
 
 type GridConfig = Extract<LayoutObjectConfig, { type: "slots-grid" }>;
 
@@ -63,6 +64,7 @@ export function SlotsGridBoard({
       setName("");
     } catch (err) {
       toast.error(`Couldn't create the board: ${errorMessage(err)}`);
+      logFailure("slots", "create the board", err);
     } finally {
       setBusy(false);
     }

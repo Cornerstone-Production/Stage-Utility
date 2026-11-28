@@ -2,11 +2,10 @@ import { createElement } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Tooltip } from "./ui/tooltip";
 import { invoke } from "../lib/api";
-import { errorMessage } from "@main/services/errors";
 import { ColorField } from "./ui/color-field";
 import { useEditableIcon } from "./editable-icon";
-import { toast } from "./ui";
 import { cn } from "../lib/cn";
+import { reportFailure } from "../lib/report-failure";
 
 /** The theme accent, used when an item has no color of its own. Kept as a CSS
  *  var so a tinted and an untinted icon still agree with the rest of the theme. */
@@ -101,8 +100,7 @@ export function IconTint({
                 return invoke("icons:setColor", { key: legacyKey, color: "" });
               })
               .catch((e: unknown) => {
-                console.error("[icon-tint:setColor]", itemKey, v, e);
-                toast.error(`Could not change the icon color: ${errorMessage(e)}`);
+                reportFailure("icons", "change the icon color", e, itemKey);
               });
           }}
           className="absolute inset-0 [&>button]:size-full [&>button]:border-0 [&>button]:bg-transparent [&>button]:opacity-0"

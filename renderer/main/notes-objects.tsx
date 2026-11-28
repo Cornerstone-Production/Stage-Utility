@@ -13,8 +13,8 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { invoke } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
-import { toast } from "../components/ui";
 import { usePlanChecklist } from "./use-plan-checklist";
+import { reportFailure } from "../lib/report-failure";
 
 interface NotesContent {
   text?: string;
@@ -57,7 +57,7 @@ function useSavedContent(objectId: string, all: Record<string, NotesContent> | u
         .then(() => { setSaveError(null); })
         .catch((e: unknown) => {
           setSaveError(errorMessage(e));
-          toast.error(`Could not save that note: ${errorMessage(e)}`);
+          reportFailure("notes", "save that note", e);
         })
         .finally(() => { pending.current = false; });
     }, SAVE_DEBOUNCE_MS);

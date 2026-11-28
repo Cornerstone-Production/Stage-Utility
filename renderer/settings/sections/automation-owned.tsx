@@ -11,12 +11,12 @@ import { useState } from "react";
 import { ChevronRightIcon, Trash2Icon } from "lucide-react";
 
 import { calledCueName } from "@main/services/cue-aliases";
-import { errorMessage } from "@main/services/errors";
 
-import { confirm, Button, toast } from "../../components/ui";
+import { confirm, Button } from "../../components/ui";
 import { invoke } from "../../lib/api";
 import type { CueUse } from "./cue-usage";
 import type { RuleWithIssues } from "./automation-section";
+import { reportFailure } from "../../lib/report-failure";
 
 /** Why an owned rule's Button is not holding it, or null while it is. */
 export type OrphanKind = "removed" | "repointed";
@@ -106,7 +106,7 @@ function OwnedRow({
     try {
       await invoke("automation:updateRule", { id: rule.id, patch: { ownedBy: null } });
     } catch (e) {
-      toast.error(`Could not list ${cue || rule.name}: ${errorMessage(e)}`);
+      reportFailure("automation", `list ${cue || rule.name}`, e);
     } finally {
       setBusy(false);
       onChanged();
@@ -125,7 +125,7 @@ function OwnedRow({
     try {
       await invoke("automation:removeRule", { id: rule.id });
     } catch (e) {
-      toast.error(`Could not delete ${cue || rule.name}: ${errorMessage(e)}`);
+      reportFailure("automation", `delete ${cue || rule.name}`, e);
     } finally {
       setBusy(false);
       onChanged();

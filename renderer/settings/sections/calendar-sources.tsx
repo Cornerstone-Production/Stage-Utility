@@ -18,12 +18,12 @@ import {
   FieldLabel,
   FieldSet,
   MultiSelect,
-  toast,
   type MultiSelectOption,
 } from "../../components/ui";
 import { invoke } from "../../lib/api";
+import { logReadFailure } from "../../lib/client-log";
+import { reportFailure } from "../../lib/report-failure";
 import { optionsFor as pcoOptions } from "./pco-options";
-import { errorMessage } from "@main/services/errors";
 import type { CalendarSelection, CalendarSourceDTO, CalendarTagDTO } from "@main/types/calendar";
 import type { View } from "@main/types/stage";
 
@@ -122,7 +122,10 @@ export function CalendarSources({ view, pcoConfigured }: { view: View; pcoConfig
       .then((s) => {
         if (current) setLoad({ at: "loaded", sources: s });
       })
-      .catch(() => {
+      .catch((e: unknown) => {
+        // Said on /log whether or not this page is still current: the read
+        // failed either way, and the line is what an operator finds later.
+        logReadFailure("calendar", "the calendars from Planning Center", e);
         if (current) setLoad({ at: "failed" });
       });
     return () => {
@@ -138,7 +141,7 @@ export function CalendarSources({ view, pcoConfigured }: { view: View; pcoConfig
       id: view.id,
       calendarSources: nextCalendars,
       calendarTags: nextTags,
-    }).catch((e: unknown) => toast.error(`Could not save what this calendar shows: ${errorMessage(e)}`));
+    }).catch((e: unknown) => reportFailure("calendar", "save what this calendar shows", e));
   };
 
   const status =

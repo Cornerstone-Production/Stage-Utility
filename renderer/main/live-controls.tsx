@@ -3,6 +3,7 @@ import { useState } from "react";
 import { invoke } from "../lib/api";
 import { confirm, toast } from "../components/ui";
 import { ChevronLeftIcon, ChevronRightIcon, Loader2Icon, RotateCcwIcon } from "lucide-react";
+import { logFailure } from "../lib/report-failure";
 
 /**
  * Step PCO Live back or on. The one place that makes the call, so the console
@@ -57,6 +58,7 @@ export function LiveControls({
       toast.success("Pacing reset");
     } catch (e) {
       toast.error(`Couldn't reset pacing: ${errorMessage(e)}`);
+      logFailure("live", "reset pacing", e);
     } finally {
       setResetting(false);
     }

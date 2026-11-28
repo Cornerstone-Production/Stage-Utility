@@ -25,7 +25,9 @@ import {
   FieldSet,
   toast,
 } from "../../components/ui";
+import { logFailure } from "../../lib/report-failure";
 import { settingText } from "./advanced-settings";
+import { postArchive } from "./data-archive-request";
 
 interface ServiceMeta {
   serviceKey: string;
@@ -44,6 +46,14 @@ interface ImportPlan {
   newBaptismSessions: number;
 }
 
+/** What the import route answers: the services it touched, and any raw sample
+ *  file it could not write. */
+interface ImportOutcome {
+  added: ServiceMeta[];
+  merged: ServiceMeta[];
+  replaced: ServiceMeta[];
+  rawFilesFailed?: { file: string; reason: string }[];
+}
 
 const CHOICES: { id: Choice; label: string; hint: string }[] = [
   {
@@ -88,14 +98,15 @@ export function DataArchivePanel() {
     setBusy(true);
     setPending(null);
     try {
-      const res = await fetch("/api/archive/inspect", { method: "POST", body: await file.arrayBuffer() });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body?.error ?? "Could not read that archive.");
-      setPending({ file, plan: body as ImportPlan });
+      const plan = await postArchive<ImportPlan>("/api/archive/inspect", await file.arrayBuffer(), {
+        failure: "Could not read that archive.",
+      });
+      setPending({ file, plan });
       setChoice("skip"); // keeping what is here is always the default
 
     } catch (err) {
       toast.error(errorMessage(err));
+      logFailure("archive", "read that archive", err);
     } finally {
       setBusy(false);
     }
@@ -105,13 +116,10 @@ export function DataArchivePanel() {
     if (!pending) return;
     setBusy(true);
     try {
-      const res = await fetch("/api/archive/import", {
-        method: "POST",
+      const body = await postArchive<ImportOutcome>("/api/archive/import", await pending.file.arrayBuffer(), {
         headers: { "X-Archive-Mode": choice },
-        body: await pending.file.arrayBuffer(),
+        failure: "Import failed.",
       });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body?.error ?? "Import failed.");
       const parts = [
         body.added.length > 0 && `added ${plural(body.added.length, "service")}`,
         body.merged.length > 0 && `merged ${body.merged.length}`,
@@ -139,6 +147,7 @@ export function DataArchivePanel() {
       setChoice("skip");
     } catch (err) {
       toast.error(errorMessage(err));
+      logFailure("archive", "import that archive", err);
     } finally {
       setBusy(false);
     }

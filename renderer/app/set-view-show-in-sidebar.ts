@@ -17,7 +17,7 @@ export async function setViewShowInSidebar(queryClient: QueryClient, id: string,
     ["stage:getState"],
     (cur) => ({ ...cur, views: cur.views.map((v) => (v.id === id ? { ...v, showInSidebar } : v)) }),
     () => invoke<StageState>("views:setShowInSidebar", { id, showInSidebar }),
-    "Failed to change whether the console is listed in the sidebar",
+    { tag: "screens", fail: "Failed to change whether the console is listed in the sidebar" },
   );
   return next != null;
 }

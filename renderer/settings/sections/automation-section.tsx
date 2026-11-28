@@ -23,6 +23,7 @@ import { BelongsToButton, OwnedRows } from "./automation-owned";
 import { HomeAssistantChip, UsedOn, VoiceChip } from "./automation-chips";
 import { useOptionSources } from "./automation-option-sources";
 import { joinWithAnd } from "../../lib/join-with-and";
+import { logFailure } from "../../lib/report-failure";
 
 /** A rule as GET /api/automation/rules sends it — its own fields plus the
  *  issues the server computed against the current registry. See
@@ -150,6 +151,7 @@ function ActivityLog() {
                 await invoke("automation:clearLog");
               } catch (e) {
                 toast.error(`Could not clear the log: ${errorMessage(e)}`);
+                logFailure("automation", "clear the log", e);
               }
               refresh();
             }}
@@ -452,6 +454,7 @@ function RuleRow({
               // the same request this client-side check would have. Same
               // wording either way.
               toast.error(errorMessage(e));
+              logFailure("automation", "turn a rule on or off", e, rule.id);
             }
             onChanged();
           }}

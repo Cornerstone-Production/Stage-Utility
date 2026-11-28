@@ -26,8 +26,8 @@
 import { useState, type FormEvent } from "react";
 import { CopyIcon, PanelRightIcon, XIcon } from "lucide-react";
 
-import { Button, Checkbox, ErrorNote, NumberInput, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Tooltip, toast } from "../../components/ui";
-import { copyText } from "../../lib/clipboard";
+import { Button, Checkbox, ErrorNote, NumberInput, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Tooltip } from "../../components/ui";
+import { copyWithToast } from "../../lib/clipboard";
 import { cn } from "../../lib/cn";
 import { errorMessage } from "@main/services/errors";
 import { KIND_DRAWS_TOP_BAR, screenIsControlSurface, viewShownInSidebar, viewSurface, type CreateScreenInput, type ViewSurface } from "@main/types/views";
@@ -540,8 +540,11 @@ function EditBody({ output, views, baseUrl, online, messageGroups, created, canR
                 type="button"
                 aria-label="Copy the permanent URL"
                 onClick={async () => {
-                  if (await copyText(permanent)) toast.success("URL copied");
-                  else toast.error("Could not copy — select the URL and copy it by hand");
+                  await copyWithToast(permanent, {
+                    tag: "screens",
+                    ok: "URL copied",
+                    fail: "Could not copy — select the URL and copy it by hand",
+                  });
                 }}
                 className="shrink-0 rounded-md p-1 text-fg-subtle hover:bg-fill hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
               >

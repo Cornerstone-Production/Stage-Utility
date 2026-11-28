@@ -22,8 +22,9 @@ import {
   toast,
 } from "../../components/ui";
 import { invoke } from "../../lib/api";
+import { logReadFailure } from "../../lib/client-log";
+import { reportFailure } from "../../lib/report-failure";
 import { optionsFor as pcoOptions } from "./pco-options";
-import { errorMessage } from "@main/services/errors";
 import type { SectionProps } from "../types";
 
 interface Sources {
@@ -69,7 +70,10 @@ export function ChecklistSources({
       // Failed is its own state, not the absence of one: an empty picker, a
       // picker still loading and a picker that could not be loaded look
       // identical, and the description below is what says which.
-      .catch(() => { if (current) setResult({ at: "failed", serviceTypeId }); });
+      .catch((e: unknown) => {
+        logReadFailure("checklist", "the note categories from Planning Center", e);
+        if (current) setResult({ at: "failed", serviceTypeId });
+      });
     return () => { current = false; };
   }, [serviceTypeId]);
 
@@ -191,7 +195,7 @@ export function ChecklistSources({
                 // leave ticks standing that the operator believes are gone.
                 void invoke("checklist:clear")
                   .then(() => toast.success("Checklist ticks cleared"))
-                  .catch((e: unknown) => toast.error(`Could not clear the ticks: ${errorMessage(e)}`));
+                  .catch((e: unknown) => reportFailure("checklist", "clear the ticks", e));
               }}
             >
               Clear ticks

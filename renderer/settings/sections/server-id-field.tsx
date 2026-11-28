@@ -8,11 +8,11 @@
 import { AlertTriangleIcon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
-import { errorMessage } from "@main/services/errors";
 import type { DuplicateServer, ServerIdentity } from "@main/types/kiosk";
 import { Button, confirm, toast } from "../../components/ui";
 import { invoke } from "../../lib/api";
 import { formatClock } from "../../lib/clock-format";
+import { reportFailure } from "../../lib/report-failure";
 
 /** The `data-flash-id` the row carries: Needs attention's fix points here. */
 export const SERVER_ID_FLASH = "server-id";
@@ -57,7 +57,7 @@ function NewServerIdButton({ duplicates }: { duplicates: readonly DuplicateServe
       await invoke("stage:newServerId");
       toast.success("This server has a new id.");
     } catch (e) {
-      toast.error(`Could not give this server a new id: ${errorMessage(e)}`);
+      reportFailure("server", "give this server a new id", e);
     } finally {
       setBusy(false);
     }

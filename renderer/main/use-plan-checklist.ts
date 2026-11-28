@@ -43,9 +43,9 @@ import { useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
 
 import { invoke } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
-import { toast } from "../components/ui";
 import type { PlanChecklistDTO, PlanChecklistRow } from "@main/services/plan-note-checklist";
 import { useStageState } from "./use-stage-state";
+import { reportFailure } from "../lib/report-failure";
 
 export interface PlanChecklist {
   rows: PlanChecklistRow[];
@@ -205,7 +205,7 @@ async function toggleRow(key: string, done: boolean): Promise<void> {
     // operator is told why, rather than being left with a tick that was never
     // saved. Unlike the read, a tick is something they just did, so it gets a
     // toast as well as the row snapping back.
-    toast.error(`Could not save that tick: ${errorMessage(e)}`);
+    reportFailure("checklist", "save that tick", e);
   } finally {
     // Only the newest write ON THIS ROW clears its optimistic value; an older
     // one finishing later must not un-hold the row the newest is still waiting

@@ -2,9 +2,9 @@ import { useRef } from "react";
 import { CopyIcon, ExternalLinkIcon } from "lucide-react";
 
 import { useStageState } from "../main/use-stage-state";
-import { Button, Input, toast } from "./ui";
+import { Button, Input } from "./ui";
 import { SETTINGS_CARD } from "../lib/card-classes";
-import { copyText } from "../lib/clipboard";
+import { copyWithToast } from "../lib/clipboard";
 
 /** Where the Companion module lives. Not in the app's own repo — it ships to
  *  Companion separately, which is exactly why a link is worth having. */
@@ -26,13 +26,14 @@ function CopyField({ label, value }: { label: string; value: string }) {
           size="small"
           onClick={async () => {
             // Inside the dialog's focus trap, or the legacy copy path loses its selection to it.
-            const ok = await copyText(value, input.current?.closest<HTMLElement>('[role="dialog"]'));
-            if (ok) toast.success(`${label} copied`);
-            else {
-              // Plain HTTP has no clipboard write; the field is selected so the operator can copy it by hand.
-              input.current?.select();
-              toast.error(`Couldn't copy — select and copy manually`);
-            }
+            const ok = await copyWithToast(value, {
+              tag: "companion",
+              ok: `${label} copied`,
+              fail: "Couldn't copy — select and copy manually",
+              container: input.current?.closest<HTMLElement>('[role="dialog"]'),
+            });
+            // Plain HTTP has no clipboard write; the field is selected so the operator can copy it by hand.
+            if (!ok) input.current?.select();
           }}
           aria-label={`Copy ${label}`}
         >

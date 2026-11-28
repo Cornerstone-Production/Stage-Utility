@@ -26,6 +26,7 @@ import { BaptismTriggersPanel } from "../../../main/baptism-triggers-panel";
 import { useServiceLive } from "./use-service-live";
 import { baptismRebuildDisabledReason, rebuildTargetLabel, runBaptismRebuild } from "./rebuild";
 import { errorMessage } from "@main/services/errors";
+import { logFailure } from "../../../lib/report-failure";
 
 /**
  * Invoke a channel, tracking a busy flag around it and surfacing a failure as
@@ -51,6 +52,7 @@ async function act(
     after?.();
   } catch (err) {
     toast.error(`Action failed: ${errorMessage(err)}`);
+    logFailure("baptism", `run ${channel}`, err);
   } finally {
     setBusy(false);
   }

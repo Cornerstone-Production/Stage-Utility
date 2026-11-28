@@ -20,6 +20,7 @@ import { useDevices, refreshDevices, describeScreen } from "./use-devices";
 import { outputModeLine, outputSwitchState } from "./output-helpers";
 import { readUpdate, TONE_CLASS } from "./machine-update";
 import { cn } from "../../lib/cn";
+import { logFailure } from "../../lib/report-failure";
 
 /**
  * Unbind a device from the screen it shows, and say so. One function for the two
@@ -38,6 +39,7 @@ export async function releaseDevice(deviceId: string, screenName: string): Promi
     toast.success(`${screenName} released — the screen goes back to waiting`);
   } catch (err) {
     toast.error(errorMessage(err));
+    logFailure("screens", "release the device", err, deviceId);
   }
 }
 
@@ -52,6 +54,7 @@ export async function setOutputEnabled(deviceId: string, enabled: boolean): Prom
     if (failed) toast.error(`Switched, but the list did not reload: ${failed.message}`);
   } catch (err) {
     toast.error(errorMessage(err));
+    logFailure("screens", "switch the output", err, deviceId);
   }
 }
 

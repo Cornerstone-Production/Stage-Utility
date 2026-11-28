@@ -100,6 +100,7 @@ import {
 import { CompanionPressFields } from "./companion-cues";
 import { homeEntity, homeImpact, impactQuestion, makeAutomatic, makeManual, setAside, type SetAside } from "./rule-conversion";
 import { NOT_PICKED_TRIGGERS, PickerField } from "./automation-picker";
+import { logFailure } from "../../lib/report-failure";
 
 // ── Registry shapes (functions are stripped server-side) ──────────────────────
 
@@ -1978,6 +1979,7 @@ export function RuleEditorDialog({
       else toast.success(`Test fire: ${r.detail}`);
     } catch (e) {
       toast.error(errorMessage(e));
+      logFailure("automation", "test fire a rule", e, onDraft.id);
     }
   }
 
@@ -2018,6 +2020,7 @@ export function RuleEditorDialog({
       onClose();
     } catch (e) {
       toast.error(errorMessage(e));
+      logFailure("automation", "remove a rule", e, onDraft.id);
     } finally {
       setBusy(false);
     }
