@@ -81,6 +81,16 @@ describe("summarizeChangelog", () => {
     assert.deepEqual(summarizeChangelog(["fix!: drop the old path"]), ["fix!: drop the old path"]);
   });
 
+  test("an invisible type that is breaking is shown, as the release notes show it", () => {
+    // scripts/release-notes.ts keeps `refactor!:` (a `!` outranks an invisible type); the
+    // updater's list dropped it, so the dialog for a breaking release omitted the breaking line.
+    for (const t of [...COMMIT_TYPE_FILE.invisible]) {
+      assert.deepEqual(summarizeChangelog([`${t}!: drop the legacy route`]), [`${t}!: drop the legacy route`], t);
+      assert.deepEqual(summarizeChangelog([`${t}(api)!: drop the legacy route`]), [`${t}(api)!: drop the legacy route`], `${t}(api)`);
+    }
+    assert.deepEqual(summarizeChangelog(["refactor: tidy"]), []);
+  });
+
   test("a revert keeps the word revert, which is the whole meaning", () => {
     // Shortened, this reads as the feature being ADDED. The line would announce
     // the opposite of what the update does.

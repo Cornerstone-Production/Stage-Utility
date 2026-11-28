@@ -34,7 +34,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { isMain } from "./is-main.ts";
 
 /** One thing the scan objects to. A private-term finding on a file's name has line 0. */
 export interface Finding {
@@ -421,12 +421,7 @@ function main() {
   }
 }
 
-// Only when run directly, so a test can import the scan. Compared as real paths:
-// a suffix match on the file name let a symlinked or Windows-style invocation
-// skip main() and exit 0, which for a check is a silent pass.
-function isEntryPoint() {
-  const entry = process.argv[1];
-  if (!entry) return false;
-  return fs.realpathSync(fileURLToPath(import.meta.url)) === fs.realpathSync(path.resolve(entry));
-}
-if (isEntryPoint()) main();
+// Only when run directly, so a test can import the scan. isMain compares real paths: a suffix
+// match on the file name let a symlinked or Windows-style invocation skip main() and exit 0,
+// which for a check is a silent pass.
+if (isMain(import.meta.url, process.argv[1])) main();

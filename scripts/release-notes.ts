@@ -18,8 +18,8 @@
 
 import { execFileSync } from "node:child_process";
 import SCOPE_LABEL_FILE from "../main/services/scope-labels.json" with { type: "json" };
-import INTERNAL_SCOPE_FILE from "../main/services/internal-scopes.json" with { type: "json" };
 import COMMIT_TYPE_FILE from "../main/services/commit-types.json" with { type: "json" };
+import { BETA_ONLY_TRAILER, isShownInNotes, parseSubject } from "../main/services/commit-subject.ts";
 
 const SCOPE_LABELS = Object.fromEntries(
   Object.entries(SCOPE_LABEL_FILE).filter(([k]) => !k.startsWith("_")),
@@ -76,12 +76,6 @@ function upgradeNotice(v: string): string {
   }
 }
 
-/**
- * Commit types that change nothing an operator could notice, and the legacy ones
- * the lint refuses but old history may still carry.
- */
-const INVISIBLE = new Set([...COMMIT_TYPE_FILE.invisible, ...COMMIT_TYPE_FILE.legacy]);
-
 /** A minor type announces a capability: New. */
 const MINOR_TYPES = new Set(COMMIT_TYPE_FILE.minor);
 
@@ -92,17 +86,6 @@ const MINOR_TYPES = new Set(COMMIT_TYPE_FILE.minor);
  */
 const PATCH_TYPES = new Set(COMMIT_TYPE_FILE.patch);
 const FIX_TYPE = "fix";
-
-/**
- * Scopes that name this machinery rather than the app. `fix(release)` is a
- * real fix and honestly typed, and 1.18.0's notes carried four such lines that
- * no operator could act on. Shared with the update dialog and the workflow's
- * version decision via main/services/internal-scopes.json.
- */
-const INTERNAL_SCOPES = new Set(INTERNAL_SCOPE_FILE.scopes);
-
-/** `type(scope)!: subject` */
-const CONVENTIONAL = /^([a-z]+)(?:\(([^)]*)\))?(!)?:\s*(.+)$/i;
 
 /**
  * How many change bullets one release's notes carry, and the least any section
@@ -174,7 +157,7 @@ function log(range: string): string[] {
 
 /**
  * SHA, subject AND body, so a commit can say something about itself that its
- * subject cannot — see BETA_ONLY — and so an override can name one.
+ * subject cannot — see BETA_ONLY_TRAILER — and so an override can name one.
  *
  * Records are separated by RS and the fields by NUL, because a commit body
  * contains blank lines, bullet lists and code fences, and every cheaper
@@ -193,22 +176,6 @@ function commits(range: string): { sha: string; subject: string; body: string }[
     return [];
   }
 }
-
-/**
- * `Beta-only: true` — this fixed a bug that never reached a stable release.
- *
- * The scope heuristic below cannot see these. It asks whether a fix's SCOPE is
- * new this release, which catches a whole new subsystem and misses a new feature
- * built under an existing one: `fix(integrations): the Setup guide links to this
- * build's branch` is a fix to something added in the same release, but
- * `integrations` is years old, so it reads as a fix to long-standing behaviour
- * and survives into the notes. In 1.13.0 there were 13 such scopes carrying 42
- * fixes — a reader coming from 1.12.1 being told about bugs they never had.
- *
- * Only the author knows, so only the author can say. Prereleases keep them
- * either way: someone on the beta track HAS been running the broken version.
- */
-const BETA_ONLY = /^Beta-only:\s*(true|yes)\s*$/im;
 
 /**
  * Corrections to a `Beta-only:` decision that can no longer be made in the commit.
@@ -305,8 +272,8 @@ function scopesBefore(ref: string | undefined): Set<string> | null {
   if (!ref) return null; // no anchor: nothing is known to be old, so suppress nothing
   const before = new Set<string>();
   for (const subject of log(ref)) {
-    const m = CONVENTIONAL.exec(subject);
-    if (m?.[2]) before.add(m[2].toLowerCase());
+    const key = parseSubject(subject)?.scopeKey;
+    if (key) before.add(key);
   }
   return before;
 }
@@ -332,7 +299,7 @@ interface Parsed {
   type: string;
   scope: string | undefined;
   key: string | null;
-  bang: string | undefined;
+  bang: boolean;
   text: string;
   betaOnly: boolean;
   override: boolean | null;
@@ -347,18 +314,15 @@ const overrides = isPrerelease ? new Map() : betaOnlyOverrides(version);
 const overridesApplied = new Set<string>();
 
 for (const { sha, subject, body } of entries) {
-  const m = CONVENTIONAL.exec(subject);
-  if (!m) continue;
-  const [, rawType, scope, bang, text] = m;
-  const type = rawType.toLowerCase();
-  if (INVISIBLE.has(type) && !bang) continue;
-  const key = scope?.toLowerCase() ?? null;
+  const p = parseSubject(subject);
+  if (!p) continue;
   // Skipped before featScopes: a feat(release) must not make `release` read as
   // a surface introduced this cycle.
-  if (key && INTERNAL_SCOPES.has(key) && !bang) continue;
+  if (!isShownInNotes(p)) continue;
+  const { type, scope, scopeKey: key, breaking: bang, text } = p;
   if (!bang && MINOR_TYPES.has(type) && key) featScopes.add(key);
 
-  const trailer = BETA_ONLY.test(body);
+  const trailer = BETA_ONLY_TRAILER.test(body);
   const override = overrides.get(sha);
   // Only a patch-level commit is ever held back, so an override on anything else
   // would read as applied and change nothing. Left unapplied, and caught below.

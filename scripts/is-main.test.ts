@@ -18,6 +18,13 @@ import { isMain } from "./is-main.ts";
 const SCRIPTS = path.dirname(fileURLToPath(import.meta.url));
 
 describe("isMain", () => {
+  test("on Windows a symlinked invocation is the script too, whatever the case of its real path", () => {
+    const real = (p: string) => (p.toLowerCase() === "c:\\links\\run.ts" ? "C:\\Repo\\scripts\\run.ts" : p);
+    assert.equal(isMain("file:///c:/repo/scripts/run.ts", "C:\\links\\run.ts", { windows: true, realpath: real }), true);
+    assert.equal(isMain("file:///c:/repo/scripts/run.ts", "C:\\links\\other.ts", { windows: true, realpath: real }), false);
+  });
+
+
   test("is true for the script itself, however the host writes its path", () => {
     assert.equal(isMain("file:///C:/repo/scripts/manifest-changed.ts", "C:\\repo\\scripts\\manifest-changed.ts", { windows: true }), true);
     assert.equal(isMain("file:///C:/repo/scripts/manifest-changed.ts", "c:\\repo\\scripts\\.\\manifest-changed.ts", { windows: true }), true, "a drive letter's case");

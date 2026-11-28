@@ -29,7 +29,7 @@ type(scope): subject
   release notes and mints no release. The list is
   `main/services/internal-scopes.json`, read by the notes generator, the update
   dialog and the workflow alike. A breaking `!` is shown and counted whatever its
-  scope.
+  scope or type.
 - **subject** — imperative mood, no trailing period. Say what the change does, not
   what you did: "add rack color to the header", not "added rack color".
 
