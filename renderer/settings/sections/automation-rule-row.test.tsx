@@ -32,18 +32,10 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { installRenderDom } from "../../test-dom.js";
 
-const teardown = installRenderDom();
+import type { Rule } from "@main/types/automation";
+import { rule as ruleOf } from "../../test-fixtures/automation-rules.js";
 
-interface StubRule {
-  id: string;
-  name: string;
-  enabled: boolean;
-  trigger: { id: string; params: Record<string, string | number> };
-  conditions: never[];
-  action: { id: string; params: Record<string, string | number> };
-  cooldownSec: number;
-  oncePerService: boolean;
-}
+const teardown = installRenderDom();
 
 const CALL_TRIGGER_ID = "call.by-name";
 
@@ -67,7 +59,7 @@ const REGISTRY = {
   ],
 };
 
-let RULES: StubRule[] = [];
+let RULES: Rule[] = [];
 
 (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown) => {
   const url = String(input);
@@ -115,12 +107,11 @@ async function mount() {
 }
 
 /** A cue whose Companion button the last reconcile could not find. */
-const missing = (over: Partial<StubRule> = {}): StubRule => ({
+const missing = (over: Partial<Rule> = {}): Rule => ruleOf({
   id: "rule-1",
   name: "Projectors ON",
   enabled: true,
   trigger: { id: CALL_TRIGGER_ID, params: { name: "projectors_on", says: "the projectors" } },
-  conditions: [],
   action: {
     id: "companion.press",
     params: {
@@ -135,8 +126,6 @@ const missing = (over: Partial<StubRule> = {}): StubRule => ({
       movedFrom: "",
     },
   },
-  cooldownSec: 0,
-  oncePerService: false,
   ...over,
 });
 

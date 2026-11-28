@@ -16,19 +16,10 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { installRenderDom } from "../../test-dom.js";
 
-const teardown = installRenderDom();
+import type { Rule } from "@main/types/automation";
+import { rule as ruleOf } from "../../test-fixtures/automation-rules.js";
 
-interface StubRule {
-  id: string;
-  name: string;
-  enabled: boolean;
-  trigger: { id: string; params: Record<string, string | number> };
-  conditions: never[];
-  action: { id: string; params: Record<string, string | number> };
-  cooldownSec: number;
-  oncePerService: boolean;
-  ownedBy?: { viewId: string; objectId: string };
-}
+const teardown = installRenderDom();
 
 const CALL_TRIGGER_ID = "call.by-name";
 
@@ -51,7 +42,7 @@ const REGISTRY = {
   ],
 };
 
-let RULES: StubRule[] = [];
+let RULES: Rule[] = [];
 /** What GET /api/cues/usage answers with. */
 let USAGE: Record<string, { viewId: string; viewName: string; objectId: string; label: string; home: boolean }[]> = {};
 
@@ -116,15 +107,12 @@ const visibleRuleNames = (): string[] =>
 
 const countText = (): string => document.querySelector("[data-rule-search-count]")?.textContent ?? "";
 
-const cue = (over: Partial<StubRule> = {}): StubRule => ({
+const cue = (over: Partial<Rule> = {}): Rule => ruleOf({
   id: over.id ?? "rule-1",
   name: over.name ?? "Rule",
   enabled: true,
   trigger: { id: CALL_TRIGGER_ID, params: { name: "cue_name", says: "" } },
-  conditions: [],
   action: { id: "log.message", params: {} },
-  cooldownSec: 0,
-  oncePerService: false,
   ...over,
 });
 
@@ -161,7 +149,7 @@ beforeEach(() => {
       name: "Shutter",
       trigger: { id: CALL_TRIGGER_ID, params: { name: "btn_shutter" } },
       ownedBy: { viewId: "v2", objectId: "o9" },
-    } as Partial<StubRule>),
+    } as Partial<Rule>),
   ];
 });
 afterEach(async () => {

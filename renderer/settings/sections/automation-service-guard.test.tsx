@@ -19,22 +19,14 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { installRenderDom } from "../../test-dom.js";
 
+import type { Rule } from "@main/types/automation";
+import { rule as ruleOf } from "../../test-fixtures/automation-rules.js";
+
 const teardown = installRenderDom();
 
 interface StubCondition {
   id: string;
   params: Record<string, string | number>;
-}
-
-interface StubRule {
-  id: string;
-  name: string;
-  enabled: boolean;
-  trigger: { id: string; params: Record<string, string | number> };
-  conditions: StubCondition[];
-  action: { id: string; params: Record<string, string | number> };
-  cooldownSec: number;
-  oncePerService: boolean;
 }
 
 const CALL_TRIGGER_ID = "call.by-name";
@@ -59,7 +51,7 @@ const REGISTRY = {
   actions: [{ id: "log.message", label: "Write a log message", params: [] }],
 };
 
-let RULES: StubRule[] = [];
+let RULES: Rule[] = [];
 /** The body of the last PATCH the switch sent, or null if none yet. */
 let lastPatch: unknown = null;
 
@@ -68,7 +60,7 @@ let lastPatch: unknown = null;
   if (init?.method === "PATCH" && url.includes("/api/automation/rules/")) {
     lastPatch = JSON.parse(String(init.body));
     const id = url.split("/").pop();
-    RULES = RULES.map((r) => (r.id === id ? { ...r, ...(lastPatch as Partial<StubRule>) } : r));
+    RULES = RULES.map((r) => (r.id === id ? { ...r, ...(lastPatch as Partial<Rule>) } : r));
     return { ok: true, status: 200, json: async () => RULES[0], text: async () => "{}" };
   }
   let body: unknown = {};
@@ -113,15 +105,13 @@ async function mount() {
   return view;
 }
 
-const cue = (over: Partial<StubRule> = {}): StubRule => ({
+const cue = (over: Partial<Rule> = {}): Rule => ruleOf({
   id: "rule-1",
   name: "Projectors ON",
   enabled: true,
   trigger: { id: CALL_TRIGGER_ID, params: { name: "projectors_on", says: "the projectors" } },
   conditions: [{ id: GUARD_ID, params: {} }],
   action: { id: "log.message", params: { message: "x" } },
-  cooldownSec: 0,
-  oncePerService: false,
   ...over,
 });
 

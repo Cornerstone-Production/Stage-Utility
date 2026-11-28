@@ -30,6 +30,9 @@ import { ruleIssues, type RuleStepsLike } from "@main/services/automation-param-
 import type { ParamDef } from "@main/types/automation";
 import type { OptionSources } from "./automation-option-sources.js";
 
+import type { Rule } from "@main/types/automation";
+import { rule as ruleOf } from "../../test-fixtures/automation-rules.js";
+
 const teardown = installRenderDom();
 
 const REGISTRY = {
@@ -52,21 +55,10 @@ const lookup = (kind: "trigger" | "condition" | "action", id: string) => {
   return s ? { label: s.label, params: s.params } : null;
 };
 
-interface StubRule {
-  id: string;
-  name: string;
-  enabled: boolean;
-  trigger: { id: string; params: Record<string, string> };
-  conditions: never[];
-  action: { id: string; params: Record<string, string> };
-  cooldownSec: number;
-  oncePerService: boolean;
-}
-
 // Keyed by id, so a pair's two halves — two rules, two ids — are told apart
 // by the stub the same way the real server tells them apart: by the id in the
 // PATCH path, never by which one the test happened to touch last.
-let RULES: Record<string, StubRule> = {};
+let RULES: Record<string, Rule> = {};
 let calls: { id: string; body: Record<string, unknown> }[] = [];
 
 (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: RequestInit) => {
@@ -201,26 +193,22 @@ afterEach(async () => {
 });
 after(() => teardown());
 
-const base = (enabled: boolean): StubRule => ({
+const base = (enabled: boolean): Rule => ruleOf({
   id: "r1",
   name: "Doors cue",
   enabled,
   trigger: { id: "pco.item-reached", params: {} }, // title missing — an issue
-  conditions: [],
   action: { id: "log.message", params: { message: "hi" } },
   cooldownSec: 30,
-  oncePerService: false,
 });
 
-const pairHalf = (id: string, title: string): StubRule => ({
+const pairHalf = (id: string, title: string): Rule => ruleOf({
   id,
   name: id,
   enabled: true,
   trigger: { id: "pco.item-reached", params: title ? { title } : {} }, // blank title — an issue
-  conditions: [],
   action: { id: "log.message", params: { message: "hi" } },
   cooldownSec: 30,
-  oncePerService: false,
 });
 
 describe("a save that turned the rule off over an issue", () => {

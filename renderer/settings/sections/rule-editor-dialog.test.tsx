@@ -36,18 +36,10 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { installRenderDom } from "../../test-dom.js";
 
-const teardown = installRenderDom();
+import type { Rule } from "@main/types/automation";
+import { rule as ruleOf } from "../../test-fixtures/automation-rules.js";
 
-interface StubRule {
-  id: string;
-  name: string;
-  enabled: boolean;
-  trigger: { id: string; params: Record<string, string | number> };
-  conditions: { id: string; params: Record<string, string | number> }[];
-  action: { id: string; params: Record<string, string | number> };
-  cooldownSec: number;
-  oncePerService: boolean;
-}
+const teardown = installRenderDom();
 
 const CALL_TRIGGER_ID = "call.by-name";
 
@@ -119,18 +111,15 @@ const REGISTRY = {
   ],
 };
 
-const cue = (name: string, params: Record<string, string | number> = {}): StubRule => ({
+const cue = (name: string, params: Record<string, string | number> = {}): Rule => ruleOf({
   id: `rule-${name}`,
   name: `Rule ${name}`,
   enabled: true,
   trigger: { id: CALL_TRIGGER_ID, params: { name, ...params } },
-  conditions: [],
   action: { id: "companion.press", params: { page: 1, row: 0, col: 1 } },
-  cooldownSec: 0,
-  oncePerService: false,
 });
 
-let RULES: StubRule[] = [];
+let RULES: Rule[] = [];
 let requests: { method: string; url: string; body: string | null }[] = [];
 /** What GET /api/cues/usage answers: the Buttons that name each command. */
 let USAGE: Record<string, unknown[]> = {};
@@ -157,7 +146,7 @@ let RUN_NEEDS_CONFIRM = false;
       };
     }
     if (method === "PATCH") {
-      const patch = JSON.parse(String(init?.body)) as Partial<StubRule>;
+      const patch = JSON.parse(String(init?.body)) as Partial<Rule>;
       RULES = RULES.map((r) => (r.id === id ? { ...r, ...patch } : r));
       // The real route's shape: the rule's own fields, flat, plus `issues` —
       // the SAME shape GET's list items carry, not a { rule, issues } wrapper.
@@ -291,15 +280,12 @@ async function pickFrom(label: string, id: string) {
 
 /** A rule that is not a cue: what the picker tests start from, since a cue's
  *  editor has no trigger to pick. */
-const planRule = (over: Partial<StubRule> = {}): StubRule => ({
+const planRule = (over: Partial<Rule> = {}): Rule => ruleOf({
   id: "rule-plan-item",
   name: "Lights at item 3",
   enabled: true,
   trigger: { id: "pco.plan-item", params: {} },
-  conditions: [],
   action: { id: "log.message", params: { message: "x" } },
-  cooldownSec: 0,
-  oncePerService: false,
   ...over,
 });
 
@@ -453,7 +439,7 @@ describe("one rule", () => {
     await typeIn(field("Name"), "Screens", "Name");
     await press(button("Save"), "Save");
 
-    const body = JSON.parse(String(writes()[0]?.body)) as Partial<StubRule>;
+    const body = JSON.parse(String(writes()[0]?.body)) as Partial<Rule>;
     assert.equal(body.name, "Screens");
     assert.equal(body.action, undefined, "Save sent the action it opened with");
     assert.deepEqual(
@@ -482,7 +468,7 @@ describe("one rule", () => {
     await typeIn(field("Command name"), "the_screens", "Command name");
     await press(button("Save"), "Save");
 
-    const body = JSON.parse(String(writes()[0]?.body)) as Partial<StubRule>;
+    const body = JSON.parse(String(writes()[0]?.body)) as Partial<Rule>;
     assert.deepEqual(body.trigger?.params, {
       // A rename keeps the old name as a former name.
       aliases: "take_screens",
@@ -501,7 +487,7 @@ describe("one rule", () => {
     for (const id of ["log.message", "companion.press"]) await pickFrom("Action", id);
     await press(button("Save"), "Save");
 
-    const body = JSON.parse(String(writes()[0]?.body)) as Partial<StubRule>;
+    const body = JSON.parse(String(writes()[0]?.body)) as Partial<Rule>;
     assert.deepEqual(body.action, { id: "companion.press", params: {} });
   });
 

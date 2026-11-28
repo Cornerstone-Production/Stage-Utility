@@ -25,18 +25,10 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { installRenderDom } from "../../test-dom.js";
 
-const teardown = installRenderDom();
+import type { Rule } from "@main/types/automation";
+import { rule as ruleOf } from "../../test-fixtures/automation-rules.js";
 
-interface StubRule {
-  id: string;
-  name: string;
-  enabled: boolean;
-  trigger: { id: string; params: Record<string, string | number> };
-  conditions: never[];
-  action: { id: string; params: Record<string, string | number> };
-  cooldownSec: number;
-  oncePerService: boolean;
-}
+const teardown = installRenderDom();
 
 /** Cut to what the section reads, with the real action's two enum params. */
 const REGISTRY = {
@@ -61,7 +53,7 @@ const REGISTRY = {
   ],
 };
 
-let RULES: StubRule[] = [];
+let RULES: Rule[] = [];
 /** What the macro option route answers — empty models a booth machine that is off. */
 let MACRO_ITEMS: { value: string; label: string }[] = [];
 /** The instances that did not answer. `null` models a server from before the
@@ -121,15 +113,12 @@ async function open(): Promise<void> {
   await settle();
 }
 
-const rule = (macro: string): StubRule => ({
+const rule = (macro: string): Rule => ruleOf({
   id: "rule-1",
   name: "Doors macro",
   enabled: true,
   trigger: { id: "service.live", params: {} },
-  conditions: [],
   action: { id: "propresenter.macro", params: { instance: "default", macro } },
-  cooldownSec: 0,
-  oncePerService: false,
 });
 
 /** The Macro field's options, as plain strings — never as DOM nodes. */
