@@ -50,6 +50,48 @@ import { stageController } from "./stage-controller.js";
  */
 export const SERVICE_GAP_MS = 10 * 60_000;
 
+/**
+ * The occurrence segment of a service key: PCO's service-time id for this
+ * occurrence, or the service's date when PCO names none. The segment that tells
+ * the 9am from the 11am (see service-key.ts).
+ */
+export function liveOccurrence(live: PcoLiveDTO): string {
+  return live.serviceTimeId ?? serviceDateKey(live);
+}
+
+/** The same segment, read back off a record keyed with it. */
+export function recordOccurrence(record: Pick<ServiceRecord, "serviceTimeId" | "serviceDate">): string {
+  return record.serviceTimeId ?? record.serviceDate;
+}
+
+/** `${serviceTypeId}:${planId}:${occurrence}`, the key every recorder files under. */
+export function serviceKeyOf(serviceTypeId: string, planId: string, occurrence: string): string {
+  return `${serviceTypeId}:${planId}:${occurrence}`;
+}
+
+/** What shouldHoldThroughServiceTimeChange decided, and what announceHold needs to say it. */
+type HoldVerdict =
+  | { hold: true; why: "no-occurrence" }
+  | { hold: boolean; why: "gap" }
+  | { hold: false; why: "opening-item" }
+  | { hold: boolean; why: "clock"; untilMs: number; startsAtMs: number };
+
+/** Where a tick lands — see placeTick. */
+type TickPlacement =
+  | { kind: "unkeyed" }
+  | { kind: "same" }
+  | { kind: "held"; verdict: HoldVerdict }
+  | {
+      kind: "new";
+      key: string;
+      st: ReturnType<typeof stageController.getState>;
+      serviceTypeId: string;
+      planId: string;
+      date: string;
+      serviceTimeId: string | null;
+      verdict: HoldVerdict | null;
+    };
+
 /** How often a closed record that still cannot be saved is mentioned again. */
 const STILL_FAILING_LOG_MS = 10 * 60_000;
 
@@ -579,32 +621,46 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    * service's first item mid-overrun, but the next service always starts with
    * one. A reprise of any OTHER item (a song, a step back) is not evidence of
    * that and keeps holding. See openingItemId / captureOpeningItem.
+   *
+   * Pure: it decides and says nothing. announceHold logs the decision, and only
+   * ensureRecord calls that, so occurrenceFor can ask the same question of a tick
+   * the recorder has not acted on yet without logging a split that never happens.
    */
   private shouldHoldThroughServiceTimeChange(
     live: PcoLiveDTO,
     serviceTimeId: string | null,
     gapSinceLive: number,
-  ): boolean {
+  ): HoldVerdict {
     const from = this.current?.serviceTimeId ?? null;
-    if (serviceTimeId == null || from == null) return true; // no two occurrences to compare
+    if (serviceTimeId == null || from == null) return { hold: true, why: "no-occurrence" }; // no two occurrences to compare
     const startsAtMs = live.serviceTimeStartsAt ? Date.parse(live.serviceTimeStartsAt) : NaN;
-    if (!Number.isFinite(startsAtMs)) return gapSinceLive < SERVICE_GAP_MS;
+    if (!Number.isFinite(startsAtMs)) return { hold: gapSinceLive < SERVICE_GAP_MS, why: "gap" };
 
     const untilMs = startsAtMs - Date.now();
     const hold = untilMs > SERVICE_GAP_MS;
 
-    // The opening item overrides a hold outright. Logged unconditionally, not
-    // through loggedServiceTimeChange: the split below changes currentKey on
-    // THIS tick, so this transition is never asked about again and nothing can
-    // double-log it.
+    // The opening item overrides a hold outright.
     const openingItemId = this.current?.openingItemId ?? null;
     if (hold && openingItemId != null && live.currentItemId === openingItemId) {
-      console.log(
-        `[service-recorder] ${this.label}: "${scrub(live.label ?? live.currentItemTitle ?? openingItemId)}" went live again during the hold — the next service has begun, closing ${this.current?.serviceKey ?? "the open record"} and opening a new record`,
-      );
-      return false;
+      return { hold: false, why: "opening-item" };
     }
+    return { hold, why: "clock", untilMs, startsAtMs };
+  }
 
+  /** Say what shouldHoldThroughServiceTimeChange decided, once per transition. */
+  private announceHold(verdict: HoldVerdict, live: PcoLiveDTO, serviceTimeId: string | null): void {
+    // Logged unconditionally, not through loggedServiceTimeChange: the split
+    // this announces changes currentKey on THIS tick, so this transition is
+    // never asked about again and nothing can double-log it.
+    if (verdict.why === "opening-item") {
+      console.log(
+        `[service-recorder] ${this.label}: "${scrub(live.label ?? live.currentItemTitle ?? live.currentItemId ?? "")}" went live again during the hold — the next service has begun, closing ${this.current?.serviceKey ?? "the open record"} and opening a new record`,
+      );
+      return;
+    }
+    if (verdict.why !== "clock") return;
+    const { hold, untilMs, startsAtMs } = verdict;
+    const from = this.current?.serviceTimeId ?? null;
     // Keyed on the decision as well as the transition: a hold announced 35
     // minutes out is followed, ten minutes out, by the split it was holding
     // for, and that split is news too. Keyed on the transition alone, it was
@@ -621,7 +677,6 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
             : `[service-recorder] ${this.label}: service time ${from} → ${serviceTimeId} began at ${clockOf(startsAtMs)}, ${closing}`,
       );
     }
-    return hold;
   }
 
   /**
@@ -667,6 +722,51 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
   }
 
   /**
+   * Which record this tick belongs to: ensureRecord's decision, made without
+   * acting on it, so occurrenceFor can ask it of a tick the recorder has not
+   * reached yet and get the answer ensureRecord will act on.
+   *
+   *   - "unkeyed": PCO has no service type or plan selected, so no key can be
+   *     made; `current`, if any, carries on.
+   *   - "same": the tick's key is the current record's.
+   *   - "held": a different key, held in the current record — see below.
+   *   - "new": a different key that gets its own record.
+   */
+  protected placeTick(live: PcoLiveDTO, gapSinceLive: number): TickPlacement {
+    const st = stageController.getState();
+    const serviceTypeId = st.serviceTypeId;
+    const planId = st.planId;
+    if (!serviceTypeId || !planId) return { kind: "unkeyed" };
+    const date = serviceDateKey(live);
+    // Separate back-to-back services sharing one plan by the PCO service-time
+    // occurrence (9am vs 11am). Fall back to the date when none is known.
+    const serviceTimeId = live.serviceTimeId;
+    const key = serviceKeyOf(serviceTypeId, planId, liveOccurrence(live));
+    if (this.currentKey === key && this.current) return { kind: "same" };
+
+    // Hold the open record through a serviceTimeId change WITHIN one live service
+    // — see SERVICE_GAP_MS.
+    //
+    // Only while there is a service to hold for: the record is still open, or a
+    // plan item is live (an item coming back after a mode drop resumes the
+    // closed record, as SPL and the timeline do). A closed record and no item
+    // live is a service that has ended, and the tick is the attendance ramp for
+    // the NEXT occurrence; holding there appended its arrivals to the finished
+    // record, after its end, until the hold released ten minutes before the
+    // next start.
+    const verdict =
+      this.current &&
+      (this.current.endedAt == null || inLiveItem(live)) &&
+      this.current.serviceTypeId === serviceTypeId &&
+      this.current.planId === planId &&
+      this.current.serviceDate === date
+        ? this.shouldHoldThroughServiceTimeChange(live, serviceTimeId, gapSinceLive)
+        : null;
+    if (verdict?.hold) return { kind: "held", verdict };
+    return { kind: "new", key, st, serviceTypeId, planId, date, serviceTimeId, verdict };
+  }
+
+  /**
    * Make sure `current` is the record for the occurrence this tick belongs to.
    *
    * Returns nothing on purpose. An earlier version returned a boolean described
@@ -684,43 +784,18 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     const priorAiring = this.lastAiring;
     this.lastAiring = live.currentItemId ? { itemId: live.currentItemId, liveStartAt: live.liveStartAt } : null;
 
-    const st = stageController.getState();
-    const serviceTypeId = st.serviceTypeId;
-    const planId = st.planId;
-    if (!serviceTypeId || !planId) return; // can't key a record yet
-    // Captured, not re-read: narrowing does not survive the awaits below, and the
-    // operator could switch plans mid-tick — this record belongs to the plan that
-    // was selected when the tick began.
-    const date = serviceDateKey(live);
-    // Separate back-to-back services sharing one plan by the PCO service-time
-    // occurrence (9am vs 11am). Fall back to the date when none is known.
-    const serviceTimeId = live.serviceTimeId;
-    const key = `${serviceTypeId}:${planId}:${serviceTimeId ?? date}`;
-    if (this.currentKey === key && this.current) {
+    // The plan is captured in the placement, not re-read: the operator could
+    // switch plans during the awaits below, and this record belongs to the plan
+    // that was selected when the tick began.
+    const place = this.placeTick(live, gapSinceLive);
+    if (place.kind === "unkeyed") return; // can't key a record yet
+    if (place.kind === "same") {
       this.captureOpeningItem(live); // backfill for a record that opened before any item was live
       return;
     }
-
-    // Hold the open record through a serviceTimeId change WITHIN one live service
-    // — see SERVICE_GAP_MS.
-    //
-    // Only while there is a service to hold for: the record is still open, or a
-    // plan item is live (an item coming back after a mode drop resumes the
-    // closed record, as SPL and the timeline do). A closed record and no item
-    // live is a service that has ended, and the tick is the attendance ramp for
-    // the NEXT occurrence; holding there appended its arrivals to the finished
-    // record, after its end, until the hold released ten minutes before the
-    // next start.
-    if (
-      this.current &&
-      (this.current.endedAt == null || inLiveItem(live)) &&
-      this.current.serviceTypeId === serviceTypeId &&
-      this.current.planId === planId &&
-      this.current.serviceDate === date &&
-      this.shouldHoldThroughServiceTimeChange(live, serviceTimeId, gapSinceLive)
-    ) {
-      return;
-    }
+    if (place.verdict) this.announceHold(place.verdict, live, live.serviceTimeId);
+    if (place.kind === "held") return;
+    const { key, st, serviceTypeId, planId, date, serviceTimeId } = place;
 
     // Only one establish runs at a time (each recorder's busy latch), so what
     // was forgotten before this one began cannot matter to it.
@@ -826,6 +901,38 @@ export abstract class ItemRecorder<T extends ServiceRecord & { items: SequencedI
    */
   protected recordsLiveItem(live: PcoLiveDTO): live is LiveItemTick {
     return !!live.currentItemId && serviceRunning(live) && shouldRecordLive(live, this.getOpenRecord() != null);
+  }
+
+  /**
+   * The occurrence this tick is recorded against (liveOccurrence's segment of
+   * the key), asked BEFORE this recorder has seen the tick.
+   *
+   * For the automation engine, which hears a pco:live broadcast before the
+   * live-poller hands the same snapshot to the recorders. Reading the record as
+   * it stood would answer a tick late: the 9am's record is still open on the
+   * tick the 11am's opening item goes live, so a once-per-service cue on that
+   * item would be suppressed as already run. So this asks placeTick, which is
+   * the decision ensureRecord acts on, and answers with the occurrence the tick
+   * will land in:
+   *
+   *   - a tick this recorder will record into the record it holds (the same
+   *     key, a key held through an overrun, or PCO with no plan selected): that
+   *     record's occurrence, however far the live id has rolled on
+   *   - a tick it will not record (the mode dropped, SERVICE END passed): the
+   *     open record's occurrence, since this is the tick that closes it
+   *   - anything else: the tick's own
+   */
+  occurrenceFor(live: PcoLiveDTO): string {
+    const current = this.current;
+    if (current) {
+      if (this.recordsLiveItem(live)) {
+        const gapSinceLive = this.lastLiveAt === 0 ? Infinity : Date.now() - this.lastLiveAt;
+        if (this.placeTick(live, gapSinceLive).kind !== "new") return recordOccurrence(current);
+      } else if (current.endedAt == null) {
+        return recordOccurrence(current);
+      }
+    }
+    return liveOccurrence(live);
   }
 
   /** Called by the live-poller after each pco:live broadcast. */

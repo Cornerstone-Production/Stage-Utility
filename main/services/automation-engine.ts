@@ -13,6 +13,7 @@ import { randomUUID } from "node:crypto";
 import { scrub } from "./scrub.js";
 
 import type { AutomationSettings, ConditionCtx, OwnedBy, Rule } from "../types/automation.js";
+import type { PcoLiveDTO } from "../types/stage.js";
 import { addBroadcastListener, addChannelDemandSource, broadcast } from "./broadcaster.js";
 import { AUTOMATION_ACTIONS } from "./automation-actions.js";
 import { missingSentence, readFingerprint } from "./companion-fingerprint.js";
@@ -49,6 +50,7 @@ import { cueStates, type CueCommand, type CueStateName } from "./cue-states.js";
 import { notePressForLearning } from "./companion-state-probe.js";
 import { cueLive } from "./cue-live.js";
 import { calledCueName, cueKey, parseAliases } from "./cue-aliases.js";
+import { serviceOccurrence } from "./service-key.js";
 import { splRecorder } from "./spl-recorder.js";
 import { stageController } from "./stage-controller.js";
 import { plural } from "./plural.js";
@@ -147,10 +149,12 @@ class AutomationEngine {
   private prev = new Map<string, unknown>();
   private lastFiredAt = new Map<string, number>();
   private firedForService = new Map<string, string>();
-  /** Latest service occurrence id, taken from the pco:live payload when one flows.
+  /** The last pco:live snapshot off the bus, for oncePerService's occurrence.
    *  Preferred over stageController so the engine stays drivable by a broadcast
-   *  alone — which is what makes oncePerService testable without the controller. */
-  private serviceKeyFromBus: string | null = null;
+   *  alone — which is what makes oncePerService testable without the controller.
+   *  The whole snapshot, not only a non-empty service-time id: keeping the last
+   *  non-empty id let a plan with no service time inherit the previous one's. */
+  private liveFromBus: PcoLiveDTO | null = null;
   /** ruleId -> the confirmation handed out and when it lapses. In memory only:
    *  a confirmation must not survive a restart, which is thirty seconds of
    *  nobody watching turning into a cue that fires on a call made yesterday. */
@@ -201,7 +205,7 @@ class AutomationEngine {
     this.lastFiredAt.clear();
     this.firedForService.clear();
     this.pendingConfirm.clear();
-    this.serviceKeyFromBus = null;
+    this.liveFromBus = null;
 
     // Said once per process however many times init runs: a Button that owned a
     // rule went with a views save, and the rule was kept.
@@ -940,11 +944,10 @@ class AutomationEngine {
   }
 
   private async handleBroadcast(channel: string, payload: unknown, now: number): Promise<void> {
-    // Track the live service occurrence straight off the bus, before any early
-    // return — oncePerService keys on it and must not depend on evaluation order.
+    // Track the live snapshot straight off the bus, before any early return —
+    // oncePerService keys on it and must not depend on evaluation order.
     if (channel === "pco:live" && payload && typeof payload === "object") {
-      const id = (payload as { serviceTimeId?: unknown }).serviceTimeId;
-      if (typeof id === "string" && id) this.serviceKeyFromBus = id;
+      this.liveFromBus = payload as PcoLiveDTO;
     }
 
     const triggers = triggersForChannel(channel);
@@ -1122,10 +1125,13 @@ class AutomationEngine {
     };
   }
 
-  /** Identifies one service occurrence, for oncePerService. Prefers what the bus
-   *  just carried; falls back to the controller when no pco:live has flowed yet. */
+  /** Identifies one service occurrence, for oncePerService: the occurrence the
+   *  recorders file this snapshot under (serviceOccurrence), which holds through
+   *  an overrun where the live service-time id has already rolled on to the
+   *  next service. Prefers what the bus just carried; falls back to the
+   *  controller when no pco:live has flowed yet. */
   private serviceKey(): string | null {
-    return this.serviceKeyFromBus ?? stageController.getLastLive()?.serviceTimeId ?? null;
+    return serviceOccurrence(this.liveFromBus ?? stageController.getLastLive());
   }
 
   /**

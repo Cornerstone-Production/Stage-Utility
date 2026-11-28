@@ -39,6 +39,13 @@ between tabs.
 | **Cooldown** | seconds before this rule may fire again (default 30) |
 | **Once per service** | fire at most once per service occurrence |
 
+A service occurrence is the one History records: the Planning Center service time
+(two services on one plan are two occurrences), or the service's date when Planning
+Center names no service time. A service that runs past its planned end stays the
+same occurrence until History closes it, although Planning Center has already moved
+its current service time on to the next service, so a rule that fires in the
+overrun can still fire in the next service.
+
 ![The Automation page: Simulate and Disarm above the tabs, and the Commands tab listing each command with its badges, the screens it is used on and a Run button](images/automation-rules.png)
 
 A rule is made with **New command** (Commands tab) or **New rule** (Rules tab),
