@@ -69,6 +69,16 @@ const CATALOG = {
         { Name: "mute", Type: "Boolean" },
       ],
     },
+    // A Gain block that also carries numbered channels.
+    {
+      name: "Gain_Plus",
+      type: "gain",
+      controls: [
+        { Name: "gain", Type: "Float", ValueMin: -100, ValueMax: 20 },
+        { Name: "mute", Type: "Boolean" },
+        { Name: "input.1.gain", Type: "Float", ValueMin: -100, ValueMax: 20 },
+      ],
+    },
   ],
 };
 /** What the next catalog read answers: tests add a control that carries Choices. */
@@ -76,7 +86,7 @@ let withChoices = false;
 const allow = (control: string, min: number | null = null, max: number | null = null) => ({ component: MIX, control, label: "", min, max, confirm: "none" });
 const bank = (control: string, min: number | null = null, max: number | null = null) => ({ component: "Input_Bank", control, label: "", min, max, confirm: "none" });
 // input.4.mute is deliberately not allowlisted.
-const ALLOW = { entries: [allow("gain", -100, 0), allow("mute"), allow("load.1"), allow("load.2"), allow("Button 2"), bank("input.3.gain", -100, 0), bank("input.3.mute"), bank("input.4.gain", -100, 0), { component: "Zone_Gain", control: "gain", label: "", min: -100, max: 0, confirm: "none" }, { component: "Zone_Gain", control: "mute", label: "", min: null, max: null, confirm: "none" }] };
+const ALLOW = { entries: [allow("gain", -100, 0), allow("mute"), allow("load.1"), allow("load.2"), allow("Button 2"), bank("input.3.gain", -100, 0), bank("input.3.mute"), bank("input.4.gain", -100, 0), { component: "Gain_Plus", control: "gain", label: "", min: -100, max: 0, confirm: "none" }, { component: "Gain_Plus", control: "input.1.gain", label: "", min: -100, max: 0, confirm: "none" }, { component: "Zone_Gain", control: "gain", label: "", min: -100, max: 0, confirm: "none" }, { component: "Zone_Gain", control: "mute", label: "", min: null, max: null, confirm: "none" }] };
 
 const f = stubFetchWithLog((url) => {
   if (url === "/api/qsys/catalog") {
@@ -262,7 +272,7 @@ describe("the Q-SYS inspector", () => {
     fireEvent.click(r.getByRole("button", { name: "Bind a channel" }));
     await wait();
     const select = r.getByLabelText("Component") as HTMLSelectElement;
-    assert.deepEqual([...select.options].map((o) => o.value), ["", "Lobby_Mixer", "Input_Bank", "Zone_Gain"], "only components with channel-named controls (meter.1 alone makes one), and Gain blocks");
+    assert.deepEqual([...select.options].map((o) => o.value), ["", "Lobby_Mixer", "Input_Bank", "Zone_Gain", "Gain_Plus"], "only components with channel-named controls (meter.1 alone makes one), and Gain blocks");
     fireEvent.change(select, { target: { value: "Input_Bank" } });
     await wait();
     fireEvent.click(r.getByRole("button", { name: "Input 4" }));
@@ -329,6 +339,18 @@ describe("the Q-SYS inspector", () => {
     await wait();
     assert.deepEqual(r.latest().gain, same);
     assert.equal(r.getByRole("button", { name: "Level" }).getAttribute("aria-expanded"), "false", "the Level picker stayed open after the same channel was filled again");
+  });
+
+  test("a Gain-type component that also has numbered channels offers both: the Gain block and each channel", async () => {
+    const r = mount({ type: "qsys-strip", name: null, label: "", gain: null, mute: null, meter: null });
+    fireEvent.click(r.getByRole("button", { name: "Bind a channel" }));
+    await wait();
+    fireEvent.change(r.getByLabelText("Component"), { target: { value: "Gain_Plus" } });
+    await wait();
+    assert.deepEqual([...r.getByRole("group", { name: "Channel" }).querySelectorAll("button")].map((x) => x.textContent), ["Gain block", "Input 1"]);
+    fireEvent.click(r.getByRole("button", { name: "Input 1" }));
+    await wait();
+    assert.deepEqual(r.latest().gain, { component: "Gain_Plus", control: "input.1.gain" });
   });
 
   test("Break apart is offered on a strip and calls the editor's action", () => {

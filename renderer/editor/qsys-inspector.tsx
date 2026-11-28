@@ -388,7 +388,7 @@ function StripFill({ c, onConfig }: { c: Of<"qsys-strip">; onConfig: (c: LayoutO
               {comp && (
                 <div className="flex flex-wrap gap-1" role="group" aria-label="Channel">
                   {gainBlock && <Button variant="filled" size="small" onClick={() => apply(null)}>Gain block</Button>}
-                  {!gainBlock && channelsOf(namesOf(comp)).map((ch) => (
+                  {channelsOf(namesOf(comp)).map((ch) => (
                     <Button key={`${ch.side}${ch.n}`} variant="filled" size="small" onClick={() => apply(ch)}>{channelLabel(ch)}</Button>
                   ))}
                 </div>
