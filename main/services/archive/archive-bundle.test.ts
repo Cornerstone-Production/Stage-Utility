@@ -317,6 +317,32 @@ test("merging another box's attendance puts both recordings in one frame", async
   assert.equal(after.lastAttendance, raw(30) - 500);
 });
 
+test("an attendance merge it could not align, or that left samples out, says so on [archive] lines", async () => {
+  const { attendanceStore } = await import("../attendance-store.js");
+  const key = "st1:pAttWarn:t1";
+  const base = {
+    ...(record(key, "2026-10-19") as unknown as Record<string, unknown>),
+    items: undefined,
+    totalAttendance: 0, peakAttendance: 0, peakOccupancy: 300, minOccupancy: 300, lastAttendance: 0, lastOccupancy: 300,
+  };
+  const sample = (min: number) => ({ t: `2026-10-19T09:${String(min).padStart(2, "0")}:07.000Z`, attendance: min, occupancy: 300 });
+  // The archive's copy: no baseline, and one sample that is not a reading.
+  await attendanceStore.upsert({ ...base, attendanceBaseline: null, samples: [sample(1), { t: "2026-10-19T09:02:07.000Z", occupancy: 300 }] } as never);
+  const zip = await buildArchive();
+  await attendanceStore.upsert({ ...base, attendanceBaseline: 500, samples: [sample(3), sample(4)] } as never);
+
+  const warned: string[] = [];
+  const orig = console.warn;
+  console.warn = (...a: unknown[]) => { warned.push(a.join(" ")); };
+  try {
+    await importArchive(zip, { merge: [key] });
+  } finally {
+    console.warn = orig;
+  }
+  assert.ok(warned.some((w) => w.startsWith("[archive]") && w.includes("without aligning")), warned.join("\n"));
+  assert.ok(warned.some((w) => w.startsWith("[archive]") && w.includes("left out 1 attendance sample")), warned.join("\n"));
+});
+
 test("replace wins over merge when a key is somehow in both lists", async () => {
   const res = await importArchive(await buildArchive(), {
     merge: ["st1:pMerge:t1"],

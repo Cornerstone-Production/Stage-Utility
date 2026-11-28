@@ -373,3 +373,58 @@ test("a baseline that is not a number shifts nothing, and the merge says it coul
   assert.ok(record.samples!.every((s) => Number.isFinite((s as { attendance: number }).attendance)), "no NaN reached a sample");
   assert.equal(mergeAttendanceRecord(a, boxRecord(5, 15, 7, () => 300)).frames, "aligned");
 });
+
+test("a stored peak above the samples moves into the merged frame with them", () => {
+  // This box restarted (baseline 520) and its recorder saw a peak of 50 that no
+  // kept sample holds; the archive's box was there from 500.
+  const a = { ...boxRecord(10, 20, 0, () => 300), peakAttendance: 50 };
+  const b = boxRecord(0, 15, 7, () => 300);
+
+  const out = mergeAttendanceRecord(a, b).record;
+
+  assert.equal(out.attendanceBaseline, 500);
+  assert.equal(out.peakAttendance, 50 + 20, "the stored peak was not shifted with this box's samples");
+});
+
+test("a ramp-only recording's stored 0 is not a floor once shifted", () => {
+  const a = { ...boxRecord(0, 2, 0, () => 300), peakAttendance: 4 }; // in service, peak 4, baseline 500
+  const ramp = boxRecord(20, 25, 7, () => 300); // baseline 540, every sample before the service
+  const b = { ...ramp, samples: ramp.samples.map((s) => ({ ...s, phase: "pre" as const })), peakAttendance: 0, minOccupancy: null };
+
+  const out = mergeAttendanceRecord(a, b).record;
+
+  assert.equal(out.peakAttendance, 4, "the ramp's stored 0, shifted by 40, became a peak of 40");
+});
+
+test("an incoming sample that is not a reading is left out and counted, and no figure is poisoned", () => {
+  const a = boxRecord(0, 10, 0, () => 300);
+  const b = boxRecord(5, 15, 7, () => 300);
+  const bad = [
+    { t: "2026-07-26T09:05:30.000Z", attendance: "12", occupancy: 300 },
+    { t: "2026-07-26T09:05:40.000Z", occupancy: 300 },
+    null,
+  ];
+  const { record, skippedSamples } = mergeAttendanceRecord(a, { ...b, samples: [...b.samples, ...bad] as never });
+
+  assert.equal(skippedSamples, 3);
+  assert.equal(record.samples!.length, a.samples.length + b.samples.length);
+  for (const f of ["peakAttendance", "peakOccupancy", "minOccupancy", "lastAttendance", "lastOccupancy"] as const) {
+    assert.ok(Number.isFinite(record[f]), `${f} is ${String(record[f])}`);
+  }
+  assert.equal(record.peakAttendance, rawAt(15) - 500);
+  assert.equal(mergeAttendanceRecord(a, { ...b, samples: "not a list" as never }).record.peakAttendance, a.peakAttendance, "a samples field that is not a list adds nothing");
+});
+
+test("a merge that could not align keeps this box's baseline rather than adopting the other's", () => {
+  const a = { ...boxRecord(0, 10, 0, () => 300), attendanceBaseline: null };
+  const b = boxRecord(5, 15, 7, () => 300);
+  const { record, frames } = mergeAttendanceRecord(a, b);
+  assert.equal(frames, "unknown");
+  assert.equal(record.attendanceBaseline, null, "a known baseline stamped on a mixed series makes the next merge shift it");
+});
+
+test("the raw daily total takes the later, larger figure", () => {
+  const a = boxRecord(0, 25, 0, () => 300);
+  const b = boxRecord(10, 30, 7, () => 300);
+  assert.equal(mergeAttendanceRecord(a, b).record.totalAttendance, rawAt(30));
+});

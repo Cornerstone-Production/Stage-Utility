@@ -26,12 +26,11 @@ export interface AttendanceFrame {
   attendanceBaseline?: number | null;
 }
 
-/** A baseline that can be shifted by: a finite number. Anything else — null,
- *  absent, or a non-number in an imported record — is unknown, and an unknown
- *  baseline means no shift, never a NaN one. */
-function baselineOf(r: AttendanceFrame): number | null {
-  const b = r.attendanceBaseline;
-  return typeof b === "number" && Number.isFinite(b) ? b : null;
+/** A number that arithmetic can use, or null. Imported records are
+ *  unvalidated, and a string or NaN that reaches a sum poisons every figure
+ *  after it ("12" + 0 is "120"). */
+export function finiteOrNull(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
 /** Oldest first. By time where both stamps parse, by text otherwise, so a record
@@ -40,7 +39,8 @@ function byTime(a: AttendanceSample, b: AttendanceSample): number {
   const ta = Date.parse(a.t);
   const tb = Date.parse(b.t);
   if (Number.isFinite(ta) && Number.isFinite(tb) && ta !== tb) return ta - tb;
-  return a.t < b.t ? -1 : a.t > b.t ? 1 : 0;
+  if (a.t === b.t) return 0;
+  return a.t < b.t ? -1 : 1;
 }
 
 /** Converts a value from one record's frame into another's. */
@@ -59,7 +59,9 @@ export interface AlignedAttendance {
    * both are in the earlier one, or one side had no samples to place.
    * "unknown": both sides have samples and one has no usable baseline, so
    * neither was shifted. The result is what the two records held, side by
-   * side, and the caller says so.
+   * side, and the caller says so. Its baseline is `into`'s, never adopted
+   * from `from`: stamping a known baseline on a mixed series would make the
+   * next merge of it shift samples that were never in that frame.
    */
   frames: "aligned" | "unknown";
   /** Converts a value recorded in `into`'s frame into the merged one. */
@@ -81,27 +83,46 @@ export interface AlignedAttendance {
  * own record's start, so their difference IS the offset.
  *
  * A sample stamped at the same instant on both sides is kept once, `into`'s.
+ * A sample whose attendance is not a number is carried as it is, never shifted:
+ * the stored records are the operator's, and this deletes nothing from them.
+ *
+ * A baseline that is a finite number is trusted. Records a Recalculate, window
+ * edit or merge touched in v1.9.3 or v1.9.4 (fixed in v1.10.0) may carry an
+ * already-baselined value there (normally 0), and those shift wrongly. Nothing
+ * on the record tells such a baseline from a real 0 — a window trim leaves the
+ * same gap to totalAttendance — so it is not guessed at here.
  */
 export function alignAttendance(into: AttendanceFrame, from: AttendanceFrame): AlignedAttendance {
-  const intoBase = baselineOf(into);
-  const fromBase = baselineOf(from);
-  const known = intoBase != null && fromBase != null;
-  const base = known ? Math.min(intoBase, fromBase) : (intoBase ?? fromBase);
-  const by = (own: number | null) => (known && own != null ? own - (base as number) : 0);
-  const intoBy = by(intoBase);
-  const fromBy = by(fromBase);
+  const intoBase = finiteOrNull(into.attendanceBaseline);
+  const fromBase = finiteOrNull(from.attendanceBaseline);
+  const intoList = Array.isArray(into.samples) ? into.samples : [];
+  const fromList = Array.isArray(from.samples) ? from.samples : [];
 
-  const shifted = (list: AttendanceSample[] | undefined, n: number) =>
-    (list ?? []).map((s) => ({ ...s, attendance: s.attendance + n }));
-  const mine = shifted(into.samples, intoBy);
+  let base: number | null;
+  let intoBy = 0;
+  let fromBy = 0;
+  let frames: AlignedAttendance["frames"] = "aligned";
+  if (intoBase != null && fromBase != null) {
+    base = Math.min(intoBase, fromBase);
+    intoBy = intoBase - base;
+    fromBy = fromBase - base;
+  } else if (intoList.length && fromList.length) {
+    base = intoBase;
+    frames = "unknown";
+  } else {
+    base = intoList.length ? intoBase : (fromBase ?? intoBase);
+  }
+
+  const shifted = (list: AttendanceSample[], n: number) =>
+    list.map((s) => (finiteOrNull(s.attendance) == null ? { ...s } : { ...s, attendance: s.attendance + n }));
+  const mine = shifted(intoList, intoBy);
   const seen = new Set(mine.map((s) => s.t));
-  const theirs = shifted(from.samples, fromBy).filter((s) => !seen.has(s.t));
+  const theirs = shifted(fromList, fromBy).filter((s) => !seen.has(s.t));
 
-  const placed = known || mine.length === 0 || (from.samples ?? []).length === 0;
   return {
     samples: [...mine, ...theirs].sort(byTime),
     attendanceBaseline: base,
-    frames: placed ? "aligned" : "unknown",
+    frames,
     intoShift: (v) => v + intoBy,
     fromShift: (v) => v + fromBy,
   };
@@ -130,14 +151,17 @@ export function inServiceSamples(samples: AttendanceSample[]): AttendanceSample[
 export function attendanceStats(samples: AttendanceSample[]): AttendanceStats {
   const svc = inServiceSamples(samples);
   const stat = svc.length ? svc : samples;
-  const perSvc = (v: number) => Math.max(0, v);
-  const last = stat.at(-1);
+  const nonNegative = (v: number) => Math.max(0, v);
+  // A reading that is not a number is passed over rather than let NaN or a
+  // string into a figure.
+  const att = stat.map((x) => finiteOrNull(x.attendance)).filter((v): v is number => v != null);
+  const occ = stat.map((x) => finiteOrNull(x.occupancy)).filter((v): v is number => v != null);
   return {
-    peakAttendance: stat.reduce((m, x) => Math.max(m, perSvc(x.attendance)), 0),
-    peakOccupancy: stat.reduce((m, x) => Math.max(m, x.occupancy), 0),
-    minOccupancy: stat.length ? stat.reduce((m, x) => Math.min(m, x.occupancy), stat[0].occupancy) : null,
-    lastAttendance: last ? perSvc(last.attendance) : 0,
-    lastOccupancy: last ? last.occupancy : 0,
+    peakAttendance: att.reduce((m, v) => Math.max(m, nonNegative(v)), 0),
+    peakOccupancy: occ.reduce((m, v) => Math.max(m, v), 0),
+    minOccupancy: occ.length ? Math.min(...occ) : null,
+    lastAttendance: att.length ? nonNegative(att[att.length - 1]) : 0,
+    lastOccupancy: occ.length ? occ[occ.length - 1] : 0,
   };
 }
 
