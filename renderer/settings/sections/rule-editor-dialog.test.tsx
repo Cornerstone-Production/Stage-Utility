@@ -743,8 +743,8 @@ describe("a pair", () => {
     // its OWN conditions. Written to the ON half alone, the off cue would go on
     // refusing mid-service with the switch on screen saying it was allowed.
     RULES = [
-      { ...cue("projectors_on"), conditions: [{ id: "service.is-not-live", params: {} }] },
-      { ...cue("projectors_off"), conditions: [{ id: "service.is-not-live", params: {} }] },
+      { ...cue("projectors_on"), name: "Projectors on", conditions: [{ id: "service.is-not-live", params: {} }] },
+      { ...cue("projectors_off"), name: "Projectors off", conditions: [{ id: "service.is-not-live", params: {} }] },
     ];
     await mount();
     await openPair("Projectors");
