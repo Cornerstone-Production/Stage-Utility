@@ -1350,6 +1350,21 @@ describe("the plot editor", () => {
     assert.equal(router.state.location.pathname, "/stageplots/manage/room-one");
   });
 
+  test("a venue's address uses the Public address when one is set", async () => {
+    // As every screen link does: the address a phone or a volunteer is given is
+    // the one the operator set, not whichever the operator's browser happens to use.
+    DOC.venues[0].slug = "room-one";
+    STATE = { publicUrl: "http://stage.example.org" };
+    await mountRouted("/stageplots/edit?venue=v-1");
+    const row = () => within(card("Venues")).getByRole("button", { name: /Room One/ });
+    await act(async () => {
+      fireEvent.contextMenu(row(), { clientX: 30, clientY: 30 });
+    });
+    await click(screen.getByRole("menuitem", { name: "Copy its address" }));
+    await settle();
+    assert.match(within(card("Venues")).getByRole("status").textContent!, /http:\/\/stage\.example\.org\/stageplots\/room-one$/);
+  });
+
   test("a 500-item plot re-renders only the dragged item per pointermove", async () => {
     DOC.plots[0].items = Array.from({ length: 500 }, (_, i) => item({ id: `i-${i}`, x: (i % 25) * 38, y: Math.floor(i / 25) * 30, w: 30, h: 20 }));
     await mount();

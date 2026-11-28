@@ -4,6 +4,11 @@
 // the browser exemption on the cue routes. They used to be one function here and
 // a looser copy in cue-tokens.ts, and the copy accepted a bare `Sec-Fetch-Site`
 // header — curl with one header minted itself a cue token. One definition now.
+//
+// Also the one rule for what a Host header may be turned into an address from
+// (originFromHost), and for a username or password inside an address
+// (hasUserinfo). Each used to be written in more than one place, and the copies
+// disagreed. Import-free, because the renderer imports this file.
 
 /**
  * Hostname of an Origin header ("http://host:port") or a Host header
@@ -59,4 +64,33 @@ export function headerValue(
 ): string {
   const raw = headers[name];
   return String(Array.isArray(raw) ? (raw[0] ?? "") : (raw ?? ""));
+}
+
+/** A hostname, an IPv4 address or a bracketed IPv6 address, then an optional
+ *  port. Labels at most 63 characters, as DNS allows. Nothing a shell, a YAML
+ *  string or a spreadsheet link reads as syntax can match. */
+const HOST_RE = /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*|\[[0-9A-Fa-f:.]{2,45}\])(?::\d{1,5})?$/;
+
+/** The longest Host header taken as a name: no DNS name is longer. */
+const MAX_HOST_LENGTH = 255;
+
+/**
+ * `http://host:port` (or `https://`) for a Host header, or null when the header
+ * is absent or is not a plain host. The header is whatever the client sent, and
+ * every caller writes the result somewhere it matters: an installer that runs as
+ * root, a link in a spreadsheet handed outside Production, the addresses Home
+ * Assistant calls. So the shape is strict, and a caller that gets null leaves the
+ * address out or uses its own fallback rather than repairing the header.
+ */
+export function originFromHost(host: string | null | undefined, secure: boolean): string | null {
+  if (!host || host.length > MAX_HOST_LENGTH || !HOST_RE.test(host)) return null;
+  return `${secure ? "https" : "http"}://${host}`;
+}
+
+/** A username or password inside the address itself. Refused for every address
+ *  the app keeps: stored there it would sit in a config store and go out to every
+ *  screen (video:state, the connect QR and display links), and a browser refuses
+ *  to fetch an address that carries one, so it could never work either. */
+export function hasUserinfo(u: URL): boolean {
+  return u.username !== "" || u.password !== "";
 }

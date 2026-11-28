@@ -52,7 +52,9 @@ import { wirelessManager } from "./wireless-manager.js";
 // One definition of "this is the mask, not a value" and "is there anything in
 // this field", shared with the wireless half and the renderer rather than
 // written again here. A leaf module, so the panels can import it too.
-import { hasSecretValue, isBlankSecret, isMask, isTypedSecret, MASK } from "./mask.js";
+import { hasSecretValue, isTypedSecret, MASK } from "./mask.js";
+// What each value in a credential field asks for: keep, clear, set or ignore.
+import { foldSecret } from "./credential-fold.js";
 
 // PCO integration descriptor.
 const PCO_DESCRIPTOR: IntegrationDescriptor = {
@@ -926,49 +928,16 @@ export function foldConfigEntries(
     // list, both already done, on a null-prototype object.
     const key = rawKey;
     if (secretKeys.includes(key)) {
-      // THREE cases, and the middle one used to be missing.
-      //
-      // A MASK means "leave it alone" — the dialog posts back what it was shown.
-      // Matched on any run of bullets rather than the exact four this file
-      // writes, for the reason mask.isMask spells out: the panel seeds its
-      // fields with the longer FORM_MASK, and a client echoing that back would
-      // have stored a row of bullets AS the credential.
-      //
-      // An EMPTY STRING is the operator clearing the field, and it was silently
-      // ignored — so no integration secret could be removed from the dialog at
-      // all. A PCO token, an OBS password or a SafeSpace space id could be
-      // entered and never taken back out, with the form showing an empty field
-      // and the server still holding the value. That is exactly the bug
-      // wireless-credentials.mergeSecrets was rewritten to fix ("an empty string
-      // is an explicit clear"), and this is the other copy of it.
-      if (isMask(value)) continue;
-      // A field holding only whitespace is an EMPTY field — see isBlankSecret.
-      // `value === ""` here while getSensourceConfig read the same slot through
-      // `.trim() || null` is how one save produced a stored "   " that the panel
-      // read as an ID and the log read as none.
-      if (isBlankSecret(value)) clearedSecrets.push(key);
-      else if (typeof value === "string") secrets[key] = value;
-      else {
-        // NOT String(value), which is what this did. `String(null)` is "null",
-        // so POST {"config":{"safeSpaceId":null}} stored the four-character
-        // string "null" AS the credential and the app went off and polled
-        // SafeSpace with it — indistinguishable from a real id anywhere in the
-        // UI, which shows a mask either way. `String({})` gives
-        // "[object Object]"; `String([])` gives "", a stored empty-string secret
-        // that masks as UNSET while occupying the slot.
-        //
-        // wireless-credentials.mergeSecrets — the other copy of this fold, and
-        // the one the commit that split these claimed parity with — has always
-        // had `typeof value === "string"`. This is the copy that drifted.
-        //
-        // Ignored rather than cleared, and said out loud. A body putting a
-        // non-string in a password field is junk or a mistake, and deleting a
-        // working credential over it is the worse of the two wrong answers; a
-        // silent skip is how an operator concludes the field is broken.
+      // Mask keeps, blank clears, a string sets, anything else is ignored and
+      // said out loud: credential-fold.ts has the rule and why each case is so.
+      const edit = foldSecret(value);
+      if (edit.kind === "clear") clearedSecrets.push(key);
+      else if (edit.kind === "set") secrets[key] = edit.value;
+      else if (edit.kind === "ignore") {
         // The TYPE, never the value — this is a credential slot.
         console.warn(
           `[integration-manager] ignoring a non-string credential on ${scrub(id)}: ` +
-            `${scrub(key)} arrived as ${scrub(value === null ? "null" : typeof value)}. ` +
+            `${scrub(key)} arrived as ${scrub(edit.type)}. ` +
             "The stored value is unchanged.",
         );
       }

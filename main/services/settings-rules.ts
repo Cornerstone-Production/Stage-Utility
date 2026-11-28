@@ -51,8 +51,16 @@ export function normalizeBaseUrl(url: string | null): string | null {
   return s.replace(/\/+$/, "");
 }
 
-/** Whether a normalized base URL parses as http or https with a host. */
+/**
+ * Whether a normalized base URL parses as http or https with a host, and has no
+ * `@` anywhere. This one goes on the connect QR code and into every display
+ * link, so a password in it would be handed to everyone who scans. hasUserinfo
+ * alone is not enough: normalizeBaseUrl puts `http://` in front of a mistyped
+ * scheme, so `https:/admin:pw@host` parses with `https` as the host and the
+ * password in the path. No address anyone reaches this server by has an `@`.
+ */
 export function isHttpBaseUrl(url: string): boolean {
+  if (url.includes("@")) return false;
   try {
     const u = new URL(url);
     return (u.protocol === "http:" || u.protocol === "https:") && u.hostname !== "";

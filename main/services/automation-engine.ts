@@ -11,6 +11,7 @@
 import { errorMessage } from "./errors.js";
 import { randomUUID } from "node:crypto";
 import { scrub } from "./scrub.js";
+import { secretsMatch } from "./secret-compare.js";
 
 import type { AutomationSettings, ConditionCtx, OwnedBy, Rule } from "../types/automation.js";
 import { addBroadcastListener, addChannelDemandSource, broadcast } from "./broadcaster.js";
@@ -789,7 +790,7 @@ class AutomationEngine {
     if (rule.confirmRequired) {
       const pending = this.pendingConfirm.get(rule.id);
       const presented = String(opts.confirm ?? "").trim();
-      const valid = !!pending && pending.expiresAt > now && presented !== "" && presented === pending.token;
+      const valid = !!pending && pending.expiresAt > now && presented !== "" && secretsMatch(presented, pending.token);
       if (!valid) {
         const token = randomUUID();
         this.pendingConfirm.set(rule.id, { token, expiresAt: now + CONFIRM_WINDOW_MS });

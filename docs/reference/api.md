@@ -578,7 +578,7 @@ the wrong shape is `400` with the reason unless noted.
 | `/api/ndi-enabled` | `{enabled: boolean}` |
 | `/api/kiosk-discovery` | `{enabled: boolean}` — whether the server answers devices looking for one |
 | `/api/server-id/new` | No body. Gives this server a new `serverId` and answers the state, logged on `[stage-controller]`. Only while another server answers discovery with this server's id (`serverIdentity.duplicates` in the state); otherwise `409` with `code: "no-duplicate-server"` and nothing changes ([Two servers with one id](../kiosk-devices.md#two-servers-with-one-id)) |
-| `/api/public-url` | `{url: string \| null}` — the address used for the connect QR and display links; blank or `null` clears it. Taken as `http://` when it names no scheme; anything that is then not an http or https address is refused |
+| `/api/public-url` | `{url: string \| null}` — the address used for the connect QR and display links; blank or `null` clears it. Taken as `http://` when it names no scheme; anything that is then not an http or https address, or that has an `@` in it (a user name or password), is refused |
 | `/api/timezone` | `{timezone: string \| null}` — an IANA zone, or `null` (blank) to follow the host clock; an unknown zone is `400` |
 | `/api/hour-cycle` | `{hourCycle: "12h" \| "24h"}` |
 | `/api/reconnect-schedule` | any of `{enabled, leadMin, tailMin, dormantMin}`, the numbers rounded and clamped (lead and tail 0–1440, dormant 1–1440 minutes) |

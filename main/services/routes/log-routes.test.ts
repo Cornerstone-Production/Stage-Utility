@@ -9,6 +9,7 @@
 // client gets, not a description of them.
 
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { afterEach, describe, test } from "node:test";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -19,7 +20,8 @@ import * as fsp from "node:fs/promises";
 // operator's real ~/.stage-utility.
 process.env.STAGE_UTILITY_DATA = await fsp.mkdtemp(path.join(os.tmpdir(), "log-routes-"));
 
-const { logRoutes } = await import("./log-routes.js");
+const { logAuthed, logRoutes } = await import("./log-routes.js");
+const { captureConsole } = await import("../fixtures/capture-console.js");
 const { LOG_PAGE_PATHS, CANONICAL_LOG_PATH } = await import("./log-paths.js");
 const { callRoute } = await import("./route-harness.js");
 const { addLogLine } = await import("../log-buffer.js");
@@ -72,6 +74,36 @@ describe("the token gate applies identically to every log path", () => {
     const r = await callRoute(logRoutes, "/logs");
     assert.equal(r.status, 401);
     assert.equal(r.headers.Location, undefined, "an unauthorised alias must not hand out a Location");
+  });
+});
+
+describe("the token is compared in constant time", () => {
+  // How long a comparison takes cannot be measured reliably in a unit test (see
+  // secret-compare.test.ts), so this runs the real gate and watches what it
+  // hands to crypto.timingSafeEqual: two 32-byte digests, for a right token and a
+  // wrong one alike. A bare `===` never calls it.
+  test("a right, a wrong, a longer and a missing token are all judged by timingSafeEqual", (t) => {
+    process.env.STAGE_UTILITY_LOG_TOKEN = TOKEN;
+    const spy = t.mock.method(crypto, "timingSafeEqual");
+    assert.equal(logAuthed(new URL(`http://x/api/log?token=${TOKEN}`)), true);
+    assert.equal(logAuthed(new URL("http://x/api/log?token=wrong")), false);
+    assert.equal(logAuthed(new URL(`http://x/api/log?token=${TOKEN}-and-more`)), false);
+    assert.equal(logAuthed(new URL("http://x/api/log")), false);
+    assert.deepEqual(
+      spy.mock.calls.map((c) => [(c.arguments[0] as Buffer).length, (c.arguments[1] as Buffer).length]),
+      [[32, 32], [32, 32], [32, 32], [32, 32]],
+    );
+  });
+
+  test("a refusal never repeats the token, presented or configured", async (t) => {
+    process.env.STAGE_UTILITY_LOG_TOKEN = TOKEN;
+    const lines = captureConsole(t, "log", "warn", "error");
+    for (const p of [...LOG_PAGE_PATHS, "/api/log"]) {
+      const r = await callRoute(logRoutes, `${p}?token=near-${TOKEN}`);
+      assert.equal(r.status, 401, p);
+      assert.doesNotMatch(r.body, new RegExp(TOKEN), `${p} repeated the token`);
+    }
+    assert.doesNotMatch(lines.join("\n"), new RegExp(TOKEN), "a log line repeated the token");
   });
 });
 
@@ -150,7 +182,7 @@ describe("/api/log", () => {
 
   test("an empty or unparseable ?since= falls back to the whole buffer", async () => {
     // The page sends since= with nothing after it on its very first load.
-    for (const q of ["?since=", "?since=banana"]) {
+    for (const q of ["?since=", "?since=%20", "?since=banana"]) {
       const body = (await callRoute(logRoutes, `/api/log${q}`)).json as { reset: boolean };
       assert.equal(body.reset, true, `${q} must not be trusted as a position`);
     }

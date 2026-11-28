@@ -125,7 +125,8 @@ One page, at two addresses, the split [ServiceCue](servicecue-and-baptisms.md) a
 
 A venue opened from one stays on it: its back link, and the address bar, keep to the
 page it was opened on. Copy its address, in the editor, always gives the crew's
-`/stageplots/<address>`. Everything below holds on both, except where it says
+`/stageplots/<address>`, on the Public address when one is set (as every screen link
+is), and otherwise on the address this browser is using. Everything below holds on both, except where it says
 otherwise.
 
 Read-only, and as wide as the page. The venues as cards in a grid, home then offsite, each with a thumbnail of the

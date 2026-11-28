@@ -23,6 +23,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
 import { foldConfigEntries } from "./integration-manager.js";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 const SECRETS = ["password", "apiToken"];
 
@@ -69,7 +70,8 @@ describe("clearing a stored credential", () => {
     assert.equal(foldConfigEntries({ host: "203.0.113.7" }, SECRETS, "test").config.host, "203.0.113.7");
   });
 
-  test("a non-string is ignored, never coerced into the credential", () => {
+  test("a non-string is ignored, never coerced into the credential", (t) => {
+    const warned = captureConsole(t, "warn");
     // GUARD. This was `secrets[key] = String(value)`. `String(null)` is "null",
     // so POST {"config":{"apiToken":null}} stored the four-character string
     // "null" as the credential and the integration went and used it — the UI
@@ -93,6 +95,14 @@ describe("clearing a stored credential", () => {
       assert.deepEqual(clearedSecrets, [], `${String(junk)} deleted a working credential`);
       assert.deepEqual({ ...config }, {}, `${String(junk)} leaked into the non-secret config`);
     }
+    // Ignored OUT LOUD, one line each, naming the field and the type and never
+    // the value: a silent skip is how an operator concludes the field is broken.
+    assert.deepEqual(
+      warned.map((l) => /arrived as (\w+)\./.exec(l)?.[1]),
+      ["null", "undefined", "number", "boolean", "object", "object", "object"],
+      warned.join("\n"),
+    );
+    for (const l of warned) assert.match(l, /^\[integration-manager\] ignoring a non-string credential on test: password /, l);
   });
 
   test("an empty NON-secret field is an ordinary value, not a clear", () => {

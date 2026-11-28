@@ -19,6 +19,7 @@ import { confirm } from "../../components/ui/confirm-dialog";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
 import { useContextMenuState, useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
 import { useCopyFeedback } from "../../lib/use-copy-feedback";
+import { useAppBaseUrl } from "../../lib/app-base-url";
 import { useRouterHandle } from "../../lib/use-search-param";
 import { cn } from "../../lib/cn";
 import { useResyncOn } from "../../lib/use-resync-on";
@@ -96,7 +97,9 @@ export function VenuesCard({
     if (ok) await run(() => stageplotsApi.deleteVenue(venue.id));
   };
 
-  const address = (v: VenueView) => `${window.location.origin}${venuePath(v)}`;
+  // The Public address when one is set, as every screen link does (app-base-url.ts).
+  const base = useAppBaseUrl();
+  const address = (v: VenueView) => `${base}${venuePath(v)}`;
   const copyAddress = (v: VenueView) => {
     void copyToClipboard(address(v));
   };

@@ -6,6 +6,7 @@ import {
   MAX_UPLOAD_BODY_BYTES,
   error,
   json,
+  queryNumber,
   readBody,
   readBodyOrEmpty,
   readBodyTolerant,
@@ -306,4 +307,20 @@ test("readBodyOrEmpty reads only an object; readBodyTolerant keeps an array an a
   assert.deepEqual(await via(readBodyOrEmpty, '{"a":1}'), { v: { a: 1 } });
   assert.deepEqual(await via(readBodyTolerant, "[1]"), { v: [1] });
   assert.deepEqual(await via(readBodyTolerant, "null"), { v: {} });
+});
+
+// ── queryNumber ─────────────────────────────────────────────────────────────
+// One reading of a numeric query parameter. `Number("")` is 0, which made a bare
+// `?since=` a position in one route and "not given" in another.
+
+test("queryNumber reads a number, and null for absent, empty, blank or not a number", () => {
+  const q = (search: string) => queryNumber(new URL(`http://x/api${search}`), "n");
+  assert.equal(q("?n=12"), 12);
+  assert.equal(q("?n=0"), 0);
+  assert.equal(q("?n=-4"), -4);
+  assert.equal(q("?n=0.5"), 0.5);
+  assert.equal(q("?n=%2012%20"), 12);
+  for (const search of ["", "?n=", "?n=%20%20", "?n=banana", "?n=Infinity", "?n=NaN", "?m=3"]) {
+    assert.equal(q(search), null, search);
+  }
 });

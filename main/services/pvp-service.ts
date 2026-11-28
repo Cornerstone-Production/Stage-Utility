@@ -20,6 +20,7 @@
 //      subscribers is what silently disabled every SPL rule on an unattended box.
 
 import { errorMessage } from "./errors.js";
+import { hasUserinfo } from "./http-origin.js";
 import { StatusIntegration } from "./integration-base.js";
 import { pinToOrigin } from "./pinned-origin.js";
 import { scrub } from "./scrub.js";
@@ -135,8 +136,8 @@ export function pvpOrigin(t: PvpTarget): PvpOrigin {
   }
   const port = String(t.port) === (t.https ? "443" : "80") ? "" : String(t.port);
   if (
-    u.protocol !== `${t.https ? "https" : "http"}:` || u.port !== port || u.username !== "" ||
-    u.password !== "" || u.pathname !== "/" || u.search !== "" || u.hash !== ""
+    u.protocol !== `${t.https ? "https" : "http"}:` || u.port !== port || hasUserinfo(u) ||
+    u.pathname !== "/" || u.search !== "" || u.hash !== ""
   ) {
     throw new Error(`the ProVideoPlayer host "${scrub(t.host, 80)}" is not a plain host name or address`);
   }

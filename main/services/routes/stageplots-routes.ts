@@ -138,7 +138,7 @@ import {
   validateVenueInput,
   venueSlugProblem,
 } from "../stageplots-store.js";
-import { BodyTooLargeError, type RouteCtx, error, json, readObjectBody, readRawBody } from "./context.js";
+import { BodyTooLargeError, type RouteCtx, error, json, queryNumber, readObjectBody, readRawBody } from "./context.js";
 
 
 const PREFIX = "/api/stageplots";
@@ -849,8 +849,8 @@ async function uploadPdf(c: RouteCtx): Promise<void> {
 }
 
 function pageParam(name: string, url: URL, key: string): number {
-  const n = Number(url.searchParams.get(key));
-  if (!Number.isInteger(n) || n < 1 || n > 10_000) refuseUpload(name, null, `?${key}= must be a page number`);
+  const n = queryNumber(url, key);
+  if (n === null || !Number.isInteger(n) || n < 1 || n > 10_000) refuseUpload(name, null, `?${key}= must be a page number`);
   return n;
 }
 

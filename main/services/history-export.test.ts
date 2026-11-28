@@ -521,7 +521,12 @@ describe("buildHistoryWorkbook: Baptisms sheet", () => {
       serviceKey: "st1:plan1:t1",
       people: [{ testimonyMs: 1000, baptizeMs: 1000 }],
     });
-    for (const host of ["evil.example/path", "a b", "host:port", "\"quoted\""]) {
+    // The last two are shapes a Host header can hold and no name can: a label
+    // longer than DNS allows (63), and a header longer than any name (255). The
+    // installer stamp refused both; this link used to write them in.
+    const longLabel = `${"a".repeat(64)}.example.org`;
+    const longHost = Array.from({ length: 5 }, () => "b".repeat(60)).join(".");
+    for (const host of ["evil.example/path", "a b", "host:port", "\"quoted\"", longLabel, longHost]) {
       const buf = await buildHistoryWorkbook({ include: ["baptisms"], host });
       const { rows } = await sheetOf(buf, "Baptisms");
       assert.equal(rows[0]!["History"], null, `a Host of ${JSON.stringify(host)} reached the link`);

@@ -5,7 +5,7 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
-import { type RouteCtx, json, error, pcoReadFailed, queryFlag } from "./context.js";
+import { type RouteCtx, json, error, pcoReadFailed, queryFlag, queryNumber } from "./context.js";
 import { stageController } from "../stage-controller.js";
 import { SERVER_VERSION } from "../server-version.js";
 import { UPCOMING_DEFAULT_DAYS, UPCOMING_MAX_DAYS } from "../upcoming-plans.js";
@@ -89,9 +89,9 @@ export async function stateRoutes(c: RouteCtx): Promise<void> {
       // nothing past tonight — a nonsense value that read as a working list.
       // Anything under a whole day now falls back to the default rather than
       // being rounded up, the same answer `?days=banana` gets.
-      const raw = Math.floor(Number(url.searchParams.get("days")));
-      const days =
-        Number.isFinite(raw) && raw > 0 ? Math.min(raw, UPCOMING_MAX_DAYS) : UPCOMING_DEFAULT_DAYS;
+      const asked = queryNumber(url, "days");
+      const whole = asked === null ? 0 : Math.floor(asked);
+      const days = whole > 0 ? Math.min(whole, UPCOMING_MAX_DAYS) : UPCOMING_DEFAULT_DAYS;
       const dto = await stageController.getUpcomingPlanList(days);
       // Also a header, so a proxy or a curl can see the age without parsing.
       res.setHeader("X-Plans-Cache-Age-Ms", String(dto.cacheAgeMs));

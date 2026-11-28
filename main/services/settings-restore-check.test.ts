@@ -187,6 +187,29 @@ describe("settings.json restore check", () => {
     assert.equal(warnings.filter((w) => w.includes("[config-snapshot]") && w.includes("publicUrl")).length, 2, warnings.join("\n"));
   });
 
+  test("a public URL carrying a user name or password is restored as none, and the log never repeats them", async (t) => {
+    const warnings = captureConsole(t as TestContext, "warn");
+    // Only the first parses. A space in the host, or a `/`, `?` or `#` inside
+    // the password, makes the rest fail to parse, and that password must not
+    // reach the log either.
+    const bad = [
+      "http://admin:hunter22@stage.example.org",
+      "http://admin:hunter22@stage box",
+      "http://admin:hun/ter22@stage.example.org",
+      "http://admin:hun?ter22@stage.example.org",
+      "http://admin:hun#ter22@stage.example.org",
+      "https:/admin:hunter22@stage.example.org",
+    ];
+    for (const url of bad) {
+      const result = await settingsRestoreCheck({ publicUrl: url });
+      assert.ok(result.ok, !result.ok ? result.reason : "");
+      assert.equal((result.value as { publicUrl: unknown }).publicUrl, null, url);
+    }
+    const lines = warnings.filter((w) => w.includes("[config-snapshot]") && w.includes("publicUrl"));
+    assert.equal(lines.length, bad.length, warnings.join("\n"));
+    for (const line of lines) assert.doesNotMatch(line, /hunter22|ter22|admin/, line);
+  });
+
   test("a key no code reads is dropped", async () => {
     const result = await settingsRestoreCheck({ showQr: true, somethingElse: { x: 1 } });
     assert.ok(result.ok);

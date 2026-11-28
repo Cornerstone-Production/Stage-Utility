@@ -16,11 +16,12 @@
 // not something a person chose, so there is no dictionary to run and the work
 // factor a password hash buys does nothing here.
 
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 
 import { errorMessage } from "./errors.js";
 import { headerValue, isCrossOrigin } from "./http-origin.js";
 import { scrub } from "./scrub.js";
+import { secretsMatch } from "./secret-compare.js";
 import { secretsStore } from "./secrets.js";
 
 /** The secrets slot and key the token list lives in. */
@@ -55,12 +56,6 @@ export interface CueCaller {
 
 function sha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
-}
-
-/** Constant-time hex comparison, so a wrong token cannot be narrowed by timing. */
-function hashesMatch(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  return timingSafeEqual(Buffer.from(a, "utf8"), Buffer.from(b, "utf8"));
 }
 
 function summarise(t: CueTokenRecord): CueTokenSummary {
@@ -207,7 +202,8 @@ class CueTokenStore {
   async verify(presented: string | null): Promise<CueCaller | null> {
     if (!presented) return null;
     const hash = sha256(presented);
-    const match = (await this.read()).find((t) => hashesMatch(t.hash, hash));
+    // Constant time; hashing the hashes once more costs nothing that matters.
+    const match = (await this.read()).find((t) => secretsMatch(hash, t.hash));
     return match ? { id: match.id, label: match.label } : null;
   }
 

@@ -15,7 +15,7 @@ import * as path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { originFromHost } from "../main/services/kiosk-installer-origin.js";
+import { originFromHost } from "../main/services/http-origin.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const KIOSK = path.join(HERE, "kiosk");

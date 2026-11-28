@@ -5,7 +5,7 @@ import type { CredentialTarget } from "../credential-target.js";
 import { isRecord } from "../../types/is-record.js";
 import { parseAudioFields, type AudioFields } from "./audio-input.js";
 import { normalizeEmbedRef } from "./embed.js";
-import { hasUserinfo } from "./url-userinfo.js";
+import { hasUserinfo } from "../http-origin.js";
 
 /** The source kinds this build offers. One set, so the routes and a config
  *  restore cannot disagree about which kinds a feed may be. */
