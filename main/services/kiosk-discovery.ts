@@ -11,6 +11,7 @@
 // string and array before they reach a Map that lives in memory.
 
 import { DEVICE_OUTPUT_KINDS, type DeviceOutput, type DiscoveryProbe, type DiscoveryReply } from "../types/kiosk.js";
+import { isRecord } from "../types/is-record.js";
 
 /** Marks our datagrams so we ignore whatever else is on the port. */
 const MAGIC = "stageUtility";
@@ -64,8 +65,8 @@ export function encodeProbe(p: DiscoveryProbe): string {
  * today" promises.
  */
 function decodeOutput(v: unknown): DeviceOutput | undefined {
-  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
-  const o = v as Record<string, unknown>;
+  if (!isRecord(v)) return undefined;
+  const o = v;
   const kind = DEVICE_OUTPUT_KINDS.find((k) => k === o.kind);
   const name = str(o.name);
   const port = str(o.port);
@@ -85,8 +86,8 @@ export function decodeProbe(buf: Buffer | string): DiscoveryProbe | null {
   let o: Record<string, unknown>;
   try {
     const parsed: unknown = JSON.parse(buf.toString());
-    if (!parsed || typeof parsed !== "object") return null;
-    o = parsed as Record<string, unknown>;
+    if (!isRecord(parsed)) return null;
+    o = parsed;
   } catch {
     // Anything at all can land on a broadcast port. Not ours, not an error.
     return null;
@@ -121,8 +122,8 @@ export function decodeReply(buf: Buffer | string): DiscoveryReply | null {
   let o: Record<string, unknown>;
   try {
     const parsed: unknown = JSON.parse(buf.toString());
-    if (!parsed || typeof parsed !== "object") return null;
-    o = parsed as Record<string, unknown>;
+    if (!isRecord(parsed)) return null;
+    o = parsed;
   } catch {
     return null;
   }

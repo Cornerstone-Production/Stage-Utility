@@ -73,7 +73,6 @@ import { baptismTimerService } from "./main/services/baptism-timer-service.js";
 import { messagesService } from "./main/services/messages-service.js";
 import { homeSnoozes } from "./main/services/home-snoozes.js";
 import { trendsPrefs } from "./main/services/trends-prefs.js";
-import { photoThemes } from "./main/services/photo-themes/service.js";
 import { scrubError } from "./main/services/scrub.js";
 import { backupScheduler } from "./main/services/backup-scheduler.js";
 import { configSnapshot } from "./main/services/config-snapshot.js";
@@ -152,16 +151,6 @@ for (const { what, error } of await messagesService.start()) {
 await homeSnoozes.start();
 // The History Trends card's chosen sound metric: loaded so the hello burst can serve it.
 await trendsPrefs.start();
-// Theme photos: the controller asks it what each plan's slots draw, and it asks
-// the controller who is on a plan. Wired here, not by import, so neither module
-// imports the other.
-stageController.setThemedPhotoSource((planId) => photoThemes.shownPhotos(planId));
-await photoThemes.start({
-  planPeople: (serviceTypeId, planId) => stageController.planPeople(serviceTypeId, planId),
-  currentPhotoOf: (personId) => stageController.currentPhotoOf(personId),
-  currentPlanSortDate: (planId) => stageController.currentPlanSortDateFor(planId),
-  onShownChanged: () => stageController.refreshThemedPhotos(),
-});
 // Unattended backups, if the operator has turned them on.
 backupScheduler.start();
 
@@ -222,7 +211,6 @@ async function shutdown(signal: string): Promise<void> {
   tslService.stop();
   oscManager.stop();
   messagesService.stop();
-  photoThemes.stop();
   try {
     await remoteServer.stop();
     await deviceManager.stop();

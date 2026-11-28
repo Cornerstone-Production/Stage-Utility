@@ -37,6 +37,7 @@ import {
   type AppStateSourceId,
 } from "./app-state-sources.js";
 import { CALL_TRIGGER_ID, calledCueName, parseAliases } from "./cue-aliases.js";
+import { snakeCase } from "./cue-slug.js";
 import { errorMessage } from "./errors.js";
 import { stateBindingParams, type StateBinding } from "./cue-pairs.js";
 import { integrationManager } from "./integration-manager.js";
@@ -258,13 +259,15 @@ export function layerButtons(layer: string, slug: string): BuiltinButtonDef[] {
  *
  * A layer whose name has no letters or digits in it slugs to "" and is SKIPPED
  * by the caller rather than offered as `pvp__shown`.
+ *
+ * NOT slugForCue, deliberately. A built-in's cue name is derived from the live
+ * layer name every time, and Home Assistant, Companion and Buttons already hold
+ * the name an existing layer made. slugForCue folds accents and collapses a
+ * literal `\n`; using it here would rename the built-ins of a layer called
+ * "Café". It shares only the regex chain, snakeCase.
  */
 export function layerSlug(name: string): string {
-  return name
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
+  return snakeCase(name.trim());
 }
 
 /**
@@ -373,8 +376,8 @@ function rule(opts: {
       params: {
         name: opts.cue,
         // `says` is what the manifest and the generated Home Assistant config
-        // call this on a screen; see spokenCueName. The rule's own `name` is
-        // never used for that — a rule may be called "Rule 4".
+        // call this on a screen; see spokenCueName. Set outright, so
+        // renaming the rule in the list never renames the switch.
         says: opts.name,
         ...(opts.binding ? stateBindingParams(opts.binding) : {}),
       },

@@ -262,6 +262,25 @@ export function unassignedDistinct(groups: readonly { typeId: string; cats: stri
   return [...byKey.values()];
 }
 
+/** What the top-of-page notice names: each category once, grouped under the service types it
+ *  is in no role on. A name two types share is one entry under both, not one line per type;
+ *  names with the same types are listed together. */
+export function noticeGroups(
+  roles: readonly CategoryRole[],
+  typeIds: readonly string[],
+  catsByType: ReadonlyMap<string, readonly string[]>,
+  typeName: (id: string) => string,
+): { typeName: string; cats: string[] }[] {
+  const byTypes = new Map<string, { typeIds: string[]; cats: string[] }>();
+  for (const c of unassignedDistinct(unassignedByType(roles, typeIds, catsByType))) {
+    const key = c.typeIds.join("\n");
+    const entry = byTypes.get(key) ?? { typeIds: c.typeIds, cats: [] };
+    entry.cats.push(c.name);
+    byTypes.set(key, entry);
+  }
+  return [...byTypes.values()].map((g) => ({ typeName: listOf(g.typeIds.map(typeName)), cats: g.cats }));
+}
+
 /** The top-of-page line naming the categories no layout can show, in three parts: the
  *  bold lead, the rest of the sentence, and the quieter reassurance after it. */
 export function noticeText(groups: readonly { typeName: string; cats: string[] }[]): { lead: string; rest: string; still: string } {
@@ -269,7 +288,7 @@ export function noticeText(groups: readonly { typeName: string; cats: string[] }
   const n = groups.reduce((sum, g) => sum + g.cats.length, 0);
   const one = n === 1;
   return {
-    lead: `${parts.join(groups.some((g) => g.cats.length > 1) ? ", and " : " and ")} ${one ? "is" : "are"} in no role`,
+    lead: `${parts.join(groups.some((g) => g.cats.length > 1 || g.typeName.includes(" and ")) ? ", and " : " and ")} ${one ? "is" : "are"} in no role`,
     rest: `, so no layout can show ${one ? "it" : "them"} as a column.`,
     still: one ? "It still appears under All columns." : "They still appear under All columns.",
   };

@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import type { PcoLiveDTO } from "../types/stage.js";
-import { RAMP_GRACE_MS, classifyPhase, type PhaseContext } from "./attendance-phase.js";
+import { RAMP_GRACE_MS, classifyPhase, inTaper, type PhaseContext } from "./attendance-phase.js";
 
 const SERVICE_START = Date.parse("2026-08-09T15:30:00Z"); // 10:30 America/Chicago
 const HOUR = 60 * 60_000;
@@ -178,5 +178,53 @@ describe("the latch", () => {
   it("reclassifies to pre for an item above the SERVICE START header", () => {
     const c = ctx({ hasOpenRecord: true });
     assert.equal(classifyPhase(item({ beforeServiceStart: true }), c, SERVICE_START), "pre");
+  });
+});
+
+// Planning Center stays parked on the item below SERVICE END for as long as the
+// operator leaves it there. The tick that reaches it closes the record (the case
+// above, an OPEN record); every tick after that holds a CLOSED record, and is the
+// emptying room: the taper, bounded by postMs like any other. It used to read
+// "post" for as long as the start window allowed, 12 h past the start, so the
+// recorder kept appending taper samples long after the taper was over, with the
+// taper switched off too.
+describe("parked past SERVICE END, record closed", () => {
+  const ENDED = SERVICE_START + HOUR;
+  const parked = () => item({ currentItemId: "dismissal", serviceEnded: true });
+  const closed = (over: Partial<PhaseContext> = {}) =>
+    ctx({ hasOpenRecord: false, endedAt: new Date(ENDED).toISOString(), ...over });
+
+  it("is the taper while the window runs", () => {
+    assert.equal(classifyPhase(parked(), closed(), ENDED + 15 * 60_000), "post");
+    assert.equal(classifyPhase(parked(), closed(), ENDED + HOUR), "post", "inclusive at the boundary");
+  });
+
+  it("stops once the window has passed", () => {
+    assert.equal(classifyPhase(parked(), closed(), ENDED + HOUR + 60_000), null);
+    assert.equal(classifyPhase(parked(), closed(), ENDED + 3 * HOUR), null);
+  });
+
+  it("does not run when the taper is disabled", () => {
+    assert.equal(classifyPhase(parked(), closed({ postMs: 0 }), ENDED + 60_000), null);
+  });
+
+  it("never tapers a record that only ever held an arrival ramp", () => {
+    assert.equal(classifyPhase(parked(), closed({ heldServiceStartedAt: null }), ENDED + 60_000), null);
+  });
+});
+
+describe("inTaper", () => {
+  const ENDED = SERVICE_START + HOUR;
+  const ended = new Date(ENDED).toISOString();
+
+  it("is inclusive at the far edge of the window", () => {
+    assert.equal(inTaper(ended, HOUR, ENDED + HOUR), true);
+    assert.equal(inTaper(ended, HOUR, ENDED + HOUR + 1), false);
+  });
+
+  it("is never true with the window at 0, an open record or an unreadable end", () => {
+    assert.equal(inTaper(ended, 0, ENDED), false);
+    assert.equal(inTaper(null, HOUR, ENDED), false);
+    assert.equal(inTaper("not a date", HOUR, ENDED), false);
   });
 });

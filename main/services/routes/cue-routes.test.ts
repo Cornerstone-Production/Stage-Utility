@@ -34,6 +34,7 @@ const { automationLog } = await import("../automation-log.js");
 const { cueTokens } = await import("../cue-tokens.js");
 const { secretsStore } = await import("../secrets.js");
 const { handlerErrorStatus } = await import("../remote-server.js");
+const { BodyTooLargeError, MAX_JSON_BODY_BYTES } = await import("./context.js");
 const { errorMessage } = await import("../errors.js");
 const { companionApi, companionDeps } = await import("../companion-api.js");
 const { companionExportFixture, FIXTURE_PAGES, FIXTURE_PAGE_IDS, fixtureActionId } = await import(
@@ -3546,5 +3547,33 @@ describe("built-in cues through the routes", () => {
       ["obs_record_on"],
     );
     assert.match(skipped[0]!.why, /already used/);
+  });
+});
+
+describe("the body of a cue call", () => {
+  test("an over-cap body is a 413 and the cue does NOT fire", async () => {
+    // The body is read with readBodyOrEmpty. A bare `.catch(() => ({}))` swallowed
+    // the size limit, so an over-cap call proceeded with an empty body, pressed
+    // the button and answered 200.
+    await withCue();
+    await assert.rejects(
+      call("projectors_on", { headers: { ...auth(), "content-length": String(MAX_JSON_BODY_BYTES + 1) } }),
+      (err: unknown) => err instanceof BodyTooLargeError && handlerErrorStatus(err) === 413,
+    );
+    assert.equal(presses.length, 0, "a 413 call fired the cue");
+    assert.equal(automationLog.list().length, 0, "a 413 call reached the engine");
+  });
+
+  test("a body of null is read as empty, not a 500", async () => {
+    await withCue();
+    const r = await call("projectors_on", { raw: "null" });
+    assert.equal(r.status, 200);
+  });
+
+  test("a body that is not JSON still calls the cue", async () => {
+    // Deliberate: a shell sends the confirmation in the query string and may send junk.
+    await withCue();
+    const r = await call("projectors_on", { raw: "{ not json" });
+    assert.equal(r.status, 200);
   });
 });

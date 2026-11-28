@@ -22,7 +22,7 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-history-export-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
-const { buildHistoryWorkbook, historyFileName } = await import("./history-export.js");
+const { buildHistoryWorkbook, historyFileName, HistoryExportRangeRefused } = await import("./history-export.js");
 const { parseXlsx } = await import("./patch-xlsx.js");
 const { attendanceStore } = await import("./attendance-store.js");
 const { serviceTimelineStore } = await import("./service-timeline-store.js");
@@ -655,6 +655,23 @@ describe("historyFileName", () => {
 
   test("everything is named as everything, not as today", () => {
     assert.equal(historyFileName(null, null), "stage-utility-history-all-dates.xlsx");
+  });
+
+  // The name goes into a quoted Content-Disposition value in remote-server.ts,
+  // so a bound that is not a date must never become part of it.
+  for (const [from, to] of [['a"b', null], [null, "a\r\nb"], ["2026-02-31", null], ["", "11/27/2026"]] as const) {
+    test(`refuses ${JSON.stringify([from, to])} as a 400 rather than naming a file with it`, () => {
+      assert.throws(() => historyFileName(from, to), (err: unknown) => err instanceof HistoryExportRangeRefused && err.status === 400);
+    });
+  }
+});
+
+describe("buildHistoryWorkbook refuses a bound that is not a date", () => {
+  test("before any history store is read", async (t) => {
+    const read = t.mock.method(attendanceStore, "listStrict");
+    await assert.rejects(buildHistoryWorkbook({ from: 'a"b', include: ["services"] }), HistoryExportRangeRefused);
+    await assert.rejects(buildHistoryWorkbook({ to: "a\r\nb", include: ["services"] }), HistoryExportRangeRefused);
+    assert.equal(read.mock.callCount(), 0, "a refused range still read the attendance store");
   });
 });
 
