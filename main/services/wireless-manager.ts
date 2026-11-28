@@ -2,10 +2,10 @@
 // Config persisted via wirelessStore; runtime fields (connection/message) are
 // in-memory only. Broadcasts "wireless:connections-changed" on every mutation.
 
-import { newTargetName, requireTarget, requireTargetIndex } from "./target-list.js";
 import { randomUUID } from "crypto";
 
 import { scrub } from "./scrub.js";
+import { newTargetName, requireTarget, requireTargetIndex } from "./target-list.js";
 
 import type { WirelessConnection } from "../types/devices.js";
 import type { ConnectionState, IntegrationDescriptor } from "../types/integrations.js";

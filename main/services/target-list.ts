@@ -8,16 +8,11 @@
 // {"name":""}, {"name":5} and {"config":"x"} were stored, where OSC and wireless
 // validated.
 
-import type * as http from "node:http";
-
 import { firstFree } from "./first-free.js";
-import { errorMessage } from "./errors.js";
-import { error } from "./routes/context.js";
 import { isRecord } from "../types/is-record.js";
 
-/** An id no entry in the list has. Declares 404, which handlerErrorStatus passes through. */
+/** An id no entry in the list has. The routes answer it as 404 (answeringUnknownTarget). */
 export class UnknownTargetError extends Error {
-  readonly status = 404;
   constructor(message: string) {
     super(message);
     this.name = "UnknownTargetError";
@@ -154,19 +149,4 @@ export function wrappedPatch(body: Record<string, unknown>): Record<string, unkn
   if (body.patch === undefined) return body;
   if (!isRecord(body.patch)) throw new InvalidTargetPatchError("patch must be an object");
   return body.patch;
-}
-
-/**
- * Run a route's work on a target list and answer an unknown id as 404. Not in
- * handlerErrorStatus: that answers for every route, and a 404 declared by some
- * unrelated error would start reading as "not found" instead of a fault.
- * Anything else is rethrown for the server's own error path.
- */
-export async function answeringUnknownTarget(res: http.ServerResponse, work: () => Promise<void>): Promise<void> {
-  try {
-    await work();
-  } catch (err) {
-    if (!(err instanceof UnknownTargetError)) throw err;
-    error(res, errorMessage(err), 404);
-  }
 }

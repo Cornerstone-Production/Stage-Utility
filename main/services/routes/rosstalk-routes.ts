@@ -6,7 +6,8 @@ import { errorMessage } from "../errors.js";
 import { type RouteCtx, json, error, readBodyOrEmpty, readJsonObject } from "./context.js";
 import { ROSSTALK_COMMANDS, commandsForFamily } from "../rosstalk-commands.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
-import { ROSSTALK_CONFIG_RULES, answeringUnknownTarget, parseTargetPatch } from "../target-list.js";
+import { answeringUnknownTarget } from "./unknown-target.js";
+import { ROSSTALK_CONFIG_RULES, parseTargetPatch } from "../target-list.js";
 
 export async function rosstalkRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, url, method } = c;

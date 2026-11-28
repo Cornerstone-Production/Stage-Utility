@@ -14,7 +14,8 @@ import { wirelessManager } from "../wireless-manager.js";
 import { oscManager } from "../osc-manager.js";
 import * as youtubeConnect from "../youtube-connect.js";
 import { isRecord } from "../../types/is-record.js";
-import { OSC_CONFIG_RULES, answeringUnknownTarget, parseTargetPatch, wrappedPatch } from "../target-list.js";
+import { answeringUnknownTarget } from "./unknown-target.js";
+import { OSC_CONFIG_RULES, parseTargetPatch, wrappedPatch } from "../target-list.js";
 
 export async function integrationRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
