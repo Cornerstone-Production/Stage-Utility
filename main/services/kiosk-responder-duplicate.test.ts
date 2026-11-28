@@ -21,6 +21,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, before, describe, test } from "node:test";
 import { udpPort } from "./fixtures/free-port.js";
+import { until } from "./fixtures/within.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-responder-dup-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -38,14 +39,6 @@ const THIS_MAC = "02:00:00:00:00:aa";
 const OTHER_MAC = "02:00:00:00:00:bb";
 const RECHECK_MS = 120;
 const WINDOW_MS = 60;
-
-async function until(what: string, ok: () => boolean, ms = 3000): Promise<void> {
-  const end = Date.now() + ms;
-  while (!ok()) {
-    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((r) => setTimeout(r, 10));
-  }
-}
 
 /** The other server: answers this server's checks with this server's id while `answering`. */
 let peer: dgram.Socket;
@@ -106,19 +99,19 @@ after(async () => {
 
 describe("the check this server sends", () => {
   test("goes out when the responder starts, naming this server's id", async () => {
-    await until("a check probe", () => checks.length > 0);
+    await until(() => checks.length > 0, "a check probe");
     assert.equal(checks[0].boundTo, OWN);
     assert.ok(checks[0].id.startsWith("server-check-"));
   });
 
   test("ANOTHER SERVER ANSWERING IT WITH THIS SERVER'S ID IS FLAGGED", async () => {
-    await until("a duplicate", () => (latest()?.duplicates.length ?? 0) > 0);
+    await until(() => (latest()?.duplicates.length ?? 0) > 0, "a duplicate");
     const dup = latest().duplicates[0];
     assert.equal(dup.address, "127.0.0.1");
     assert.equal(dup.url, "http://192.0.2.60:8788");
     // Flagged as the answer arrives, while the round is still being counted.
     assert.ok(["checking", "ok"].includes(latest().check.state), latest().check.state);
-    await until("the round to be counted", () => latest().check.state === "ok");
+    await until(() => latest().check.state === "ok", "the round to be counted");
     assert.ok(
       logged.some((l) => l.includes("[kiosk-responder] another server at 127.0.0.1") && l.includes("answers as this server")),
       "no [kiosk-responder] line said so",
@@ -127,13 +120,13 @@ describe("the check this server sends", () => {
 
   test("is sent again while something is flagged, so the flag can clear", async () => {
     const before = checks.length;
-    await until("a re-check", () => checks.length >= before + 2);
+    await until(() => checks.length >= before + 2, "a re-check");
   });
 
   test("the flag clears after two rounds with no answer, and says so once", async () => {
     answering = false;
     const atSilence = checks.length;
-    await until("the flag to clear", () => latest().duplicates.length === 0);
+    await until(() => latest().duplicates.length === 0, "the flag to clear");
     assert.ok(checks.length - atSilence >= 2, `cleared after ${checks.length - atSilence} silent round(s); one lost datagram must not clear it`);
     assert.equal(logged.filter((l) => l.includes("127.0.0.1 no longer answers as this server")).length, 1);
   });
@@ -151,7 +144,7 @@ describe("an answer carrying this server's own address", () => {
     // can land on either socket: the answer this server sent the other one came
     // back to it, and read as a twin at its own address.
     answering = false;
-    await until("the flag to clear", () => latest().duplicates.length === 0, 3000);
+    await until(() => latest().duplicates.length === 0, "the flag to clear", 3000);
     peer.send(encodeReply({ serverId: OWN, name: "This box", url: "http://192.0.2.50:8788", claimed: false }), responderPort, "127.0.0.1");
     await new Promise((r) => setTimeout(r, 150));
     assert.equal(latest().duplicates.length, 0, "this server took its own answer for a twin");
@@ -169,15 +162,15 @@ describe("a check another server sends", () => {
     peerReplies.length = 0;
     answering = true;
     await send({ id: "server-check-peer", macs: [OTHER_MAC], hostname: "other-box", boundTo: OWN, check: true });
-    await until("an answer", () => peerReplies.length > 0);
+    await until(() => peerReplies.length > 0, "an answer");
     assert.equal(decodeReply(peerReplies[0])?.serverId, OWN);
-    await until("a duplicate", () => (latest()?.duplicates.length ?? 0) > 0);
+    await until(() => (latest()?.duplicates.length ?? 0) > 0, "a duplicate");
     assert.deepEqual(seenDevices().map((d) => d.id), [], "the other server was listed as a screen to set up");
   });
 
   test("for another id is not answered, not flagged and not listed", async () => {
     answering = false;
-    await until("the flag to clear", () => latest().duplicates.length === 0, 3000);
+    await until(() => latest().duplicates.length === 0, "the flag to clear", 3000);
     resetKioskPresence();
     peerReplies.length = 0;
     await send({ id: "server-check-peer", macs: [OTHER_MAC], hostname: "other-box", boundTo: "some-other-id", check: true });
@@ -195,23 +188,23 @@ describe("a new server id", () => {
     answering = true;
     // The peer checks for this server's id, which flags it.
     peer.send(encodeProbe({ id: "server-check-peer", macs: [OTHER_MAC], boundTo: OWN, check: true }), responderPort, "127.0.0.1");
-    await until("a duplicate", () => (latest()?.duplicates.length ?? 0) > 0);
+    await until(() => (latest()?.duplicates.length ?? 0) > 0, "a duplicate");
     // The peer keeps the OLD id: it answers only checks for OWN from here on.
     const before = checks.length;
     currentId = NEXT;
     recheckServerId();
     assert.deepEqual(latest().duplicates, [], "the old id's duplicate outlived the change");
-    await until("a check under the new id", () => checks.slice(before).some((c) => c.boundTo === NEXT));
+    await until(() => checks.slice(before).some((c) => c.boundTo === NEXT), "a check under the new id");
   });
 
   test("and it answers devices as the new id", async () => {
     peerReplies.length = 0;
     peer.send(encodeProbe({ id: "server-check-peer", macs: [OTHER_MAC], boundTo: NEXT, check: true }), responderPort, "127.0.0.1");
-    await until("an answer", () => peerReplies.length > 0);
+    await until(() => peerReplies.length > 0, "an answer");
     assert.equal(decodeReply(peerReplies[0])?.serverId, NEXT);
     // It also flagged the peer, now as checking for the new id; drop that for what follows.
     answering = false;
-    await until("the flag to clear", () => latest().duplicates.length === 0, 3000);
+    await until(() => latest().duplicates.length === 0, "the flag to clear", 3000);
   });
 
   test("A SCREEN SET UP ONLY HERE follows the new id, as the confirm promises", async () => {
@@ -229,7 +222,7 @@ describe("a new server id", () => {
     assert.equal(peerReplies.length, 0, "answered a screen still naming the old id: the other server has that id now");
 
     probe();
-    await until("an answer", () => peerReplies.length > 0);
+    await until(() => peerReplies.length > 0, "an answer");
     const reply = decodeReply(peerReplies[0]);
     assert.equal(reply?.serverId, NEXT);
     assert.equal(reply?.claimed, true);
@@ -253,7 +246,7 @@ describe("this server's own check, heard back", () => {
       replyWindowMs: WINDOW_MS,
       onCheck: (i) => identities.push(i),
     });
-    await until("a finished check", () => latest()?.check.state === "ok");
+    await until(() => latest()?.check.state === "ok", "a finished check");
     await new Promise((r) => setTimeout(r, 150));
     assert.equal(latest().duplicates.length, 0, "this server took its own check for another server's");
   });
@@ -276,12 +269,12 @@ describe("a check that cannot be sent while something is flagged", () => {
       replyWindowMs: WINDOW_MS,
       onCheck: (i) => identities.push(i),
     });
-    await until("the check to fail", () => latest()?.check.state === "failed");
+    await until(() => latest()?.check.state === "failed", "the check to fail");
     peer.send(encodeProbe({ id: "server-check-peer", macs: [OTHER_MAC], boundTo: OWN, check: true }), responderPort, "127.0.0.1");
-    await until("a duplicate", () => (latest()?.duplicates.length ?? 0) > 0);
+    await until(() => (latest()?.duplicates.length ?? 0) > 0, "a duplicate");
     const failedAt = () => new Set(identities.filter((i) => i.check.state === "failed").map((i) => i.check.at)).size;
     const before = failedAt();
-    await until("further attempts", () => failedAt() >= before + 2, RECHECK_MS * 20);
+    await until(() => failedAt() >= before + 2, "further attempts", RECHECK_MS * 20);
     assert.ok(logged.filter((l) => l.includes("could not send the duplicate-id check")).length === 1, "a run of failed sends was not one line");
   });
 });

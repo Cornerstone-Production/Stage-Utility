@@ -12,7 +12,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, test, type TestContext } from "node:test";
 import { captureConsole } from "../fixtures/capture-console.js";
-import { within } from "../fixtures/within.js";
+import { until, within } from "../fixtures/within.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-relay-lifecycle-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -35,18 +35,10 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
 /** A busy port's holder, as port-holder.ts reports one. */
 const OBS_STUDIO = { kind: "process" as const, program: "OBS Studio", pid: 812 };
 
-/** Real wall-clock polling, never affected by a test's own mocked
- *  setTimeout or Date (performance.now() is neither): the start sequence's
- *  first-ever secretsStore call generates an encryption key (real crypto),
- *  and a single settle() is not always enough past that. */
-async function waitUntil(predicate: () => boolean, timeoutMs = 2000): Promise<void> {
-  const start = performance.now();
-  for (;;) {
-    if (predicate()) return;
-    if (performance.now() - start > timeoutMs) throw new Error("waitUntil() timed out");
-    await settle();
-  }
-}
+/** The start sequence's first-ever secretsStore call generates an encryption key
+ *  (real crypto), and a single settle() is not always enough past that. */
+const waitUntil = (predicate: () => boolean, timeoutMs = 2000): Promise<void> =>
+  until(predicate, "the relay lifecycle's condition", timeoutMs);
 
 /** The lifecycle's chain, readiness ticks and the publishes they set off have
  *  all landed. Bounded: a step that never finishes fails the test that waited

@@ -21,7 +21,7 @@ import * as http from "node:http";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
-import { sleep } from "./fixtures/within.js";
+import { sleep, until } from "./fixtures/within.js";
 
 // Before the module graph loads, so every store reads an empty tree instead of
 // the operator's real config.
@@ -115,15 +115,6 @@ const row = (): { connection: string; message: string | null } => {
   return { connection: s.connection, message: s.message };
 };
 
-async function until(what: string, fn: () => boolean, ms = 4000): Promise<void> {
-  const deadline = Date.now() + ms;
-  while (Date.now() < deadline) {
-    if (fn()) return;
-    await sleep(5);
-  }
-  assert.fail(`timed out after ${ms}ms waiting for: ${what} — row is ${JSON.stringify(row())}`);
-}
-
 /**
  * The row once the stream is up and the card is green.
  *
@@ -143,11 +134,11 @@ async function live(): Promise<string> {
     });
   }
   await integrationManager.setEnabled("propresenter", false);
-  await until("any previous subscription to close", () => streams.length === 0);
+  await until(() => streams.length === 0, "any previous subscription to close");
   await integrationManager.setEnabled("propresenter", true);
-  await until("the stream to be held", () => streams.length === 1);
+  await until(() => streams.length === 1, "the stream to be held");
   const streaming = `Streaming from 127.0.0.1:${port}`;
-  await until("the row to say it is streaming", () => row().message === streaming);
+  await until(() => row().message === streaming, "the row to say it is streaming");
   return streaming;
 }
 
@@ -191,10 +182,10 @@ describe("the ProPresenter row on the Integrations card", () => {
 
     await integrationManager.setEnabled("propresenter", false);
     assert.deepEqual(row(), { connection: "disconnected", message: null });
-    await until("the stub to see the subscription close", () => streams.length === 0);
+    await until(() => streams.length === 0, "the stub to see the subscription close");
 
     await integrationManager.setEnabled("propresenter", true);
-    await until("the row to leave Connecting", () => row().connection === "connected");
+    await until(() => row().connection === "connected", "the row to leave Connecting");
     assert.deepEqual(row(), { connection: "connected", message: streaming });
   });
 
