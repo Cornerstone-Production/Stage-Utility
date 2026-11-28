@@ -301,6 +301,17 @@ describe("creating, changing and copying boards", () => {
     assert.equal((await slotsStore.getDefault(id, TYPE)).length, 1);
   });
 
+  it("a body that is not JSON is refused with a 400 and changes nothing", async () => {
+    // bodyOf once read through readBodyOrEmpty, so junk read as {} and the
+    // duplicate went ahead and made a board.
+    const before = ctl.boards.size;
+    await assert.rejects(
+      callRoute(boardRoutes, "/api/boards/b-right/duplicate", { method: "POST", raw: "{ not json" }),
+      (err: unknown) => (err as { status?: number }).status === 400,
+    );
+    assert.equal(ctl.boards.size, before);
+  });
+
   it("copies another board's layout into one target", async () => {
     await slotsStore.setDefault("b-right", TYPE, [slot("r1"), slot("r2")]);
     const r = await call(boardRoutes, "/api/boards/b-left/copy-from", "POST", { fromBoardId: "b-right", target: { kind: "default", serviceTypeId: TYPE } });

@@ -44,6 +44,7 @@
 import { isCompanionVariableRef } from "./companion-export.js";
 import { STATE_SOURCES } from "./companion-state-source.js";
 import { plural } from "./plural.js";
+import { isRecord } from "../types/is-record.js";
 
 /**
  * The variable names worth asking a connection about.
@@ -237,16 +238,16 @@ export function parseLearning(params: Record<string, string | number>): Learning
   } catch {
     return EMPTY;
   }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return EMPTY;
-  const rec = parsed as Record<string, unknown>;
+  if (!isRecord(parsed)) return EMPTY;
+  const rec = parsed;
   const observed = new Map<string, CandidateObservation>();
   for (const [ref, entry] of Object.entries(
     typeof rec.observed === "object" && rec.observed && !Array.isArray(rec.observed)
       ? (rec.observed as Record<string, unknown>)
       : {},
   )) {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
-    const e = entry as Record<string, unknown>;
+    if (!isRecord(entry)) continue;
+    const e = entry;
     const observation: CandidateObservation = {
       values: Array.isArray(e.values)
         ? e.values.filter((v): v is string => typeof v === "string")

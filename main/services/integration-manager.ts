@@ -2669,10 +2669,11 @@ class IntegrationManager {
       const types = await pcoService.listServiceTypes(appId, secret);
       this.setConnectionState("planning-center", "connected", `Connected — ${types.length} service type(s)`);
       this.broadcastStates();
-      // The poller stands down on an auth failure, and start() is otherwise
-      // called only at boot — so without this, fixing the credentials would
-      // leave the countdown dead until someone restarted the server.
-      // Idempotent: start() is a no-op when it is already running.
+      // The poller backs off for five minutes after an auth failure, so without
+      // this, fixing the credentials would leave the countdown frozen until the
+      // backoff ran out. start() on a running poller polls at once with the new
+      // credentials; a tick still waiting on the old ones is dropped, never a
+      // second poll chain.
       void import("./live-poller.js")
         .then((m) => m.livePoller.start())
         .catch((err) =>

@@ -37,17 +37,6 @@ export function photoSizeFor(px: number): number | null {
 
 const GEOMETRY = /([?&]g=)(\d+)x(\d+)(%23|#)?/;
 
-/**
- * `url` with no PCO geometry: the same photo whatever size it was asked for.
- *
- * What identifies the upload rather than a rendering of it, so two slots drawing
- * one face at different sizes read as the same photo. A themed photo records it
- * to notice when somebody uploads a new one (photo-themes/service.ts).
- */
-export function withoutAvatarGeometry(url: string): string {
-  return url.replace(/([?&])g=\d+x\d+(%23|#)?(&|$)/, (_m, lead: string, _crop, trail: string) => (trail ? lead : ""));
-}
-
 /** `url` with its PCO geometry set to `geometry`, replacing one or appending one. */
 export function setAvatarGeometry(url: string, geometry: string): string {
   return GEOMETRY.test(url)

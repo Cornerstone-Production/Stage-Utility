@@ -262,6 +262,8 @@ describe("slugs", () => {
     assert.equal(layerSlug("Lower Thirds / 2"), "lower_thirds_2");
     assert.equal(layerSlug("  Key  "), "key");
     assert.equal(layerSlug("!!!"), "");
+    // Not accent-folded: a built-in's name is derived live from the layer, and existing names must not move.
+    assert.equal(layerSlug("Café"), "caf");
   });
 
   test("a layer that cannot be named is skipped, and a duplicate slug is too", () => {

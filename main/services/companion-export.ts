@@ -32,6 +32,7 @@ import {
   learnableConnections,
 } from "./companion-state-source.js";
 import { collapse, slugForCue } from "./cue-slug.js";
+import { isRecord } from "../types/is-record.js";
 
 /** One pressable Companion button, at the coordinates the press API takes. */
 export interface CompanionButton {
@@ -157,7 +158,7 @@ export interface CompanionPair {
 }
 
 const rec = (v: unknown): Record<string, unknown> =>
-  v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  isRecord(v) ? v : {};
 
 const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
 

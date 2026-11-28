@@ -17,9 +17,6 @@ import { propresenterManager } from "../propresenter-service.js";
 import { prodcomService } from "../prodcom-service.js";
 import { THUMBNAIL_QUALITY as PROPRESENTER_THUMBNAIL_QUALITY } from "../propresenter-service.js";
 import { photoSizeFor } from "../avatar-geometry.js";
-import { storedImageHeaders } from "../image-files.js";
-import { photoThemes } from "../photo-themes/service.js";
-import { THEMED_PHOTO_REF_PREFIX } from "../../types/photo-themes.js";
 
 // Small FIFO cache of ProPresenter slide thumbnails, keyed by the per-slide
 // cache-bust token. Lets multiple displays showing the same slide share one
@@ -141,20 +138,6 @@ export async function proxyRoutes(c: RouteCtx): Promise<void> {
       const photoUrl = url.searchParams.get("u");
       if (!photoUrl) {
         error(res, "u query param required");
-        return;
-      }
-      // A themed photo (photo-themes/service.ts) is this server's own file, named
-      // in the slot's photoUrl in place of a Planning Center address. Its name is
-      // a hash of its bytes, so it is cached as hard as an avatar.
-      if (photoUrl.startsWith(THEMED_PHOTO_REF_PREFIX)) {
-        const image = await photoThemes.readImage(photoUrl.slice(THEMED_PHOTO_REF_PREFIX.length));
-        if (!image) {
-          res.writeHead(404);
-          res.end("Photo not found");
-          return;
-        }
-        res.writeHead(200, storedImageHeaders(image.mime, "public, max-age=31536000, immutable"));
-        res.end(image.data);
         return;
       }
       try {

@@ -1193,6 +1193,22 @@ test("the notice names each category in no role and its service type, and Make a
   }
 });
 
+test("a category the landing types share is named once in the notice, not once per type", async () => {
+  const cats = { sun: ["Audio", "Video", "Lighting", "Band", "Stage", "Props"], wed: ["Sound", "Lights", "Cameras", "Stage notes", "Props"], yth: ["Props"] };
+  const s = serviceCueServer({ layouts: LAYOUTS, roles: SETUP_ROLES, shown: ["sun", "wed", "yth"], types: TYPES, cats });
+  try {
+    await mount();
+    await eventually(() =>
+      assert.equal(
+        notice(),
+        `Props from ${TYPES[0].name}, ${TYPES[1].name} and ${TYPES[2].name} is in no role, so no layout can show it as a column. It still appears under All columns.`,
+      ),
+    );
+  } finally {
+    s.restore();
+  }
+});
+
 test("no notice on a first run, or when every category is in a role", async () => {
   const first = serviceCueServer({ roles: [], shown: ["sun", "wed"], types: TYPES, cats: SETUP_CATS });
   try {
