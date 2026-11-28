@@ -211,6 +211,32 @@ describe("after a service ends, before the next one", () => {
     }
   });
 
+  it("gives the next service the arrivals counted after the stop, before the split", async (t) => {
+    // Attendance holds the stopped 9am for the service gap in case it comes
+    // back; the arrival-ramp counts taken in that window are the 11am's.
+    let raw = 1000;
+    const { sensourceService } = await import("./sensource-service.js");
+    t.mock.method(sensourceService, "getLatest", () => ({ connected: true, total: { attendance: raw, occupancy: 200 } }));
+    await tick(NINE, "occ-a", "welcome");
+    await airs(NINE + 2 * MIN, NINE + 30 * MIN, rolling, "song");
+    await airs(NINE + 32 * MIN, NINE + 68 * MIN, rolling, "message");
+    const drop = NINE + 70 * MIN;
+    for (let at = drop; at <= NINE + 84 * MIN; at += 2 * MIN) {
+      raw += 10; // people arriving for the 11am
+      await tickNoItem(at, "occ-b");
+    }
+
+    const att = RECORDERS[1]![1] as unknown as { getRecord(k: string): Promise<{ samples: { t: string; attendance: number; phase?: string }[]; attendanceBaseline: number | null } | null> };
+    const nine = await att.getRecord(keyFor("occ-a"));
+    const eleven = await att.getRecord(keyFor("occ-b"));
+    assert.deepEqual(nine?.samples.filter((x) => Date.parse(x.t) >= drop).map((x) => x.t), [], "the 11am's arrivals are in the 9am");
+    const ramp = eleven?.samples.filter((x) => x.phase === "pre") ?? [];
+    assert.equal(ramp[0]?.t, iso(drop), "the arrivals counted after the stop are missing from the 11am");
+    // Counted from the 11am's own first count, as its other samples are.
+    assert.equal(ramp[0]?.attendance, 0);
+    assert.ok(ramp.every((x, i) => i === 0 || x.attendance >= ramp[i - 1]!.attendance), JSON.stringify(ramp));
+  });
+
   it("still holds attendance on the ramp through a brief mode drop mid-overrun", async () => {
     await tick(NINE, "occ-a", "welcome");
     await airs(NINE + 2 * MIN, NINE + 74 * MIN, rolling, "song");

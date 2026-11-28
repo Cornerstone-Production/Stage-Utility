@@ -10,6 +10,7 @@
 
 import type { AttendanceSample, PcoLiveDTO, ServiceAttendance } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
+import { scrub } from "./scrub.js";
 import { sampleArchive } from "./archive/sample-archive.js";
 import { attendanceStore } from "./attendance-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
@@ -71,6 +72,31 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
     // points of the pre-service arrival ramp up to a minute old, which is the
     // steepest part of the curve and the part an operator is watching.
     sensourceService.pollNowIfIdle();
+  }
+
+  /**
+   * The arrival-ramp counts taken after the outgoing service stopped: while it
+   * held the stopped record in case the service came back (see
+   * shouldHoldThroughServiceTimeChange), the room filling was the next
+   * service's. Re-based on the incoming record's own baseline, which is the
+   * first of them when it has none, as its other samples are.
+   */
+  protected override takeAfterStop(from: ServiceAttendance, into: ServiceAttendance, stopIso: string): boolean {
+    const stopMs = Date.parse(stopIso);
+    const moving = from.samples.filter((x) => x.phase === "pre" && Date.parse(x.t) >= stopMs);
+    if (moving.length === 0) return false;
+    const fromBase = from.attendanceBaseline ?? 0;
+    const rawOf = (x: AttendanceSample) => x.attendance + fromBase;
+    into.attendanceBaseline ??= rawOf(moving[0]!);
+    const base = into.attendanceBaseline;
+    from.samples = from.samples.filter((x) => !moving.includes(x));
+    into.samples = [...moving.map((x) => ({ ...x, attendance: Math.max(0, rawOf(x) - base) })), ...into.samples].sort(
+      (a, b) => Date.parse(a.t) - Date.parse(b.t),
+    );
+    console.log(
+      `[attendance-recorder] ${moving.length} arrival count(s) taken after ${scrub(from.serviceKey)} stopped belong to ${scrub(into.serviceKey)}; moved there`,
+    );
+    return true;
   }
 
   /** What (if anything) to sample this tick — see attendance-phase.ts. */

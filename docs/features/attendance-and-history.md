@@ -76,7 +76,7 @@ are not taken for the service ending. Attendance follows the same rule with no
 item at all: after Planning Center leaves a service inside the next one's arrival
 window, the finished record is held for ten minutes in case the service comes
 back, then closed at the moment Planning Center left it, and the arrivals go to
-the next service's record. If Planning Center then comes back on the item it
+the next service's record, including those counted while it was held. If Planning Center then comes back on the item it
 stopped on while the next service is still more than ten minutes away,
 attendance goes back to the finished service's record, as the other two do.
 

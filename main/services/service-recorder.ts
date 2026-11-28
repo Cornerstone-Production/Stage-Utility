@@ -824,6 +824,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     // the service stopped, when a tick saw it stop after it last ran: attendance
     // can hold a record open on the arrival ramp after Planning Center left the
     // service, and the split that ends that hold comes later.
+    let splitAtStop: { outgoing: T; stopIso: string } | null = null;
     if (this.current) {
       // Not a stop from before this record opened: going back from a ramp
       // record, the stop belongs to the record being returned to.
@@ -831,8 +832,10 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
         Number.isFinite(gapSinceLive) &&
         this.stoppedAt > Date.now() - gapSinceLive &&
         this.stoppedAt >= Date.parse(this.current.startedAt); // a stop before this record opened is another's
-      this.finalizeRecord(stoppedSinceItRan ? new Date(this.stoppedAt).toISOString() : undefined);
+      const stopIso = stoppedSinceItRan ? new Date(this.stoppedAt).toISOString() : undefined;
+      this.finalizeRecord(stopIso);
       const outgoing = this.current;
+      if (stopIso) splitAtStop = { outgoing, stopIso };
       await this.saveClosed(outgoing);
       if (gen !== this.generation) return; // forgotten while we waited
       this.publishClosed(outgoing);
@@ -894,6 +897,27 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     this.inheritedAiring = priorAiring;
     this.captureOpeningItem(live);
     this.onRecordEstablished();
+
+    // What the outgoing record took after its service stopped belongs to this
+    // one (attendance's arrival counts while it held the stopped service, see
+    // takeAfterStop). Not from a record deleted in History meanwhile.
+    if (splitAtStop && this.current && !this.forgotten.has(splitAtStop.outgoing.serviceKey)) {
+      const { outgoing, stopIso } = splitAtStop;
+      if (this.takeAfterStop(outgoing, this.current, stopIso)) {
+        this.schedulePersist();
+        await this.saveClosed(outgoing);
+        this.publishClosed(outgoing);
+      }
+    }
+  }
+
+  /**
+   * Move into `into` what `from` recorded after its service stopped at
+   * `stopIso`, when the split that closed `from` came later than the stop.
+   * Answers whether it moved anything. Only attendance records anything there.
+   */
+  protected takeAfterStop(_from: T, _into: T, _stopIso: string): boolean {
+    return false;
   }
 }
 
