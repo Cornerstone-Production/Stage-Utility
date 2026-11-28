@@ -78,19 +78,12 @@ export function EmbeddedView({
 }: {
   view: View;
   ctx: LayoutRenderCtx;
-  /** Present when the embed is a SCREEN — dashboard, stage and SPL-rundown
-   *  kinds are configured per display, so they need the id the tile came from. */
+  /** Present when the embed is a SCREEN; the SPL rundown shows its name. */
   displayId?: string | null;
   showHeader?: boolean;
   autoScroll?: boolean;
 }) {
   const notice = (text: string) => <EmbedNotice text={text} />;
-
-  /** Configured per DISPLAY, not per view. Without a display id there is nothing
-   *  to read the configuration from, and saying so beats drawing an empty box
-   *  the operator has to guess about. */
-  const perDisplay = (what: string, render: (id: string) => ReactNode) =>
-    displayId ? render(displayId) : notice(`A ${what} is set up per screen — embed the screen instead`);
 
   const refusal = embedRefusal(view.id, ctx.embedChain);
   if (refusal) return notice(refusal.message);
@@ -128,21 +121,22 @@ export function EmbeddedView({
       );
     }
 
+    // None of these needs a screen behind the tile: the SPL rundown reads the
+    // display only for its header name, so it takes null as the transcription did.
     case "transcription":
       return <TranscriptionView />;
 
     case "dashboard":
-      return perDisplay("dashboard", () => <DashboardView />);
+      return <DashboardView />;
 
     case "stage":
-      return perDisplay("stage view", () => <StageDisplayView />);
+      return <StageDisplayView />;
 
     case "spl-rundown":
-      return perDisplay("SPL rundown", (id) => <SplRundownView displayId={id} />);
+      return <SplRundownView displayId={displayId ?? null} />;
 
     case "calendar":
-      // Configured per VIEW, not per display, so unlike the three above it draws
-      // in any tile — which is the point: a producer multiview should be able to
+      // Configured per VIEW, so it draws in any tile — which is the point: a producer multiview should be able to
       // carry the month beside everything else.
       //
       // ctx.now, not Date.now(): this app has one clock, corrected against the

@@ -9,7 +9,8 @@ import { usePlanItemsStatus } from "./use-plan-items";
 import { resolveSplValue, useSplHistory, useSplState } from "./use-spl-state";
 
 interface SplRundownViewProps {
-  displayId: string;
+  /** Only the source of the display NAME, so an embed with no screen passes null. */
+  displayId: string | null;
 }
 
 function splColor(db: number | null): string {
