@@ -93,6 +93,7 @@ import { cn } from "../lib/cn";
 import { bindGesture, TOUCH_SLOP_PX, type GestureHandle } from "../lib/pointer-gesture";
 import { useContextMenuState, useContextMenuTrigger } from "../components/ui/context-menu-trigger";
 import { useCoarsePointer } from "../lib/use-media-query";
+import { isMod, isTypingTarget, modalOpen } from "../lib/keyboard-target";
 import { viewSurface } from "@main/types/views";
 import { alignRect, type Guide } from "./alignment";
 import { adoptSavedGridPointers } from "./slots-grid-source";
@@ -1907,15 +1908,14 @@ export function LayoutEditor({
     const onKey = (e: KeyboardEvent) => {
       // A dialog, or an open list or menu, over the editor owns the keyboard: Backspace in
       // the Companion pane's large grid must not delete the Button selected behind it.
-      if (document.querySelector('[role="dialog"], [role="listbox"], [role="menu"]')) return;
+      if (modalOpen({ listbox: true })) return;
       if (opensShelfSearch(e, shelfSearchRef.current)) {
         e.preventDefault();
         openShelfSearch();
         return;
       }
-      const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable)) return;
-      const mod = e.metaKey || e.ctrlKey;
+      if (isTypingTarget(e.target)) return;
+      const mod = isMod(e);
       if ((e.key === "Delete" || e.key === "Backspace") && selectedIds.size > 0) { e.preventDefault(); removeSelected(); }
       else if (mod && (e.key === "d" || e.key === "D")) { e.preventDefault(); duplicateSelected(); }
       else if (mod && (e.key === "c" || e.key === "C") && selectedIds.size > 0) { e.preventDefault(); copySelected(); }

@@ -72,6 +72,7 @@ import { planNamer } from "./plan-date-label";
 import { PendingLinksCard, PublishCard, whenLabel } from "./stageplots-publish-card";
 import { ThisWeekCard } from "./stageplots-this-week-card";
 import { VenuesCard } from "./stageplots-venues-card";
+import { isMod, isTypingTarget, modalOpen } from "../../lib/keyboard-target";
 
 /** The narrowest the canvas may be before the palette gives up its names. */
 const MIN_CANVAS_PX = 600;
@@ -347,9 +348,9 @@ function useUndoKeys(dispatch: Dispatch<EditorAction>, active: boolean) {
   useEffect(() => {
     if (!active) return;
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z") return;
-      const t = e.target as HTMLElement | null;
-      if (t?.closest?.("input, textarea, select, [contenteditable]")) return;
+      if (!isMod(e) || e.key.toLowerCase() !== "z") return;
+      // A dialog over the plot owns the keyboard: Cmd+Z in its confirm must not undo the plot behind it.
+      if (modalOpen() || isTypingTarget(e.target)) return;
       e.preventDefault();
       dispatch({ type: e.shiftKey ? "redo" : "undo" });
     };

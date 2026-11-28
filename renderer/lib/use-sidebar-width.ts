@@ -5,6 +5,7 @@
 // the width you chose, rather than resetting it.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { bindGesture, type GestureHandle } from "./pointer-gesture";
 import { readStored, writeStored } from "./safe-storage";
 
 export const SIDEBAR_WIDTH_KEY = "stage-sidebar-width";
@@ -82,9 +83,12 @@ export function usePanelWidth(opts: PanelWidthOptions): SidebarWidth {
 
   // A drag that ends while the component is unmounting must not leave a frame
   // queued against a dead component.
+  // The drag in flight lives on the window now, so it is let go here too.
+  const gesture = useRef<GestureHandle | null>(null);
   useEffect(() => {
     return () => {
       if (frame.current !== null) cancelAnimationFrame(frame.current);
+      gesture.current?.cancel();
     };
   }, []);
 
@@ -93,43 +97,36 @@ export function usePanelWidth(opts: PanelWidthOptions): SidebarWidth {
       // Left button only; a right-click drag would otherwise resize the rail.
       if (e.button !== 0) return;
       e.preventDefault();
-      const handle = e.currentTarget;
       const startX = e.clientX;
       const startWidth = width;
-      handle.setPointerCapture(e.pointerId);
+      // One drag at a time: a second finger's press is not a second drag.
+      if (gesture.current) return;
       setDragging(true);
-
-      const onMove = (ev: PointerEvent) => {
-        const delta = ev.clientX - startX;
-        pending.current = clamp(startWidth + (edge === "right" ? -delta : delta));
-        if (frame.current !== null) return;
-        frame.current = requestAnimationFrame(() => {
-          frame.current = null;
-          if (pending.current !== null) setWidth(pending.current);
-        });
-      };
-
-      const onUp = () => {
-        handle.releasePointerCapture(e.pointerId);
-        handle.removeEventListener("pointermove", onMove);
-        handle.removeEventListener("pointerup", onUp);
-        handle.removeEventListener("pointercancel", onUp);
-        if (frame.current !== null) {
-          cancelAnimationFrame(frame.current);
-          frame.current = null;
-        }
-        const final = pending.current ?? startWidth;
-        pending.current = null;
-        setWidth(final);
-        setDragging(false);
-        persist(final);
-      };
-
-      handle.addEventListener("pointermove", onMove);
-      handle.addEventListener("pointerup", onUp);
-      // pointercancel matters on touch: a browser gesture can steal the pointer
-      // mid-drag, and without this the rail stays stuck in dragging state.
-      handle.addEventListener("pointercancel", onUp);
+      // bindGesture: captured, on the window, this pointer only, and it always ends
+      // (a browser gesture can steal a touch mid-drag, which is a cancel here).
+      gesture.current = bindGesture(e.currentTarget, e.pointerId, {
+        move: (ev) => {
+          const delta = ev.clientX - startX;
+          pending.current = clamp(startWidth + (edge === "right" ? -delta : delta));
+          if (frame.current !== null) return;
+          frame.current = requestAnimationFrame(() => {
+            frame.current = null;
+            if (pending.current !== null) setWidth(pending.current);
+          });
+        },
+        end: () => {
+          gesture.current = null;
+          if (frame.current !== null) {
+            cancelAnimationFrame(frame.current);
+            frame.current = null;
+          }
+          const final = pending.current ?? startWidth;
+          pending.current = null;
+          setWidth(final);
+          setDragging(false);
+          persist(final);
+        },
+      });
     },
     [width, persist, clamp, edge],
   );

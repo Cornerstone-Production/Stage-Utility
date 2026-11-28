@@ -10,7 +10,7 @@ import { after, afterEach, describe, test } from "node:test";
 import { installRenderDom } from "../../test-dom.js";
 
 const teardown = installRenderDom();
-const { render, screen, cleanup, act } = await import("@testing-library/react");
+const { render, screen, cleanup, act, fireEvent } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { LogoCropper } = await import("./logo-cropper.js");
 
@@ -25,11 +25,11 @@ afterEach(async () => {
 });
 
 /** An `Image` that loads at once and reports `side` x `side`. Returns the undo. */
-function imagesOf(side: number): () => void {
+function imagesOf(side: number, width = side): () => void {
   const g = globalThis as unknown as Record<string, unknown>;
   const saved = g.Image;
   g.Image = class {
-    naturalWidth = side;
+    naturalWidth = width;
     naturalHeight = side;
     onload: (() => void) | null = null;
     onerror: (() => void) | null = null;
@@ -42,8 +42,8 @@ function imagesOf(side: number): () => void {
   };
 }
 
-async function open(side: number, sharpFrom?: number) {
-  const undo = imagesOf(side);
+async function open(side: number, sharpFrom?: number, width = side) {
+  const undo = imagesOf(side, width);
   try {
     await act(async () => {
       render(
@@ -79,5 +79,76 @@ describe("the soft-image note", () => {
   test("with no threshold given (the logo, the empty slot, the avatar) there is never a note", async () => {
     await open(300);
     assert.ok(screen.queryByText(/looks sharpest/) === null, "a note appeared where none was asked for");
+  });
+});
+
+describe("panning the crop", () => {
+  const left = () => parseFloat((document.querySelector("img.absolute") as HTMLElement).style.left);
+  /** jsdom has no pointer capture. */
+  const capturable = (el: HTMLElement) => {
+    const held = new Set<number>();
+    Object.assign(el, {
+      setPointerCapture: (id: number) => held.add(id),
+      hasPointerCapture: (id: number) => held.has(id),
+      releasePointerCapture: (id: number) => held.delete(id),
+    });
+    return el;
+  };
+  const ptr = (pointerId: number, x: number) => ({ pointerId, pointerType: "touch", isPrimary: pointerId === 1, button: 0, clientX: x, clientY: 0 });
+
+  test("the finger that took the image pans it", async () => {
+    await open(300, undefined, 600);
+    const viewport = capturable(document.querySelector(".touch-none") as HTMLElement);
+    const before = left();
+    await act(async () => {
+      fireEvent.pointerDown(viewport, ptr(1, 100));
+      fireEvent.pointerMove(viewport, ptr(1, 110));
+      fireEvent.pointerUp(viewport, ptr(1, 110));
+    });
+    assert.equal(left(), before + 10);
+  });
+
+  test("a second finger's moves do not", async () => {
+    await open(300, undefined, 600);
+    const viewport = capturable(document.querySelector(".touch-none") as HTMLElement);
+    const before = left();
+    await act(async () => {
+      fireEvent.pointerDown(viewport, ptr(1, 100));
+      fireEvent.pointerDown(viewport, ptr(2, 100));
+      fireEvent.pointerMove(viewport, ptr(2, 150));
+      fireEvent.pointerUp(viewport, ptr(1, 100));
+    });
+    assert.equal(left(), before, "another finger panned the image");
+  });
+});
+
+describe("closing the cropper mid-pan", () => {
+  test("leaves nothing bound to the window", async () => {
+    const live = new Map<unknown, string>();
+    const add = window.addEventListener.bind(window);
+    const remove = window.removeEventListener.bind(window);
+    window.addEventListener = ((type: string, fn: unknown, opts?: unknown) => {
+      if (type.startsWith("pointer")) live.set(fn, type);
+      return (add as (...a: unknown[]) => void)(type, fn, opts);
+    }) as typeof window.addEventListener;
+    window.removeEventListener = ((type: string, fn: unknown, opts?: unknown) => {
+      live.delete(fn);
+      return (remove as (...a: unknown[]) => void)(type, fn, opts);
+    }) as typeof window.removeEventListener;
+    try {
+      await open(300, undefined, 600);
+      const viewport = document.querySelector(".touch-none") as HTMLElement;
+      Object.assign(viewport, { setPointerCapture() {}, hasPointerCapture: () => false, releasePointerCapture() {} });
+      await act(async () => {
+        fireEvent.pointerDown(viewport, { pointerId: 1, pointerType: "touch", button: 0, clientX: 100, clientY: 0 });
+      });
+      assert.ok(live.size > 0, "the control is void: the pan bound nothing");
+      cleanup();
+      await settle();
+      assert.deepEqual([...live.values()], [], "a closed cropper is still listening");
+    } finally {
+      window.addEventListener = add;
+      window.removeEventListener = remove;
+    }
   });
 });

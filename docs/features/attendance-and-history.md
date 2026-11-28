@@ -302,7 +302,8 @@ one nothing was recorded on. Moving off puts the sentence back. It replaces a
 line that is already there rather than being drawn over the plot, so nothing
 covers the lines and the card does not change height.
 
-**Right-click** a tile, a legend entry or the plot for a menu: *Hide <type>*, a
+**Right-click** a tile, a legend entry or the plot (or tap and hold it on a touch
+screen) for a menu: *Hide <type>*, a
 tick per service type, and *Show all*. A hidden type leaves the tiles, the chart
 and the readout together; its legend entry stays, dimmed, and clicking it brings
 the type back. The choice is remembered per browser.

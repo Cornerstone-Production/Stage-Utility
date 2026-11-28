@@ -1157,6 +1157,30 @@ describe("the plot editor", () => {
     assert.ok(banner() === null);
   });
 
+  test("Cmd+Z with the confirm dialog open undoes nothing behind it", async () => {
+    DRAFTS_DOWN = true;
+    await mount();
+    const mine = await addFromPalette("box");
+    await click(tabs()[1]);
+    await settle();
+    assert.ok(screen.getByRole("alertdialog"), "the confirm did not open");
+    await act(async () => {
+      fireEvent.keyDown(document.body, { key: "z", metaKey: true });
+    });
+    await settle();
+    assert.ok(drawn(mine), "Cmd+Z undid the plot behind the open dialog");
+  });
+
+  test("Cmd+Z with nothing open still undoes the last change", async () => {
+    await mount();
+    const mine = await addFromPalette("box");
+    await act(async () => {
+      fireEvent.keyDown(document.body, { key: "z", metaKey: true });
+    });
+    await settle();
+    assert.equal(canvas().querySelector(`[data-id="${mine}"]`), null, "Cmd+Z undid nothing");
+  });
+
   // ── Keys, and the right-click menus ───────────────────────────────────────
 
   /** Two boxes, `a` then `b` in drawing order, with `id` selected by a press on it. */

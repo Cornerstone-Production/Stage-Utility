@@ -14,12 +14,10 @@ import { ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 
 import { widgetMatchRank, LAYOUT_OBJECTS, PALETTE_GROUP_ORDER, widgetMatchesQuery, type PaletteGroup } from "../main/layout-objects";
 import { cn } from "../lib/cn";
+import { isMod, isTypingTarget } from "../lib/keyboard-target";
 import { Checkbox } from "../components/ui/checkbox";
 import { searchShortcutLabel } from "../components/page-tabs";
 import { GROUP_ACCENT, WidgetIcon, usePaletteDrag, type PaletteDragHandlers } from "./palette";
-
-/** The `<input>` types that take typed text, so a find-in-field is not stolen. */
-const NON_TEXT_INPUTS = new Set(["checkbox", "radio", "button", "submit", "reset", "range", "color", "file", "image"]);
 
 /**
  * Should this keydown open the shelf's search?
@@ -30,13 +28,11 @@ const NON_TEXT_INPUTS = new Set(["checkbox", "radio", "button", "submit", "reset
  * textarea or a name box keeps the browser's find.
  */
 export function opensShelfSearch(e: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "shiftKey" | "altKey" | "target">, searchEl: HTMLElement | null): boolean {
-  if (!(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey) return false;
+  if (!isMod(e) || e.shiftKey || e.altKey) return false;
   if (e.key !== "f" && e.key !== "F") return false;
-  const t = e.target as HTMLElement | null;
-  if (!t || t === searchEl) return true;
-  if (t.isContentEditable || t.tagName === "TEXTAREA" || t.tagName === "SELECT") return false;
-  if (t.tagName === "INPUT" && !NON_TEXT_INPUTS.has((t as HTMLInputElement).type)) return false;
-  return true;
+  if (!e.target || e.target === searchEl) return true;
+  // A text field keeps the browser's find, so finding a word in it is not stolen; a checkbox does not.
+  return !isTypingTarget(e.target, { textOnly: true });
 }
 
 export interface WidgetShelfProps extends PaletteDragHandlers {

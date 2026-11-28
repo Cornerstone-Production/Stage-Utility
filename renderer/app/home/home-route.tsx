@@ -17,7 +17,7 @@
 // every display with its URL, which is the same job done in the place you go to
 // think about screens.
 
-import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Loader2Icon, PencilIcon, CheckIcon } from "lucide-react";
 import { useRouter } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
@@ -41,6 +41,7 @@ import { ButtonPressSheet, buttonConfigOf } from "./button-press-sheet";
 import { useCueLive } from "../../main/use-cue-live";
 import { useSplState } from "../../main/use-spl-state";
 import { invoke } from "../../lib/api";
+import { bindGesture, type GestureHandle } from "../../lib/pointer-gesture";
 import { ContextMenu, type ContextMenuItem } from "../../components/ui/context-menu";
 import { ROW_PX, GRID_GAP_PX } from "./home-grid";
 import { COLUMNS } from "./home-cards";
@@ -93,54 +94,43 @@ export function startCardDrag(
   id: string,
   cb: CardDragCallbacks,
   cancelPress?: () => void,
-) {
-  if (e.button !== 0) return;
+): GestureHandle | null {
+  if (e.button !== 0) return null;
   // The chrome carries the size buttons, the visibility select and the remove
   // X. A press on one of those is a press on a CONTROL, and the drag gesture
   // must not touch it — capturing the pointer here retargets the rest of the
   // sequence to the card, so the button never saw its own pointerup and the
   // click never happened. Delete stopped working the day dragging moved to
   // pointer events.
-  if ((e.target as HTMLElement).closest("button, select, input, [role='combobox']")) return;
+  if ((e.target as HTMLElement).closest("button, select, input, [role='combobox']")) return null;
 
   const el = e.currentTarget;
   const startX = e.clientX;
   const startY = e.clientY;
   let moved = false;
 
-  const move = (ev: PointerEvent) => {
-    if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < DRAG_START_PX) return;
-    if (!moved) {
-      moved = true;
-      // Captured only once this IS a drag, for the same reason: until the
-      // pointer has travelled, everything under it must keep behaving
-      // normally.
-      el.setPointerCapture(ev.pointerId);
-      cancelPress?.();
-      cb.onDragStart(id);
-    }
-    const cell = cb.cellAt(ev.clientX, ev.clientY);
-    if (cell) cb.onDropCell(cell);
-  };
-  const finish = (ev: PointerEvent) => {
-    el.removeEventListener("pointermove", move);
-    el.removeEventListener("pointerup", finish);
-    el.removeEventListener("pointercancel", cancel);
-    if (el.hasPointerCapture(ev.pointerId)) el.releasePointerCapture(ev.pointerId);
-    if (moved) cb.onDrop(id, ev.clientX, ev.clientY);
-    else cb.onEnd();
-  };
-  // A cancelled pointer (a system gesture, a lost capture) must not leave the
-  // page frozen mid-drag with a card half-moved.
-  const cancel = () => {
-    el.removeEventListener("pointermove", move);
-    el.removeEventListener("pointerup", finish);
-    el.removeEventListener("pointercancel", cancel);
-    cb.onEnd();
-  };
-  el.addEventListener("pointermove", move);
-  el.addEventListener("pointerup", finish);
-  el.addEventListener("pointercancel", cancel);
+  // On the window and filtered to this pointer, so a second finger cannot steer
+  // the drag and a release off the card still ends it. bindGesture also captures the
+  // pointer, so the drag keeps reporting where it went when it leaves the grid; the
+  // controls that need their own click were already refused above.
+  return bindGesture(el, e.pointerId, {
+    move: (ev) => {
+      if (!moved && Math.hypot(ev.clientX - startX, ev.clientY - startY) < DRAG_START_PX) return;
+      if (!moved) {
+        moved = true;
+        cancelPress?.();
+        cb.onDragStart(id);
+      }
+      const cell = cb.cellAt(ev.clientX, ev.clientY);
+      if (cell) cb.onDropCell(cell);
+    },
+    // A cancelled pointer (a system gesture, a lost capture) must not leave the
+    // page frozen mid-drag with a card half-moved, and drops nothing.
+    end: (ev, cancelled) => {
+      if (moved && !cancelled) cb.onDrop(id, ev.clientX, ev.clientY);
+      else cb.onEnd();
+    },
+  });
 }
 
 export function HomeRoute() {
@@ -169,6 +159,9 @@ export function HomeRoute() {
   // The Button whose Presses sheet is open: chosen from its menu, or by tapping it unset.
   const [pressingId, setPressingId] = useState<string | null>(null);
   const gridEl = useRef<HTMLDivElement | null>(null);
+  // The card drag in flight, so it lets go of the window if Home goes away under it.
+  const cardGesture = useRef<GestureHandle | null>(null);
+  useEffect(() => () => cardGesture.current?.cancel(), []);
   /** The card list as the operator has it, ahead of the server. See `save`. */
   const [pending, setPending] = useState<LayoutObject[] | null>(null);
   /** The same list, readable synchronously inside one React batch. Written in
@@ -427,7 +420,9 @@ export function HomeRoute() {
    *  `startCardDrag` for the gesture itself and why it takes callbacks rather
    *  than reading this closure directly. */
   function startDrag(e: ReactPointerEvent<HTMLElement>, id: string, cancelPress?: () => void) {
-    startCardDrag(
+    // One drag at a time: a second finger's press is not a second drag.
+    if (cardGesture.current) return;
+    cardGesture.current = startCardDrag(
       e,
       id,
       {
@@ -435,8 +430,14 @@ export function HomeRoute() {
         onDragStart: setDragId,
         onDropCell: (cell) =>
           setDropCell((prev) => (prev && prev.col === cell.col && prev.row === cell.row ? prev : cell)),
-        onDrop: dropOnGrid,
-        onEnd: endDrag,
+        onDrop: (...args) => {
+          cardGesture.current = null;
+          dropOnGrid(...args);
+        },
+        onEnd: () => {
+          cardGesture.current = null;
+          endDrag();
+        },
       },
       cancelPress,
     );
