@@ -29,7 +29,5 @@ import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
  * was stamped with the 11am's identity and linked onto that service in History.
  */
 export function currentServiceKey(): string | null {
-  const record = serviceTimelineRecorder.getCurrent();
-  if (!record || record.endedAt != null) return null;
-  return record.serviceKey;
+  return serviceTimelineRecorder.getOpenRecord()?.serviceKey ?? null;
 }

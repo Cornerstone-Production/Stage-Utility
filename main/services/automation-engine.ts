@@ -48,7 +48,7 @@ import {
 import { cueStates, type CueCommand, type CueStateName } from "./cue-states.js";
 import { notePressForLearning } from "./companion-state-probe.js";
 import { cueLive } from "./cue-live.js";
-import { calledCueName, parseAliases } from "./cue-aliases.js";
+import { calledCueName, cueKey, parseAliases } from "./cue-aliases.js";
 import { splRecorder } from "./spl-recorder.js";
 import { stageController } from "./stage-controller.js";
 import { plural } from "./plural.js";
@@ -505,7 +505,7 @@ class AutomationEngine {
     if (gone) {
       // A cue's name is a URL somebody else holds, and Buttons name it: say which went and how many are left pressing nothing.
       const cue = calledCueName(gone.trigger);
-      const pressing = cue ? (cueUsage(stageController.getState().views)[cue.trim().toLowerCase()] ?? []).length : 0;
+      const pressing = cue ? (cueUsage(stageController.getState().views)[cueKey(cue)] ?? []).length : 0;
       if (cue) {
         console.log(
           `[automation] rule removed "${scrub(gone.name)}" (${scrub(id)}) as cue "${scrub(cue)}", ${scrub(plural(pressing, "Button still names", "Buttons still name"))} it`,
@@ -593,7 +593,7 @@ class AutomationEngine {
     opts: { caller: string; confirm?: string | null; now?: number },
   ): Promise<CueCallResult> {
     const now = opts.now ?? Date.now();
-    const wanted = name.trim().toLowerCase();
+    const wanted = cueKey(name);
     // NAMES FIRST, then former names. A live name always wins: a rule that is
     // called by its own name must never be shadowed by another rule that used to
     // be called that.

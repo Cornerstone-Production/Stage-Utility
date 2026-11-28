@@ -51,10 +51,13 @@ import { CALL_TRIGGER_ID } from "./automation-triggers.js";
 import { calledCueName, parseAliases } from "./cue-aliases.js";
 import {
   cuePairs,
+  distinctSpokenNames,
   isHiddenFromHome,
   isPairHalfName,
   isTogglePair,
   type StateBinding,
+  spokenCueName,
+  type SpokenCue,
 } from "./cue-pairs.js";
 import { scrub } from "./scrub.js";
 import type { Rule } from "../types/automation.js";
@@ -118,12 +121,6 @@ function attrOf(base: string): string {
   return `(state_attr('${SENSOR_ENTITY}', '${base}') or {})`;
 }
 
-/** The name a person would say for a cue, from `says` or the rule's own name. */
-function friendlyOf(rule: Rule): string {
-  const says = String(rule.trigger.params.says ?? "").trim();
-  return says || rule.name.trim() || String(rule.trigger.params.name ?? "");
-}
-
 /**
  * The `_on`/`_off` cues that belong together, and what reads each one's state.
  *
@@ -142,10 +139,10 @@ function pairsOf(rules: Rule[], cues: Map<string, Cue>): Pair[] {
   for (const pair of cuePairs(rules)) {
     const cue = cues.get(pair.onName);
     if (!cue) continue;
-    // The friendly name loses the "on": the switch is the THING, and Home
+    // spokenCueName takes the "on" off: the switch is the THING, and Home
     // Assistant supplies the verb. "Turn on Projectors on" is what happens
     // otherwise.
-    const friendly = cue.friendly.replace(/\s+on$/i, "").trim() || pair.base;
+    const friendly = spokenCueName(pair.on.trigger.params, pair.base);
     out.push({
       base: pair.base,
       friendly,
@@ -157,85 +154,6 @@ function pairsOf(rules: Rule[], cues: Map<string, Cue>): Pair[] {
     });
   }
   return out.sort((a, b) => a.base.localeCompare(b.base));
-}
-
-/** "main_conf_tvs" -> "Main Conf Tvs". The cue name is all there is to go on. */
-function humanise(base: string): string {
-  return base
-    .split("_")
-    .filter(Boolean)
-    .map((w) => w[0]!.toUpperCase() + w.slice(1))
-    .join(" ");
-}
-
-/** One object in the generated config that carries a name a person says. */
-interface Spoken {
-  /** `switch:<base>` or `script:<cue name>`. Unique across the document. */
-  key: string;
-  /** `switch` or `script` — Home Assistant's own two domains. */
-  kind: "switch" | "script";
-  /** The id it gets in its domain: a pair's base, or a script's cue name. */
-  id: string;
-  /** The words, from `says` or the rule's name. */
-  friendly: string;
-}
-
-/**
- * No two objects may share the name a person says — ACROSS THE KINDS, not
- * within each.
- *
- * A switch's `friendly_name` and a script's `alias` are the same thing to a
- * voice assistant: the words somebody says out loud. Two of them saying
- * "Projectors" is an assistant that picks one at random, and the operator finds
- * out which in the middle of a service. Disambiguating the switches on their own
- * — which is all this did — left two scripts whose cues have the same `says`
- * both called that, and a switch and a script colliding with each other
- * entirely unhandled.
- *
- * The Companion import already separates most of this on the way in: a name
- * found on two pages is spoken with its page name (see cueSlugs). A
- * hand-written cue has no page, and two operators typing the same `says` is
- * exactly what this catches.
- *
- * Three tiers, and every collision is resolved by the second or the third:
- *
- *  1. the words, when this is the only object saying them,
- *  2. else the id humanised — a pair's base, a script's cue name. Ids are
- *     unique WITHIN a kind, because a pair is keyed by a cue name the engine
- *     refuses to duplicate,
- *  3. else the id humanised with its domain, which separates the one case tier
- *     2 cannot: a pair based `projectors` and a one-shot cue called
- *     `projectors`, which are `switch.projectors` and `script.projectors` in
- *     Home Assistant and two different things.
- *
- * Returned as a map rather than a rewritten list so the switches and the scripts
- * can be emitted from their own loops while sharing one answer.
- */
-function friendlyNames(items: readonly Spoken[]): Map<string, string> {
-  const tally = (of: (item: Spoken) => string): Map<string, number> => {
-    const counts = new Map<string, number>();
-    for (const item of items) {
-      const key = of(item).toLowerCase();
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    }
-    return counts;
-  };
-  const said = tally((i) => i.friendly);
-  const humanised = tally((i) => humanise(i.id));
-
-  const out = new Map<string, string>();
-  for (const item of items) {
-    if ((said.get(item.friendly.toLowerCase()) ?? 0) < 2) {
-      out.set(item.key, item.friendly);
-      continue;
-    }
-    const fallback = humanise(item.id);
-    out.set(
-      item.key,
-      (humanised.get(fallback.toLowerCase()) ?? 0) < 2 ? fallback : `${fallback} (${item.kind})`,
-    );
-  }
-  return out;
 }
 
 /**
@@ -253,7 +171,7 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
     if (!name || cues.has(name)) continue;
     cues.set(name, {
       name,
-      friendly: friendlyOf(rule),
+      friendly: spokenCueName(rule.trigger.params, name),
       formerNames: parseAliases(rule.trigger.params),
       hidden: isHiddenFromHome(rule.trigger.params),
     });
@@ -355,10 +273,10 @@ export function homeAssistantYaml(rules: Rule[], baseUrl: string): string {
 
   // ONE disambiguation over both kinds. A switch's friendly_name and a script's
   // alias are the same thing to a voice assistant, so they cannot be separated
-  // one list at a time. See friendlyNames.
-  const spoken = friendlyNames([
-    ...pairs.map((p): Spoken => ({ key: `switch:${p.base}`, kind: "switch", id: p.base, friendly: p.friendly })),
-    ...scripts.map((c): Spoken => ({ key: `script:${c.name}`, kind: "script", id: c.name, friendly: c.friendly })),
+  // one list at a time. See distinctSpokenNames.
+  const spoken = distinctSpokenNames([
+    ...pairs.map((p): SpokenCue => ({ key: `switch:${p.base}`, kind: "switch", id: p.base, friendly: p.friendly })),
+    ...scripts.map((c): SpokenCue => ({ key: `script:${c.name}`, kind: "script", id: c.name, friendly: c.friendly })),
   ]);
 
   // ONE `rest` sensor for every bound pair, and only when there is one. Its
