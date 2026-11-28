@@ -8,6 +8,7 @@
 import type { AttendanceSample } from "../types/history.js";
 import type { BaptismSession, ServiceAttendance, ServiceItemTimeEdit, ServiceTimeline } from "../types/stage.js";
 import { serviceDirPath } from "./archive/archive-paths.js";
+import { alignAttendance, recomputeAttendance } from "./attendance-aggregate.js";
 import { readArchiveRows } from "./archive/archive-rows.js";
 import { mergeItemRuns } from "./archive/merge-records.js";
 import { rebuildSplRecord, rebuildTimelineRecord } from "./archive/rebuild.js";
@@ -33,6 +34,7 @@ import {
 import { clockOf } from "./app-timezone.js";
 import { plural } from "./plural.js";
 import { attendanceRecorder } from "./attendance-recorder.js";
+import { clampItemsToWindow, closeTimelineItem, laterEnd } from "./service-recorder.js";
 import { splRecorder } from "./spl-recorder.js";
 import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
 
@@ -174,42 +176,6 @@ export async function deleteServiceRecords(
   return { deleted: records.length > 0, records };
 }
 
-/** Re-derive attendance aggregates from the (possibly trimmed) sample series. Note:
- *  totalAttendance is a raw daily counter we can't reconstruct from baselined
- *  samples, so it's left as-is. */
-function recomputeAttendance(att: ServiceAttendance): void {
-  const s = att.samples;
-  // Per-service attendance = value − first sample (the count when this window began),
-  // so a service not reset off the prior one reads its own count; on a trim, the new
-  // first in-window sample re-baselines automatically.
-  const base = s.length ? s[0].attendance : 0;
-  // attendanceBaseline is the RAW daily counter at this record's start — that is
-  // what the recorder writes and what a merge needs to convert between two
-  // records' frames. This used to assign `base`, an already-baselined value
-  // (normally 0), without touching the samples: after any Recalculate, window
-  // edit or earlier merge the field no longer meant what its writer meant, and a
-  // later merge reading it as raw shifted the other record by a hundred people.
-  // Advancing it by the same amount the samples are about to be re-based by keeps
-  // raw = sample + baseline true.
-  att.attendanceBaseline = (att.attendanceBaseline ?? 0) + base;
-  if (base !== 0) for (const x of s) x.attendance -= base;
-  // Samples are now expressed against this record's own start, so the aggregates
-  // read them directly. (Clamped only against a negative left by a hand-edited
-  // window.)
-  const perSvc = (v: number) => Math.max(0, v);
-  // Peak/Lowest/Last reflect the SERVICE, not the pre-service arrival ramp or the
-  // post-service emptying room — those tagged samples still draw the curve but must
-  // not drag the "floor" or "last" toward an empty room. Fall back to all samples if
-  // a record has no in-service samples at all (shouldn't happen in practice).
-  const svc = s.filter((x) => !x.phase);
-  const stat = svc.length ? svc : s;
-  att.peakAttendance = stat.reduce((m, x) => Math.max(m, perSvc(x.attendance)), 0);
-  att.peakOccupancy = stat.reduce((m, x) => Math.max(m, x.occupancy), 0);
-  att.minOccupancy = stat.length ? stat.reduce((m, x) => Math.min(m, x.occupancy), stat[0].occupancy) : null;
-  att.lastAttendance = stat.length ? perSvc(stat[stat.length - 1].attendance) : 0;
-  att.lastOccupancy = stat.length ? stat[stat.length - 1].occupancy : 0;
-}
-
 /** The ramp/taper windows the recorder samples with, in ms. */
 async function taperMs(): Promise<{ pre: number; post: number }> {
   const tw = (await settingsStore.get()).taperWindow ?? DEFAULT_TAPER_WINDOW;
@@ -308,9 +274,10 @@ export class InvalidWindowError extends Error {
 }
 
 /**
- * Adjust a service's start/end window across all three records: trim the
- * timeline's trailing items, drop attendance samples / SPL items outside the
- * window, and recompute derived values. Either stamp may be omitted to leave it
+ * Adjust a service's start/end window across all three records: drop timeline
+ * and SPL items that start after the new end and close those still running at
+ * it (clampItemsToWindow, one rule for both), re-window the attendance samples,
+ * and recompute derived values. Either stamp may be omitted to leave it
  * unchanged.
  *
  * Trimming is what this is for — a capture that kept recording through a parked
@@ -362,16 +329,9 @@ export async function editServiceWindow(
   let orphaned: ServiceItemTimeEdit[] = [];
   if (tl) {
     if (endMs != null) {
-      const before = tl.items.length;
-      tl.items = tl.items.filter((it) => Date.parse(it.startedAt) <= endMs); // drop items starting after the end
-      trim.items = before - tl.items.length;
-      for (const it of tl.items) {
-        if (it.endedAt == null || Date.parse(it.endedAt) > endMs) {
-          it.endedAt = new Date(endMs).toISOString();
-          const s = Date.parse(it.startedAt);
-          if (Number.isFinite(s)) it.actualDurationSec = Math.max(0, Math.round((endMs - s) / 1000));
-        }
-      }
+      const fit = clampItemsToWindow(tl.items, endMs, closeTimelineItem);
+      tl.items = fit.kept;
+      trim.items = fit.dropped;
     }
     // The items have been trimmed to the new window; the corrections OVER them
     // had not been, so a recording trimmed to fifteen minutes could still show
@@ -393,9 +353,12 @@ export async function editServiceWindow(
 
   const spl = rewindow(await splHistoryStore.get(serviceKey));
   if (spl && endMs != null) {
-    const before = spl.items.length;
-    spl.items = spl.items.filter((it) => Date.parse(it.startedAt) <= endMs);
-    trim.splItems = before - spl.items.length;
+    // Closed the way the timeline's items just were: an SPL item still running
+    // at the new end ends there too, rather than past the service its timeline
+    // twin was cut back to. Its levels are not re-derived (see clampItemsToWindow).
+    const fit = clampItemsToWindow(spl.items, endMs, (it, endIso) => { it.endedAt = endIso; });
+    spl.items = fit.kept;
+    trim.splItems = fit.dropped;
   }
 
   if (trimTotal(trim) > 0) {
@@ -1570,6 +1533,23 @@ function adoptIdentity<T extends OccurrenceIdentity>(record: T, identity: Occurr
   return { ...record, ...identity };
 }
 
+/**
+ * Union two records' item runs and number them in the order they ran.
+ *
+ * By RUN, not by item id — see mergeItemRuns. Keyed on the id alone, a source
+ * that ran an item twice contributed at most one of them. Re-ordered by when
+ * each run actually started, so a run taken from the source lands where it
+ * happened rather than after everything the target recorded. The timeline and
+ * the SPL record both merge this way; mergeItemRuns returns the objects it was
+ * given, which is what lets the timeline re-key its corrections afterwards.
+ */
+function mergeRunsInTimeOrder<T extends { itemId: string; startedAt: string; sequence: number }>(target: T[], source: T[]): T[] {
+  const runs = mergeItemRuns(target, source);
+  runs.sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
+  runs.forEach((it, i) => { it.sequence = i; });
+  return runs;
+}
+
 /** What a merge actually did, per store. Reported rather than assumed: this
  *  rewrites the source of truth, and "it worked" is not evidence. */
 export interface MergeOutcome {
@@ -1615,8 +1595,9 @@ async function mergeArchives(sourceKey: string, targetKey: string): Promise<bool
  * stores, then delete the source. Fixes a mis-split service (e.g. a run that
  * overran its planned end and rolled the tail into the next occurrence's record):
  * merge the wrong record back into the right one. Items are matched by itemId so a
- * duplicated boundary item isn't doubled; attendance samples are concatenated and
- * aggregates re-derived; the target window extends to cover both.
+ * duplicated boundary item isn't doubled; attendance samples are put in one frame
+ * and aggregates re-derived; each record's end becomes the later of the two
+ * (laterEnd). Its start stays the target's, even when the source began earlier.
  */
 export async function mergeServiceRecords(sourceKey: string, targetKey: string): Promise<MergeOutcome> {
   const outcome: MergeOutcome = { merged: [], moved: [], archivesMoved: false };
@@ -1658,16 +1639,11 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     // Without this the operator's corrections would still be in the merged
     // record and would land, silently, on whichever rows took those numbers.
     const boundEdits = bindItemTimeEdits(tgtTl, srcTl);
-    // By RUN, not by item id — see mergeItemRuns. Keyed on the id alone, a
-    // source that ran an item twice contributed at most one of them.
-    tgtTl.items = mergeItemRuns(tgtTl.items, srcTl.items);
-    tgtTl.items.sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
-    tgtTl.items.forEach((it, i) => { it.sequence = i; });
+    tgtTl.items = mergeRunsInTimeOrder(tgtTl.items, srcTl.items);
     const rekeyed = rekeyItemTimeEdits(boundEdits, tgtTl.items);
     if (rekeyed.length) tgtTl.itemTimeEdits = rekeyed;
     else delete tgtTl.itemTimeEdits;
-    const ends = tgtTl.items.map((i) => (i.endedAt ? Date.parse(i.endedAt) : NaN)).filter(Number.isFinite);
-    if (ends.length) tgtTl.endedAt = new Date(Math.max(...ends)).toISOString();
+    tgtTl.endedAt = laterEnd(tgtTl.endedAt, srcTl.endedAt);
     await serviceTimelineStore.upsert(tgtTl);
     await serviceTimelineStore.delete(sourceKey);
     broadcastTimeline(tgtTl);
@@ -1692,34 +1668,24 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     // reading and starts near zero while the target's end near its full count.
     // Concatenating them raw put a cliff to zero at the seam and dragged the
     // service average and lastAttendance down with it — the repair tool producing
-    // a worse record than the split it was invoked to fix.
-    //
-    // Shifting the source into the target's frame is exact: both baselines are the
-    // raw daily counter at their own start, so their difference is the offset.
-    // Read before recomputeAttendance, which rewrites attendanceBaseline.
-    // Shift BOTH into the earlier of the two baselines rather than into the
-    // target's. The merge target is not necessarily the later record — the panel
-    // offers every same-day recording, and merging a spurious leading fragment
-    // INTO the main record is the natural repair — so shifting the source into
-    // the target's frame produced a negative offset, and clamping that at zero
-    // silently flattened the fragment's attendees to nothing. A common floor
-    // makes both shifts non-negative, so no clamp is needed and a bad offset
-    // would surface as a wrong number rather than as deleted data.
-    const srcBase = srcAt.attendanceBaseline;
-    const tgtBase = tgtAt.attendanceBaseline;
-    const shift =
-      srcBase != null && tgtBase != null
-        ? { base: Math.min(srcBase, tgtBase), src: srcBase - Math.min(srcBase, tgtBase), tgt: tgtBase - Math.min(srcBase, tgtBase) }
-        : { base: tgtBase ?? srcBase ?? 0, src: 0, tgt: 0 };
-    const bump = (list: typeof srcAt.samples, by: number) =>
-      by === 0 ? list : list.map((s) => ({ ...s, attendance: s.attendance + by }));
-    tgtAt.attendanceBaseline = shift.base;
-    tgtAt.samples = [...bump(tgtAt.samples, shift.tgt), ...bump(srcAt.samples, shift.src)].sort(
-      (a, b) => Date.parse(a.t) - Date.parse(b.t),
-    );
-    if (srcAt.endedAt && (!tgtAt.endedAt || Date.parse(srcAt.endedAt) > Date.parse(tgtAt.endedAt))) {
-      tgtAt.endedAt = srcAt.endedAt;
+    // a worse record than the split it was invoked to fix. alignAttendance shifts
+    // both into the earlier baseline (see there for why not the target's), the
+    // same way an archive import of another box's recording now does.
+    const aligned = alignAttendance(tgtAt, srcAt);
+    if (aligned.frames === "unknown") {
+      console.warn(
+        `[history-edit] merge ${scrub(sourceKey)} -> ${scrub(targetKey)}: one record's attendance has no baseline, ` +
+          "so the two were merged without aligning them.",
+      );
     }
+    tgtAt.attendanceBaseline = aligned.attendanceBaseline;
+    tgtAt.samples = aligned.samples;
+    // Samples joined unaligned stay in more than one frame whichever record
+    // they now sit in: the mark goes with them, and a join this merge could
+    // not align (one side has no baseline) is marked the same way, so a later
+    // archive import never aligns on it.
+    if (srcAt.attendanceUnaligned || aligned.frames === "unknown") tgtAt.attendanceUnaligned = true;
+    tgtAt.endedAt = laterEnd(tgtAt.endedAt, srcAt.endedAt);
     tgtAt.totalAttendance = Math.max(tgtAt.totalAttendance, srcAt.totalAttendance);
     recomputeAttendance(tgtAt);
     await attendanceStore.upsert(tgtAt);
@@ -1740,15 +1706,8 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     splHistoryStore.get(targetKey),
   ]);
   if (srcSpl && tgtSpl) {
-    // By RUN, as the timeline above, and re-ordered by when each run actually
-    // started so a run taken from the source lands where it happened rather than
-    // after everything this box recorded.
-    tgtSpl.items = mergeItemRuns(tgtSpl.items, srcSpl.items);
-    tgtSpl.items.sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
-    tgtSpl.items.forEach((it, i) => { it.sequence = i; });
-    if (srcSpl.endedAt && (!tgtSpl.endedAt || Date.parse(srcSpl.endedAt) > Date.parse(tgtSpl.endedAt))) {
-      tgtSpl.endedAt = srcSpl.endedAt;
-    }
+    tgtSpl.items = mergeRunsInTimeOrder(tgtSpl.items, srcSpl.items);
+    tgtSpl.endedAt = laterEnd(tgtSpl.endedAt, srcSpl.endedAt);
     await splHistoryStore.upsert(tgtSpl);
     await splHistoryStore.delete(sourceKey);
     broadcast("spl:history", tgtSpl);

@@ -9,7 +9,7 @@
 // of the week — is NOT here. It lives in home-cards.ts beside the ordering, so a
 // card can be rendered anywhere without dragging Home's rules along with it.
 
-import { useEffect, useRef, useState } from "react";
+import { useRef } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   CheckIcon,
@@ -41,8 +41,7 @@ export type HomeCardType = Exclude<Extract<LayoutObjectConfig, { type: `home-${s
 import { flashTarget } from "../flash";
 import { cn } from "../../lib/cn";
 import { useElementSize } from "../../lib/use-element-size";
-import { invoke, onNotification } from "../../lib/api";
-import { useFailedReads } from "../../lib/use-failed-reads";
+import { useHistoryLists } from "../../lib/use-history-lists";
 import { joinWithAnd } from "../../lib/join-with-and";
 import { ErrorNote } from "../../components/ui/error-note";
 import { computeOverview, trendColor, type OverviewData, type Trend } from "../../settings/sections/overview-data";
@@ -256,99 +255,6 @@ export function Stat({
   );
 }
 
-/**
- * History's records, for the headline figures.
- *
- * Fetched here rather than threaded down from the route: Home is the only other
- * consumer, and the same SSE channels History listens to keep it current, so a
- * service that finishes on Sunday updates Thursday's headline without a reload.
- */
-function useHistoryRecords(wantSpl = false) {
-  const [list, setList] = useState<ServiceTimeline[] | null>(null);
-  const [attList, setAttList] = useState<ServiceAttendanceSummary[]>([]);
-  /** One level per service. Fetched only when a card is actually drawing the
-   *  line — Home is the page every operator lands on, and this is a read nobody
-   *  who leaves the setting off should ever pay for. */
-  const [splList, setSplList] = useState<SplServiceSummary[]>([]);
-  /** Which reads FAILED, as opposed to came back empty. The same three reads
-   *  History makes, said the same way on the same `[history]` tag. Each list is
-   *  still emptied on a failure, so a live push can land in it, and a read that
-   *  later succeeds takes its note with it. */
-  const { failed, fail, clear } = useFailedReads<"timeline" | "attendance" | "spl">("history");
-  useEffect(() => {
-    if (!wantSpl) return;
-    let alive = true;
-    invoke<SplServiceSummary[]>("spl:getSummary")
-      .then((r) => {
-        if (!alive) return;
-        setSplList(r ?? []);
-        clear("spl");
-      })
-      .catch((err: unknown) => {
-        if (!alive) return;
-        setSplList([]);
-        fail("spl", "the sound summary", err);
-      });
-    return () => { alive = false; };
-  }, [wantSpl, fail, clear]);
-
-  useEffect(() => {
-    let alive = true;
-    invoke<ServiceTimeline[]>("serviceTimeline:list")
-      .then((l) => {
-        if (!alive) return;
-        setList(l ?? []);
-        clear("timeline");
-      })
-      .catch((err: unknown) => {
-        if (!alive) return;
-        setList([]);
-        fail("timeline", "the service timings", err);
-      });
-    invoke<ServiceAttendanceSummary[]>("attendance:listSummaries")
-      .then((a) => {
-        if (!alive) return;
-        setAttList(a ?? []);
-        clear("attendance");
-      })
-      .catch((err: unknown) => {
-        if (!alive) return;
-        setAttList([]);
-        fail("attendance", "the attendance history", err);
-      });
-    return () => { alive = false; };
-  }, [fail, clear]);
-
-  useEffect(() => {
-    const offTl = onNotification("service-timeline:history", (p: unknown) => {
-      const rec = p as ServiceTimeline | null;
-      if (!rec) return;
-      setList((prev) => {
-        if (!prev) return prev;
-        const i = prev.findIndex((s) => s.serviceKey === rec.serviceKey);
-        if (i === -1) return [rec, ...prev];
-        const next = prev.slice();
-        next[i] = rec;
-        return next;
-      });
-    });
-    const offAtt = onNotification("attendance:history", (p: unknown) => {
-      const rec = p as ServiceAttendance | null;
-      if (!rec) return;
-      setAttList((prev) => {
-        const i = prev.findIndex((a) => a.serviceKey === rec.serviceKey);
-        if (i === -1) return [rec, ...prev];
-        const next = prev.slice();
-        next[i] = rec;
-        return next;
-      });
-    });
-    return () => { offTl(); offAtt(); };
-  }, []);
-
-  return { list, attList, splList, failed };
-}
-
 /** "the a", "the a and the b", "the a, the b and the c" — the join-with-and
  *  shape, plus this file's own "the " prefix per item. */
 function theList(items: string[]): string {
@@ -529,7 +435,12 @@ export function RecentServicesCard({
    *  the menu and keeps tracking the pointer underneath it. */
   hoverSuppressed?: boolean;
 }) {
-  const { list, attList, splList, failed } = useHistoryRecords(showSpl);
+  // History's own lists, through History's own hook: Home is the only other
+  // consumer, the same pushes keep it current (a service that finishes on
+  // Sunday updates Thursday's headline without a reload), and a failed read is
+  // said the same way on [history]. The SPL summary is read only while this
+  // card draws the sound line; Home is where every operator lands.
+  const { list, attList, splList, failed } = useHistoryLists({ spl: showSpl });
 
   // Scoped to the ACTIVE service type, like History's Overview — an Events night
   // must not show up under a Weekend heading. asOf is null: on Home the question

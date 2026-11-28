@@ -187,6 +187,50 @@ export function closeTimelineItems(items: ServiceTimelineItem[], endIso: string)
   for (const it of items) if (!it.endedAt) closeTimelineItem(it, endIso);
 }
 
+/**
+ * Fit a record's items to a window that now ends at `endMs`, the same way for
+ * every kind of record: an item that started after the end is dropped, and one
+ * still running at it (or never closed) is closed there by `close`.
+ *
+ * A window edit used to clamp the timeline's items and only drop the SPL
+ * record's, so the SPL twin of a clamped item kept running past the service.
+ * Closing an SPL item moves its end and nothing else: its levels were taken
+ * over every sample it had and are not re-derived, since the stored record
+ * keeps no samples to take them from (Rebuild from raw does, from the rows).
+ *
+ * Returns how many items were dropped; the clamp itself deletes nothing.
+ */
+export function clampItemsToWindow<T extends { startedAt: string; endedAt: string | null }>(
+  items: T[],
+  endMs: number,
+  close: (item: T, endIso: string) => void,
+): { kept: T[]; dropped: number } {
+  const kept = items.filter((it) => Date.parse(it.startedAt) <= endMs);
+  const endIso = new Date(endMs).toISOString();
+  for (const it of kept) {
+    if (it.endedAt == null || Date.parse(it.endedAt) > endMs) close(it, endIso);
+  }
+  return { kept, dropped: items.length - kept.length };
+}
+
+/**
+ * The later of two record ends, as stored: the end a record merged from both
+ * should carry. An end that will not parse counts as absent; when neither
+ * parses, the first one stands.
+ *
+ * One rule for every kind. History's merge took the timeline's end from its
+ * latest ITEM end and the other two from the later record end, so a target
+ * whose window outlasted its last item had its timeline cut back to that item
+ * while its attendance and sound kept their window.
+ */
+export function laterEnd(a: string | null, b: string | null): string | null {
+  const ta = a == null ? Number.NaN : Date.parse(a);
+  const tb = b == null ? Number.NaN : Date.parse(b);
+  if (!Number.isFinite(tb)) return a;
+  if (!Number.isFinite(ta)) return b;
+  return tb > ta ? b : a;
+}
+
 /** The identity every service record carries. */
 export interface ServiceRecord {
   serviceKey: string;

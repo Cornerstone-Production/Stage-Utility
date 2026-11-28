@@ -73,7 +73,32 @@ count shown.
 
 Merge is for one service recorded on two machines, neither with the whole thing. It
 unions plan items, attendance samples and raw rows, keeping the local entry on any
-clash, and recomputes attendance peaks over the filled gap.
+clash. Each machine counts attendance from its own start, so the two attendance
+series are first put on a common start (the earlier machine's), the same way
+History's **Merge** joins two recordings; the curve then reads as one service
+rather than two interleaved twenty people apart. The service figures are
+recomputed over the filled gap: a peak never falls below, and the lowest room
+count never rises above, what either machine recorded itself, and the last
+reading is the later machine's own.
+
+A pair is joined as it stands, unshifted, when its start counts cannot be
+trusted: one has none (a recording too old to carry it), or the two cannot
+both be right. A record last edited on v1.9.3 or v1.9.4 can carry a start
+count of 0 that is not true. Where the two recordings overlap, both machines
+read one counter, so their counts must agree there; this machine's copies of
+the archive's own readings, taken by an earlier import, are not counted as
+agreement. Where they do not overlap, a record whose start count is 0 while
+its daily total sits well above its counts is not aligned on; that also
+catches a genuine 0 whose tail was trimmed. A wrong start count that a later
+edit re-based is not caught without an overlap. A record joined unshifted (by
+an import, or by History's **Merge** when one side has no start count) is
+marked, and no later import aligns on it, so importing an archive twice, or
+passing archives back and forth between machines, changes nothing more. A
+third machine's archive can show a disagreement the first two did not; the
+record is then marked, and no sample or figure moves. An
+archive sample that is not a reading is left out. The import logs an
+`[archive]` line for each of these. Records imported before this alignment
+existed are left as they are.
 
 Merge deliberately does not combine per-item sound levels where both sides recorded
 the same item — those combine correctly only across disjoint time, and two machines

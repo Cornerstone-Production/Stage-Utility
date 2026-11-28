@@ -717,12 +717,14 @@ its end on the next day.
 
 Moving the window trims what falls outside it: timeline and SPL items that
 start after the new end, and attendance samples beyond the ramp and taper
-either side. Rebuild from raw can bring the items back from the raw rows, but
-not the samples: it re-derives attendance from these same stored samples, so a
-dropped sample is gone for good. So a window that would delete anything is not
-applied straight away: History names what would go and asks, and only **Trim**
-applies it. The server log carries a `[history]` line for
-each trim, with what it dropped, and for each edit refused.
+either side. A timeline or SPL item still running at the new end is cut off
+there; its recorded sound levels are kept as they were. Rebuild from raw can
+bring the items back from the raw rows, but not the samples: it re-derives
+attendance from these same stored samples, so a dropped sample is gone for
+good. So a window that would delete anything is not applied straight away:
+History names what would go and asks, and only **Trim** applies it. The server
+log carries a `[history]` line for each trim, with what it dropped, and for
+each edit refused.
 
 The rundown itself is a table of every item as it ran: number, title, planned
 length, actual, the difference, and the times it started and ended. A table too
@@ -791,7 +793,8 @@ Two recordings of the same service — a run that overran its planned end and
 rolled its tail into the next occurrence — can be merged back together, in either
 direction. Attendance is stored per-service, so the two curves are re-expressed
 against a common start before they are joined; the merged trend reads as one
-continuous service rather than restarting at the seam.
+continuous service rather than restarting at the seam. Each merged record ends
+at the later of the two recordings' ends.
 
 ## Attendance metrics
 

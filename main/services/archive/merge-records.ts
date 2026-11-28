@@ -16,6 +16,9 @@
 // item, this keeps the local figures and says so. (The raw CSVs are merged by
 // timestamp, so the samples needed to recompute it properly are retained.)
 
+import type { AttendanceSample } from "../../types/history.js";
+import { alignAttendance, attendanceStats, finiteOrNull, inServiceSamples, type FrameShift } from "../attendance-aggregate.js";
+
 /** Union two arrays of objects by a key field, keeping the local entry on a clash. */
 export function mergeByKey<T>(mine: T[], theirs: T[], key: (v: T) => string | null | undefined): T[] {
   const seen = new Set(mine.map(key).filter((k): k is string => k != null));
@@ -90,44 +93,260 @@ export function mergeSplRecord(mine: SplRecord, theirs: SplRecord): SplRecord {
   };
 }
 
-interface AttendanceSample {
-  t: string;
-}
+/** An attendance record as a bundle carries it: unvalidated, so every field
+ *  this reads is checked rather than trusted. */
 interface AttendanceRecord {
   samples?: AttendanceSample[];
+  attendanceBaseline?: number | null;
   peakAttendance?: number;
   peakOccupancy?: number;
+  minOccupancy?: number | null;
+  lastAttendance?: number;
+  lastOccupancy?: number;
+  totalAttendance?: number;
+  attendanceUnaligned?: true;
   [k: string]: unknown;
 }
 
+/** What an attendance merge produced, and what it could not do. */
+export interface MergedAttendanceRecord {
+  record: AttendanceRecord;
+  /** "unknown" when one side had no usable baseline, and "implausible" when
+   *  the two baselines cannot both be right (see framesDisagree):
+   *  either way the two series were joined as they stood, unshifted. Returned
+   *  so the import can say so. */
+  frames: "aligned" | "unknown" | "implausible";
+  /** For "implausible": the numbers that gave it away. */
+  implausible?: string;
+  /** Incoming samples left out because they were not readings: no string
+   *  stamp, or an attendance or occupancy that is not a number. */
+  skippedSamples: number;
+}
+
+/** Readings with a stamp Date can read, oldest first, as [ms, raw counter]. */
+function rawSeries(r: AttendanceRecord, base: number): [number, number][] {
+  return (Array.isArray(r.samples) ? r.samples : [])
+    .filter(isReading)
+    .map((x): [number, number] => [Date.parse(x.t), base + x.attendance])
+    .filter(([t]) => Number.isFinite(t))
+    .sort((x, y) => x[0] - y[0]);
+}
+
+/** Two readings this close together read the counter at nearly one moment. */
+const PAIR_MS = 15_000;
+
 /**
- * Samples union by timestamp, then re-sorted oldest→newest.
+ * Why two records' baselines cannot be aligned on, or null when they can (or
+ * when there is nothing to judge by, and the baselines are trusted).
  *
- * The peaks are recomputed rather than filled, because a peak taken over a gap is
- * wrong the moment the gap is filled — that is the whole point of merging.
+ * Recalculate, Edit times and History's merge in v1.9.3 and v1.9.4 (fixed in
+ * v1.10.0) wrote an already-baselined value (normally 0) into
+ * attendanceBaseline and left the samples alone. Such a record claims to count
+ * from 0 while its samples count from wherever its service began, and aligning
+ * on it shifts the other recording by every entry before that service.
  *
- * Only IN-SERVICE samples feed a peak. The recorder tags ramp and taper samples
- * with a `phase` and leaves the service proper untagged, precisely so an emptying
- * or filling room does not set the peak (see attendance-recorder.ts). Recomputing
- * over every sample quietly overrode that and inflated the figure — a service whose
- * stored peak was 1810 came back as 1915 off a taper sample.
+ * Where the two recordings overlap — the restarted-box case this alignment is
+ * for — the evidence is direct: both boxes read the same counter, so baseline
+ * + sample must agree between readings taken within 15 seconds of each other.
+ * A median disagreement over 20 people or 5% means one baseline is wrong, and
+ * which one cannot be told. A window trim, a split save or a crash leaves both
+ * agreeing, so none of those is flagged.
+ *
+ * Where they do not overlap there is no such evidence, and only the bug's own
+ * signature is looked for: a baseline equal to the record's first sample (the
+ * value the bug copied in, unchanged since) on a record whose daily total sits
+ * well above baseline + its latest sample. A recorder's first sample is 0, so
+ * in practice that is "baseline 0 and a total far above its counts", which a
+ * legitimate record also shows when its counter really started at 0 and its
+ * tail was trimmed or split-saved. Such a record is joined unshifted, as every
+ * import did before this alignment existed, with a line on the log; the other
+ * box's samples then read off by that box's own baseline. A corrupted record a
+ * later fixed-code edit re-based is not recognised without an overlap.
  */
-export function mergeAttendanceRecord(mine: AttendanceRecord, theirs: AttendanceRecord): AttendanceRecord {
-  const samples = mergeByKey(mine.samples ?? [], theirs.samples ?? [], (s) => s.t).sort((a, b) =>
-    a.t.localeCompare(b.t),
-  );
-  const out = { ...fillMissingFields(mine, theirs, ["samples"]), samples };
-  const inService = samples.filter((s) => (s as unknown as Record<string, unknown>).phase == null);
-  const peakOf = (field: string) =>
-    inService.reduce((m, s) => {
-      const v = (s as unknown as Record<string, unknown>)[field];
-      return typeof v === "number" ? Math.max(m, v) : m;
-    }, 0);
-  if (inService.length) {
-    out.peakAttendance = Math.max(mine.peakAttendance ?? 0, peakOf("attendance"));
-    out.peakOccupancy = Math.max(mine.peakOccupancy ?? 0, peakOf("occupancy"));
+export function framesDisagree(mine: AttendanceRecord, theirs: AttendanceRecord): string | null {
+  const mineBase = finiteOrNull(mine.attendanceBaseline);
+  const theirBase = finiteOrNull(theirs.attendanceBaseline);
+  if (mineBase == null || theirBase == null) return null;
+  const a = rawSeries(mine, mineBase);
+  const b = rawSeries(theirs, theirBase);
+  if (!a.length || !b.length) return null;
+
+  // A reading of this box's at an instant the archive also holds is a copy an
+  // earlier aligned import took from it (a fallback import's copies never
+  // reach here: the record they land in is marked unaligned and is not judged
+  // again). Paired with the archive's readings, a copy measures the archive
+  // against itself, not this box against the archive, so only this box's own
+  // readings are paired.
+  const theirStamps = new Set(b.map(([t]) => t));
+  const own = a.filter(([t]) => !theirStamps.has(t));
+  const diffs: number[] = [];
+  const levels: number[] = [];
+  for (const [t, raw] of b) {
+    let best: [number, number] | null = null;
+    for (const p of own) {
+      if (Math.abs(p[0] - t) <= PAIR_MS && (best == null || Math.abs(p[0] - t) < Math.abs(best[0] - t))) best = p;
+    }
+    if (best) {
+      diffs.push(Math.abs(best[1] - raw));
+      levels.push(Math.max(best[1], raw));
+    }
+  }
+  if (diffs.length >= 3) {
+    const median = (xs: number[]) => [...xs].sort((x, y) => x - y)[Math.floor(xs.length / 2)];
+    const off = median(diffs);
+    if (off > Math.max(20, median(levels) * 0.05)) {
+      return `where the two recordings overlap their counts disagree by about ${off} people (baselines ${mineBase} and ${theirBase})`;
+    }
+    return null;
+  }
+
+  const signature = (r: AttendanceRecord, base: number, series: [number, number][], who: string): string | null => {
+    const total = finiteOrNull(r.totalAttendance);
+    const readings = (Array.isArray(r.samples) ? r.samples : []).filter(isReading).filter((x) => Number.isFinite(Date.parse(x.t)));
+    const first = readings.reduce<AttendanceSample | null>((m, x) => (m == null || Date.parse(x.t) < Date.parse(m.t) ? x : m), null);
+    if (total == null || total <= 0 || first == null || base !== first.attendance) return null;
+    const latest = series[series.length - 1][1];
+    if (total - latest <= Math.max(10, Math.round(total * 0.02))) return null;
+    return `${who}'s baseline ${base} equals its first sample, and baseline + its latest sample is ${latest} while its daily total reads ${total}`;
+  };
+  return signature(mine, mineBase, a, "this box's record") ?? signature(theirs, theirBase, b, "the archive's record");
+}
+
+/**
+ * The merge as it was before frames were aligned, for a pair whose baselines
+ * cannot both be right: samples unioned unshifted (this box's on a clash), the
+ * peaks recomputed over in-service samples and never lowered, everything else
+ * filled, never overwritten. Three departures: this box's baseline is kept,
+ * never filled from the archive's; the lowest room count and the raw daily
+ * total, which no baseline touches, take what either machine saw; and the
+ * result is marked attendanceUnaligned, because its samples are now in more
+ * than one frame.
+ */
+function fillOnlyAttendance(mine: AttendanceRecord, theirs: AttendanceRecord, readings: AttendanceSample[]): AttendanceRecord {
+  const own = Array.isArray(mine.samples) ? mine.samples : [];
+  const samples = mergeByKey(own, readings, (x) => x.t).sort((a, b) => a.t.localeCompare(b.t));
+  const out: AttendanceRecord = { ...fillMissingFields(mine, theirs, ["samples", "attendanceBaseline"]), samples, attendanceUnaligned: true };
+  // The room count and the raw daily total depend on no baseline, so the
+  // lowest and the total take what either machine saw.
+  // A stored minimum counts only from a record with in-service samples, as on
+  // the aligned path: a ramp- or taper-only record's stored 0 means "none".
+  const mins = [
+    inServiceSamples(own).length ? mine.minOccupancy : null,
+    inServiceSamples(readings).length ? theirs.minOccupancy : null,
+  ].map(finiteOrNull).filter((v): v is number => v != null);
+  if (mins.length) out.minOccupancy = Math.min(...mins);
+  const totals = [mine.totalAttendance, theirs.totalAttendance].map(finiteOrNull).filter((v): v is number => v != null);
+  if (totals.length) out.totalAttendance = Math.max(...totals);
+  const svc = inServiceSamples(samples);
+  if (svc.length) {
+    const peakOf = (field: "attendance" | "occupancy") =>
+      svc.reduce((m, x) => Math.max(m, finiteOrNull(x[field]) ?? 0), 0);
+    out.peakAttendance = Math.max(finiteOrNull(mine.peakAttendance) ?? 0, peakOf("attendance"));
+    out.peakOccupancy = Math.max(finiteOrNull(mine.peakOccupancy) ?? 0, peakOf("occupancy"));
   }
   return out;
+}
+
+/** A sample an import can take: a stamp and two numbers. */
+function isReading(s: unknown): s is AttendanceSample {
+  if (typeof s !== "object" || s === null) return false;
+  const r = s as Record<string, unknown>;
+  return typeof r.t === "string" && finiteOrNull(r.attendance) != null && finiteOrNull(r.occupancy) != null;
+}
+
+/**
+ * Samples from both recordings, in ONE frame, oldest first; the figures
+ * re-derived over the filled gaps.
+ *
+ * The two boxes' series are first shifted into the earlier of their two
+ * baselines (alignAttendance, shared with History's merge). Each box stores
+ * attendance as the raw counter minus its OWN baseline, so unshifted, a box that
+ * restarted mid-service and opened its record twenty people later read twenty
+ * low across the whole overlap: the curve saw-toothed, and the last and lowest
+ * figures kept this box's pre-merge values.
+ *
+ * The figures are recomputed, because a figure taken over a gap is wrong the
+ * moment the gap is filled. Only IN-SERVICE samples feed them: the recorder tags
+ * ramp and taper samples with a `phase` so an emptying or filling room does not
+ * set the peak — a service whose stored peak was 1810 once came back as 1915 off
+ * a taper sample.
+ *
+ * Unlike History's merge, a figure a recording STORED bounds the result here,
+ * rather than being replaced by the samples: the recorder takes peak and lowest
+ * off every reading but keeps a sample only every 30 seconds, so a recompute
+ * over samples alone could lower a peak this box actually saw. The peaks never
+ * fall below, and the lowest never rises above, what either recording stored.
+ * Stored attendance is shifted into the merged frame first, and a recording's
+ * stored figures count only when it has in-service samples (a ramp-only
+ * record's stored 0 means "none", not "zero people"). Last is the later
+ * recording's own. totalAttendance, the raw daily counter, takes the later
+ * (larger) of the two. A union with no in-service samples at all keeps this
+ * box's figures, as before.
+ *
+ * The incoming record is unvalidated bundle input, so a sample that is not a
+ * reading is left out and counted; this box's own samples are kept as they are.
+ * The samples are not re-based to their first reading, as History's
+ * recomputeAttendance does: the merged frame is the earlier record's own, whose
+ * first reading is already its zero, and the rule here is fill, never rewrite.
+ */
+export function mergeAttendanceRecord(mine: AttendanceRecord, theirs: AttendanceRecord): MergedAttendanceRecord {
+  const incoming: unknown[] = Array.isArray(theirs.samples) ? theirs.samples : [];
+  const readings = incoming.filter(isReading);
+  const skippedSamples = incoming.length - readings.length;
+  // A record an earlier import joined without aligning holds more than one
+  // frame, and no baseline describes it: it is never aligned on again, so a
+  // re-import, an exchange back and forth, or a chain through a third machine
+  // decides the same way the first import did.
+  const already = mine.attendanceUnaligned
+    ? "this box's record already holds recordings joined without aligning them"
+    : theirs.attendanceUnaligned
+      ? "the archive's record already holds recordings joined without aligning them"
+      : null;
+  const disagree = already ?? framesDisagree(mine, { ...theirs, samples: readings });
+  if (disagree) {
+    return { record: fillOnlyAttendance(mine, theirs, readings), frames: "implausible", implausible: disagree, skippedSamples };
+  }
+  const aligned = alignAttendance(mine, { ...theirs, samples: readings });
+  if (aligned.frames === "unknown") {
+    return { record: fillOnlyAttendance(mine, theirs, readings), frames: "unknown", skippedSamples };
+  }
+  const out: AttendanceRecord = {
+    ...fillMissingFields(mine, theirs, ["samples", "attendanceBaseline"]),
+    samples: aligned.samples,
+    attendanceBaseline: aligned.attendanceBaseline,
+  };
+  const totals = [mine.totalAttendance, theirs.totalAttendance].map(finiteOrNull).filter((v): v is number => v != null);
+  if (totals.length) out.totalAttendance = Math.max(...totals);
+  const done = { record: out, frames: aligned.frames, skippedSamples };
+
+  if (inServiceSamples(aligned.samples).length === 0) return done;
+
+  const side = (r: AttendanceRecord, samples: AttendanceSample[], shift: FrameShift) => {
+    const svc = inServiceSamples(samples);
+    return { r, shift, svc: svc.length > 0, lastT: svc.length ? Date.parse(svc[svc.length - 1].t) : Number.NaN };
+  };
+  const here = side(mine, Array.isArray(mine.samples) ? mine.samples : [], aligned.intoShift);
+  const there = side(theirs, readings, aligned.fromShift);
+  const stored = (field: "peakAttendance" | "peakOccupancy" | "minOccupancy", shifted: boolean) =>
+    [here, there].flatMap(({ r, shift, svc }) => {
+      const v = svc ? finiteOrNull(r[field]) : null;
+      return v == null ? [] : [shifted ? shift(v) : v];
+    });
+
+  const stats = attendanceStats(aligned.samples);
+  out.peakAttendance = Math.max(stats.peakAttendance, ...stored("peakAttendance", true));
+  out.peakOccupancy = Math.max(stats.peakOccupancy, ...stored("peakOccupancy", false));
+  const floors = [stats.minOccupancy, ...stored("minOccupancy", false)].filter((v): v is number => v != null);
+  out.minOccupancy = floors.length ? Math.min(...floors) : null;
+
+  // Last is the later recording's own last reading, which is up to 30 seconds
+  // newer than its last sample; the samples answer only when it stored none.
+  const later = there.svc && (!here.svc || there.lastT > here.lastT) ? there : here;
+  const lastA = later.svc ? finiteOrNull(later.r.lastAttendance) : null;
+  const lastO = later.svc ? finiteOrNull(later.r.lastOccupancy) : null;
+  out.lastAttendance = lastA == null ? stats.lastAttendance : Math.max(0, later.shift(lastA));
+  out.lastOccupancy = lastO ?? stats.lastOccupancy;
+  return done;
 }
 
 interface TimelineItem {
