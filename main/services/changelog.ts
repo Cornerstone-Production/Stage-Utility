@@ -15,18 +15,7 @@
 // unrecognised subject is more likely to be a real change than something to hide.
 
 import COMMIT_TYPE_FILE from "./commit-types.json" with { type: "json" };
-
-/**
- * Commit types that change nothing an operator could notice, and the legacy ones
- * the lint refuses but old history may still carry.
- */
-const INVISIBLE = new Set<string>([...COMMIT_TYPE_FILE.invisible, ...COMMIT_TYPE_FILE.legacy]);
-
-/** `type(optional-scope)!: subject`, with the scope captured so it can lead the line. */
-const SCOPED = /^([a-z]+)(?:\(([^)]*)\))?!?:\s*(.+)$/i;
-
-/** `type!:` or `type(scope)!:` — a breaking change, whatever its type. */
-const BREAKING = /^[a-z]+(?:\([^)]*\))?!:/i;
+import { isShownInNotes, parseSubject } from "./commit-subject.js";
 
 /** Types whose name tells an operator nothing the dialog has not already said. */
 const DROPPABLE = new Set<string>([...COMMIT_TYPE_FILE.minor, ...COMMIT_TYPE_FILE.patch]);
@@ -39,15 +28,7 @@ const MERGE = /^Merge (?:(?:pull request|branch|remote-tracking)\b|\S+ into \S+)
 const CI_DIRECTIVE = /\s*\[(skip ci|ci skip|no ci)\]\s*$/i;
 
 import SCOPE_LABEL_FILE from "./scope-labels.json" with { type: "json" };
-import INTERNAL_SCOPE_FILE from "./internal-scopes.json" with { type: "json" };
 import { externKeyed } from "../types/extern-keyed.js";
-
-/**
- * Scopes that name the release machinery itself. A `fix(release)` is honestly a
- * fix, and an operator cannot see it — 1.18.0 listed four such lines. Shared
- * with scripts/release-notes.ts and scripts/release-level.sh.
- */
-const INTERNAL_SCOPES = new Set<string>(INTERNAL_SCOPE_FILE.scopes);
 
 /** Jargon scopes and what to call them. Shared with scripts/release-notes.ts. */
 const SCOPE_LABELS: Record<string, string> = externKeyed(
@@ -70,9 +51,8 @@ export function summarizeChangelog(subjects: readonly string[], cap = 20): strin
   for (const raw of subjects) {
     const subject = raw.replace(CI_DIRECTIVE, "").trim();
     if (!subject || MERGE.test(subject)) continue;
-    const m = SCOPED.exec(subject);
-    if (m && INVISIBLE.has(m[1].toLowerCase())) continue;
-    if (m && m[2] && INTERNAL_SCOPES.has(m[2].toLowerCase()) && !BREAKING.test(subject)) continue;
+    const p = parseSubject(subject);
+    if (p && !isShownInNotes(p)) continue;
     if (seen.has(subject)) continue;
     seen.add(subject);
     out.push(presentable(subject));
@@ -97,9 +77,9 @@ export function summarizeChangelog(subjects: readonly string[], cap = 20): strin
  * scope-labels.json, which the notes generator reads too.
  */
 function presentable(subject: string): string {
-  const m = SCOPED.exec(subject);
-  if (!m) return subject;
-  const [, type, scope, text] = m;
+  const p = parseSubject(subject);
+  if (!p) return subject;
+  const { type, scope, text } = p;
 
   // TWO TYPES CARRY MEANING AND MUST SURVIVE WHOLE.
   //
@@ -110,7 +90,7 @@ function presentable(subject: string): string {
   //
   // Both were caught by tests that already existed, which is the reason to run
   // them before believing a formatting change is only formatting.
-  if (BREAKING.test(subject) || !DROPPABLE.has(type.toLowerCase())) return subject;
+  if (p.breaking || !DROPPABLE.has(type)) return subject;
 
   if (!scope) return text;
   const key = scope.toLowerCase();

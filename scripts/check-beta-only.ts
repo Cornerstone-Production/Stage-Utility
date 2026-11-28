@@ -27,9 +27,9 @@
 
 import { execFileSync } from "node:child_process";
 import { isMain } from "./is-main.ts";
+import { BETA_ONLY_TRAILER } from "../main/services/commit-subject.ts";
 import COMMIT_TYPE_FILE from "../main/services/commit-types.json" with { type: "json" };
 
-const TRAILER_PATTERN = /^Beta-only:\s*(true|yes)\s*$/im;
 const subjectOf = (types: string[]) => new RegExp(`^(${types.join("|")})(\\([^)]+\\))?!?:`);
 const PATCH_SUBJECT = subjectOf(COMMIT_TYPE_FILE.patch);
 const FEAT_SUBJECT = subjectOf(COMMIT_TYPE_FILE.minor);
@@ -92,7 +92,7 @@ export function findBetaOnlyCandidates(base: string, stableTag: string): BetaOnl
     if (!PATCH_SUBJECT.test(subject)) continue;
 
     const body = git(["log", "-1", "--format=%b", sha]);
-    if (TRAILER_PATTERN.test(body)) continue;
+    if (BETA_ONLY_TRAILER.test(body)) continue;
 
     const files = commitFiles(sha);
     if (files.length === 0) continue;

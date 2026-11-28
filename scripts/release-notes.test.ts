@@ -7,6 +7,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import COMMIT_TYPE_FILE from "../main/services/commit-types.json" with { type: "json" };
+import { summarizeChangelog } from "../main/services/changelog.js";
 import { NOTES_CAP } from "../main/services/update/release-check.js";
 import { parseReleaseSections } from "../main/services/update/release-notes.js";
 
@@ -1026,5 +1027,47 @@ describe("a hand-written notice and the generated sections share one heading", (
     // The last LINE is a continuation, not a bullet; the last PARAGRAPH is the list.
     const out = notesWith(["## Improved", "", "- A hand-written improvement that runs on", "  to a second line.", ""].join("\n"));
     assert.match(sectionText(out, "Improved"), /to a second line\.\n- \*\*patch\*\*/, "a blank line split the list in two");
+  });
+});
+
+// The update dialog's "What's new" (summarizeChangelog) and these notes read a subject through one
+// parser (main/services/commit-subject.ts). Run both over the same history: a `refactor!:` was in the
+// notes and missing from the dialog, which is how a breaking release hid its breaking line.
+describe("the notes and the update dialog agree on which subjects are shown", () => {
+  const repo = buildRepo();
+  after(() => fs.rmSync(repo.dir, { recursive: true, force: true }));
+  repo.git("tag", "parity-base");
+
+  const subjects: string[] = [];
+  const add = (prefix: string, n: number) => {
+    const subject = `${prefix}: parity case ${n} end`;
+    subjects.push(subject);
+    repo.commit(`parity${n}`, subject);
+  };
+  let n = 0;
+  const types = [...COMMIT_TYPE_FILE.minor, ...COMMIT_TYPE_FILE.patch, ...COMMIT_TYPE_FILE.invisible, ...COMMIT_TYPE_FILE.legacy];
+  for (const t of types) {
+    add(t, n++);
+    add(`${t}(patch)`, n++); // an established scope: a fix to it is not build-out
+    add(`${t}(release)`, n++); // an internal scope
+    add(`${t}!`, n++);
+    add(`${t}(release)!`, n++);
+  }
+  repo.git("tag", "v9.0.0");
+  // Few enough breaking subjects that the notes' bullet budget cuts none of them.
+  const out = notesFor("9.0.0", "parity-base", repo.dir);
+  const dialog = summarizeChangelog(subjects, 1000);
+
+  it("every subject is shown by both or by neither", () => {
+    const disagree = subjects.filter((subject) => {
+      const text = subject.replace(/^[^:]+: /, "");
+      return out.includes(text) !== dialog.some((line) => line.endsWith(text));
+    });
+    assert.deepEqual(disagree, []);
+  });
+
+  it("the comparison saw both a shown and a hidden subject", () => {
+    assert.ok(subjects.some((s) => out.includes(s.replace(/^[^:]+: /, ""))));
+    assert.ok(subjects.some((s) => !out.includes(s.replace(/^[^:]+: /, ""))));
   });
 });
