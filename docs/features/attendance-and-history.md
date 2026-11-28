@@ -76,7 +76,9 @@ are not taken for the service ending. Attendance follows the same rule with no
 item at all: after Planning Center leaves a service inside the next one's arrival
 window, the finished record is held for ten minutes in case the service comes
 back, then closed at the moment Planning Center left it, and the arrivals go to
-the next service's record.
+the next service's record. If Planning Center then comes back on the item it
+stopped on, attendance goes back to the finished service's record, as the other
+two do.
 
 Each decision is logged once, whichever way it goes, and a hold that later
 ends in a split logs the split too:

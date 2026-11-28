@@ -43,6 +43,7 @@ type Held = {
   currentKey: string | null;
   lastLiveAt: number;
   stoppedAt: number;
+  splitOnRamp: unknown;
   forget(key: string): boolean;
   getRecord(key: string): Promise<Rec | null>;
 };
@@ -136,6 +137,7 @@ describe("after a service ends, before the next one", () => {
       rec.currentKey = null;
       rec.lastLiveAt = 0;
       rec.stoppedAt = 0;
+      rec.splitOnRamp = null;
     }
   });
 
@@ -201,6 +203,12 @@ describe("after a service ends, before the next one", () => {
     const att = RECORDERS[1]![1];
     assert.equal(att.current?.serviceKey, keyFor("occ-b"), "the 11am's arrivals are still being added to the 9am");
     assert.equal((await att.getRecord(keyFor("occ-a")))?.endedAt, iso(drop), "the 9am did not end when Planning Center left it");
+
+    // A new airing after that is the 11am's, for all three.
+    await tick(NINE + 86 * MIN, "occ-b", "walk-in");
+    for (const [name, rec] of RECORDERS) {
+      assert.equal(rec.current?.serviceKey, keyFor("occ-b"), `${name}: the walk-in went back to the 9am`);
+    }
   });
 
   it("still holds attendance on the ramp through a brief mode drop mid-overrun", async () => {
@@ -211,6 +219,22 @@ describe("after a service ends, before the next one", () => {
 
     for (const [name, rec] of RECORDERS) {
       assert.equal(rec.current?.serviceKey, keyFor("occ-a"), `${name}: a lull mid-overrun split the record`);
+      assert.equal(rec.current?.endedAt, null, `${name}: the record is open again`);
+    }
+  });
+
+  it("takes attendance back to the service when the airing it stopped on returns after the ramp split", async () => {
+    // Mid-overrun, Planning Center leaves item mode for twelve minutes inside
+    // the 11am's arrival window, then comes back on the same airing. The item
+    // recorders hold it for the 9am; attendance had split onto the 11am's ramp.
+    await tick(NINE, "occ-a", "welcome");
+    const songLive = NINE + 2 * MIN;
+    await airs(songLive, NINE + 74 * MIN, rolling, "song");
+    for (let at = NINE + 76 * MIN; at <= NINE + 88 * MIN; at += 2 * MIN) await tickNoItem(at, "occ-b");
+    await tick(NINE + 90 * MIN, "occ-b", "song", { since: songLive });
+
+    for (const [name, rec] of RECORDERS) {
+      assert.equal(rec.current?.serviceKey, keyFor("occ-a"), `${name}: the returning airing went to the next service`);
       assert.equal(rec.current?.endedAt, null, `${name}: the record is open again`);
     }
   });
@@ -268,6 +292,7 @@ describe("silence is not an end", () => {
       rec.currentKey = null;
       rec.lastLiveAt = 0;
       rec.stoppedAt = 0;
+      rec.splitOnRamp = null;
     }
   });
 
@@ -302,6 +327,7 @@ describe("silence is not an end", () => {
     for (const [, rec] of RECORDERS) {
       rec.lastLiveAt = 0;
       rec.stoppedAt = 0;
+      rec.splitOnRamp = null;
     }
     await tick(NINE + 66 * MIN, "occ-b", "message");
 
@@ -316,6 +342,7 @@ describe("silence is not an end", () => {
     for (const [, rec] of RECORDERS) {
       rec.lastLiveAt = 0;
       rec.stoppedAt = 0;
+      rec.splitOnRamp = null;
     }
     START.delete("occ-b");
     try {

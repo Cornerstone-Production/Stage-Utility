@@ -244,6 +244,10 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    *  older stop. Later than the last running tick means the service stopped
    *  there, which silence alone (no ticks at all) does not. */
   private stoppedAt = 0;
+  /** The record attendance split off when the next service's arrival ramp
+   *  began, and when its service last ran, until the next item goes live: if
+   *  that item is the airing the service stopped on, it goes back there. */
+  private splitOnRamp: { key: string; lastRanMs: number } | null = null;
   /** Re-entrancy latch: the poller fires every tick and onLiveTick awaits I/O. */
   protected busy = false;
   private dirty = false;
@@ -634,6 +638,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     // No item at all (attendance on the next service's arrival ramp): the
     // stopped service has had its gap, so this is the next one's ramp.
     if (hold && endedLongEnough && live.currentItemId == null) {
+      if (this.current) this.splitOnRamp = { key: this.current.serviceKey, lastRanMs };
       console.log(
         `[service-recorder] ${this.label}: the service in ${ended} stopped ${Math.round(gapSinceLive / 60_000)} min ago, and service time ${serviceTimeId} starts in ${Math.round(untilMs / 60_000)} min — its arrivals are the next service's, closing ${ended} and opening a new record`,
       );
@@ -742,7 +747,28 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     // Separate back-to-back services sharing one plan by the PCO service-time
     // occurrence (9am vs 11am). Fall back to the date when none is known.
     const serviceTimeId = live.serviceTimeId;
-    const key = `${serviceTypeId}:${planId}:${serviceTimeId ?? date}`;
+    let key = `${serviceTypeId}:${planId}:${serviceTimeId ?? date}`;
+
+    // The airing the service stopped on, back after attendance split onto the
+    // next service's ramp (see shouldHoldThroughServiceTimeChange): the item
+    // recorders hold it for that service, so attendance goes back to it. Any
+    // other item is the next service starting. Only to a record of this plan
+    // that is there.
+    const back = live.currentItemId ? this.splitOnRamp : null;
+    if (live.currentItemId) this.splitOnRamp = null;
+    let goingBack = false;
+    if (back && back.key !== this.currentKey && back.key.startsWith(`${serviceTypeId}:${planId}:`) && itemLiveSinceMs(live) <= back.lastRanMs) {
+      const there = this.unsaved.has(back.key) || (await this.store.get(back.key)) != null;
+      if (gen !== this.generation) return; // forgotten while we waited
+      if (there) {
+        key = back.key;
+        goingBack = true;
+        console.log(
+          `[service-recorder] ${this.label}: "${scrub(live.label ?? live.currentItemTitle ?? live.currentItemId ?? "")}" came back on the airing ${scrub(back.key)} stopped on — back to that record`,
+        );
+      }
+    }
+
     if (this.currentKey === key && this.current) {
       this.captureOpeningItem(live); // backfill for a record that opened before any item was live
       return;
@@ -759,6 +785,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     // record, after its end, until the hold released ten minutes before the
     // next start.
     if (
+      !goingBack &&
       this.current &&
       (this.current.endedAt == null || inLiveItem(live)) &&
       this.current.serviceTypeId === serviceTypeId &&
@@ -779,7 +806,13 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     // can hold a record open on the arrival ramp after Planning Center left the
     // service, and the split that ends that hold comes later.
     if (this.current) {
-      const stoppedSinceItRan = Number.isFinite(gapSinceLive) && this.stoppedAt > Date.now() - gapSinceLive;
+      // Not when going back: the stop belongs to the record being returned to,
+      // not to the ramp record closing now.
+      const stoppedSinceItRan =
+        !goingBack &&
+        Number.isFinite(gapSinceLive) &&
+        this.stoppedAt > Date.now() - gapSinceLive &&
+        this.stoppedAt >= Date.parse(this.current.startedAt); // a stop before this record opened is another's
       this.finalizeRecord(stoppedSinceItRan ? new Date(this.stoppedAt).toISOString() : undefined);
       const outgoing = this.current;
       await this.saveClosed(outgoing);
