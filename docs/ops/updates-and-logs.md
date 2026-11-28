@@ -129,7 +129,7 @@ With an update waiting, the panel lists the pending commits under **Coming in
 vX.Y.Z** (**Coming in the next update** on a track with no release tags),
 filtered to what an operator could actually
 notice (`changelog.ts`). Types that change nothing an operator could notice — `chore`,
-`ci`, `build`, `docs`, `test`, `refactor`, and the legacy `style` — are dropped, along
+`ci`, `build`, `docs`, `test`, `refactor`, and the legacy `style` — are dropped unless marked breaking (`!`), along
 with merge commits and the release workflow's own `chore(release): vX.Y.Z [skip ci]`
 bump. A `revert` is kept whole: the word is the meaning. Without that filter the
 commonest thing on offer was an update whose only listed change was the version
