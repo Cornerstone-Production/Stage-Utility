@@ -32,6 +32,38 @@ export class WriteQueue {
   }
 }
 
+/** Per-key WriteQueues: work under one key runs one at a time in the order it was
+ *  queued, work under different keys does not wait for each other. A key's chain is
+ *  dropped when its last piece of work settles, so keys that come and go (a venue)
+ *  do not accumulate. A rejection never stops a chain. */
+export class KeyedQueue {
+  private readonly chains = new Map<string, Promise<unknown>>();
+
+  /** Run `fn` after all prior work under `key` settles (success or failure). */
+  enqueue<R>(key: string, fn: () => Promise<R>): Promise<R> {
+    const run = (this.chains.get(key) ?? Promise.resolve()).then(fn, fn);
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.chains.set(key, tail);
+    void tail.then(() => {
+      if (this.chains.get(key) === tail) this.chains.delete(key);
+    });
+    return run;
+  }
+
+  /** How many keys have work queued or running. */
+  get busy(): number {
+    return this.chains.size;
+  }
+
+  /** Resolves when the work queued under every key but `except` has settled. */
+  async idle(except: readonly string[] = []): Promise<void> {
+    await Promise.all([...this.chains].filter(([key]) => !except.includes(key)).map(([, tail]) => tail));
+  }
+}
+
 let counter = 0;
 
 /**

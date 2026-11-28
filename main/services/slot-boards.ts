@@ -14,7 +14,14 @@
 import type { LayoutObject, LayoutObjectConfig, Slot, SlotBoardMeta, SlotsLayout, View } from "../types/stage.js";
 import type { SlotsFile, SlotsOverride } from "./slots-store.js";
 import { walkLayoutObjects } from "./view-refs.js";
-import { isRecord } from "../types/is-record.js";
+import { canonicalJson } from "./canonical-json.js";
+
+/** Copies of `rows` with a new id on each, for rows being copied to another board:
+ *  two boards must never share a slot row identity. `freshId` is passed in, not
+ *  defaulted, so this file stays free of node:crypto (the renderer imports it). */
+export function withFreshIds<T extends { id: string }>(rows: readonly T[], freshId: () => string): T[] {
+  return rows.map((r) => ({ ...r, id: freshId() }));
+}
 
 type GridConfig = Extract<LayoutObjectConfig, { type: "slots-grid" }>;
 
@@ -178,14 +185,6 @@ function layoutOf(slot: Slot): Record<string, unknown> {
   return rest;
 }
 
-/** JSON with every object's keys sorted, so key order is not a difference. */
-function canonical(v: unknown): string {
-  return JSON.stringify(v, (_k, val: unknown) => {
-    if (!isRecord(val)) return val;
-    return Object.fromEntries(Object.entries(val).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
-  });
-}
-
 /** Everything that makes a board what it is, comparable. Null for a board with
  *  no layouts at all: two empty boards are two screens nobody has built yet,
  *  not one board. */
@@ -193,7 +192,7 @@ function boardSignature(file: SlotsFile, id: string, columnWidthIn: number | nul
   const defaults = file.defaults.get(id);
   const overrides = file.overrides.get(id);
   if (!defaults?.size && !overrides?.size) return null;
-  return canonical({
+  return canonicalJson({
     columnWidthIn,
     defaults: [...(defaults ?? [])].sort(([a], [b]) => (a < b ? -1 : 1)).map(([t, slots]) => [t, slots.map(layoutOf)]),
     overrides: [...(overrides ?? [])]

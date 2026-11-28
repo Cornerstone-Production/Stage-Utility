@@ -1,5 +1,6 @@
 // Shared by the repeater panels an integration dialog can hold.
 
+import { sameJson } from "@main/services/canonical-json";
 import { uid } from "../lib/uid";
 
 /** A stable key for a newly added repeater row. Shared because the Ross TSL
@@ -19,21 +20,7 @@ export function feedId(): string {
  *  to save. Shared because the Ross TSL feeds panel and the ProPresenter
  *  instances panel both answer this question. */
 export function sameRows(a: unknown, b: unknown): boolean {
-  return JSON.stringify(stable(a)) === JSON.stringify(stable(b));
-}
-
-/** Key-sorted, undefined-free copy of a JSON-shaped value. */
-function stable(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(stable);
-  if (value !== null && typeof value === "object") {
-    const src = value as Record<string, unknown>;
-    const out: Record<string, unknown> = {};
-    for (const key of Object.keys(src).sort()) {
-      if (src[key] !== undefined) out[key] = stable(src[key]);
-    }
-    return out;
-  }
-  return value;
+  return sameJson(a, b);
 }
 
 /** A saved repeater row in the shape its editor works in.

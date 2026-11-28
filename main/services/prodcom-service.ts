@@ -46,6 +46,7 @@ import { errorMessage } from "./errors.js";
 import { scrub } from "./scrub.js";
 import { ConnectionLifecycle, type ConnState } from "./integration-base.js";
 import { DEFAULT_SETTLE_MS, OutageLog } from "./repeat-log.js";
+import { trailing } from "./timers.js";
 import { createSseReader, keepSocketAlive, parseSseBlock, SSE_MAX_BUFFER, type SseEvent } from "./sse-reader.js";
 
 const RECONNECT_MS = 4000;
@@ -834,8 +835,7 @@ export class ProdComService extends ConnectionLifecycle {
   private skippedSources = new Map<string, number>();
 
   private seq = 0;
-  private transcriptTimer: ReturnType<typeof setTimeout> | null = null;
-  private transcriptDirty = false;
+  private readonly transcriptThrottle = trailing(TRANSCRIPT_THROTTLE_MS, () => this.flushTranscript());
 
   /** Finalised lines (rolling) + the current partial per channel.
    *
@@ -2852,11 +2852,7 @@ export class ProdComService extends ConnectionLifecycle {
   }
 
   private flushTranscript(): void {
-    if (this.transcriptTimer) {
-      clearTimeout(this.transcriptTimer);
-      this.transcriptTimer = null;
-    }
-    this.transcriptDirty = false;
+    this.transcriptThrottle.cancel();
     this.pushTranscript();
   }
 
@@ -2876,12 +2872,7 @@ export class ProdComService extends ConnectionLifecycle {
   }
 
   private scheduleTranscript(): void {
-    this.transcriptDirty = true;
-    if (this.transcriptTimer) return;
-    this.transcriptTimer = setTimeout(() => {
-      this.transcriptTimer = null;
-      if (this.transcriptDirty) this.flushTranscript();
-    }, TRANSCRIPT_THROTTLE_MS);
+    this.transcriptThrottle.schedule();
   }
 
   /**

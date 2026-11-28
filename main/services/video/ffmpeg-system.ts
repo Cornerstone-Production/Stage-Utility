@@ -37,6 +37,7 @@ import * as path from "node:path";
 import type { FfmpegStatus } from "../../types/video.js";
 import { isRecord } from "../../types/is-record.js";
 import { errorMessage } from "../errors.js";
+import { WriteQueue } from "../write-queue.js";
 import { scrub } from "../scrub.js";
 import { ffmpegPathStore, loadFfmpegPath } from "./ffmpeg-path-store.js";
 
@@ -371,7 +372,7 @@ export function parseFfmpegPath(body: unknown, platform: NodeJS.Platform = proce
 export const RECHECK_AFTER_MS = 10_000;
 
 let lastSet: { path: string; at: number; result: FfmpegResult } | null = null;
-let setQueue: Promise<unknown> = Promise.resolve();
+const setQueue = new WriteQueue();
 
 async function applyFfmpegPath(body: unknown, now: () => number): Promise<{ ok: true; result: FfmpegResult } | { ok: false; error: string }> {
   const parsed = parseFfmpegPath(body);
@@ -391,7 +392,5 @@ async function applyFfmpegPath(body: unknown, now: () => number): Promise<{ ok: 
  *  the same path again after RECHECK_AFTER_MS is the "check again" button.
  *  `now` is a test seam. */
 export function setFfmpegPath(body: unknown, now: () => number = Date.now): Promise<{ ok: true; result: FfmpegResult } | { ok: false; error: string }> {
-  const run = setQueue.then(() => applyFfmpegPath(body, now));
-  setQueue = run.catch(() => undefined);
-  return run;
+  return setQueue.enqueue(() => applyFfmpegPath(body, now));
 }

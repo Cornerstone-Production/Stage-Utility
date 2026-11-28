@@ -10,6 +10,7 @@
 // The stored value is a `/branding-images/<hash>.<ext>` URL. `<img src>` accepts it
 // exactly as it accepted a data URL, so nothing downstream had to change.
 
+import { LOGO_LIMIT_LABEL, MAX_LOGO_DATA_URL_CHARS } from "../types/limits.js";
 import { isDataUrl, readImage, saveImage } from "./image-files.js";
 import type { SettingsData } from "./settings-store.js";
 
@@ -51,7 +52,7 @@ export function looksLikeStoredRef(v: unknown): v is string {
 }
 
 /** The longest data URL a branding image may arrive as (~1.5 MB of image). */
-export const MAX_BRANDING_DATA_URL_CHARS = 2_000_000;
+export const MAX_BRANDING_DATA_URL_CHARS = MAX_LOGO_DATA_URL_CHARS;
 
 /**
  * Why `v` is not a branding image value a save takes, or null when it is: null,
@@ -64,7 +65,7 @@ export function brandingImageProblem(v: unknown, storedRefAllowed: boolean): str
   if (v === null) return null;
   if (storedRefAllowed && looksLikeStoredRef(v)) return null;
   if (!isDataUrl(v)) return `must be an image data URL${storedRefAllowed ? ", a stored image" : ""} or null`;
-  if (v.length > MAX_BRANDING_DATA_URL_CHARS) return "is too large (max ~1.5 MB)";
+  if (v.length > MAX_BRANDING_DATA_URL_CHARS) return `is too large (max ~${LOGO_LIMIT_LABEL})`;
   return null;
 }
 

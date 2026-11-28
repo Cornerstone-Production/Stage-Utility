@@ -75,6 +75,7 @@ import {
   stagePlotsPlotKey,
 } from "../types/servicecue-publish.js";
 import type { PatchFile } from "../types/patch.js";
+import { KeyedQueue } from "./write-queue.js";
 import { STAGEPLOT_LIMITS, type Background, type PendingReason, type PendingRemoval, type Plot, type PublishedItem, type PublishedPlot, type PublishedVenue, type StagePlotsDoc, type Venue, type VenuePublish } from "../types/stageplots.js";
 
 /** A new secret: 32 random bytes, base64url, 43 characters. Made here and nowhere else. */
@@ -323,7 +324,7 @@ export class StagePlotsPublisher {
   private readonly deps: StagePlotsPublishDeps;
   private readonly waitMs: number;
   /** Per venue (and the queue), the run in progress: each waits for the one before. */
-  private readonly chains = new Map<string, Promise<unknown>>();
+  private readonly chains = new KeyedQueue();
   /** Per secret, the hash of each key's text as last sent, so a republish sends only what changed. */
   private readonly sent = new Map<string, Map<string, string>>();
   /** Per secret, the keys last kept. */
@@ -391,7 +392,7 @@ export class StagePlotsPublisher {
     this.landingRetryTimer = null;
     if (this.patchRetryTimer) clearTimeout(this.patchRetryTimer);
     this.patchRetryTimer = null;
-    await Promise.all([...this.chains.values()]);
+    await this.chains.idle();
   }
 
   /**
@@ -402,7 +403,7 @@ export class StagePlotsPublisher {
   async pause(): Promise<() => void> {
     this.paused = true;
     this.cancelWait();
-    await Promise.all([...this.chains.values()]);
+    await this.chains.idle();
     return () => {
       this.paused = false;
       // A change heard while paused, or a retry that came due, was skipped: the list is made again
@@ -441,8 +442,8 @@ export class StagePlotsPublisher {
   async settle(): Promise<void> {
     for (;;) {
       await this.timerDone;
-      await Promise.all([...this.chains.values()]);
-      if (this.timer === null && this.chains.size === 0) return;
+      await this.chains.idle();
+      if (this.timer === null && this.chains.busy === 0) return;
     }
   }
 
@@ -608,16 +609,7 @@ export class StagePlotsPublisher {
 
   /** Run `fn` after whatever `key` (a venue, or the queue) is already running. */
   private serial<T>(key: string, fn: () => Promise<T>): Promise<T> {
-    const run = (this.chains.get(key) ?? Promise.resolve()).then(fn, fn);
-    const tail = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    this.chains.set(key, tail);
-    void tail.then(() => {
-      if (this.chains.get(key) === tail) this.chains.delete(key);
-    });
-    return run;
+    return this.chains.enqueue(key, fn);
   }
 
   /** An action, on the venue's chain, refused while a restore is landing. */
@@ -1124,7 +1116,7 @@ export class StagePlotsPublisher {
    * one running this, nor the queue's.
    */
   private async venueRunsDone(): Promise<void> {
-    await Promise.all([...this.chains].filter(([k]) => k !== ADDRESS_CHAIN && k !== PENDING_CHAIN).map(([, run]) => run));
+    await this.chains.idle([ADDRESS_CHAIN, PENDING_CHAIN]);
   }
 
   /** The venues on any page but `target`'s, each moved to it on its own chain. */

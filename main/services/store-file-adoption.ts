@@ -34,7 +34,8 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 
 import { getUserDataPath } from "./app-paths.js";
-import { errorMessage, isNotFound } from "./errors.js";
+import { errorMessage } from "./errors.js";
+import { fileExists } from "./file-exists.js";
 import { renamedStores, type RenamedFrom } from "./store-registry.js";
 
 export type AdoptOutcome = "moved" | "kept-current" | "none";
@@ -62,21 +63,11 @@ export function resetStoreFileAdoptionForTests(): void {
   settled.clear();
 }
 
-async function exists(file: string): Promise<boolean> {
-  try {
-    await fs.access(file);
-    return true;
-  } catch (err) {
-    if (isNotFound(err)) return false;
-    throw err;
-  }
-}
-
 async function adopt(dir: string, current: string, legacy: RenamedFrom): Promise<AdoptOutcome> {
   const from = path.join(dir, legacy.filename);
   const to = path.join(dir, current);
-  if (!(await exists(from))) return "none";
-  if (await exists(to)) {
+  if (!(await fileExists(from))) return "none";
+  if (await fileExists(to)) {
     console.warn(
       `[${legacy.logTag}] ${legacy.filename} and ${current} both exist: using ${current} and leaving ` +
         `${legacy.filename} untouched. Nothing was deleted; remove ${legacy.filename} yourself once you are sure ${current} is the one to keep.`,

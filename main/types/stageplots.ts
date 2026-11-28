@@ -6,8 +6,11 @@
 // their place on the drawing when the background changes or is re-converted.
 // See docs/features/stageplots.md.
 //
-// It imports nothing: the public page's contract (servicecue-publish.ts) takes
-// STAGEPLOT_LIMITS from here, and the ServiceCue Worker and plain Node load it.
+// It imports only limits.ts, which imports nothing: the public page's contract
+// (servicecue-publish.ts) takes STAGEPLOT_LIMITS from here, and the ServiceCue
+// Worker and plain Node load it, so both import with their .ts extension.
+
+import { MAX_IMAGE_BYTES, MAX_PDF_BYTES } from "./limits.ts";
 
 export type VenueKind = "home" | "offsite";
 
@@ -302,9 +305,9 @@ export interface PublishedPlot {
 
 export const STAGEPLOT_LIMITS = {
   /** The largest PNG or JPEG upload, and the largest page raster. */
-  imageBytes: 12 * 1024 * 1024,
+  imageBytes: MAX_IMAGE_BYTES,
   /** The largest PDF upload. */
-  pdfBytes: 25 * 1024 * 1024,
+  pdfBytes: MAX_PDF_BYTES,
   venues: 50,
   plotsPerVenue: 20,
   backgrounds: 50,

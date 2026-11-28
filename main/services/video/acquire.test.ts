@@ -523,6 +523,35 @@ test("a download over 64 MB is refused by actual bytes received, not a spoofed C
   await assert.rejects(fs.access(path.join(downloadsDir, "mediamtx-oversized.tar.gz.part")));
 });
 
+// An archive that cannot be looked at (a permissions problem on the downloads
+// folder) used to read as absent: the code downloaded it again and the operator
+// never saw the permission error. Not run as root, which can read anything.
+test("an archive that cannot be looked at is reported, not downloaded again", { skip: process.platform === "win32" || process.getuid?.() === 0 }, async (t) => {
+  await resetRelayDir();
+  const pinned = assetFor(process.platform, process.arch);
+  if (!pinned) {
+    t.skip("no pinned asset for this platform");
+    return;
+  }
+  const downloadsDir = path.join(relayDir(), "downloads");
+  await fs.mkdir(downloadsDir, { recursive: true });
+  await fs.writeFile(path.join(downloadsDir, pinned.name), "placed by hand");
+  await fs.chmod(downloadsDir, 0o000);
+  t.after(() => fs.chmod(downloadsDir, 0o755));
+  let fetched = false;
+  const result = await ensureBinary({
+    assets: new Map([[KEY, pinned]]),
+    fetchImpl: (async () => {
+      fetched = true;
+      return new Response("replacement");
+    }) as unknown as typeof fetch,
+  });
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.match(result.reason, /EACCES|permission denied/i);
+  assert.equal(fetched, false, "an unreadable archive was treated as absent and downloaded again");
+});
+
 test("relayArchivePresent: the pinned archive in video-relay/downloads, whether or not it is extracted", async (t) => {
   await resetRelayDir();
   const pinned = assetFor(process.platform, process.arch);

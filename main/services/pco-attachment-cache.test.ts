@@ -28,17 +28,10 @@ after(async () => {
   await fs.rm(dataDir, { recursive: true, force: true });
 });
 
-/** Minimal Response stand-in — the cache only reads .status/.ok/.arrayBuffer(). */
+/** A real Response: the cache reads the body as a stream, so a stand-in with only
+ *  .arrayBuffer() would test something the code no longer does. */
 function resp(status: number, body?: Buffer): Response {
-  const b = body ?? Buffer.alloc(0);
-  // Buffer.from() hands back a view into a shared pool — slice by offset, or the
-  // "payload" would be 8 KB of unrelated pool bytes.
-  const ab = b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength);
-  return {
-    status,
-    ok: status >= 200 && status < 300,
-    arrayBuffer: async () => ab,
-  } as unknown as Response;
+  return new Response(status >= 200 && status < 300 ? new Uint8Array(body ?? Buffer.alloc(0)) : null, { status });
 }
 
 describe("attachment cache", () => {
@@ -108,13 +101,14 @@ describe("attachment cache", () => {
       globalThis.fetch = realFetch;
     });
     globalThis.fetch = (async () =>
-      ({
-        status: 200,
-        ok: true,
-        arrayBuffer: async () => {
-          throw new Error("connection reset mid-body");
-        },
-      }) as unknown as Response) as typeof fetch;
+      new Response(
+        new ReadableStream<Uint8Array>({
+          pull(controller) {
+            controller.error(new Error("connection reset mid-body"));
+          },
+        }),
+        { status: 200 },
+      )) as typeof fetch;
 
     const file = await getAttachmentFile(
       "torn-1",
@@ -173,6 +167,97 @@ describe("attachment cache", () => {
         `first ${sizesSeen.slice(0, 5).join(", ")} (expected ${payload.length})`,
     );
     assert.equal((await fs.stat(file.path)).size, payload.length);
+  });
+
+  // A signed link that stalls used to hang its request forever, and because the
+  // in-flight map is keyed by path, every later request for that attachment joined
+  // the hung promise until a restart. A body past the cap was held whole in memory.
+  describe("a download is bounded", () => {
+    const LIMITS = { maxBytes: 1024 * 1024, idleMs: 60, totalMs: 5_000 };
+    const open = async () => "https://example.invalid/signed";
+    /** Fails the test, rather than hanging the run, when `p` has not settled. */
+    const within = <T,>(p: Promise<T>, ms: number, what: string): Promise<T> =>
+      Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`${what} did not settle in ${ms} ms`)), ms).unref())]);
+
+    test("a body that stalls mid-transfer times out, leaves no file, and the next request starts afresh", async (t) => {
+      t.after(() => { globalThis.fetch = realFetch; mock.restoreAll(); });
+      mock.method(console, "error", () => {});
+      let fetches = 0;
+      globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+        fetches += 1;
+        return new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new Uint8Array(16));
+              init?.signal?.addEventListener("abort", () => controller.error(init.signal?.reason));
+            },
+          }),
+          { status: 200 },
+        );
+      }) as typeof fetch;
+
+      const file = await within(getAttachmentFile("stall-1", "application/pdf", "plot.pdf", open, "", LIMITS), 3_000, "a stalled download");
+      assert.equal(file, null, "a stalled download must report failure");
+      assert.deepEqual((await fs.readdir(cacheDir)).filter((n) => n.includes("stall-1")), [], "a stalled download must leave no file or part behind");
+      await within(getAttachmentFile("stall-1", "application/pdf", "plot.pdf", open, "", LIMITS), 3_000, "the retry");
+      assert.equal(fetches, 2, "the hung request must not stay in flight for the next one to join");
+    });
+
+    test("a link that never answers times out too", async (t) => {
+      t.after(() => { globalThis.fetch = realFetch; mock.restoreAll(); });
+      mock.method(console, "error", () => {});
+      globalThis.fetch = ((_url: unknown, init?: RequestInit) =>
+        new Promise<Response>((_res, rej) => init?.signal?.addEventListener("abort", () => rej(init.signal?.reason)))) as typeof fetch;
+      const file = await within(getAttachmentFile("stall-2", "application/pdf", "plot.pdf", open, "", LIMITS), 3_000, "a link that never answers");
+      assert.equal(file, null);
+    });
+
+    test("a PCO open that never answers times out too, and the next request starts afresh", async (t) => {
+      t.after(() => { globalThis.fetch = realFetch; mock.restoreAll(); });
+      mock.method(console, "error", () => {});
+      let opens = 0;
+      const hung = () => { opens += 1; return new Promise<string>(() => {}); };
+      const file = await within(getAttachmentFile("stall-3", "application/pdf", "plot.pdf", hung, "", LIMITS), 3_000, "a hung open");
+      assert.equal(file, null);
+      await within(getAttachmentFile("stall-3", "application/pdf", "plot.pdf", hung, "", LIMITS), 3_000, "the retry");
+      assert.equal(opens, 2, "the hung open stayed in flight");
+    });
+
+    test("a slow body that keeps moving outlives the idle window", async (t) => {
+      t.after(() => { globalThis.fetch = realFetch; });
+      globalThis.fetch = (async () => {
+        let sent = 0;
+        return new Response(new ReadableStream<Uint8Array>({
+          async pull(controller) {
+            await new Promise((r) => setTimeout(r, 40));
+            controller.enqueue(new Uint8Array(8));
+            if (++sent === 5) controller.close();
+          },
+        }), { status: 200 });
+      }) as typeof fetch;
+      const file = await getAttachmentFile("slow-1", "application/pdf", "plot.pdf", open, "", { ...LIMITS, idleMs: 100 });
+      assert.ok(file, "a download that keeps moving was abandoned for being quiet");
+      assert.equal((await fs.stat(file.path)).size, 40);
+    });
+
+    test("a body past the size cap is refused, and nothing is written", async (t) => {
+      t.after(() => { globalThis.fetch = realFetch; mock.restoreAll(); });
+      const errors: string[] = [];
+      mock.method(console, "error", (...a: unknown[]) => { errors.push(a.map(String).join(" ")); });
+      globalThis.fetch = (async () => resp(200, Buffer.alloc(LIMITS.maxBytes + 1, 1))) as typeof fetch;
+      const file = await getAttachmentFile("big-1", "application/pdf", "plot.pdf", open, "", LIMITS);
+      assert.equal(file, null, "an over-cap attachment must be refused");
+      assert.deepEqual((await fs.readdir(cacheDir)).filter((n) => n.includes("big-1")), [], "an over-cap attachment must leave nothing on disk");
+      assert.match(errors.join("\n"), /"plot\.pdf" \(attachment big-1\): .*larger than/);
+    });
+
+    test("a body exactly at the cap is kept", async (t) => {
+      t.after(() => { globalThis.fetch = realFetch; });
+      globalThis.fetch = (async () => resp(200, Buffer.alloc(LIMITS.maxBytes, 1))) as typeof fetch;
+      const file = await getAttachmentFile("big-2", "application/pdf", "plot.pdf", open, "", LIMITS);
+      assert.ok(file);
+      assert.equal((await fs.stat(file.path)).size, LIMITS.maxBytes);
+    });
   });
 
   test("a file already on disk is served without opening a link or fetching", async (t) => {

@@ -48,6 +48,7 @@
 
 import type { Slot, SlotBoardMeta, SlotLink } from "../types/stage.js";
 import { stripResolvedFields } from "./slot-resolver.js";
+import { withFreshIds } from "./slot-boards.js";
 import { scrub } from "./scrub.js";
 import { DataStore } from "./data-store.js";
 import { announceSlotsSaved } from "./boards-changed.js";
@@ -465,14 +466,14 @@ function copyLayouts(
   if (srcDefaults) {
     defaults = new Map();
     for (const [serviceTypeId, slots] of srcDefaults) {
-      defaults.set(serviceTypeId, slots.map((s) => ({ ...s, id: freshId() })));
+      defaults.set(serviceTypeId, withFreshIds(slots, freshId));
     }
   }
   let overrides: Map<string, SlotsOverride> | null = null;
   if (srcOverrides) {
     overrides = new Map();
     for (const [planId, override] of srcOverrides) {
-      overrides.set(planId, { ...override, slots: override.slots.map((s) => ({ ...s, id: freshId() })) });
+      overrides.set(planId, { ...override, slots: withFreshIds(override.slots, freshId) });
     }
   }
   return { defaults, overrides };

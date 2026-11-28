@@ -21,6 +21,7 @@ import { promisify } from "node:util";
 import { getUserDataPath } from "../app-paths.js";
 import { commitPart, downloadWatchdog, sha256OfFile, streamToPart, type DownloadTimeouts } from "../capped-download.js";
 import { errorMessage } from "../errors.js";
+import { fileExists } from "../file-exists.js";
 import { scrub } from "../scrub.js";
 import { ASSETS, MEDIAMTX_DOWNLOAD_BYTES, MEDIAMTX_VERSION, assetFor, downloadUrlFor, type MediaMtxAsset } from "./mediamtx-pin.js";
 
@@ -54,15 +55,6 @@ async function realExtract(archive: string, destDir: string, member: string): Pr
   await execFileAsync("tar", ["-xf", archive, "-C", destDir, member]);
 }
 
-async function exists(p: string): Promise<boolean> {
-  try {
-    await fsp.access(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** Whether the pinned binary is already extracted on this machine — used for
  *  the "off" status line's own copy (main/types/video.ts's `binaryPresent`):
  *  "never downloaded yet" (show the download-size sentence) needs telling
@@ -81,8 +73,19 @@ export async function relayBinaryPresent(): Promise<boolean> {
 export async function relayArchivePresent(): Promise<boolean> {
   const asset = assetFor();
   if (!asset) return false;
-  return exists(path.join(relayDir(), "downloads", asset.name));
+  try {
+    return await fileExists(path.join(relayDir(), "downloads", asset.name));
+  } catch (err) {
+    // A status read, polled by the Advanced page and read at boot: it must not
+    // throw. ensureBinary looks at the same file and returns the failure as its reason.
+    const why = scrub(errorMessage(err));
+    if (why !== lastArchiveProblem) console.warn(`[video] cannot look for the MediaMTX archive: ${why}`);
+    lastArchiveProblem = why;
+    return false;
+  }
 }
+/** The last archive problem logged, so a polled read says each one once. */
+let lastArchiveProblem: string | null = null;
 
 /** A file with bytes in it that this process may run — not merely a name.
  *  An extract interrupted partway leaves the name with no bytes, and a file
@@ -363,7 +366,7 @@ async function ensureAsset(asset: MediaMtxAsset, downloadsDir: string, opts: Ens
   // binary that lost its mode: removed, and extracted again below.
   await fsp.rm(versionDir, { recursive: true, force: true });
 
-  if (await exists(archivePath)) {
+  if (await fileExists(archivePath)) {
     const got = await sha256OfFile(archivePath);
     if (got !== asset.sha256) {
       // No logging here — this can be reached on every retry (relay-lifecycle.ts

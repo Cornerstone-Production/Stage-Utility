@@ -11,6 +11,7 @@ import * as zlib from "node:zlib";
 import { errorMessage } from "../errors.js";
 import { isRecord } from "../../types/is-record.js";
 import { PcoUrlRefused } from "../pco-path.js";
+import { isCrossOrigin } from "../http-origin.js";
 import { scrub } from "../scrub.js";
 
 /** Everything a route handler needs about the request in flight. */
@@ -105,6 +106,20 @@ export function queryFlag(url: URL, name: string, fallback: boolean): boolean | 
 
 export function error(res: http.ServerResponse, message: string, status = 400, code?: string): void {
   json(res, code ? { error: message, code } : { error: message }, status);
+}
+
+/**
+ * Refuse a browser request that comes from another site: a 403 and a
+ * `[remote-server] rejected cross-origin` line, the same line the mutating-method
+ * gate in remote-server.ts writes for the same refusal. True when it refused, so
+ * the route returns. For a read that answers a live secret, which the gate leaves
+ * open by design for LAN peers.
+ */
+export function refuseCrossOrigin(c: Pick<RouteCtx, "req" | "res" | "method" | "pathname">): boolean {
+  if (!isCrossOrigin(c.req.headers.origin, c.req.headers.host)) return false;
+  console.warn(`[remote-server] rejected cross-origin ${scrub(c.method)} ${scrub(c.pathname)} from ${scrub(c.req.headers.origin)}`);
+  error(c.res, "cross-origin request rejected", 403);
+  return true;
 }
 
 /**

@@ -5,6 +5,7 @@ import * as crypto from "crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
 
+import { MAX_IMAGE_BYTES } from "../types/limits.js";
 import { getUserDataPath } from "./app-paths.js";
 import { downscaleAvatarUrl } from "./avatar-geometry.js";
 import { pruneCacheDir } from "./cache-prune.js";
@@ -15,9 +16,6 @@ import { atomicWrite } from "./write-queue.js";
 // Photos are small; keep ~90 days of them, capped at 250 MB.
 const MAX_AGE_MS = 90 * 24 * 60 * 60 * 1000;
 const MAX_BYTES = 250 * 1024 * 1024;
-
-/** A single photo is an avatar, not a payload. Refuse anything absurd. */
-const MAX_PHOTO_BYTES = 12 * 1024 * 1024;
 
 /**
  * Hosts this proxy will fetch from.
@@ -318,11 +316,11 @@ async function fetchPhoto(photoUrl: string): Promise<Buffer | null> {
       // The body is therefore read incrementally and abandoned the moment it goes
       // over, which is what the guarantee needs to be.
       const declared = Number(response.headers.get("content-length"));
-      if (Number.isFinite(declared) && declared > MAX_PHOTO_BYTES) {
+      if (Number.isFinite(declared) && declared > MAX_IMAGE_BYTES) {
         console.error(`[photo-cache] refused ${scrub(declared)} declared bytes from ${scrub(photoUrl)} (over cap)`);
         return null;
       }
-      const buf = await readCapped(response, MAX_PHOTO_BYTES);
+      const buf = await readCapped(response, MAX_IMAGE_BYTES);
       if (!buf) {
         console.error(`[photo-cache] refused an over-cap body from ${scrub(photoUrl)}`);
         return null;

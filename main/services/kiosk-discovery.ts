@@ -12,6 +12,7 @@
 
 import { DEVICE_OUTPUT_KINDS, type DeviceOutput, type DiscoveryProbe, type DiscoveryReply } from "../types/kiosk.js";
 import { isRecord } from "../types/is-record.js";
+import { sameJson } from "./canonical-json.js";
 
 /** Marks our datagrams so we ignore whatever else is on the port. */
 const MAGIC = "stageUtility";
@@ -75,9 +76,9 @@ function decodeOutput(v: unknown): DeviceOutput | undefined {
   return modes.length > 0 ? { kind, name, port, modes } : { kind, name, port };
 }
 
-/** Do two reports describe the same output? A small plain object, so JSON says. */
+/** Do two reports describe the same output? */
 export function sameOutput(a: DeviceOutput | undefined, b: DeviceOutput | undefined): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+  return sameJson(a, b);
 }
 
 /** Parse a probe, or null when the datagram is not one. Never throws. */

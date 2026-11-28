@@ -13,6 +13,7 @@ import type { SplMetricsDTO } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 import { StatusIntegration } from "./integration-base.js";
 import { ModernSmaartAdapter, type SmaartAdapter, type SmaartInput, type SplReading } from "./smaart-protocol.js";
+import { trailing } from "./timers.js";
 
 /** The one seam: tests drive the connect path without a Smaart. */
 export const smaartDeps: { adapter: (host: string, port: number) => SmaartAdapter } = {
@@ -37,8 +38,8 @@ class SmaartService extends StatusIntegration<SplMetricsDTO> {
   private adapter: SmaartAdapter | null = null;
   private streamClosers: (() => void)[] = [];
 
-  private dirty = false;
-  private throttleTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Coalesces a burst of readings into one broadcast. */
+  private readonly throttle = trailing(BROADCAST_THROTTLE_MS, () => this.publish(this.last, false));
 
   constructor() {
     super("smaart", "spl:metrics", OFFLINE);
@@ -195,14 +196,8 @@ class SmaartService extends StatusIntegration<SplMetricsDTO> {
     }
   }
 
-  // Trailing throttle: coalesce a burst of readings into one broadcast.
   private scheduleBroadcast(): void {
-    this.dirty = true;
-    if (this.throttleTimer) return;
-    this.throttleTimer = setTimeout(() => {
-      this.throttleTimer = null;
-      if (this.dirty) this.publish(this.last, false);
-    }, BROADCAST_THROTTLE_MS);
+    this.throttle.schedule();
   }
 
   /** The base's emit() means "publish now" — which is what goOffline() wants. */
@@ -212,11 +207,7 @@ class SmaartService extends StatusIntegration<SplMetricsDTO> {
 
   private publish(snapshot: SplMetricsDTO, immediate: boolean): void {
     this.last = snapshot; // always kept fresh — the SPL recorder pulls getLatest()
-    this.dirty = false;
-    if (immediate && this.throttleTimer) {
-      clearTimeout(this.throttleTimer);
-      this.throttleTimer = null;
-    }
+    if (immediate) this.throttle.cancel();
     // 4 Hz to nobody is wasted work — skip the push when nothing is consuming SPL.
     // Recording is unaffected (it reads this.last, not the broadcast).
     //

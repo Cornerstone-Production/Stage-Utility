@@ -16,7 +16,7 @@
 //     other body is cancelled unread so the socket is released. The document is public
 //     and is asked for without the token.
 
-import { readCapped } from "./capped-download.js";
+import { SMALL_JSON_ANSWER_BYTES, readCapped } from "./capped-download.js";
 import { fetchFailureMessage, untrustedCertificateCode } from "./errors.js";
 import { isStringList } from "../types/is-record.js";
 import { pinToOrigin } from "./pinned-origin.js";
@@ -43,9 +43,6 @@ const BYTES_PER_EXTRA_SECOND = 100_000;
 
 /** The page's public document, which carries the build id of the page it is. */
 const VIEWER_PATH = "/servicecue";
-
-/** The most a status answer is read for (5,000 documents and images). */
-const MAX_ANSWER_BYTES = 1024 * 1024;
 
 // ── The one fetch ────────────────────────────────────────────────────────────
 
@@ -264,7 +261,7 @@ function parseRemoved(raw: unknown): { docs: string[]; assets: string[] } | unde
 
 /** A response's JSON, or undefined when it is over the cap or not JSON. A body cut off by the ceiling or a stop throws. */
 async function readJson(res: Response): Promise<unknown> {
-  const bytes = await readCapped(res, MAX_ANSWER_BYTES);
+  const bytes = await readCapped(res, SMALL_JSON_ANSWER_BYTES);
   if (!bytes) return undefined;
   try {
     return JSON.parse(bytes.toString("utf8"));
@@ -326,7 +323,7 @@ export function createPushClient(opts: PushClientOptions): PushClient {
         await res.body?.cancel().catch(() => undefined);
         return null;
       }
-      const bytes = await readCapped(res, MAX_ANSWER_BYTES);
+      const bytes = await readCapped(res, SMALL_JSON_ANSWER_BYTES);
       return bytes ? viewerBuildFromHtml(bytes.toString("utf8")) : null;
     } catch {
       return null;

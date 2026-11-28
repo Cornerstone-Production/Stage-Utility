@@ -26,7 +26,7 @@ import { rosstalkStore } from "./rosstalk-store.js";
 import { saveLayoutImageBytes } from "./layout-image-store.js";
 import { isSafeKey } from "./safe-key.js";
 import { isRecord } from "../types/is-record.js";
-import { hasLegacyGridFields, migrateBoards } from "./slot-boards.js";
+import { hasLegacyGridFields, migrateBoards, withFreshIds } from "./slot-boards.js";
 import { walkLayoutObjects } from "./view-refs.js";
 import { isLayoutShape } from "../types/views.js";
 import type { Slot } from "../types/stage.js";
@@ -356,7 +356,7 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
         continue;
       }
       // Fresh slot ids: two boards must never share a slot row identity.
-      defaults.set(landing, rows.map((r) => ({ ...r, id: randomUUID() })));
+      defaults.set(landing, withFreshIds(rows, randomUUID));
     }
     const meta = Object.hasOwn(incomingBoards, oldId) ? incomingBoards[oldId] : undefined;
     const name = freeName(meta?.name ?? "Imported board", boardNames);

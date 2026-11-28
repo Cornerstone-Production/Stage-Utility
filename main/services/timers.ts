@@ -23,3 +23,36 @@ export function cleared(timer: NodeJS.Timeout | null): null {
 export function backoffMs(failures: number, minMs: number, maxMs = Infinity): number {
   return Math.min(maxMs, minMs * 2 ** Math.max(0, failures - 1));
 }
+
+/** A trailing throttle: `schedule()` marks work pending and, if no wait is running,
+ *  starts one; when it ends, `flush` runs once for however many `schedule()` calls
+ *  came in. `cancel()` drops the wait and the pending mark (a caller that publishes
+ *  at once has nothing left to flush). */
+export interface Trailing {
+  /** Marks work pending. Returns true when it started the wait, false when one was already running. */
+  schedule(): boolean;
+  cancel(): void;
+}
+
+/** A burst of readings becomes one `flush` every `ms` at most, carrying the last. */
+export function trailing(ms: number, flush: () => void): Trailing {
+  let timer: NodeJS.Timeout | null = null;
+  let dirty = false;
+  return {
+    schedule(): boolean {
+      dirty = true;
+      if (timer) return false;
+      timer = setTimeout(() => {
+        timer = null;
+        if (!dirty) return;
+        dirty = false;
+        flush();
+      }, ms);
+      return true;
+    },
+    cancel(): void {
+      timer = cleared(timer);
+      dirty = false;
+    },
+  };
+}

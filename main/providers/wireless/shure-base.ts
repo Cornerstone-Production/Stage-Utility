@@ -4,9 +4,9 @@
 // leading `<` / whitespace and trim; tokenise by spaces. Ignore partial/empty.
 
 import * as net from "net";
-import { scrub } from "../../services/scrub.js";
 import type { DeviceChannel, DeviceProvider } from "../../types/devices.js";
 import { DeviceProviderBase, blankChannel, type ChannelState } from "./device-provider-base.js";
+import { scrub } from "../../services/scrub.js";
 
 // Per-channel mutable runtime state.
 export interface ShureConfig {

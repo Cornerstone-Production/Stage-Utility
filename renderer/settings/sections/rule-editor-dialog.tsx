@@ -18,6 +18,7 @@
 // unchanged: the rules list still renders the collapsed row, and the editor is
 // only ever mounted by this dialog, so the two files split along that line.
 
+import { sameJson } from "@main/services/canonical-json";
 import { errorMessage } from "@main/services/errors";
 import { CALL_TRIGGER_ID, calledCueName, encodeAliases, nextAliases, parseAliases } from "@main/services/cue-aliases";
 import {
@@ -1518,7 +1519,7 @@ const roomOf = (params: Record<string, string | number>): string => String(param
 /** One trigger or action, as a rule stores it. */
 type RuleStep = Rule["trigger"];
 
-const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+const same = sameJson;
 
 /**
  * One trigger or action as it should be SAVED, or null when this dialog changed

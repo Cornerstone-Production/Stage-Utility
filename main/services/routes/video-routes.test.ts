@@ -7,6 +7,7 @@ import * as path from "node:path";
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-routes-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 const { callRoute } = await import("./route-harness.js");
+const { captureConsole } = await import("../fixtures/capture-console.js");
 const { videoRoutes } = await import("./video-routes.js");
 
 const EMBED = { name: "Online stream", source: { kind: "embed", player: "youtube-video", ref: "dQw4w9WgXcQ" } };
@@ -226,6 +227,23 @@ test("GET /push refuses a cross-origin browser request with 403; same-origin and
 
     const noOrigin = await callRoute(videoRoutes, `/api/video/feeds/${id}/push`, { headers: {} });
     assert.equal(noOrigin.status, 200);
+  } finally {
+    await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "DELETE" });
+  }
+});
+
+test("a refused cross-origin read of a secret leaves a line on /log, as the mutating gate does", async (t) => {
+  const { id } = await addPushFeedWithSecret("Origin log box");
+  try {
+    const warns = captureConsole(t, "warn");
+    const push = await callRoute(videoRoutes, `/api/video/feeds/${id}/push`, { headers: { origin: "http://evil.example", host: "localhost:8788" } });
+    const exported = await callRoute(videoRoutes, "/api/video/export?passwords=1", { headers: { origin: "http://evil.example", host: "localhost:8788" } });
+    assert.equal(push.status, 403);
+    assert.equal(exported.status, 403);
+    const said = warns.filter((l) => l.startsWith("[remote-server] rejected cross-origin GET "));
+    assert.equal(said.length, 2, warns.join(" | "));
+    assert.match(said[0]!, new RegExp(`/api/video/feeds/${id}/push from http://evil\\.example$`));
+    assert.match(said[1]!, /\/api\/video\/export from http:\/\/evil\.example$/);
   } finally {
     await callRoute(videoRoutes, `/api/video/feeds/${id}`, { method: "DELETE" });
   }
