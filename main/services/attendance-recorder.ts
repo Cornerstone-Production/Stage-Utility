@@ -82,7 +82,11 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
    * first of them when it has none, as its other samples are. Going back to a
    * stopped service, the ramp record's counts return to it the same way.
    */
-  protected override takeAfterStop(from: ServiceAttendance, into: ServiceAttendance, stopIso: string): boolean {
+  protected override isEmptyRecord(record: ServiceAttendance): boolean {
+    return record.samples.length === 0;
+  }
+
+  protected override takeAfterStop(from: ServiceAttendance, into: ServiceAttendance, stopIso: string, back = false): boolean {
     const stopMs = Date.parse(stopIso);
     const moving = from.samples.filter((x) => x.phase === "pre" && Date.parse(x.t) >= stopMs);
     if (moving.length === 0) return false;
@@ -95,9 +99,17 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
     into.samples = [...moving.map((x) => ({ ...x, attendance: Math.max(0, rawOf(x) - base) })), ...into.samples].sort(
       (a, b) => Date.parse(a.t) - Date.parse(b.t),
     );
-    console.log(
-      `[attendance-recorder] ${scrub(moving.length)} arrival count(s) taken after ${scrub(from.serviceKey)} stopped belong to ${scrub(into.serviceKey)}; moved there`,
-    );
+    // Two calls, not one with a ternary: the log-injection scan reads each
+    // call's argument and cannot follow a ternary.
+    if (back) {
+      console.log(
+        `[attendance-recorder] ${scrub(moving.length)} count(s) taken while ${scrub(into.serviceKey)} was stopped went back to it from ${scrub(from.serviceKey)}`,
+      );
+    } else {
+      console.log(
+        `[attendance-recorder] ${scrub(moving.length)} arrival count(s) taken after ${scrub(from.serviceKey)} stopped belong to ${scrub(into.serviceKey)}; moved there`,
+      );
+    }
     return true;
   }
 
