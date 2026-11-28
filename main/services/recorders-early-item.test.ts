@@ -237,6 +237,51 @@ describe("after a service ends, before the next one", () => {
       assert.equal(rec.current?.serviceKey, keyFor("occ-a"), `${name}: the returning airing went to the next service`);
       assert.equal(rec.current?.endedAt, null, `${name}: the record is open again`);
     }
+    // The ramp record it left closes after it opened, not at the 9am's stop.
+    const ramp = await RECORDERS[1]![1].getRecord(keyFor("occ-b"));
+    const opened = (ramp as unknown as { startedAt: string } | null)?.startedAt;
+    assert.ok(ramp?.endedAt && opened && ramp.endedAt >= opened, `the ramp record ends ${ramp?.endedAt} before it opens ${opened}`);
+  });
+
+  it("does not go back to a record deleted in History while it was being looked up", async (t) => {
+    await tick(NINE, "occ-a", "welcome");
+    const songLive = NINE + 2 * MIN;
+    await airs(songLive, NINE + 74 * MIN, rolling, "song");
+    for (let at = NINE + 76 * MIN; at <= NINE + 88 * MIN; at += 2 * MIN) await tickNoItem(at, "occ-b");
+    const { attendanceStore } = await import("./attendance-store.js");
+    const realGet = attendanceStore.get.bind(attendanceStore);
+    let lookups = 0;
+    t.mock.method(attendanceStore, "get", async (key: string) => {
+      // The operator's delete lands during the first read, the go-back lookup.
+      if (key === keyFor("occ-a") && lookups++ === 0) attendanceRecorder.forget(key);
+      return realGet(key);
+    });
+    await tick(NINE + 90 * MIN, "occ-b", "song", { since: songLive });
+
+    assert.notEqual(RECORDERS[1]![1].current?.serviceKey, keyFor("occ-a"), "went back to a record deleted in History");
+  });
+
+  it("splits with the item recorders when the airing that returns is the service's opening item", async () => {
+    // The opener was on air when Planning Center dropped out, and the
+    // occurrence rolled during the drop. The item recorders take the opener
+    // going live in a hold as the next service starting.
+    await airs(NINE, NINE + 58 * MIN, rolling, "welcome");
+    for (let at = NINE + 60 * MIN; at <= NINE + 70 * MIN; at += 2 * MIN) await tickNoItem(at, "occ-b");
+    await tick(NINE + 72 * MIN, "occ-b", "welcome", { since: NINE });
+
+    const where = RECORDERS.map(([name, rec]) => `${name}=${rec.current?.serviceKey}`).join(" ");
+    for (const [, rec] of RECORDERS) assert.equal(rec.current?.serviceKey, keyFor("occ-b"), where);
+  });
+
+  it("splits with the item recorders when the airing returns inside the next service's ten minutes", async () => {
+    await tick(NINE, "occ-a", "welcome");
+    const songLive = NINE + 2 * MIN;
+    await airs(songLive, NINE + 74 * MIN, rolling, "song");
+    for (let at = NINE + 76 * MIN; at <= NINE + 110 * MIN; at += 2 * MIN) await tickNoItem(at, "occ-b");
+    await tick(NINE + 112 * MIN, "occ-b", "song", { since: songLive });
+
+    const where = RECORDERS.map(([name, rec]) => `${name}=${rec.current?.serviceKey}`).join(" ");
+    for (const [, rec] of RECORDERS) assert.equal(rec.current?.serviceKey, keyFor("occ-b"), where);
   });
 
   it("still resumes the closed record after a brief mode drop mid-service", async () => {
