@@ -20,7 +20,7 @@ export async function postArchive<T>(
     res = await fetch(path, { method: "POST", headers, body, signal: AbortSignal.timeout(timeoutMs) });
   } catch (err) {
     if (err instanceof DOMException && err.name === "TimeoutError") {
-      throw new Error(`${failure} The server did not answer in time.`, { cause: err });
+      throw new Error(`${failure} The server did not answer in time; it may still be working, so reload and check before trying again.`, { cause: err });
     }
     throw err;
   }

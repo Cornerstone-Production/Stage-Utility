@@ -15,6 +15,7 @@ import { PatchTable } from "./patch-table";
 import { ExportMenu } from "./patch-export";
 import { RippleSwitch, DEFAULT_RIPPLE, type RippleState } from "./patch-ripple-bar";
 import { SheetTabs } from "./patch-sheet-tabs";
+import { logFailure } from "../../lib/report-failure";
 
 /** The Editing select's value for this week's one-off tweaks. */
 const WEEK = "__week";
@@ -103,6 +104,7 @@ export function PatchSection() {
         // The patch WAS saved (and announced); what failed is the stage plot points following it.
         // The answer carries no file, so read what is stored: the page must not show it as unsaved.
         toast.error(errorMessage(e));
+        logFailure("patch", "update the stage plot points after the patch saved", e);
         try {
           const stored = await invoke<PatchFile>("patch:get");
           setSaved(stored);

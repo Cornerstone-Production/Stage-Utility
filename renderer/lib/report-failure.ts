@@ -8,8 +8,7 @@
 // The ONE reporter: a control that has its own wording keeps its toast and calls
 // logFailure beside it; one that says "Could not ..." calls reportFailure.
 //
-// Nothing the operator typed or was handed goes in `what` or `detail` — ids and
-// key names only, never a value, token or address.
+// `what` and `detail` carry ids and key names, never a token, secret or address.
 
 import { errorMessage } from "@main/services/errors";
 import { toast } from "../components/ui";

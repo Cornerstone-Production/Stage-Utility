@@ -174,7 +174,7 @@ export async function runBaptismRebuild(args: {
       // Not a liveness problem at all — leave the button exactly as it was
       // and say what the server actually refused on.
       toast.error(errorMessage(e));
-      logFailure("baptism", "rebuild: no raw rows to rebuild from", e);
+      logFailure("baptism", "rebuild", e);
       return;
     }
     toast.error(`Rebuild failed: ${errorMessage(e)}`);

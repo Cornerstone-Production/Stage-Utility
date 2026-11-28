@@ -31,7 +31,7 @@ describe("postArchive", () => {
     );
     await assert.rejects(
       postArchive("/api/archive/import", BYTES, { failure: "Import failed.", timeoutMs: 20 }),
-      /Import failed\. The server did not answer in time\./,
+      /Import failed\. The server did not answer in time/,
     );
   });
 

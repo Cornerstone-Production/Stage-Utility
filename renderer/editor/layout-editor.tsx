@@ -103,6 +103,7 @@ import { rectForDrop, localiseToParent, defaultSizeFor, nestedGeometry } from ".
 import { rectFrom } from "./draw-to-create";
 import { ShapePreview, PREVIEW_SHAPES, type PreviewShape } from "./preview-shape";
 import { AlignmentGuides } from "./alignment-guides";
+import { logFailure } from "../lib/report-failure";
 
 /** How close an edge must come before it snaps, in rendered pixels. Small enough
  *  that deliberate placement is never fought, large enough to catch a hand. */
@@ -2037,6 +2038,7 @@ export function LayoutEditor({
       after();
     } catch (err) {
       toast.error(errorMessage(err));
+      logFailure("layout-editor", "save the layout", err);
     }
   }
 

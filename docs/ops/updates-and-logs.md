@@ -221,11 +221,11 @@ message)` (or the `useFailedReads` hook that wraps it), and the line reaches
 subsystem's own bookkeeping — nothing an operator would search for — is marked
 as such rather than given a doc link it doesn't need.
 
-Every failure the app toasts for a caught error (a save refused, a toggle that
+Most failures the app toasts for a caught error (a save refused, a toggle that
 did not take, a copy that did not copy) also writes a line, through one helper
 (`reportFailure` for a toast and a line, `logFailure` beside a toast with its own
 wording), so the toast that was gone in four seconds is still on `/log`. The line
-names the action and the reason, and never a value the operator typed or a token.
+names the action and the reason, with an id where there is one, and never a token or secret. The Advanced and Service history pages, mic slots and the integration dialogs do not all write one yet.
 
 A `BUG:` line is the app reporting a mistake in its own code, not in your setup:
 the request still went to the right place, and the line names only origins, never
@@ -249,7 +249,7 @@ a path or a credential. If you see one, report it.
 | `[baptism-replay]` | A data-archive rebuild skipping baptism rows it could not place, and why: [Baptisms are merged, never replaced](../data-archive.md#baptisms-are-merged-never-replaced) |
 | `[baptism-timer]` | The live timer's own persistence: debounced save failures, a save that failed at shutdown, a dismissed save-failure notice |
 | `[bar-config]` | The context bar's one-time migration splitting service type out of a plan item, on the one start that needed it: [The context bar](../features/context-bar.md) |
-| `[branding]` | A logo or avatar image failing to externalize to `branding-images/`; the custom tab and home-screen icon being set or removed, a custom icon whose stored file cannot be read, so the built-in one is served (once per file), and, from the browser, the Branding page failing to draw an icon or to open an image in the crop editor, and the tab failing to draw itself from the icon's art (or to recolor the logo), so the built-in icon or the plain logo shows: [Branding](../features/operator-app.md#branding) |
+| `[branding]` | A logo or avatar image failing to externalize to `branding-images/`; the custom tab and home-screen icon being set or removed, a custom icon whose stored file cannot be read, so the built-in one is served (once per file), and, from the browser, the Branding page failing to draw an icon or to open an image in the crop editor, and the tab failing to draw itself from the icon's art (or to recolor the logo), so the built-in icon or the plain logo shows: [Branding](../features/operator-app.md#branding); and a branding write the server refused |
 | `[broadcaster]` | A subscriber's own callback throwing while handling a broadcast — internal plumbing, not an operator signal |
 | `[cache-maintenance]` | The daily disk-cache prune (photos, attachments, layout images, the Mac output helper's cached zips) failing outright: [Under load](reliability.md#under-load) |
 | `[calendar]` | The pushed month-grid view folding or failing a refresh: [Calendar](../integrations/planning-center.md#calendar); browser-side, a calendar picker unable to read its sources or save what a calendar shows |
@@ -313,7 +313,7 @@ a path or a credential. If you see one, report it.
 | `[security]` | The host-name check: refusal on or off at start-up and when switched, and `host-names.json` unreadable (refusal then off until it reads); a name not on the list the first time it is answered (the request and the address it came from); a name's first refusal, then one line an hour with how many more, and a `Host` that is not a name refused the same way; the seen list reaching its 50-name cap and the name it forgot (these three share five lines a minute, and the rest are counted on one line); refusal turned on with how many names were kept and how many left out, and each name added to or taken off the list by that confirmation; event streams closed because their name is now refused; a name added, accepted, removed or dismissed by the operator; the seen list failing to save (it is retried each minute): [SECURITY.md](../../SECURITY.md) |
 | `[sennheiser:<id>]` | A Sennheiser wireless connection's protocol trace, only under `SENNHEISER_DEBUG`: [Wireless](../integrations/wireless.md) |
 | `[sensource]` | Poll cadence for occupancy and SafeSpace, and an idle consumer waking the poller. Also `BUG: a request URL for <origin> was sent to <origin> instead`, written when a token or API request had to be moved back onto SenSource's own host: [SenSource](../integrations/sensource.md); browser-side, a scope or SafeSpace change that could not be saved |
-| `[server]` | Process-level boot and shutdown: the data directory in use, unhandled rejections, and uncaught exceptions |
+| `[server]` | Process-level boot and shutdown: the data directory in use, unhandled rejections, and uncaught exceptions; browser-side, a server id that could not be regenerated |
 | `[settings]` | Browser-side: a Settings write refused or failed: a rename, a layout save, a view or display change, a color or caption setting, an update check or start, a refresh, with the action and the reason |
 | `[service-recorder]` | The shared logic all three service recordings share: whether a live-service boundary was held or split, and why, and an item already on air before a record opened not taken as its opening item: [Back-to-back services on one plan](../features/attendance-and-history.md#back-to-back-services-on-one-plan) |
 | `[service-timeline]` | The recorded rundown timing: items going live again, and pacing reset by an operator: [What gets recorded](../features/attendance-and-history.md#what-gets-recorded). The timing records' own files, as for `[attendance-history]`: [When a recorded file cannot be read](reliability.md#when-a-recorded-file-cannot-be-read) |
@@ -324,7 +324,7 @@ a path or a credential. If you see one, report it.
 | `[servicecue-layouts]` | A one-time migration of saved columns from category names to roles: [Category roles](../features/servicecue-and-baptisms.md#category-roles) |
 | `[shure:<id>]` | A Shure wireless or charger connection's init and per-channel state: [Wireless](../integrations/wireless.md) |
 | `[sidebar]` | The sidebar's arrangement: a save refused, with the reason; ids it names that this server no longer has (a page a release removed, a console deleted), left out and said once until the next save; and a `sidebar-config.json` that breaks the rules at start-up, copied aside as `sidebar-config.json.invalid-<time>` and drawn from what in it can be read: [Customizing the sidebar](../features/operator-app.md#customizing-the-sidebar) |
-| `[slots]` | Plan-to-service-type checks and override pruning: [Switching plans in the editor](../slots.md#switching-plans-in-the-editor) |
+| `[slots]` | Plan-to-service-type checks and override pruning: [Switching plans in the editor](../slots.md#switching-plans-in-the-editor); browser-side, a board that could not be created |
 | `[slots-store]` | `slots.json` migrations: the move onto named boards with its counts, each pair of identical boards merged, each unused board kept, each pointer at a board that does not exist set to none, a merge an interrupted start recorded and the next one finished or kept, and a write that could not be saved (which file, and that the next start finishes it): [Slots](../reference/data-model.md#slots) |
 | `[slug-migration]` | A display renamed off a URL now reserved by `/log` or `/logs`: [Friendly URLs](../display-urls.md#friendly-urls) |
 | `[smaart]` | Connection state to a Smaart measurement server: [Smaart](../integrations/smaart.md) |

@@ -119,7 +119,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
       onUpdate(next);
     } catch (err) {
       toast.error(`Failed to rename: ${errorMessage(err)}`);
-      logFailure("wireless", "rename", err);
+      logFailure("wireless", "rename", err, conn.id);
       setLocalName(conn.name);
     }
   }
@@ -138,7 +138,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
       if (dropped) toast.info(dropped);
     } catch (err) {
       toast.error(`Failed to change provider: ${errorMessage(err)}`);
-      logFailure("wireless", "change provider", err);
+      logFailure("wireless", "change provider", err, conn.id);
     }
   }
 
@@ -164,7 +164,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
       if (dropped) toast.info(dropped);
     } catch (err) {
       toast.error(`Failed to save: ${errorMessage(err)}`);
-      logFailure("wireless", "save", err);
+      logFailure("wireless", "save a setting", err, `${conn.id} ${key}`);
     }
   }
 
@@ -187,7 +187,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
       onUpdate(next);
     } catch (err) {
       toast.error(`Failed to save: ${errorMessage(err)}`);
-      logFailure("wireless", "save", err);
+      logFailure("wireless", "save a setting", err, `${conn.id} ${key}`);
     }
   }
 
@@ -200,7 +200,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
       onUpdate(next);
     } catch (err) {
       toast.error(`Failed to ${enabled ? "enable" : "disable"}: ${errorMessage(err)}`);
-      logFailure("wireless", enabled ? "enable" : "disable", err);
+      logFailure("wireless", enabled ? "enable" : "disable", err, conn.id);
     }
   }
 
@@ -214,6 +214,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
       setTestResult(result);
     } catch (err) {
       setTestResult({ ok: false, message: errorMessage(err) });
+      logFailure("wireless", "test the connection", err, conn.id);
     } finally {
       setIsTesting(false);
     }
@@ -226,7 +227,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
       onRemove(next);
     } catch (err) {
       toast.error(`Failed to remove: ${errorMessage(err)}`);
-      logFailure("wireless", "remove", err);
+      logFailure("wireless", "remove", err, conn.id);
       setIsRemoving(false);
     }
   }

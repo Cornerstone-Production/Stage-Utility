@@ -216,7 +216,7 @@ export function useStageSettings(pinnedViewId?: string) {
       toast.success("Refreshed from Planning Center.");
     } catch (err) {
       toast.error(`Refresh failed: ${errorMessage(err)}`);
-      logFailure("settings", "refresh", err);
+      logFailure("settings", "refresh from Planning Center", err);
     } finally {
       setIsRefreshing(false);
     }

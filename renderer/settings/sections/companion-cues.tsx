@@ -1267,6 +1267,7 @@ export function CueAccessCard() {
       });
     } catch (e) {
       toast.error(errorMessage(e));
+      logFailure("companion", "build the Home Assistant config", e);
     }
   }
 

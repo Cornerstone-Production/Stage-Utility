@@ -33,6 +33,7 @@ import {
   toast,
 } from "../../components/ui";
 import type { StoredMilestone } from "./history-trends/trends";
+import { logFailure } from "../../lib/report-failure";
 
 /** Every service type that has ever recorded, for the optional scope picker. */
 function useServiceTypes(): { types: { id: string; name: string }[]; unread: boolean } {
@@ -107,6 +108,7 @@ export function HistoryMilestonesPanel() {
       setTypeId(EVERY_TYPE);
     } catch (e) {
       toast.error(`Couldn't save that milestone: ${errorMessage(e)}`);
+      logFailure("history", "save that milestone", e);
     } finally {
       setSaving(false);
     }
@@ -124,6 +126,7 @@ export function HistoryMilestonesPanel() {
       clear("list");
     } catch (e) {
       toast.error(`Couldn't delete that milestone: ${errorMessage(e)}`);
+      logFailure("history", "delete that milestone", e);
     }
   }
 

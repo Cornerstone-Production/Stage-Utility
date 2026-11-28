@@ -51,7 +51,7 @@ export function BaptismTriggersPanel() {
       await invoke("settings:setBaptismAutoStart", partial);
     } catch (err) {
       toast.error(`Couldn't save: ${errorMessage(err)}`);
-      logFailure("baptism", "save the triggers", err);
+      logFailure("baptism", "save the auto-start setting", err);
     }
   }
 
