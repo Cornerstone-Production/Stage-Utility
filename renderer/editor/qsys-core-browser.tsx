@@ -17,7 +17,7 @@
 import { useEffect, useState } from "react";
 import { ChevronLeftIcon, XIcon } from "lucide-react";
 
-import { choicesOf, isMeterComponent, isMeterControl, isSelectorButton, isWritable, kindOf, type QsysBinding } from "@main/types/qsys";
+import { choicesOf, isMeterComponent, isReadOnlyDirection, isMeterControl, isSelectorButton, isWritable, kindOf, type QsysBinding } from "@main/types/qsys";
 import { rangeOf } from "@main/types/qsys-taper";
 import { Button, Input } from "../components/ui";
 import { invoke, type ApiError } from "../lib/api";
@@ -28,9 +28,10 @@ import { logReadFailure } from "../lib/client-log";
  * What an object wants to bind: a level, an on/off, a button, a choice list, a
  * meter, or text. `press` is a selector's button: a trigger, or an on/off control
  * (a selector plugin's `Button N` is a Boolean, on for the chosen one), both
- * written true on a press.
+ * written true on a press. `any` is the allowlist's own picker: every control the
+ * Core does not report read-only, whatever its kind.
  */
-export type QsysBrowseKind = "gain" | "boolean" | "trigger" | "press" | "choice" | "meter" | "string";
+export type QsysBrowseKind = "any" | "gain" | "boolean" | "trigger" | "press" | "choice" | "meter" | "string";
 
 interface CatalogControl {
   Name: string;
@@ -65,6 +66,8 @@ const hasChoices = (c: CatalogControl) => choicesOf(c) !== null;
 /** Whether a control is the kind of thing an object of `kind` binds to. Writability is separate. */
 export function fitsKind(kind: QsysBrowseKind, componentType: string, c: CatalogControl): boolean {
   switch (kind) {
+    case "any":
+      return !isReadOnlyDirection(c.Direction);
     case "meter":
       return isMeterControl(componentType, { Name: c.Name, Type: String(c.Type ?? "") });
     case "gain":
@@ -178,19 +181,25 @@ export function QsysCoreBrowser({
   label = "Control",
   placeholder = "Choose control",
   clearable = true,
+  disabled = false,
+  exclude,
 }: {
   kind: QsysBrowseKind;
   /** The object WRITES this control: only allowlisted, writable ones are offered. */
   writable: boolean;
   value: QsysBinding | null;
   /** `legend`: the name the Core draws on the chosen control, when it reported one. */
-  onChange: (b: QsysBinding | null, legend?: string) => void;
+  onChange: (b: QsysBinding | null, legend?: string, control?: CatalogControl) => void;
   /** What this binding is called in the inspector ("Fader control", "On trigger"). */
   label?: string;
   /** What the button says while nothing is bound. */
   placeholder?: string;
   /** False where the binding is required (a preset's control): choose another instead. */
   clearable?: boolean;
+  /** The button does nothing (a reason is the caller's to give). */
+  disabled?: boolean;
+  /** Controls not offered, by allowKey(component, control): ones already taken. */
+  exclude?: ReadonlySet<string>;
 }) {
   const [open, setOpen] = useState(false);
   /** Bumped on each open: a fresh read each time, since the design may have been redeployed. */
@@ -205,6 +214,7 @@ export function QsysCoreBrowser({
       : comp.controls
           .filter((c) => {
             if (!fitsKind(kind, comp.type, c)) return false;
+            if (exclude?.has(keyOf(comp.name, c.Name))) return false;
             if (!writable) return true;
             const entry = load.allow?.get(keyOf(comp.name, c.Name));
             // A choice list is written with one of its choices, which bound it in place of a range.
@@ -213,7 +223,7 @@ export function QsysCoreBrowser({
           .sort(natural);
 
   const pick = (comp: string, c: CatalogControl) => {
-    onChange({ component: comp, control: c.Name }, legendOf(c) ?? undefined);
+    onChange({ component: comp, control: c.Name }, legendOf(c) ?? undefined, c);
     setOpen(false);
     setQuery("");
     setComponent(null);
@@ -261,6 +271,7 @@ export function QsysCoreBrowser({
           variant="filled"
           aria-label={label}
           aria-expanded={open}
+          disabled={disabled}
           className="min-w-0 flex-1 justify-start"
           onClick={() => {
             setOpened((n) => n + 1);

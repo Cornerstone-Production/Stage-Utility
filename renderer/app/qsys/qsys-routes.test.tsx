@@ -87,6 +87,9 @@ interface Server {
   patches: { url: string; body: Record<string, unknown> }[];
   patchAnswer: { status: number; body: unknown };
   puts: Record<string, unknown>[];
+  /** Imports sent, and how the next one is answered. */
+  imports: Record<string, unknown>[];
+  importAnswer: { status: number; body: unknown } | null;
   posts: Record<string, unknown>[];
   allow: { entries: unknown[]; invalid: string | null; rev: string };
   repairs: unknown[];
@@ -112,6 +115,8 @@ function freshServer(): Server {
     patches: [],
     patchAnswer: { status: 200, body: {} },
     puts: [],
+    imports: [],
+    importAnswer: null,
     posts: [],
     allow: structuredClone(ALLOW),
     repairs: [],
@@ -142,6 +147,8 @@ const CATALOG = {
         // A measured range (-100..+10) and one with no measured taper (-100..+20).
         { Name: "output.1.gain", Type: "Float", ValueMin: -100, ValueMax: 10 },
         { Name: "output.2.gain", Type: "Float", ValueMin: -100, ValueMax: 20 },
+        // Read-only: never a control a panel could write, so never offered for the allowlist.
+        { Name: "peak", Type: "Float", Direction: "Read", ValueMin: -100, ValueMax: 20 },
       ],
     },
   ],
@@ -173,6 +180,14 @@ const f = stubFetchWithLog((url, init) => {
     server.puts.push(body);
     server.allow = { entries: body.entries, invalid: null, rev: `r${server.puts.length + 1}` };
     return ok({ entries: body.entries, rev: server.allow.rev });
+  }
+  if (url === "/api/qsys/allowlist/export") return ok({ format: "stage-utility-qsys-allowlist", version: 1, entries: server.allow.entries });
+  if (url === "/api/qsys/allowlist/import") {
+    server.imports.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+    if (server.importAnswer) return reply(server.importAnswer.status, server.importAnswer.body);
+    const entries = (server.imports.at(-1)!.entries ?? []) as unknown[];
+    server.allow = { entries, invalid: null, rev: "imported" };
+    return ok({ entries, rev: "imported" });
   }
   if (url === "/api/qsys/allowlist") return ok(server.allow);
   if (url === "/api/qsys/pin" && init?.method === "PUT") {
@@ -753,6 +768,113 @@ describe("/qsys/manage", () => {
     await wait(40);
     assert.deepEqual((server.puts.at(-1)!.entries as { control: string }[]).map((e) => e.control), ["gain"]);
     assert.equal(rows().length, 1);
+  });
+
+  test("Add a control picks from the Core's writable controls, lands as an unsaved row at the Core's range, and saves", async () => {
+    await open("/qsys/manage");
+    await wait(60);
+    const opener = () => screen.getByRole("button", { name: "Add a control" }) as HTMLButtonElement;
+    assert.equal(opener().disabled, false);
+    act(() => {
+      fireEvent.click(opener());
+    });
+    await wait(40);
+    act(() => {
+      fireEvent.click(document.querySelector(`[data-qsys-component="${MIX}"]`)!);
+    });
+    await wait(10);
+    const offered = [...document.querySelectorAll("[data-qsys-browser] [data-qsys-control]")].map((b) => (b as HTMLElement).dataset.qsysControl);
+    // gain and mute are on the list already; peak is read-only. output.1.gain is bound by no panel.
+    assert.deepEqual(offered, ["meter", "output.1.gain", "output.2.gain"]);
+    act(() => {
+      fireEvent.click(document.querySelector('[data-qsys-control="output.1.gain"]')!);
+    });
+    await wait(10);
+    assert.equal(server.puts.length, 0, "adding saved straight away");
+    assert.ok(screen.getByText("Save the allowlist"), "the add is an unsaved edit");
+    act(() => {
+      fireEvent.click(screen.getByText("Save the allowlist"));
+    });
+    await wait(40);
+    assert.deepEqual(server.puts.at(-1)!.entries, [
+      { component: MIX, control: "gain", label: "", min: -100, max: 20, confirm: "none" },
+      { component: MIX, control: "mute", label: "", min: null, max: null, confirm: "none" },
+      { component: MIX, control: "output.1.gain", label: "output.1.gain", min: -100, max: 10, confirm: "none" },
+    ]);
+    // Now on the list, it is not offered again.
+    act(() => {
+      fireEvent.click(opener());
+    });
+    await wait(40);
+    act(() => {
+      fireEvent.click(document.querySelector(`[data-qsys-component="${MIX}"]`)!);
+    });
+    await wait(10);
+    assert.equal(document.querySelector('[data-qsys-browser] [data-qsys-control="output.1.gain"]'), null);
+  });
+
+  test("Add a control is off, with its reason, while the Core is not connected", async () => {
+    server.status = { connected: false, state: "reconnecting", configured: true, designName: null, isEmulator: null };
+    await open("/qsys/manage");
+    await wait(60);
+    assert.equal((screen.getByRole("button", { name: "Add a control" }) as HTMLButtonElement).disabled, true);
+    assert.match(document.body.textContent ?? "", /Adding a control needs the Core connected/);
+  });
+
+  test("Export downloads the allowlist file; Import sends a file once confirmed and shows the server's answer", async () => {
+    render(React.createElement(ConfirmHost));
+    const saved: Blob[] = [];
+    const urlApi = URL as unknown as { createObjectURL?: (b: Blob) => string; revokeObjectURL?: (u: string) => void };
+    const before = { c: urlApi.createObjectURL, r: urlApi.revokeObjectURL };
+    urlApi.createObjectURL = (b) => (saved.push(b), "#blob");
+    urlApi.revokeObjectURL = () => {};
+    try {
+      await open("/qsys/manage");
+      await wait(60);
+      act(() => {
+        fireEvent.click(screen.getByText("Export"));
+      });
+      await wait(40);
+      const file = JSON.parse(await saved[0]!.text()) as { format: string; entries: unknown[] };
+      assert.equal(file.format, "stage-utility-qsys-allowlist");
+      assert.equal(file.entries.length, 2);
+    } finally {
+      urlApi.createObjectURL = before.c;
+      urlApi.revokeObjectURL = before.r;
+    }
+    const pick = (text: string) => {
+      const input = screen.getByLabelText("Allowlist file to import") as HTMLInputElement;
+      act(() => {
+        fireEvent.change(input, { target: { files: [new File([text], "list.json", { type: "application/json" })] } });
+      });
+    };
+    const body = { format: "stage-utility-qsys-allowlist", version: 1, entries: [{ component: MIX, control: "meter", label: "m", min: -100, max: 20, confirm: "none" }] };
+    pick(JSON.stringify(body));
+    await wait(40);
+    assert.equal(server.imports.length, 0, "it imported without asking");
+    act(() => {
+      fireEvent.click(screen.getByText("Replace the list"));
+    });
+    await wait(60);
+    assert.deepEqual(server.imports.at(-1), { ...body, rev: "r1" });
+    assert.match(document.body.textContent ?? "", /Imported 1 control\./);
+    assert.match(document.querySelector("[data-qsys-allowlist]")?.textContent ?? "", /Lobby_Mixer meter/);
+    // A refusal is shown as the server said it, and the list stays.
+    server.importAnswer = { status: 400, body: { error: "this is not a Q-SYS allowlist file" } };
+    pick(JSON.stringify({ nope: true }));
+    await wait(40);
+    act(() => {
+      fireEvent.click(screen.getByText("Replace the list"));
+    });
+    await wait(60);
+    assert.match(screen.getByRole("alert").textContent ?? "", /Nothing was imported: .*not a Q-SYS allowlist file/);
+    assert.match(document.querySelector("[data-qsys-allowlist]")?.textContent ?? "", /Lobby_Mixer meter/);
+    // A file that is not JSON never reaches the server.
+    const sent = server.imports.length;
+    pick("{ not json");
+    await wait(40);
+    assert.equal(server.imports.length, sent);
+    assert.match(screen.getByRole("alert").textContent ?? "", /not JSON/);
   });
 
   test("a panel's settings save its kind and address and keep its siblings and return time", async () => {

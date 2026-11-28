@@ -10,7 +10,7 @@
 // Every read here can fail on its own; each says so where its section is, and
 // on /log, rather than leaving a section that looks empty and clean.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "@tanstack/react-router";
 
 import {
@@ -42,6 +42,8 @@ import { invoke } from "../../lib/api";
 import { logReadFailure, logToServer } from "../../lib/client-log";
 import { useRead, type ReadState } from "../../lib/use-read";
 import { canEditInPlace } from "../../editor/can-edit";
+import { QsysCoreBrowser, allowKey } from "../../editor/qsys-core-browser";
+import { downloadJson } from "../mic-slots/download";
 import { AppLink } from "../app-link";
 import { cn } from "../../lib/cn";
 import { ConsoleEditor, InPlaceEditFrame } from "../console-route";
@@ -709,6 +711,8 @@ function AllowlistSection({
   const saved = current?.entries ?? [];
   const entries = draft?.entries ?? saved;
   const dirty = draft !== null;
+  const importInput = useRef<HTMLInputElement>(null);
+  const onList = useMemo(() => new Set(entries.map((e) => allowKey(e.component, e.control))), [entries]);
 
   const editTo = (next: AllowEntry[]) => setDraft({ entries: next, base: draft?.base ?? { entries: saved, rev: current?.rev ?? "" } });
   const edit = (i: number, change: Partial<AllowEntry>) => editTo(entries.map((e, j) => (j === i ? { ...e, ...change } : e)));
@@ -781,6 +785,53 @@ function AllowlistSection({
     }
   }
 
+  /** One control picked from the Core: an unsaved row at the Core's own range, to tighten before saving. */
+  function addControl(b: { component: string; control: string } | null, _legend?: string, c?: { ValueMin?: number; ValueMax?: number }) {
+    if (!b) return;
+    const ranged = Number.isFinite(c?.ValueMin) && Number.isFinite(c?.ValueMax) && c!.ValueMin! <= c!.ValueMax!;
+    editTo([...entries, { component: b.component, control: b.control, label: b.control, min: ranged ? c!.ValueMin! : null, max: ranged ? c!.ValueMax! : null, confirm: "none" }]);
+    setMessage(null);
+  }
+
+  async function exportList() {
+    setMessage(null);
+    try {
+      downloadJson("qsys-allowlist.json", await invoke("qsys:exportAllowlist"));
+    } catch (err) {
+      logToServer("qsys", `exporting the allowlist failed: ${errorMessage(err)}`);
+      setMessage({ tone: "error", text: `Couldn't export the allowlist: ${errorMessage(err)}` });
+    }
+  }
+
+  async function importFile(file: File) {
+    setMessage(null);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await file.text());
+    } catch (err) {
+      logToServer("qsys", `an allowlist import was refused: the file is not JSON (${errorMessage(err)})`);
+      setMessage({ tone: "error", text: "That file is not JSON, so nothing was imported." });
+      return;
+    }
+    const ok = await confirm({
+      title: "Replace the allowlist?",
+      message: "The list on this server is replaced by the file's. A control that is not in the file is no longer writable by any panel.",
+      confirmLabel: "Replace the list",
+    });
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const r = await invoke<{ entries: AllowEntry[]; rev: string }>("qsys:importAllowlist", { file: parsed, rev: current?.rev || undefined });
+      took(r);
+      setMessage({ tone: "ok", text: `Imported ${r.entries.length} control${r.entries.length === 1 ? "" : "s"}.` });
+    } catch (err) {
+      logToServer("qsys", `an allowlist import was refused: ${errorMessage(err)}`);
+      setMessage({ tone: "error", text: `Nothing was imported: ${errorMessage(err)}` });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function addPanel(p: View) {
     setBusy(true);
     setMessage(null);
@@ -811,6 +862,30 @@ function AllowlistSection({
           </Button>
         </div>
       )}
+      <div className="flex flex-wrap items-center gap-2" data-qsys-allowlist-actions>
+        <div className="w-56" data-qsys-add-control>
+          <QsysCoreBrowser kind="any" writable={false} value={null} onChange={addControl} label="Add a control" placeholder="Add a control" clearable={false} disabled={busy || !connected} exclude={onList} />
+        </div>
+        <Button size="small" variant="transparent" disabled={busy} onClick={() => void exportList()}>
+          Export
+        </Button>
+        <Button size="small" variant="transparent" disabled={busy || dirty} onClick={() => importInput.current?.click()}>
+          Import
+        </Button>
+        <input
+          ref={importInput}
+          type="file"
+          accept="application/json,.json"
+          aria-label="Allowlist file to import"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            if (file) void importFile(file);
+          }}
+        />
+      </div>
+      {!connected && <p className="text-caption1 text-fg-muted">Adding a control needs the Core connected: the controls and their ranges come from it.</p>}
       {panels.length > 0 && (
         <div className="flex flex-wrap gap-2" data-qsys-add-panel>
           {panels.map((p) => (
@@ -821,7 +896,7 @@ function AllowlistSection({
         </div>
       )}
       {panels.length > 0 && !connected && <p className="text-caption1 text-fg-muted">Adding a panel's controls needs the Core connected: their limits come from it.</p>}
-      {dirty && <p className="text-caption1 text-fg-muted">Save or discard your edits before adding a panel's controls.</p>}
+      {dirty && <p className="text-caption1 text-fg-muted">Save or discard your edits before adding a panel's controls or importing a file.</p>}
       {current && entries.length === 0 && <p className="text-footnote text-fg-muted">Nothing is on the list, so no panel can change anything.</p>}
       {entries.length > 0 && (
         <div className="overflow-x-auto rounded-xl border border-line bg-surface">
