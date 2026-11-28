@@ -23,6 +23,7 @@ import type { PlotDraft, PlotItem } from "@main/types/stageplots";
 import type { ApiError } from "../../lib/api";
 import { logToServer } from "../../lib/client-log";
 import { useLatestRef } from "../../lib/use-latest-ref";
+import { nextRetryDelay } from "../../lib/retry-delay";
 import { sameItems } from "./editor-state";
 import { stageplotsApi } from "./stageplots-api";
 
@@ -155,7 +156,7 @@ export function useDraftKeeper({
           failing.current = true;
           logToServer("stageplots", `could not keep the unsaved draft of plot ${forPlot} (${reason}); trying again`);
         }
-        retryMs.current = Math.min(RETRY_MAX_MS, retryMs.current === 0 ? RETRY_FIRST_MS : retryMs.current * 2);
+        retryMs.current = nextRetryDelay(retryMs.current, RETRY_FIRST_MS, RETRY_MAX_MS);
         hold();
         // Not once the editor is gone: its last chance was the keepalive on pagehide.
         if (!gone.current) timer.current = setTimeout(() => void store(forPlot), retryMs.current);

@@ -17,6 +17,7 @@ import { STAGEPLOT_DRAFTS_CHANNEL, type PlotDraft, type PlotDraftNotes } from "@
 
 import { onNotification } from "../../lib/api";
 import { logReadFailure } from "../../lib/client-log";
+import { nextRetryDelay } from "../../lib/retry-delay";
 import { stageplotsApi } from "./stageplots-api";
 
 /** A failed re-read is made again after this, doubling up to DRAFTS_RETRY_MAX_MS. */
@@ -72,7 +73,7 @@ export function usePlotDrafts(): PlotDraftsState {
           // The first read's failure is the page's to show (it waits for it). A later one would
           // leave the held drafts behind the server's: read again until it reads.
           if (held.current === null || gone.current || retry.current) return;
-          retryMs.current = Math.min(DRAFTS_RETRY_MAX_MS, retryMs.current === 0 ? DRAFTS_RETRY_FIRST_MS : retryMs.current * 2);
+          retryMs.current = nextRetryDelay(retryMs.current, DRAFTS_RETRY_FIRST_MS, DRAFTS_RETRY_MAX_MS);
           retry.current = setTimeout(() => {
             retry.current = null;
             void attempt();
