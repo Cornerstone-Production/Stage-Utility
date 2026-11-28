@@ -29,20 +29,16 @@ export function isStamped(name: string): boolean {
   return MARKERS.has(name);
 }
 
-/** A hostname, an IPv4 address or a bracketed IPv6 address, then an optional port.
- *  Nothing a shell reads as syntax can match. */
-const HOST_RE = /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*|\[[0-9A-Fa-f:.]{2,45}\])(?::\d{1,5})?$/;
-
-/** `http://host:port` for a Host header, or null when the header is not one. */
-export function originFromHost(host: string | undefined, secure: boolean): string | null {
-  if (!host || host.length > 255 || !HOST_RE.test(host)) return null;
-  return `${secure ? "https" : "http"}://${host}`;
-}
+// The Host header rule lives in http-origin.ts, shared with the History export
+// and the Home Assistant YAML. Re-exported only because kiosk-device-routes.ts
+// imports it from here: point that import at http-origin.js and delete this
+// line the next time that file is edited.
+export { originFromHost } from "./http-origin.js";
 
 /** The installer with its origin filled in. Throws when the marker is missing:
  *  that is a change to the script this module has not been taught, and a silent
  *  pass-through would ship an installer that cannot download. Both installers'
- *  quotes hold the address safely: HOST_RE admits no quote of either kind. */
+ *  quotes hold the address safely: originFromHost admits no quote of either kind. */
 export function stampOrigin(script: string, origin: string | null, name: string): string {
   const m = MARKERS.get(name);
   if (!m) throw new Error(`${name} is not an installer the server stamps`);

@@ -55,6 +55,7 @@ import { runCompanionReconcile } from "../companion-reconcile.js";
 import { bearerOf, cueTokens, isSameOriginBrowser, refusalReason } from "../cue-tokens.js";
 import { CALL_TRIGGER_ID } from "../automation-triggers.js";
 import { homeAssistantYaml } from "../home-assistant-yaml.js";
+import { originFromHost } from "../http-origin.js";
 import { attachmentDisposition } from "../export-filename.js";
 import { cueStates, cueStatesBody } from "../cue-states.js";
 import { cueManifest } from "../cue-manifest.js";
@@ -103,13 +104,25 @@ async function requireCaller(
 }
 
 
+/** Where the YAML points when neither the LAN address nor the Host header gives one. */
+const FALLBACK_BASE_URL = "http://localhost:8788";
+
 /** Where Home Assistant should send its calls. A LAN IP, never a name. */
 function baseUrlFor(c: RouteCtx): string {
   const lan = stageController.getState().lanUrl;
   if (lan) return lan;
   // Falls back to whatever the caller reached us on, which at worst is the same
-  // address they already typed.
-  return `http://${c.req.headers.host ?? "localhost:8788"}`;
+  // address they already typed. The header is the client's, so it is held to
+  // the same rule as the installer stamp and the History export.
+  const host = c.req.headers.host;
+  const origin = originFromHost(host, false);
+  if (origin) return origin;
+  if (host) {
+    // Not the header itself: it is what was just refused. The address is
+    // written out rather than interpolated, so the line holds no value at all.
+    console.warn("[cues] the Home Assistant YAML was asked for with a Host header that is not a host name; its addresses use http://localhost:8788");
+  }
+  return FALLBACK_BASE_URL;
 }
 
 export async function cueRoutes(c: RouteCtx): Promise<void> {

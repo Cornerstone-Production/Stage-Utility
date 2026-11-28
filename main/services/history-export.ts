@@ -15,6 +15,7 @@ import { tableFeature, type TableSpec } from "./xlsx-table.js";
 import { appTimeZone, zonedDateKey } from "./app-timezone.js";
 import { isCalendarDate } from "./calendar-date.js";
 import { safeFilename } from "./export-filename.js";
+import { originFromHost } from "./http-origin.js";
 
 import { attendanceStore } from "./attendance-store.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
@@ -74,23 +75,20 @@ const durationSec = (startedAt: string | null | undefined, endedAt: string | nul
 /**
  * Absolute link to the shared READ-ONLY History page for one service — `/history`,
  * never `/history/manage`, so a spreadsheet handed outside Production cannot open
- * into the operator app. Blank when either half is missing, since neither a
- * relative path nor a link with nothing to open belongs in the cell.
+ * into the operator app. Blank when either half is missing, or when the Host
+ * header is not a plain host (originFromHost), since neither a relative path, a
+ * link with nothing to open, nor whatever a client put in its Host belongs in
+ * the cell.
  *
  * `service` is the param name `HISTORY_SERVICE_PARAM` defines in
  * service-history-section.tsx (renderer) — that file cannot be imported here, so
  * the name is repeated rather than shared, and would need to change in both
  * places together.
  */
-const historyUrl = (host: string | null | undefined, serviceKey: string | null | undefined): string | null =>
-  host && serviceKey && HOST_HEADER.test(host)
-    ? `http://${host}/history?service=${encodeURIComponent(serviceKey)}`
-    : null;
-
-/** A hostname, IPv4 or bracketed IPv6 address, with an optional port. `Host`
- *  is whatever the client sent, so anything else leaves the cell blank rather
- *  than writing it into a link. */
-const HOST_HEADER = /^(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*|\[[0-9A-Fa-f:.]+\])(?::\d{1,5})?$/;
+const historyUrl = (host: string | null | undefined, serviceKey: string | null | undefined): string | null => {
+  const origin = originFromHost(host, false);
+  return origin && serviceKey ? `${origin}/history?service=${encodeURIComponent(serviceKey)}` : null;
+};
 
 /** Everything a cell can hold here. Dates are already ISO strings in the stores. */
 type Scalar = string | number | null | undefined;

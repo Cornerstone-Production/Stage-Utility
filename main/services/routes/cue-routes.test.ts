@@ -17,7 +17,7 @@
 //    same-origin page still works. Half of that is easy to break silently.
 
 import assert from "node:assert/strict";
-import { after, before, beforeEach, describe, test } from "node:test";
+import { after, before, beforeEach, describe, test, type TestContext } from "node:test";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fsp from "node:fs/promises";
@@ -29,6 +29,7 @@ process.env.HOME = path.join(TMP, "home");
 const { cueRoutes } = await import("./cue-routes.js");
 const { automationRoutes } = await import("./automation-routes.js");
 const { callRoute } = await import("./route-harness.js");
+const { captureConsole } = await import("../fixtures/capture-console.js");
 const { automationEngine } = await import("../automation-engine.js");
 const { automationLog } = await import("../automation-log.js");
 const { cueTokens } = await import("../cue-tokens.js");
@@ -1644,6 +1645,25 @@ describe("the Home Assistant config", () => {
     // current Home Assistant, so every switch in a pasted fragment vanished.
     assert.equal((yaml.match(/^template:$/gm) ?? []).length, 1);
     assert.equal(/^switch:$/m.test(yaml), false, "the legacy switch: block is back");
+  });
+
+  test("a Host header that is not a host name is not written into the addresses", async (t) => {
+    // Used only while the LAN address is unknown, which it is under test. The
+    // header is whatever the client sent; the installer stamp and the History
+    // export refuse these shapes, and so does this.
+    const warnings = captureConsole(t as TestContext, "warn");
+    for (const host of ["evil.example/x", `${"a".repeat(64)}.example.org`, "stage.local:port"]) {
+      const r = await callRoute(cueRoutes, "/api/cues/home-assistant.yaml", { headers: { host } });
+      assert.equal(r.status, 200);
+      const urls = r.body.match(/url: "[^"]*"/g) ?? [];
+      assert.ok(urls.length > 0, "no addresses in the YAML");
+      for (const u of urls) assert.match(u, /^url: "http:\/\/localhost:8788\/api\/cues\//, `${host} reached ${u}`);
+    }
+    const refused = warnings.filter((w) => w.startsWith("[cues]") && w.includes("Host"));
+    assert.equal(refused.length, 3, warnings.join("\n"));
+    // A plain one is used as it came.
+    const ok = await callRoute(cueRoutes, "/api/cues/home-assistant.yaml", { headers: { host: "stage.local:8788" } });
+    assert.match(ok.body, /url: "http:\/\/stage\.local:8788\/api\/cues\//);
   });
 
   test("it is an open read, and never contains a token", async () => {
