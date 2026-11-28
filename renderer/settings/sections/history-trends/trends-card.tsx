@@ -41,6 +41,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton
 import type { ChartSeries } from "../history-chart/geometry";
 import { Sparkline } from "./sparkline";
 import { ContextMenu, type ContextMenuItem } from "../../../components/ui/context-menu";
+import { ContextMenuDiv } from "../../../components/ui/context-menu-target";
 import {
   assignColorIndexes,
   colorForIndex,
@@ -492,11 +493,10 @@ export function TrendsCard({
     [tiles, hidden],
   );
 
-  /** Where a right-click landed, and which series it was on (null = the plot). */
+  /** Where a right-click or long press landed, and which series it was on (null = the plot). */
   const [menu, setMenu] = useState<{ x: number; y: number; id: string | null } | null>(null);
-  function openMenu(id: string | null, e: React.MouseEvent) {
-    e.preventDefault();
-    setMenu({ x: e.clientX, y: e.clientY, id });
+  function openMenu(id: string | null, at: { x: number; y: number }) {
+    setMenu({ x: at.x, y: at.y, id });
   }
   function setHidden(id: string, hide: boolean) {
     if (hidden.includes(id) === hide) return;
@@ -719,10 +719,10 @@ export function TrendsCard({
               dimmed entry, which is how it comes back. */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {shownTiles.map((t) => (
-              <div
+              <ContextMenuDiv
                 key={t.serviceTypeId ?? "all"}
                 data-trend-tile={t.serviceTypeId ?? "all"}
-                onContextMenu={(e) => openMenu(t.serviceTypeId ?? "all", e)}
+                onOpenMenu={(at) => openMenu(t.serviceTypeId ?? "all", at)}
                 // Sparkline LEFT, figures RIGHT. Stacked, the tile was three
                 // rows of equal weight and the average did not lead.
                 className="flex items-center gap-3 rounded-lg border border-line bg-fill/40 px-3 py-2.5"
@@ -815,7 +815,7 @@ export function TrendsCard({
                   })()}
                 </div>
                 </div>
-              </div>
+              </ContextMenuDiv>
             ))}
           </div>
 
@@ -843,7 +843,7 @@ export function TrendsCard({
               const err = toggleHidden(id);
               if (err) toast.error(`Couldn't remember that: ${err.message}`);
             }}
-            onSeriesContextMenu={openMenu}
+            onSeriesMenu={openMenu}
             ariaLabel={
               sound
                 ? `${peakWhat}: the loudest recording of each day ${overSpan}`

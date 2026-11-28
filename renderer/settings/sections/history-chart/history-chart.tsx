@@ -22,6 +22,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "../../../lib/cn";
+import { useContextMenuTrigger } from "../../../components/ui/context-menu-trigger";
 import { prefersReducedMotion } from "../../../lib/reduced-motion";
 import { formatClock } from "../../../lib/clock-format";
 import { useServerNow } from "../../../lib/server-clock";
@@ -122,14 +123,14 @@ export interface HistoryChartProps {
   /** Dated marks under the axis. See ChartMilestone. */
   milestones?: ChartMilestone[];
   /**
-   * A right-click on a legend entry, or on the plot itself.
+   * A right-click or a long press on a legend entry, or on the plot itself.
    *
    * `id` is the series the entry names, or null for the plot — where a 2px line
    * is not something a pointer reliably lands on, so the menu is offered for
    * the chart as a whole and lists every series rather than guessing which one
    * was aimed at.
    */
-  onSeriesContextMenu?: (id: string | null, e: React.MouseEvent) => void;
+  onSeriesMenu?: (id: string | null, at: { x: number; y: number }) => void;
   /**
    * Whether an item's `peakLabel` draws its tick on the lane. Default true.
    *
@@ -188,12 +189,14 @@ export function HistoryChart({
   xAxis = "clock",
   milestones,
   peakMarks = true,
-  onSeriesContextMenu,
+  onSeriesMenu,
   onHover,
 }: HistoryChartProps) {
   const uid = useId().replace(/[^a-zA-Z0-9-]/g, "");
   const hostRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+  // The plot's menu, and the empty note's in its place: one at a time is on the page.
+  const { cancel: _cancelPlotPress, ...plotMenu } = useContextMenuTrigger((at) => onSeriesMenu?.(null, at));
   const [width, setWidth] = useState(640);
   const [hoverX, setHoverX] = useState<number | null>(null);
   const [hoverRow, setHoverRow] = useState<"plot" | "pre" | "service" | null>(null);
@@ -530,24 +533,16 @@ export function HistoryChart({
           );
         }
         return (
-          <button
+          <LegendToggle
             key={s.id}
-            type="button"
-            data-series-toggle={s.id}
-            aria-pressed={on}
-            onClick={() => onToggleSeries(s.id)}
-            onContextMenu={onSeriesContextMenu ? (e) => onSeriesContextMenu(s.id, e) : undefined}
-            className={cn(
-              "touch-target inline-flex items-center gap-1.5 rounded px-1 py-0.5",
-              "hover:text-fg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus",
-              // An off series stays legible — it is a control, not a disabled
-              // one — but reads as off at a glance.
-              !on && "opacity-45 line-through decoration-1",
-            )}
+            id={s.id}
+            on={on}
+            onToggle={onToggleSeries}
+            onMenu={onSeriesMenu}
           >
             {swatch}
             {s.label}
-          </button>
+          </LegendToggle>
         );
       })}
       {/* The peak triangle, NAMED: the first thing anybody asked about the sound
@@ -596,7 +591,7 @@ export function HistoryChart({
         {!onHover && <StatStrip figures={figures} hover={null} live={null} right={customize} />}
         <div
           className="rounded-lg border border-dashed border-line-strong px-4 py-10 text-center text-caption1 text-fg-muted"
-          onContextMenu={onSeriesContextMenu ? (e) => onSeriesContextMenu(null, e) : undefined}
+          {...(onSeriesMenu ? plotMenu : {})}
         >
           {hiddenNote ?? emptyNote ?? "Nothing recorded yet — the chart fills in as the service runs."}
         </div>
@@ -624,13 +619,16 @@ export function HistoryChart({
         // domain does, and a guard over it passes on a chart that tracks every
         // sample.
         data-domain-end={Number.isFinite(domainEnd) ? Math.round(domainEnd) : undefined}
-        onPointerMove={onMove}
+        {...(onSeriesMenu ? plotMenu : {})}
+        onPointerMove={(e) => {
+          plotMenu.onPointerMove(e);
+          onMove(e);
+        }}
         onPointerLeave={() => {
           setHoverX(null);
           setHoverRow(null);
           setHoverPeak(null);
         }}
-        onContextMenu={onSeriesContextMenu ? (e) => onSeriesContextMenu(null, e) : undefined}
       >
         <defs>
           {/* 45° hatch for the time outside the service window. A pattern, not a
@@ -1357,4 +1355,43 @@ function useEasedValue(target: number, ms: number): number {
   }, [target, ms]);
 
   return tween ?? target;
+}
+
+/**
+ * One legend entry: a toggle, and a menu on a right-click or a long press. A component
+ * rather than inline in the `.map` because the trigger is a hook.
+ */
+function LegendToggle({
+  id,
+  on,
+  onToggle,
+  onMenu,
+  children,
+}: {
+  id: string;
+  on: boolean;
+  onToggle: (id: string) => void;
+  onMenu?: (id: string, at: { x: number; y: number }) => void;
+  children: React.ReactNode;
+}) {
+  const { cancel: _cancelPress, style, ...trigger } = useContextMenuTrigger((at) => onMenu?.(id, at));
+  return (
+    <button
+      type="button"
+      data-series-toggle={id}
+      aria-pressed={on}
+      onClick={() => onToggle(id)}
+      {...(onMenu ? trigger : {})}
+      style={onMenu ? style : undefined}
+      className={cn(
+        "touch-target inline-flex items-center gap-1.5 rounded px-1 py-0.5",
+        "hover:text-fg focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-focus",
+        // An off series stays legible — it is a control, not a disabled
+        // one — but reads as off at a glance.
+        !on && "opacity-45 line-through decoration-1",
+      )}
+    >
+      {children}
+    </button>
+  );
 }

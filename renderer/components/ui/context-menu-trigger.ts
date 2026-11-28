@@ -28,6 +28,7 @@ import {
   type SyntheticEvent,
 } from "react";
 
+import { TOUCH_SLOP_PX } from "../../lib/pointer-gesture";
 import type { ContextMenuItem } from "./context-menu";
 
 /**
@@ -54,7 +55,7 @@ export function useContextMenuState(): {
 export const LONG_PRESS_MS = 500;
 
 /** How far the pointer may drift, in CSS px, before the press is cancelled. */
-export const MOVE_CANCEL_PX = 8;
+export const MOVE_CANCEL_PX = TOUCH_SLOP_PX;
 
 /**
  * Elements a press must never start a long-press timer on top of. A hold on a
@@ -87,11 +88,11 @@ const CLICK_SUPPRESS_MS = 700;
 const claimed = new WeakSet<Event>();
 
 export interface ContextMenuTriggerProps {
-  onContextMenu: (e: ReactMouseEvent<HTMLElement>) => void;
-  onPointerDown: (e: ReactPointerEvent<HTMLElement>) => void;
-  onPointerMove: (e: ReactPointerEvent<HTMLElement>) => void;
-  onPointerUp: (e: ReactPointerEvent<HTMLElement>) => void;
-  onPointerCancel: (e: ReactPointerEvent<HTMLElement>) => void;
+  onContextMenu: (e: ReactMouseEvent<Element>) => void;
+  onPointerDown: (e: ReactPointerEvent<Element>) => void;
+  onPointerMove: (e: ReactPointerEvent<Element>) => void;
+  onPointerUp: (e: ReactPointerEvent<Element>) => void;
+  onPointerCancel: (e: ReactPointerEvent<Element>) => void;
   onClickCapture: (e: SyntheticEvent) => void;
   /**
    * `-webkit-touch-callout: none` and `user-select: none`, WHILE a press is in
@@ -195,13 +196,15 @@ export function useContextMenuTrigger(
 
   /** A press on a control INSIDE the trigger. The trigger itself may be a control (a
    *  tab, a list row that is a button): that is the thing the menu is for. */
-  function withinControl(e: ReactPointerEvent<HTMLElement>): boolean {
+  function withinControl(e: ReactPointerEvent<Element>): boolean {
+    // HTMLElement, not Element: a press on an SVG glyph inside the trigger is the
+    // trigger's own press, not a control's (the rail's console glyph is one).
     if (!(e.target instanceof HTMLElement)) return false;
     const control = e.target.closest(CONTROL_SELECTOR);
     return control != null && control !== e.currentTarget;
   }
 
-  function onPointerDown(e: ReactPointerEvent<HTMLElement>) {
+  function onPointerDown(e: ReactPointerEvent<Element>) {
     if (e.pointerType === "mouse") return;
     // A trigger inside this one has the press: see `claimed`.
     if (claimed.has(e.nativeEvent)) return;
@@ -233,7 +236,7 @@ export function useContextMenuTrigger(
     }, LONG_PRESS_MS);
   }
 
-  function onPointerMove(e: ReactPointerEvent<HTMLElement>) {
+  function onPointerMove(e: ReactPointerEvent<Element>) {
     if (e.pointerType === "mouse") return;
     if (gesture.current.pointerId !== e.pointerId) return;
     const dx = e.clientX - gesture.current.startX;
@@ -241,7 +244,7 @@ export function useContextMenuTrigger(
     if (Math.hypot(dx, dy) > cancelPx) abort();
   }
 
-  function onPointerUp(e: ReactPointerEvent<HTMLElement>) {
+  function onPointerUp(e: ReactPointerEvent<Element>) {
     if (e.pointerType === "mouse") return;
     if (gesture.current.pointerId !== e.pointerId) return;
     // The long press already opened the menu on the timer above — this lift is
@@ -251,7 +254,7 @@ export function useContextMenuTrigger(
     abort();
   }
 
-  function onPointerCancel(e: ReactPointerEvent<HTMLElement>) {
+  function onPointerCancel(e: ReactPointerEvent<Element>) {
     if (e.pointerType === "mouse") return;
     if (gesture.current.pointerId !== e.pointerId) return;
     abort();
@@ -265,7 +268,7 @@ export function useContextMenuTrigger(
     gesture.current.openedAt = null;
   }
 
-  function onContextMenu(e: ReactMouseEvent<HTMLElement>) {
+  function onContextMenu(e: ReactMouseEvent<Element>) {
     if (claimed.has(e.nativeEvent)) return;
     claimed.add(e.nativeEvent);
     e.preventDefault();
