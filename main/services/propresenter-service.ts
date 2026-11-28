@@ -804,9 +804,9 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
    * be able to answer the editor with a list either way.
    *
    * The cache is dropped by teardown(), so it cannot outlive the machine it was
-   * read from, and the read itself is run-guarded so a reconfigure landing
-   * INSIDE the round trip cannot write the old machine's names back over the
-   * cache teardown() just cleared. `superseded` rather than `stale`: this is
+   * read from, and the read itself checks the target it was made against, so a
+   * reconfigure landing INSIDE the round trip cannot write the old machine's
+   * names back over the cache teardown() just cleared (see below). This is
    * legitimate work on an instance that is configured but not running.
    */
   async listMacros(): Promise<MacroListResult> {

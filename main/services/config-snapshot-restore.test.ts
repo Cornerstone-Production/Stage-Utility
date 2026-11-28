@@ -8,8 +8,8 @@
 // background writer stopped: stage displays frozen on their last state,
 // recorders never ticking again, and nothing short of a restart to fix it.
 //
-// livePoller.start() is called from exactly one place — boot — so "stopped and
-// not restarted" is permanent for the life of the process.
+// livePoller.start() is called only at boot and when Planning Center accepts
+// credentials, so "stopped and not restarted" can last for the life of the process.
 
 import assert from "node:assert/strict";
 import { describe, it, beforeEach, afterEach } from "node:test";

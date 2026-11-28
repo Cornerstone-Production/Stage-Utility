@@ -175,10 +175,12 @@ class LivePoller {
   /**
    * Stop, and hand back the undo.
    *
-   * start() is called from exactly one place — boot — so anything that stops the
-   * poller and does not put it back has stopped it for the life of the process.
-   * A config restore did that on its failure path: the box kept serving with
-   * nothing polling PCO. See stageController.pauseBackgroundWork.
+   * start() is called at boot and when Planning Center accepts credentials
+   * (integration-manager), and nowhere else, so anything that stops the poller
+   * and does not put it back has stopped it until the next credential check
+   * passes, which may be never. A config restore did that on its failure path:
+   * the box kept serving with nothing polling PCO. See
+   * stageController.pauseBackgroundWork.
    */
   pause(): () => void {
     const wasRunning = this.running;
