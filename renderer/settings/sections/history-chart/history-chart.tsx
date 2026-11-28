@@ -214,8 +214,7 @@ export function HistoryChart({
   // two differ by the scale factor and the label rule silently drifts with the
   // window size.
   // jsdom reports 0 for every box; keep the default rather than collapsing the chart to nothing.
-  const measured = useElementSize(hostRef).w;
-  const width = chartWidth(measured);
+  const width = chartWidth(useElementSize(hostRef).w);
 
   const narrow = width < NARROW_PX;
   const reduced = prefersReducedMotion();
@@ -577,7 +576,7 @@ export function HistoryChart({
     return (
       // THE REF GOES ON BOTH BRANCHES.
       //
-      // The width effect runs once, on mount, and returns early when the host
+      // The width measurement (useElementSize) runs once, on mount, and returns early when the host
       // is not there. This branch used to render without the ref, so a section
       // whose data arrives AFTER the first paint — the sound chart, which fetches
       // its series — mounted empty, the observer was never attached, and the

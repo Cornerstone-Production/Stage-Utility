@@ -4,7 +4,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import type { PublishSettingsDTO } from "../../../main/types/servicecue-publish-status.js";
+import type { PublishSettingsDTO } from "@main/types/servicecue-publish-status";
 import { invoke } from "../../lib/api";
 
 export const PUBLISH_QUERY_KEY = ["servicecue:getPublish"] as const;

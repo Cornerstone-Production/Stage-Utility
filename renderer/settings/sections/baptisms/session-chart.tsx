@@ -310,11 +310,11 @@ export function HistorySessionChart({ serviceKey, sessions, items }: HistorySess
   const hostRef = useRef<HTMLDivElement>(null);
   // THE REF GOES ON CONTENT THAT IS ALWAYS RENDERED — see history-chart.tsx's
   // own "THE REF GOES ON BOTH BRANCHES" note for the identical bug. This
-  // effect runs ONCE, on mount, before useSessionLane's fetch — which never
+  // measuring hook (useElementSize) reads the host ONCE, on mount, before useSessionLane's fetch — which never
   // resolves synchronously — has any chance to flip `loaded` true. An early
   // `return null` above this div meant the FIRST render had no element for
   // the ref to find at all: the effect fired once against
-  // `hostRef.current === null`, attached to nothing, and (deps `[]`) never
+  // `hostRef.current === null`, attached to nothing, and (its dep is the ref) never
   // ran again once the real content finally existed — the chart was stuck at
   // its 640px default for the rest of the page's life, regardless of the
   // card's own real width. The `!loaded` gate now lives INSIDE the div,
@@ -411,7 +411,7 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   // THE REF GOES ON THE ALWAYS-RENDERED CONTENT DIV BELOW, not on SessionSvg's
-  // own wrapper. This effect runs once, on mount, and returns early when the
+  // own wrapper. The measuring hook (useElementSize) runs once, on mount, and returns early when the
   // host is not there — but while the lane is still loading, none of the three
   // branches below render SessionSvg at all, so a ref that only existed on
   // SessionSvg's own div was never there yet when this ran, and — deps being
