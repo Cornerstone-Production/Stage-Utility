@@ -1,3 +1,6 @@
+import { toast } from "../components/ui";
+import { logToServer } from "./client-log";
+
 /**
  * Copy text to the clipboard, returning true on success.
  *
@@ -52,4 +55,25 @@ export async function copyText(text: string, container?: HTMLElement | null): Pr
   } catch {
     return false;
   }
+}
+
+/**
+ * {@link copyText}, and say which way it went: `ok` as a success toast, `fail` as
+ * an error toast and a line on /log under `tag`. Returns the result, for a caller
+ * that has more to do on failure (select a field so it can be copied by hand).
+ *
+ * The line names the failure and never the text: what is copied may be a token
+ * that is shown once, or a URL carrying one.
+ */
+export async function copyWithToast(
+  text: string,
+  { ok, fail, tag, container }: { ok: string; fail: string; tag: string; container?: HTMLElement | null },
+): Promise<boolean> {
+  const copied = await copyText(text, container);
+  if (copied) toast.success(ok);
+  else {
+    toast.error(fail);
+    logToServer(tag, "could not copy to the clipboard");
+  }
+  return copied;
 }

@@ -16,10 +16,9 @@ import {
   menuContent,
   Button,
   Input,
-  toast,
   Callout,
   Dialog} from "../../components/ui";
-import { copyText } from "../../lib/clipboard";
+import { copyWithToast } from "../../lib/clipboard";
 import { IconTint } from "../../components/icon-tint";
 import { iconEntryAt } from "../../components/editable-icon";
 import { NewViewDialog } from "./new-view-dialog";
@@ -477,11 +476,12 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
                   const menu = (e.currentTarget as HTMLElement | null)?.closest<HTMLElement>(
                     "[data-radix-menu-content]",
                   );
-                  void copyText(outputUrl, menu).then((ok) => {
-                    setMenuOpen(false);
-                    if (ok) toast.success("URL copied");
-                    else toast.error("Couldn't copy — open Screen settings to see the address");
-                  });
+                  void copyWithToast(outputUrl, {
+                    tag: "screens",
+                    ok: "URL copied",
+                    fail: "Couldn't copy — open Screen settings to see the address",
+                    container: menu,
+                  }).then(() => setMenuOpen(false));
                 }}
                 className={MENU_ITEM}
               >
