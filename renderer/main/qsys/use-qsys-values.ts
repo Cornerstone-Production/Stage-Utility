@@ -33,7 +33,7 @@
 import { createContext, useContext, useEffect, useMemo, useSyncExternalStore } from "react";
 
 import type { WriteResult } from "@main/services/qsys/qsys-write";
-import { addressKey, choicesOf, isReadOnlyDirection, type PanelKind, type QsysAddress } from "@main/types/qsys";
+import { addressKey, choicesOf, isReadOnlyDirection, kindOf, type PanelKind, type QsysAddress } from "@main/types/qsys";
 import { toast } from "../../components/ui/toast";
 import { getStreamStatus, invoke, onNotification, onStreamStatusChange, streamClientId, whenSubscribed } from "../../lib/api";
 import { logToServer } from "../../lib/client-log";
@@ -759,6 +759,9 @@ export class QsysPanel {
    */
   private adoptReadBack(a: QsysAddress, result: Extract<WriteResult, { ok: true }>, sentAt: number): void {
     const k = addressKey(a);
+    // A Core answers a trigger's Set with the value before it, so a State Trigger
+    // (a snapshot's load.N) would read 0 after loading. Its change-group push is the truth.
+    if (kindOf({ Type: this.info.get(k)?.type }) === "trigger") return;
     if ((this.touched.get(k) ?? 0) > sentAt || this.hydratedAt > sentAt) return;
     this.readings.set(k, { value: result.value, string: result.string, position: result.position ?? null });
     this.bump();

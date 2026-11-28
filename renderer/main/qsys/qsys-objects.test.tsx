@@ -37,7 +37,7 @@ const React = await import("react");
 const { ObjectContent } = await import("../layout-renderer.js");
 const { makeRenderCtx } = await import("../test-render-ctx.js");
 const { __resetReplayCacheForTests, __sseFallback, __setSubscribedDeadlineForTests } = await import("../../lib/api.js");
-const { __resetQsysPanelsForTests, DRAG_COALESCE_MS, QsysPanel } = await import("./use-qsys-values.js");
+const { __resetQsysPanelsForTests, DRAG_COALESCE_MS, QsysPanel, useQsysPanel } = await import("./use-qsys-values.js");
 const { FLASH_MS, HOLD_MS } = await import("./qsys-objects.js");
 const await_toast = await import("../../components/ui/toast.js");
 type LayoutObjectConfig = import("@main/types/views").LayoutObjectConfig;
@@ -488,6 +488,26 @@ describe("Q-SYS objects", () => {
     assert.equal(btn.getAttribute("aria-pressed"), "false");
     push("qsys:values", [{ control: "match.1", value: 1 }]);
     assert.equal(btn.getAttribute("aria-pressed"), "true");
+  });
+
+  test("a trigger's write answer is the value before the write, and is not taken as the control's value", async () => {
+    // A Core echoes a State Trigger's pre-write value (0) in the Set reply while the
+    // snapshot is already loaded (2). The change group's push is the truth, so the
+    // echo must not replace the cached value. Read through the panel: no object
+    // draws a trigger's own value (a preset is lit only by its indicator).
+    server.values["load.1"] = 2;
+    await mount([{ type: "qsys-presets", items: [{ label: "One", binding: b("load.1") }] }]);
+    let panel: ReturnType<typeof useQsysPanel> = null;
+    const Probe = () => {
+      panel = useQsysPanel("v1", "staff");
+      return null;
+    };
+    render(React.createElement(Probe));
+    assert.equal(panel!.value(b("load.1")).value, 2, "hydrated at 2 (positive control)");
+    server.answer = () => ({ ok: true, value: 0, string: "0", clamped: false });
+    const result = await act(() => panel!.write(b("load.1"), true));
+    assert.ok(result.ok, "the press landed");
+    assert.equal(panel!.value(b("load.1")).value, 2, "the stale echo (0) was adopted as the control's value");
   });
 
   test("hold-to-confirm only writes after the full hold", async () => {
