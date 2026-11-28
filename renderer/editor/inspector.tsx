@@ -511,6 +511,9 @@ export function TranscriptLinesRow({
   );
 }
 
+/** The same bound api.ts puts on an ordinary read. */
+const ATTACHMENTS_TIMEOUT_MS = 15_000;
+
 export function PlanAttachmentConfig({
   c,
   onConfig,
@@ -542,7 +545,9 @@ export function PlanAttachmentConfig({
   useEffect(() => {
     if (!pcoConfigured) return;
     let cancelled = false;
-    fetch("/api/pco/attachments")
+    // Bounded: Planning Center may never answer, and "reading…" would stay for ever.
+    // api.ts has no channel for this route yet, so it is not on invoke()'s timeout.
+    fetch("/api/pco/attachments", { signal: AbortSignal.timeout(ATTACHMENTS_TIMEOUT_MS) })
       .then(async (r) => {
         if (r.ok) return r.json();
         // The route's own reason (a 502 carries Planning Center's), for the log.

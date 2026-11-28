@@ -309,6 +309,23 @@ describe("the plan attachment's file picker", () => {
     }
   });
 
+  test("the read is bounded: a Planning Center that never answers must not leave the picker waiting for ever", async () => {
+    let signal: AbortSignal | null | undefined;
+    const f = stubFetchWithLog((url, init) => {
+      if (url.includes(ROUTE)) {
+        signal = init?.signal;
+        return ok([]);
+      }
+      return stateSays(true)(url);
+    });
+    try {
+      await mount(attachment());
+      await eventually(() => assert.ok(signal instanceof AbortSignal, "the attachments read carried no abort signal, so a stall never ends"));
+    } finally {
+      f.restore();
+    }
+  });
+
   test("Planning Center not connected says to connect it: no read, no alert, and no claim about the plan", async () => {
     const asked: string[] = [];
     const f = stubFetchWithLog((url) => {
