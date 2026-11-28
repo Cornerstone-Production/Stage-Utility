@@ -569,6 +569,24 @@ describe("what costs money", () => {
     });
   }
 
+  test("a count in a button joins its parentheses: the button is a flex row with a gap, so each loose piece draws apart", async () => {
+    // jsdom loads no stylesheet, so the gap itself cannot be seen here; what can be
+    // seen is the shape that makes it: "(", the number and ")" as three flex children
+    // read "( 3 )". One text-and-numeral wrapper is one child, and reads "(3)".
+    themes = [theme(XMAS, "Christmas 2026", { promptChanged: true }), themes[1]!];
+    people = [person("9001", "Alex R.", "approved", { promptChanged: true }), person("9002", "Jordan P.", "ready")];
+    await mount();
+    for (const [name, text] of [
+      [/^Redo all/, "Redo all (1)"],
+      [/Approve all ready/, "Approve all ready (1)"],
+    ] as const) {
+      const btn = screen.getByRole("button", { name });
+      assert.equal(btn.textContent, text);
+      const label = [...btn.childNodes].filter((n) => n.nodeName.toLowerCase() !== "svg");
+      assert.equal(label.length, 1, `${text}: the label is ${label.length} flex children, and the gap spaces them apart`);
+    }
+  });
+
   test("Redo all says how many it would bill, asks first, and sends nothing on Cancel", async () => {
     themes = [theme(XMAS, "Christmas 2026", { promptChanged: true }), themes[1]!];
     people = [

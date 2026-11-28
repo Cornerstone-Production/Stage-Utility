@@ -306,7 +306,9 @@ function PanelBody({
               <span className="min-w-0 flex-[1_1_11rem]">The prompt for {themeLabel(theme)} changed; existing approved photos stay until redone.</span>
               <span className="flex gap-1.5">
                 <Button variant="accent" size="small" disabled={planBusy("generate") || !photos.canSend || redoAllCount === 0} onClick={() => setAskRedoAll(true)}>
-                  Redo all (<Num>{redoAllCount}</Num>)
+                  <span>
+                    Redo all (<Num>{redoAllCount}</Num>)
+                  </span>
                 </Button>
                 <Button variant="filled" size="small" disabled={photos.isBusy(`keep-prompt:${theme.id}`)} onClick={() => void photos.write(`keep-prompt:${theme.id}`, () => ipc("photoThemes:keepPrompt", { id: theme.id }))}>
                   Keep these
@@ -356,7 +358,9 @@ function PanelBody({
             </h4>
             <Button variant="filled" size="small" disabled={readyHere.length === 0 || planBusy("approve-all")} onClick={() => void approveAll()}>
               <CheckIcon className="size-3.5" />
-              Approve all ready{readyHere.length > 0 && <> (<Num>{readyHere.length}</Num>)</>}
+              <span>
+                Approve all ready{readyHere.length > 0 && <> (<Num>{readyHere.length}</Num>)</>}
+              </span>
             </Button>
           </div>
 
