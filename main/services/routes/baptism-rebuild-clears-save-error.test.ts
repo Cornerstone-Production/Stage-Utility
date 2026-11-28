@@ -9,16 +9,12 @@
 // real POST routes — never a stub of applyBaptismRebuild or mergeRebuilt.
 
 import assert from "node:assert/strict";
-import { after, describe, it } from "node:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
+import { describe, it } from "node:test";
 
 import { interceptAddSession, sleep, type AddSession } from "../baptism-save-harness.js";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-baptism-rebuild-clears-"));
-process.env.STAGE_UTILITY_DATA = TMP;
-process.env.HOME = path.join(TMP, "home");
+tempDataDir("stage-baptism-rebuild-clears-", { home: true });
 
 const { historyRoutes } = await import("./history-routes.js");
 const { callRoute } = await import("./route-harness.js");
@@ -227,10 +223,6 @@ async function realNeverFinishedSave(serviceKey: string): Promise<string> {
   rec().current = null;
   return sessionId;
 }
-
-after(async () => {
-  await fs.rm(TMP, { recursive: true, force: true }).catch(() => {});
-});
 
 describe("a rebuild that restores a save-failed session clears its note entry", () => {
   // A FRESH, never-reused key per test — sampleArchive caches a CsvAppender

@@ -17,15 +17,14 @@
 
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it, mock } from "node:test";
-import * as os from "node:os";
 import * as path from "node:path";
 import * as fsp from "node:fs/promises";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
 // proxy-routes pulls in the stage controller, which resolves the data directory
 // at import, and the photo cache writes under it. Point it somewhere disposable
 // BEFORE that happens — never at the operator's real ~/.stage-utility.
-const DATA = await fsp.mkdtemp(path.join(os.tmpdir(), "photo-proxy-route-"));
-process.env.STAGE_UTILITY_DATA = DATA;
+const DATA = tempDataDir("photo-proxy-route-");
 
 const { proxyRoutes } = await import("./proxy-routes.js");
 const { callRoute } = await import("./route-harness.js");

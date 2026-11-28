@@ -8,14 +8,10 @@
 // body. Driven through the real handler, service and a real data directory.
 
 import assert from "node:assert/strict";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
 import { beforeEach, describe, it } from "node:test";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-messages-replies-"));
-process.env.STAGE_UTILITY_DATA = TMP;
-process.env.HOME = path.join(TMP, "home");
+tempDataDir("stage-messages-replies-", { home: true });
 
 const { messagesRoutes } = await import("./messages-routes.js");
 const { callRoute } = await import("./route-harness.js");

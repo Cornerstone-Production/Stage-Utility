@@ -8,12 +8,9 @@
 
 import assert from "node:assert/strict";
 import { describe, test, beforeEach } from "node:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const dir = await fs.mkdtemp(path.join(os.tmpdir(), "su-plan-routes-"));
-process.env.STAGE_UTILITY_DATA = dir;
+tempDataDir("su-plan-routes-");
 
 const { callRoute } = await import("./route-harness.js");
 const { setAppTimeZone } = await import("../app-timezone.js");

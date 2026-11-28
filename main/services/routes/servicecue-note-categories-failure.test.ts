@@ -8,14 +8,10 @@
 // pcoService; only the network is stubbed.
 
 import assert from "node:assert/strict";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
-import { after, afterEach, beforeEach, describe, it } from "node:test";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-note-cats-"));
-process.env.STAGE_UTILITY_DATA = TMP;
-process.env.HOME = path.join(TMP, "home");
+tempDataDir("stage-note-cats-", { home: true });
 
 const { serviceCueRoutes } = await import("./servicecue-routes.js");
 const { stageController } = await import("../stage-controller.js");
@@ -50,7 +46,6 @@ beforeEach(() => {
 afterEach(() => {
   globalThis.fetch = realFetch;
 });
-after(() => fs.rm(TMP, { recursive: true, force: true }));
 
 describe("GET /api/servicecue/note-categories", () => {
   it("answers 502 and logs [pco] when Planning Center cannot be read, never 200 with an empty list", async (t) => {

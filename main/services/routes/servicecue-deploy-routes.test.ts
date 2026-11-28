@@ -8,7 +8,6 @@
 
 import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import { after, before, beforeEach, describe, it, mock } from "node:test";
 
@@ -18,10 +17,9 @@ import { BUILD_A, BUILD_B, writeBundle } from "../fixtures/deploy-bundle.js";
 import { FakeReceiver } from "../fixtures/publish-receiver.js";
 import { MASK } from "../mask.js";
 import { callRoute } from "./route-harness.js";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-deploy-routes-"));
-process.env.STAGE_UTILITY_DATA = TMP;
-process.env.HOME = path.join(TMP, "home");
+const TMP = tempDataDir("stage-deploy-routes-", { home: true });
 // The page's address is on this machine (the receiver sets the switch), and so is "Cloudflare": nothing here leaves it.
 const cloudflare = await FakeCloudflare.start();
 process.env.STAGE_UTILITY_CLOUDFLARE_API = cloudflare.origin;
@@ -83,7 +81,6 @@ after(async () => {
   await page.close();
   await other.close();
   await cloudflare.close();
-  await fs.rm(TMP, { recursive: true, force: true });
 });
 
 /** The page's address saved with its publishing token, publishing off. */

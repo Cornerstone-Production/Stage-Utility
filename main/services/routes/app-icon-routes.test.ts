@@ -11,11 +11,10 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import * as fsp from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const DATA = await fsp.mkdtemp(path.join(os.tmpdir(), "app-icon-routes-"));
-process.env.STAGE_UTILITY_DATA = DATA;
+const DATA = tempDataDir("app-icon-routes-");
 
 const { brandingRoutes } = await import("./branding-routes.js");
 const { appIconRoutes } = await import("./app-icon-routes.js");

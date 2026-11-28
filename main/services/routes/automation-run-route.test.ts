@@ -6,23 +6,15 @@
 // literal boolean true, and who the caller is.
 
 import assert from "node:assert/strict";
-import { after, before, beforeEach, describe, test } from "node:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
+import { before, beforeEach, describe, test } from "node:test";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "automation-run-route-"));
-process.env.STAGE_UTILITY_DATA = TMP;
-process.env.HOME = path.join(TMP, "home");
+tempDataDir("automation-run-route-", { home: true });
 
 const { automationRoutes } = await import("./automation-routes.js");
 const { callRoute } = await import("./route-harness.js");
 const { automationEngine } = await import("../automation-engine.js");
 const { automationLog } = await import("../automation-log.js");
-
-after(async () => {
-  await fs.rm(TMP, { recursive: true, force: true });
-});
 
 before(async () => {
   await automationEngine.init();

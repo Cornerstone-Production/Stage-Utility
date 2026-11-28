@@ -6,14 +6,10 @@
 // undrawable is the bug.
 
 import assert from "node:assert/strict";
-import { after, describe, it } from "node:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
+import { describe, it } from "node:test";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-milestone-routes-"));
-process.env.STAGE_UTILITY_DATA = TMP;
-process.env.HOME = path.join(TMP, "home");
+tempDataDir("stage-milestone-routes-", { home: true });
 
 const { historyRoutes } = await import("./history-routes.js");
 const { callRoute } = await import("./route-harness.js");
@@ -38,10 +34,6 @@ await serviceTimelineStore.upsert({
   endedAt: "2026-09-06T15:20:00.000Z",
   items: [],
 } as unknown as ServiceTimeline);
-
-after(() => {
-  fs.rm(TMP, { recursive: true, force: true }).catch(() => {});
-});
 
 const post = (body: unknown) =>
   callRoute(historyRoutes, "/api/history/milestones", { method: "POST", body });

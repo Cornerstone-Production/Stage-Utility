@@ -10,15 +10,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 
 import type { BaptismSpan } from "../archive/baptism-lane.js";
 import { sleep } from "../baptism-save-harness.js";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-baptism-lane-route-"));
-process.env.STAGE_UTILITY_DATA = TMP;
-process.env.HOME = path.join(TMP, "home");
+tempDataDir("stage-baptism-lane-route-", { home: true });
 
 const { historyRoutes } = await import("./history-routes.js");
 const { callRoute } = await import("./route-harness.js");

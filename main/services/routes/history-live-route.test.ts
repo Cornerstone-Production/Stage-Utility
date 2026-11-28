@@ -13,13 +13,9 @@
 
 import assert from "node:assert/strict";
 import { after, beforeEach, describe, it } from "node:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-history-live-"));
-process.env.STAGE_UTILITY_DATA = TMP;
-process.env.HOME = path.join(TMP, "home");
+tempDataDir("stage-history-live-", { home: true });
 
 const { historyRoutes } = await import("./history-routes.js");
 const { callRoute } = await import("./route-harness.js");
@@ -62,7 +58,6 @@ function idleAll(): void {
 
 after(async () => {
   idleAll();
-  await fs.rm(TMP, { recursive: true, force: true }).catch(() => {});
 });
 
 describe("GET /api/history/live", () => {

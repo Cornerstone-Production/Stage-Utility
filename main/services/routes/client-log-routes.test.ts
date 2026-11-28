@@ -5,24 +5,16 @@
 // a route that wrote to console with the buffer uninitialised.
 
 import assert from "node:assert/strict";
-import { after, beforeEach, describe, it } from "node:test";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
+import { beforeEach, describe, it } from "node:test";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-client-log-"));
-process.env.STAGE_UTILITY_DATA = TMP;
-process.env.HOME = path.join(TMP, "home");
+tempDataDir("stage-client-log-", { home: true });
 
 const { initLogCapture, getLogLines } = await import("../log-buffer.js");
 initLogCapture();
 
 const { clientLogRoutes, resetClientLogLimits } = await import("./client-log-routes.js");
 const { callRoute } = await import("./route-harness.js");
-
-after(() => {
-  fs.rm(TMP, { recursive: true, force: true }).catch(() => {});
-});
 
 const post = (body: unknown) =>
   callRoute(clientLogRoutes, "/api/log/client", { method: "POST", body });

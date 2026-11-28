@@ -8,14 +8,10 @@
 // left every store test green.
 
 import assert from "node:assert/strict";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
 import { beforeEach, describe, it } from "node:test";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-output-claim-"));
-process.env.STAGE_UTILITY_DATA = TMP;
-process.env.HOME = path.join(TMP, "home");
+tempDataDir("stage-output-claim-", { home: true });
 
 const { kioskDeviceRoutes } = await import("./kiosk-device-routes.js");
 const { callRoute } = await import("./route-harness.js");

@@ -3,13 +3,10 @@
 // and announced all the same, and the view import keeps its outcomes and says so.
 
 import assert from "node:assert/strict";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
 import { after, test } from "node:test";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "patch-follower-"));
-process.env.STAGE_UTILITY_DATA = TMP;
+tempDataDir("patch-follower-");
 
 const { callRoute } = await import("./route-harness.js");
 const { serviceCueRoutes } = await import("./servicecue-routes.js");
@@ -22,7 +19,6 @@ const lines: string[] = [];
 console.error = (...a: unknown[]) => void lines.push(a.map(String).join(" "));
 after(async () => {
   console.error = quiet.error;
-  await fs.rm(TMP, { recursive: true, force: true });
 });
 
 const file = (name: string): PatchFile => ({

@@ -17,9 +17,9 @@ import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 
 import { captureConsole } from "../fixtures/capture-console.js";
 import { testSigningKey } from "../fixtures/test-signing-key.js";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "su-helper-route-"));
-process.env.STAGE_UTILITY_DATA = dataDir;
+const dataDir = tempDataDir("su-helper-route-");
 
 // After the data directory is set: the route module reads it once.
 const { kioskDeviceRoutes } = await import("./kiosk-device-routes.js");
@@ -81,7 +81,6 @@ before(async () => {
 after(async () => {
   await new Promise((r) => app.close(r));
   await new Promise((r) => github.close(r));
-  await fs.rm(dataDir, { recursive: true, force: true });
 });
 
 beforeEach(async () => {
