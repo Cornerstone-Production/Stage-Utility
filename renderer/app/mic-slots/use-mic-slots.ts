@@ -52,6 +52,7 @@ import {
 } from "./board-model";
 import { duplicateOf, newSlot, newSpacer } from "./slot-factory";
 import { boardsToReread, rereadBoards } from "./boards-changed";
+import { QUERY_KEYS } from "../queries";
 
 export const BOARDS_KEY = ["boards:list"] as const;
 const TARGETS_PREFIX = ["boards:targets"] as const;
@@ -374,7 +375,7 @@ export function useMicSlots() {
     for (const v of state?.views ?? []) latestViews.current.set(v.id, newerView(latestViews.current.get(v.id), v));
   }, [state]);
   function takeState(next: StageState): void {
-    qc.setQueryData(["stage:getState"], next);
+    qc.setQueryData(QUERY_KEYS.stageState, next);
     for (const v of next.views ?? []) latestViews.current.set(v.id, newerView(latestViews.current.get(v.id), v));
   }
 
