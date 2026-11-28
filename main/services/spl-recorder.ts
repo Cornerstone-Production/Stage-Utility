@@ -117,11 +117,8 @@ class SplRecorder extends ItemRecorder<ServiceSplHistory> {
 
   protected recordTick(live: LiveItemTick, record: ServiceSplHistory): void {
     const title = liveItemTitle(live);
-    let itemChanged = false;
-    if (live.currentItemId !== this.lastItemId) {
-      this.finalizePrevItem();
-      this.lastItemId = live.currentItemId;
-      itemChanged = true;
+    const itemChanged = this.advanceItem(live);
+    if (itemChanged) {
       if (this.currentKey) {
         // The one place a plan-item transition reaches the raw layer, for
         // BOTH item-shaped records — this recorder's and the timeline's,
@@ -255,9 +252,9 @@ class SplRecorder extends ItemRecorder<ServiceSplHistory> {
 
   /** Close every open item and the record (ItemRecorder), then the raw-archive
    *  files. */
-  protected override finalizeRecord(): void {
+  protected override finalizeRecord(iso?: string): void {
     if (!this.current) return;
-    super.finalizeRecord();
+    super.finalizeRecord(iso);
     // The record is closed: name what the raw layer captured, then release the
     // appenders. A later item going live reopens the record and the files resume.
     const ctx = { serviceKey: this.current.serviceKey, serviceDate: this.current.serviceDate };

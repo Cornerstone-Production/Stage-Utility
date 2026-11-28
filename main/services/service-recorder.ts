@@ -155,8 +155,14 @@ export function plannedLengthSec(live: PcoLiveDTO): number | null {
  * Also the timeline's when nothing measured how long its last item ran — see
  * reconcile-records.ts, the one caller that can be in that position.
  */
-export function stampItemEnds(items: { endedAt: string | null }[], endIso: string): void {
-  for (const it of items) if (!it.endedAt) it.endedAt = endIso;
+export function stampItemEnds(items: { endedAt: string | null }[], endIso: string): number {
+  let stamped = 0;
+  for (const it of items) {
+    if (it.endedAt) continue;
+    it.endedAt = endIso;
+    stamped += 1;
+  }
+  return stamped;
 }
 
 /** Close one timeline run at `endIso` and measure it. Whole seconds, never
@@ -284,14 +290,14 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    * in the same shape a live push already uses (broadcastTimeline for the
    * timeline recorder; `broadcast("…:history", record)` for the other two).
    *
-   * Exists for exactly one caller: ensureRecord's split path below. Every other
-   * close a recorder produces (onLiveTick leaving "item"/service mode) already
-   * broadcasts inline right after it persists, but the split finalizes and
-   * persists the OUTGOING record and then moves straight on to the incoming
-   * one — the new record's first push was the only broadcast a split ever
-   * produced, so a History page open at the moment of a split never heard the
-   * old occurrence close and kept showing it "recording" until the page was
-   * reloaded (24 Sep 2026, all three recorders).
+   * Called by both closes: ensureRecord's split path below and closeIfOpen
+   * (Planning Center left the service). The split finalizes and persists the
+   * OUTGOING record and then moves straight on to the incoming one; before it
+   * called this, the new record's first push was the only broadcast a split
+   * ever produced, so a History page open at the moment of a split never heard
+   * the old occurrence close and kept showing it "recording" until the page
+   * was reloaded (24 Sep 2026, all three recorders). Neither publishes a record
+   * deleted in History while its save was out: the page would show it again.
    */
   protected abstract publishClosed(record: T): void;
 
@@ -411,7 +417,8 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    * Sunday the 9am's end became the moment the 11am began.
    */
   protected finalizeRecord(iso = new Date().toISOString()): void {
-    if (this.current && !this.current.endedAt) this.current.endedAt = iso;
+    const open = this.getOpenRecord();
+    if (open) open.endedAt = iso;
   }
 
   /**
@@ -836,6 +843,18 @@ export abstract class ItemRecorder<T extends ServiceRecord & { items: SequencedI
     // short list would reissue sequences already in use.
     this.nextSequence = (this.current?.items ?? []).reduce((m, it) => Math.max(m, it.sequence), -1) + 1;
     this.lastItemId = null; // re-detect the live item on the next tick
+  }
+
+  /**
+   * Has the item on air changed since the last recorded tick? When it has, the
+   * outgoing entry is closed and `lastItemId` moves on; what a recorder does
+   * about the incoming one is its own.
+   */
+  protected advanceItem(live: LiveItemTick): boolean {
+    if (live.currentItemId === this.lastItemId) return false;
+    this.finalizePrevItem();
+    this.lastItemId = live.currentItemId;
+    return true;
   }
 
   /**

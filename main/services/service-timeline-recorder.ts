@@ -65,9 +65,7 @@ class ServiceTimelineRecorder extends ItemRecorder<ServiceTimeline> {
 
   protected recordTick(live: LiveItemTick, record: ServiceTimeline): void {
     // Only mutate on an item transition — between transitions nothing changes.
-    if (live.currentItemId === this.lastItemId) return;
-    this.finalizePrevItem(); // close the OUTGOING item (this.lastItemId)
-    this.lastItemId = live.currentItemId;
+    if (!this.advanceItem(live)) return; // closes the OUTGOING item
     this.openItem(live); // create/reopen the now-current item
     broadcastTimeline(record);
     this.schedulePersist();
