@@ -23,6 +23,7 @@ const { PUBLISH_MAX_BODY_BYTES, isStagePlotsSecret } = await import("../types/se
 import type { FakeReceiver as Receiver, Received } from "./fixtures/publish-receiver.js";
 import type { PlotItem, PublishedPlot, PublishedVenue, StagePlotsDoc, Venue } from "../types/stageplots.js";
 import type { PatchFile } from "../types/patch.js";
+import { until } from "./fixtures/within.js";
 
 const TOKEN = "k".repeat(40);
 const SP = /^\/_publish\/v1\/stageplots\/([^/]+)(?:\/(.+))?$/;
@@ -2474,14 +2475,6 @@ describe("a patch that could not be read, read again", () => {
     return (JSON.parse((await visit(h.page, secret, "plot/p-0")).body) as PublishedPlot).items.find((it) => it.id === "c-sb1")!;
   };
   const RETRY = { firstMs: 20, maxMs: 80 };
-  /** Until `check` holds, or a failure naming `what` after five seconds. */
-  async function until(check: () => Promise<boolean>, what: string): Promise<void> {
-    const deadline = Date.now() + 5000;
-    while (!(await check())) {
-      if (Date.now() > deadline) throw new Error(`still waiting after 5000 ms for ${what}`);
-      await new Promise((r) => setTimeout(r, 15));
-    }
-  }
 
   test("is retried on a backoff with no event at all; once it reads, said once, and the venue that links it is sent again", async () => {
     const lines: string[] = [];

@@ -15,8 +15,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
-import { sleep } from "../fixtures/within.js";
-import { tcpPort } from "../fixtures/free-port.js";
+import { sleep, untilValue } from "../fixtures/within.js";
+import { tcpPort, udpPort } from "../fixtures/free-port.js";
 
 const execFileP = promisify(execFile);
 
@@ -29,16 +29,6 @@ const { relayConfig } = await import("./mediamtx-config.js");
 const { relayUsers } = await import("./reconcile-plan.js");
 const { planAudio, resolveAudio } = await import("./audio-listen.js");
 type RelayFeed = import("./relay.js").RelayFeed;
-
-async function until<T>(what: string, ms: number, fn: () => Promise<T | undefined | false>): Promise<T> {
-  const end = Date.now() + ms;
-  for (;;) {
-    const v = await fn().catch(() => undefined);
-    if (v) return v;
-    if (Date.now() > end) throw new Error(`gave up after ${ms} ms waiting for ${what}`);
-    await sleep(150);
-  }
-}
 
 const ffmpeg = await findFfmpeg();
 const ffprobe = ffmpeg.ok ? path.join(path.dirname(ffmpeg.resolvedPath), "ffprobe") : "";
@@ -89,8 +79,8 @@ async function withRelay(
   settings: { audioSourceUrl?: string },
 ): Promise<void> {
   assert.ok(binary?.ok);
-  const [api, rtsp, rtmp, hls, whep, udp] = await Promise.all([tcpPort(), tcpPort(), tcpPort(), tcpPort(), tcpPort(), tcpPort()]);
-  const ports = { api, rtsp, rtmp, hls, webrtcHttp: whep, webrtcUdp: udp, srt: await tcpPort() };
+  const [api, rtsp, rtmp, hls, whep, udp] = await Promise.all([tcpPort(), tcpPort(), tcpPort(), tcpPort(), tcpPort(), udpPort()]);
+  const ports = { api, rtsp, rtmp, hls, webrtcHttp: whep, webrtcUdp: udp, srt: await udpPort() };
   const password = "integrationpass".padEnd(19, "1");
   const apiPass = "apipass".padEnd(20, "x");
   const feeds0: RelayFeed[] = [{ id: "cam", kind: "push", password }];
@@ -98,7 +88,15 @@ async function withRelay(
   await fs.writeFile(configPath, JSON.stringify(relayConfig({ ports, lanIp: "127.0.0.1", users: relayUsers(feeds0, apiPass), rtsp: true })));
   start(binary.path, [configPath]);
   const relay = new MediaMtxRelay(api, apiPass);
-  await until("the relay's API", 15_000, async () => (await relay.status(), true));
+  await untilValue(
+    async () => {
+      await relay.status();
+      return true;
+    },
+    "the relay's API",
+    15_000,
+    150,
+  );
   try {
     const reconcile = async (feed: Partial<RelayFeed>) => relay.reconcile([{ id: "cam", kind: "push", password, ...feed } as RelayFeed]);
     await reconcile({});
@@ -109,7 +107,7 @@ async function withRelay(
       "-c:a", "aac", "-ac", "2", "-b:a", "128k", "-f", "rtsp", "-rtsp_transport", "tcp", `rtsp://video:${password}@127.0.0.1:${rtsp}/cam`,
     ]);
     // What the app does on learning the codec: read it from the relay's own track list.
-    const audio = await until("the source's audio track", 20_000, async () => (await relay.status()).find((p) => p.name === "cam" && p.ready)?.audio);
+    const audio = await untilValue(async () => (await relay.status()).find((p) => p.name === "cam" && p.ready)?.audio, "the source's audio track", 20_000, 150);
     assert.equal(audio, "MPEG-4 Audio", "the relay did not report the test source's AAC");
     const resolved = resolveAudio(
       planAudio({ conversion: "auto", audio, sourceUrl: settings.audioSourceUrl }, "cam"),
@@ -148,7 +146,7 @@ test("AAC in, Opus out: one ffmpeg per feed shared by two readers, started by th
     holder.kill("SIGKILL");
 
     // Ended after the last reader (10 s grace).
-    await until("the converter to stop after the last reader left", 25_000, async () => (await converters(rtsp)) === 0);
+    await untilValue(async () => (await converters(rtsp)) === 0, "the converter to stop after the last reader left", 25_000, 150);
   }, wrapper, {});
 });
 

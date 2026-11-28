@@ -43,7 +43,7 @@ import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
 import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE } from "./service-window.js";
 import { SSE_MAX_BUFFER } from "./sse-reader.js";
 import type { ProPresenterStatusDTO } from "../types/stage.js";
-import { sleep } from "./fixtures/within.js";
+import { sleep, until } from "./fixtures/within.js";
 
 // THE unattended appliance. Without this the broadcaster fails open — its
 // documented behaviour before a transport registers a check — and the fallback
@@ -408,16 +408,6 @@ interface Reachable {
  *  test-only setter: every one of these is an implementation detail. */
 const inner = (svc: unknown): Reachable => svc as Reachable;
 
-/** Poll `fn` until it is true, or fail with `what`. Bounded, never a bare sleep. */
-async function until(what: string, fn: () => boolean, ms = 4000): Promise<void> {
-  const deadline = Date.now() + ms;
-  while (Date.now() < deadline) {
-    if (fn()) return;
-    await sleep(5);
-  }
-  assert.fail(`timed out after ${ms}ms waiting for: ${what}`);
-}
-
 /**
  * Run `fn` with the window-aware retry clamp switched off.
  *
@@ -453,7 +443,7 @@ const polls = (): string[] =>
  *  stream fires inside the case's own wait. */
 async function streaming(pollMs?: number): Promise<void> {
   point("127.0.0.1", port, pollMs);
-  await until("the subscription to reach the stub", () => streams.length > 0);
+  await until(() => streams.length > 0, "the subscription to reach the stub");
 }
 
 /** Reset everything a case can have changed. */
@@ -502,7 +492,7 @@ function point(host: string, port: number, pollMs?: number): void {
 describe("the event name ProPresenter actually sends", () => {
   it("fills the whole DTO from one snapshot burst", async () => {
     await streaming();
-    await until("the burst to publish", () => status().currentSlideText === "line one");
+    await until(() => status().currentSlideText === "line one", "the burst to publish");
 
     const s = status();
     // Every field, because each one comes from a different frame and a dispatch
@@ -534,7 +524,7 @@ describe("the event name ProPresenter actually sends", () => {
     push(frame(WIRE.slide, SLIDE_FRAME));
     push(frame("v1/presentation/slide_index", SLIDE_INDEX_FRAME));
     push(frame("v1/presentation/current", presentationDoc()));
-    await until("the un-slashed frames to publish", () => status().slideCount != null);
+    await until(() => status().slideCount != null, "the un-slashed frames to publish");
 
     const s = status();
     assert.equal(s.slideIndex, 2);
@@ -558,14 +548,14 @@ describe("the event name ProPresenter actually sends", () => {
     );
     push(frame(WIRE.slide, SLIDE_FRAME));
     push(frame("v1/presentation/current", presentationDoc()));
-    await until("the document to publish", () => status().currentItem != null);
+    await until(() => status().currentItem != null, "the document to publish");
     assert.equal(status().currentItem, "Opening Song");
     assert.equal(status().slideCount, TOTAL_SLIDES);
   });
 
   it("subscribes to all six endpoints, heartbeat included, and says so", async () => {
     await streaming();
-    await until("the subscription body to arrive", () => lastSubscribeBody !== "");
+    await until(() => lastSubscribeBody !== "", "the subscription body to arrive");
     // timer/system_time is the heartbeat the watchdog counts. Dropping it from
     // the list is silent — the panel still works — right up to the Sunday a dead
     // stream is never noticed.
@@ -584,8 +574,8 @@ describe("the event name ProPresenter actually sends", () => {
     // read `0 !== 1` on a CI runner. Wait for at least one, then assert exactly
     // one, so "said once" is still guarded.
     await until(
-      "the streaming line to be logged",
       () => loggedMatching(/streaming 6 endpoints from 127\.0\.0\.1:/).length > 0,
+      "the streaming line to be logged",
     );
     assert.deepEqual(loggedMatching(/streaming 6 endpoints from 127\.0\.0\.1:/).length, 1);
   });
@@ -613,7 +603,7 @@ describe("a held stream costs no requests", () => {
     // this comes back — left it green, because the poll it armed was slower than
     // the case's own wait.
     await streaming(200);
-    await until("the burst to publish", () => status().currentSlideText === "line one");
+    await until(() => status().currentSlideText === "line one", "the burst to publish");
     // /version, the subscribe, and one playlist read for the items list.
     const atRest = [...seen];
     assert.deepEqual(
@@ -626,7 +616,7 @@ describe("a held stream costs no requests", () => {
     for (let i = 0; i < 20; i++) {
       push(frame(WIRE.slide, { current: { text: `line ${i}`, notes: "" }, next: null }));
     }
-    await until("the last slide to publish", () => status().currentSlideText === "line 19");
+    await until(() => status().currentSlideText === "line 19", "the last slide to publish");
     await sleep(500); // two of the configured 200ms intervals, and then some
 
     assert.deepEqual(
@@ -642,13 +632,13 @@ describe("a held stream costs no requests", () => {
     // in-process consumer, the old code dropped to a five-second keepalive poll;
     // an idle stream is cheaper than that, so it simply stays up.
     await streaming();
-    await until("the burst to publish", () => status().currentSlideText === "line one");
+    await until(() => status().currentSlideText === "line one", "the burst to publish");
     assert.equal(streams.length, 1);
 
     push(frame(WIRE.slide, { current: { text: "unwatched", notes: "" }, next: null }));
     await until(
-      "an unwatched instance to keep publishing",
       () => status().currentSlideText === "unwatched",
+      "an unwatched instance to keep publishing",
     );
     assert.equal(streams.length, 1, "the stream was dropped when nobody was watching");
   });
@@ -660,7 +650,7 @@ describe("a ProPresenter that refuses the subscription", () => {
   it("falls back to the poll, and the poll works", async () => {
     subscribeStatus = 404;
     point("127.0.0.1", port);
-    await until("the poll to publish", () => status().currentSlideText === "line one");
+    await until(() => status().currentSlideText === "line one", "the poll to publish");
 
     // The fallback is a real path, not a comment: the five GETs went out and the
     // DTO they build is the same one the stream builds.
@@ -680,7 +670,7 @@ describe("a ProPresenter that refuses the subscription", () => {
   it("says which status refused it, once", async () => {
     subscribeStatus = 501;
     point("127.0.0.1", port);
-    await until("the poll to publish", () => status().currentSlideText === "line one");
+    await until(() => status().currentSlideText === "line one", "the poll to publish");
     assert.deepEqual(loggedMatching(/status\/updates unsupported/), [
       "[propresenter] status/updates unsupported (HTTP 501) — falling back to polling " +
         "for the rest of this run",
@@ -690,7 +680,7 @@ describe("a ProPresenter that refuses the subscription", () => {
   it("stops re-asking: one refused subscribe, then polls only", async () => {
     subscribeStatus = 404;
     point("127.0.0.1", port);
-    await until("the poll to publish", () => status().currentSlideText === "line one");
+    await until(() => status().currentSlideText === "line one", "the poll to publish");
     seen = [];
     // Drive two more cycles by hand rather than waiting out the poll interval.
     await inner(propresenterService).connect();
@@ -714,7 +704,7 @@ describe("a ProPresenter that refuses the subscription", () => {
     });
     try {
       point("127.0.0.1", port);
-      await until("the killed subscribe to be retried", () => subscribes().length >= 2);
+      await until(() => subscribes().length >= 2, "the killed subscribe to be retried");
 
       assert.equal(
         inner(propresenterService).streamFallback,
@@ -770,7 +760,7 @@ describe("a ProPresenter that refuses the subscription", () => {
     // now that ProPresenter is out of its table.
     subscribeStatus = 404;
     point("127.0.0.1", port);
-    await until("the poll to publish", () => status().currentSlideText === "line one");
+    await until(() => status().currentSlideText === "line one", "the poll to publish");
 
     const svc = inner(propresenterService);
     /** One real poll, reporting the delay it chose next. The timer is never armed
@@ -831,12 +821,12 @@ describe("a stream that has died without saying so", () => {
     inner(propresenterService).streamIdleMs = 150;
     try {
       await streaming();
-      await until("the burst to publish", () => status().currentSlideText === "line one");
+      await until(() => status().currentSlideText === "line one", "the burst to publish");
       assert.equal(subscribes().length, 1);
 
       await until(
-        "the silent stream to be given up on and re-dialled",
         () => subscribes().length >= 2,
+        "the silent stream to be given up on and re-dialled",
       );
       assert.deepEqual(loggedMatching(/stream ended \(no heartbeat for \d+s\) — reconnecting in \d+s/).length, 1);
     } finally {
@@ -853,7 +843,7 @@ describe("a stream that has died without saying so", () => {
     inner(propresenterService).streamIdleMs = 150;
     try {
       await streaming();
-      await until("the burst to publish", () => status().currentSlideText === "line one");
+      await until(() => status().currentSlideText === "line one", "the burst to publish");
       await sleep(500); // >3x the watchdog, with nothing but heartbeats
       assert.equal(
         subscribes().length,
@@ -872,9 +862,9 @@ describe("a stream that has died without saying so", () => {
     });
     try {
       await streaming();
-      await until("the burst to publish", () => status().currentSlideText === "line one");
+      await until(() => status().currentSlideText === "line one", "the burst to publish");
       for (const s of streams) s.end();
-      await until("the closed stream to be re-dialled", () => subscribes().length >= 2);
+      await until(() => subscribes().length >= 2, "the closed stream to be re-dialled");
       assert.ok(
         loggedMatching(/stream ended \(.*\) — reconnecting in \d+s/).length >= 1,
         "a stream ended with nothing in the log to read",
@@ -902,8 +892,8 @@ describe("a stream that has died without saying so", () => {
     try {
       point("127.0.0.1", port);
       await until(
-        "the stalled subscribe to give up and re-dial",
         () => subscribes().length >= 2,
+        "the stalled subscribe to give up and re-dial",
         12_000,
       );
     } finally {
@@ -918,7 +908,7 @@ describe("a stream that has died without saying so", () => {
     // and opened a new one. It also moved the epoch, which is what made
     // listMacros report a perfectly healthy machine as unreachable.
     await streaming();
-    await until("the burst to publish", () => status().currentSlideText === "line one");
+    await until(() => status().currentSlideText === "line one", "the burst to publish");
     const before = subscribes().length;
 
     propresenterService.setTarget("127.0.0.1", port, 900);
@@ -937,14 +927,14 @@ describe("a stream that has died without saying so", () => {
     // second "Streaming from h:p" is dropped as a repeat of the first and the
     // applier's "Connecting to h:p" is the last thing the row was ever told.
     await streaming();
-    await until("the row to go green", () => reports.length === 1);
+    await until(() => reports.length === 1, "the row to go green");
     const before = reports.length;
 
     propresenterService.stop();
-    await until("the stub to see the subscription close", () => streams.length === 0);
+    await until(() => streams.length === 0, "the stub to see the subscription close");
 
     point("127.0.0.1", port); // the tick going back on: same host, same port
-    await until("the stream to come back", () => streams.length === 1);
+    await until(() => streams.length === 1, "the stream to come back");
     await sleep(PUBLISH_SETTLE_MS);
 
     assert.deepEqual(reports.slice(before), [
@@ -977,7 +967,7 @@ describe("a stream that has died without saying so", () => {
         await streaming();
         // Two silent streams is the threshold — see SILENT_STREAMS_BEFORE_ERROR —
         // so five subscribes is two past it, with the fourth stream ended.
-        await until("a fourth silent stream to end", () => subscribes().length >= 5, 8000);
+        await until(() => subscribes().length >= 5, "a fourth silent stream to end", 8000);
         await sleep(100);
 
         const said = loggedMatching(/accepts the status subscription and then sends nothing/);
@@ -1022,11 +1012,11 @@ describe("a stream that has died without saying so", () => {
     try {
       await withoutRetryClamp(async () => {
         await streaming();
-        await until("the row to go red on the wedge", () => reports.length === 2, 8000);
+        await until(() => reports.length === 2, "the row to go red on the wedge", 8000);
         // The blip: one refused probe, then the machine is back — and still wedged.
         versionFailures = 1;
-        await until("the row to be taken over by the unreachable report", () => reports.length === 3, 8000);
-        await until("the next silent stream to end", () => reports.length === 4, 8000);
+        await until(() => reports.length === 3, "the row to be taken over by the unreachable report", 8000);
+        await until(() => reports.length === 4, "the next silent stream to end", 8000);
 
         assert.equal(reports.length, 4, `reports: ${JSON.stringify(reports, null, 2)}`);
         assert.deepEqual(
@@ -1059,13 +1049,13 @@ describe("a stream that has died without saying so", () => {
     try {
       await withoutRetryClamp(async () => {
         await streaming();
-        await until("the row to go red", () => reports.some((r) => r.state === "error"), 8000);
+        await until(() => reports.some((r) => r.state === "error"), "the row to go red", 8000);
         // The publisher comes back: the next stream carries the heartbeat again.
         heartbeatOn = true;
-        await until("a stream that is delivering", () => streams.length > 0, 8000);
+        await until(() => streams.length > 0, "a stream that is delivering", 8000);
         await until(
-          "the row to go back to green",
           () => reports.at(-1)?.state === "connected",
+          "the row to go back to green",
           8000,
         );
         assert.deepEqual(reports.at(-1), {
@@ -1095,9 +1085,9 @@ describe("a stream that has died without saying so", () => {
     try {
       await streaming();
       for (let i = 0; i < 3; i++) {
-        await until(`stream ${i + 1} to be held`, () => streams.length > 0, 4000);
+        await until(() => streams.length > 0, `stream ${i + 1} to be held`, 4000);
         for (const s of streams) s.destroy();
-        await until(`stream ${i + 1} to be seen closed`, () => streams.length === 0, 4000);
+        await until(() => streams.length === 0, `stream ${i + 1} to be seen closed`, 4000);
         await sleep(60);
       }
 
@@ -1137,21 +1127,21 @@ describe("a stream that has died without saying so", () => {
         // is on, so each one DELIVERS — this is a flaky link, not a wedge, and
         // the silent-stream counter must stay out of it.
         for (let i = 1; i <= 5; i++) {
-          await until(`stream ${i} to be held`, () => streams.length > 0, 4000);
+          await until(() => streams.length > 0, `stream ${i} to be held`, 4000);
           for (const s of streams) s.destroy();
-          await until(`stream ${i} to be seen closed`, () => streams.length === 0, 4000);
+          await until(() => streams.length === 0, `stream ${i} to be seen closed`, 4000);
         }
 
         // Phase two: the link comes good. Stream six holds, heartbeats and all.
-        await until("the sixth stream to be held", () => streams.length > 0, 4000);
+        await until(() => streams.length > 0, "the sixth stream to be held", 4000);
         const before = subscribes().length;
         await sleep(400);
         assert.equal(streams.length, 1, "the held stream was dropped before it could prove anything");
 
         for (const s of streams) s.destroy();
         await until(
-          "the re-dial after a stream that held to come at the BASE delay",
           () => subscribes().length > before,
+          "the re-dial after a stream that held to come at the BASE delay",
           600,
         );
       });
@@ -1178,9 +1168,9 @@ describe("a stream that has died without saying so", () => {
 
   it("stopping the service leaves no timer and no socket behind", async () => {
     await streaming();
-    await until("the burst to publish", () => status().currentSlideText === "line one");
+    await until(() => status().currentSlideText === "line one", "the burst to publish");
     propresenterService.stop();
-    await until("the stub to see the subscription close", () => streams.length === 0);
+    await until(() => streams.length === 0, "the stub to see the subscription close");
     seen = [];
     await sleep(150);
     assert.deepEqual(seen, [], "a stopped instance kept dialling");
@@ -1211,19 +1201,19 @@ describe("one run, one publish at a time", () => {
     // exactly the stop-then-start the manager does when the host changes.
     holdVersion = true;
     point("127.0.0.1", port);
-    await until("the first connect to park on /version", () => heldVersion.length === 1);
+    await until(() => heldVersion.length === 1, "the first connect to park on /version");
     propresenterService.setTarget(null, null); // the repoint, landing inside the round trip
     point("127.0.0.1", port);
-    await until("the second connect to park on /version", () => heldVersion.length === 2);
+    await until(() => heldVersion.length === 2, "the second connect to park on /version");
 
     holdVersion = false;
     releaseVersion(); // both parked connects resume
 
-    await until("a stream to be held", () => streams.length > 0);
+    await until(() => streams.length > 0, "a stream to be held");
     await sleep(200); // room for the abandoned run to open a second one
     // The burst's publish reads the playlist; let it land so no read is still in
     // flight when the case ends and bleeds into the next one's request count.
-    await until("the burst's publish to land", () => status().nextServiceItem === "Message");
+    await until(() => status().nextServiceItem === "Message", "the burst's publish to land");
 
     assert.equal(
       subscribes().length,
@@ -1249,13 +1239,13 @@ describe("one run, one publish at a time", () => {
     await streaming();
 
     push(frame(WIRE.playlist, PLAYLIST_FRAME)); // the change → one playlist read
-    await until("the playlist read to reach the stub", () => playlistReadAt.length === 1);
+    await until(() => playlistReadAt.length === 1, "the playlist read to reach the stub");
     // Frames keep arriving while it is in flight. A service does not pause.
     for (let i = 0; i < 5; i++) {
       push(frame(WIRE.slide, { current: { text: `line ${i}`, notes: "" }, next: null }));
       await sleep(30);
     }
-    await until("the delayed playlist to land", () => status().nextServiceItem === "Message");
+    await until(() => status().nextServiceItem === "Message", "the delayed playlist to land");
     await sleep(PUBLISH_SETTLE_MS);
 
     assert.equal(
@@ -1286,13 +1276,13 @@ describe("one run, one publish at a time", () => {
         frame(WIRE.slide, SLIDE_FRAME) +
         frame(WIRE.slideIndex, SLIDE_INDEX_FRAME),
     );
-    await until("the first slide to publish", () => status().slideIndex === 2);
+    await until(() => status().slideIndex === 2, "the first slide to publish");
     await sleep(PUBLISH_SETTLE_MS);
     published = [];
 
     // The advance, as ProPresenter sends it.
     push(frame(WIRE.slide, ADVANCED_SLIDE) + frame(WIRE.slideIndex, ADVANCED_INDEX));
-    await until("the advance to publish", () => status().slideIndex === 4);
+    await until(() => status().slideIndex === 4, "the advance to publish");
     await sleep(PUBLISH_SETTLE_MS);
 
     assert.deepEqual(
@@ -1326,7 +1316,7 @@ describe("a frame that will not parse", () => {
     }
     // Everything else still lands: the stream was not dropped over it.
     push(frame(WIRE.active, presentationDoc()) + frame(WIRE.slideIndex, SLIDE_INDEX_FRAME));
-    await until("the readable frames to publish", () => status().slideCount != null);
+    await until(() => status().slideCount != null, "the readable frames to publish");
 
     const lines = loggedMatching(/unreadable/);
     assert.equal(
@@ -1357,12 +1347,12 @@ describe("a frame that will not parse", () => {
     heartbeatOn = false;
     await streaming();
     push(frame(WIRE.active, presentationDoc()) + frame(WIRE.slideIndex, SLIDE_INDEX_FRAME));
-    await until("the good document to publish", () => status().slideCount === TOTAL_SLIDES);
+    await until(() => status().slideCount === TOTAL_SLIDES, "the good document to publish");
     assert.deepEqual(status().currentSection, { name: "Verse 1", colorHex: "#ff0000" });
 
     // The next document arrives truncated, and the slide index goes on advancing.
     push(truncated(WIRE.active));
-    await until("the blanked document to publish", () => status().slideCount === null, 2000);
+    await until(() => status().slideCount === null, "the blanked document to publish", 2000);
 
     const s = status();
     assert.equal(s.slideCount, null, "the previous presentation's slide count survived an unreadable frame");
@@ -1384,13 +1374,13 @@ describe("a frame that will not parse", () => {
     try {
       await streaming();
       push(truncated(WIRE.slide) + truncated(WIRE.timers));
-      await until("both endpoints to be reported", () => loggedMatching(/unreadable/).length === 2);
+      await until(() => loggedMatching(/unreadable/).length === 2, "both endpoints to be reported");
 
       for (const st of streams) st.end();
-      await until("the stream to be re-dialled", () => subscribes().length >= 2);
-      await until("the new stream to be held", () => streams.length === 1);
+      await until(() => subscribes().length >= 2, "the stream to be re-dialled");
+      await until(() => streams.length === 1, "the new stream to be held");
       push(truncated(WIRE.slide));
-      await until("the new stream to report it too", () => loggedMatching(/unreadable/).length === 3);
+      await until(() => loggedMatching(/unreadable/).length === 3, "the new stream to report it too");
     } finally {
       delete (propresenterService as unknown as Record<string, unknown>).reconnectBaseMs;
     }
@@ -1415,7 +1405,7 @@ describe("the presentation document against the reader's buffer cap", () => {
     );
     push(frame(WIRE.slide, SLIDE_FRAME));
     push(frame(WIRE.active, big));
-    await until("the oversized document to publish", () => status().slideCount != null);
+    await until(() => status().slideCount != null, "the oversized document to publish");
     assert.equal(status().slideCount, TOTAL_SLIDES);
   });
 });
@@ -1438,7 +1428,7 @@ describe("a playlist the API refuses", () => {
    *  for frames that must change nothing (an absence cannot be waited into being true). */
   async function firstFailureLands(): Promise<void> {
     push(frame(WIRE.playlist, PLAYLIST_FRAME));
-    await until("the broken playlist's failure to be recorded", () => inner(propresenterService).playlistRetryAt > 0);
+    await until(() => inner(propresenterService).playlistRetryAt > 0, "the broken playlist's failure to be recorded");
   }
 
   it("is read once, not once per frame, for as long as it keeps failing", async () => {
@@ -1483,7 +1473,7 @@ describe("a playlist the API refuses", () => {
     // with it. The failure comes back as `nextServiceItem: null`.
     playlistStatus = 404;
     await streaming();
-    await until("the burst to publish", () => status().currentSlideText === "line one");
+    await until(() => status().currentSlideText === "line one", "the burst to publish");
     const s = status();
     assert.equal(s.currentServiceItem, "Opening Song");
     assert.equal(s.nextServiceItem, null);
@@ -1505,7 +1495,7 @@ describe("a playlist the API refuses", () => {
     inner(propresenterService).playlistRetryAt = Date.now() - 1;
     playlistStatus = 200;
     push(frame(WIRE.playlist, PLAYLIST_FRAME));
-    await until("the recovered playlist to publish", () => status().nextServiceItem === "Message");
+    await until(() => status().nextServiceItem === "Message", "the recovered playlist to publish");
     assert.equal(playlistReads().length, 2, "the back-off never came due — one failure is permanent");
 
     // Recovered: the back-off is cleared, so the cache is a cache again.
@@ -1550,7 +1540,7 @@ describe("a playlist the API refuses", () => {
     try {
       for (let n = 0; n < 4; n++) {
         push(frame(WIRE.playlist, PLAYLIST_FRAME));
-        await until(`failure ${n + 1} to set its deadline`, () => setBy.length === n + 1);
+        await until(() => setBy.length === n + 1, `failure ${n + 1} to set its deadline`);
         deadline = Date.now() - 1; // due now; the service's own write above is what is under test
       }
     } finally {
@@ -1593,8 +1583,8 @@ describe("a playlist the API refuses", () => {
       }),
     );
     await until(
-      "the new playlist to be read immediately",
       () => seen.includes(`GET /v1/playlist/${other}`),
+      "the new playlist to be read immediately",
     );
   });
 });
@@ -1611,8 +1601,8 @@ describe("two auditoriums, each on its own stream", () => {
     await sleep(150);
     push(frame(WIRE.slide, { current: { text: "still here", notes: "" }, next: null }));
     await until(
-      "the reachable instance to keep publishing",
       () => status().currentSlideText === "still here",
+      "the reachable instance to keep publishing",
     );
     assert.equal(streams.length, 1, "the primary's stream was dropped by the other instance");
     assert.equal(propresenterManager.getInstancesDto().status.overflow?.connected, false);
@@ -1633,10 +1623,10 @@ describe("two auditoriums, each on its own stream", () => {
     });
     // And it really is transient — the stream replaces it with its own.
     await until(
-      "the stream to replace the connecting message",
       () =>
         propresenterManager.getInstancesDto().conn.overflow?.message ===
         `Streaming from 127.0.0.1:${port}`,
+      "the stream to replace the connecting message",
     );
   });
 
@@ -1652,15 +1642,15 @@ describe("two auditoriums, each on its own stream", () => {
     const overflow = { id: "overflow", name: "Overflow", host: "127.0.0.1", port, enabled: true };
     propresenterManager.apply("Main", [overflow]);
     await until(
-      "the extra instance to come up",
       () => instConn("overflow")?.message === `Streaming from 127.0.0.1:${port}`,
+      "the extra instance to come up",
     );
 
     propresenterManager.apply("Main", [{ ...overflow, enabled: false }]);
     assert.deepEqual(instConn("overflow"), { state: "disconnected", message: null });
 
     propresenterManager.apply("Main", [overflow]);
-    await until("the re-enabled row to leave Connecting", () => instConn("overflow")?.state === "connected");
+    await until(() => instConn("overflow")?.state === "connected", "the re-enabled row to leave Connecting");
     assert.deepEqual(instConn("overflow"), {
       state: "connected",
       message: `Streaming from 127.0.0.1:${port}`,
@@ -1676,8 +1666,8 @@ describe("two auditoriums, each on its own stream", () => {
     const overflow = { id: "overflow", name: "Overflow", host: "127.0.0.1", port, enabled: true };
     propresenterManager.apply("Main", [overflow]);
     await until(
-      "the extra instance to come up",
       () => instConn("overflow")?.message === `Streaming from 127.0.0.1:${port}`,
+      "the extra instance to come up",
     );
 
     // A save that changes the FALLBACK poll interval, which the stream path does
@@ -1698,7 +1688,7 @@ describe("two auditoriums, each on its own stream", () => {
     propresenterManager.apply("Main", [
       { id: "overflow", name: "Overflow", host: "127.0.0.1", port, enabled: true },
     ]);
-    await until("both subscriptions to be held", () => streams.length === 2);
+    await until(() => streams.length === 2, "both subscriptions to be held");
     assert.equal(subscribes().length, 2);
   });
 });
@@ -1749,7 +1739,7 @@ describe("what a ticking timer costs", () => {
     heartbeatOn = false;
     await streaming();
     push(frame(WIRE.timers, countdown(600)));
-    await until("the first tick to publish", () => status().timers.length === 1);
+    await until(() => status().timers.length === 1, "the first tick to publish");
     await sleep(PUBLISH_SETTLE_MS);
     published = [];
 
@@ -1793,7 +1783,7 @@ describe("what a ticking timer costs", () => {
     // Something real, so the case is not merely measuring a stream that never
     // published anything at all.
     push(frame(WIRE.slide, SLIDE_FRAME));
-    await until("the slide to publish", () => status().currentSlideText === "line one");
+    await until(() => status().currentSlideText === "line one", "the slide to publish");
     await sleep(PUBLISH_SETTLE_MS);
     assert.deepEqual(status().timers, [], "a stopped timer reached the DTO");
     published = [];
@@ -1829,7 +1819,7 @@ describe("what a ticking timer costs", () => {
         { id: { uuid: "t-3", name: "Idle", index: 2 }, time: "00:03:00", state: "stopped" },
       ]),
     );
-    await until("the timers to publish", () => status().timers.length === 2);
+    await until(() => status().timers.length === 2, "the timers to publish");
     assert.deepEqual(status().timers, [
       { name: "Countdown", time: "-00:00:02", state: "overrunning" },
       { name: "Elapsed", time: "00:21:43.00", state: "running" },

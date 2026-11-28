@@ -35,14 +35,37 @@ export const sleep = (ms: number): Promise<void> => new Promise((resolve) => set
  *
  * Deadline on performance.now() and the poll on the timer captured at import,
  * so it neither hangs nor expires early in a file that mocks Date or
- * setTimeout (messages-service does both). Arguments are (ready, what, ms) in
- * `what` may be a function so the message names state at the moment of failure.
+ * setTimeout (messages-service does both). `ready` may be async. `what` may be a
+ * function so the message names state at the moment of failure.
  */
-export async function until(ready: () => boolean, what: string | (() => string), ms = 5000): Promise<void> {
+export async function until(ready: () => boolean | Promise<boolean>, what: string | (() => string), ms = 5000): Promise<void> {
   const deadline = performance.now() + ms;
   for (;;) {
-    if (ready()) return;
+    if (await ready()) return;
     if (performance.now() > deadline) throw new Error(`timed out waiting for ${typeof what === "function" ? what() : what}`);
     await new Promise<void>((resolve) => realSetTimeout(resolve, 5));
+  }
+}
+
+/**
+ * `until` for a probe that yields a value: polls `probe` until it returns
+ * something truthy and returns it. A probe that throws counts as "not yet", for a
+ * wait on something external (a spawned process, a socket) that errors until it
+ * is ready. Polls every `pollMs`, for probes that are themselves costly.
+ */
+export async function untilValue<T>(
+  probe: () => Promise<T | undefined | false> | T | undefined | false,
+  what: string | (() => string),
+  ms = 5000,
+  pollMs = 5,
+): Promise<T> {
+  const deadline = performance.now() + ms;
+  for (;;) {
+    const v = await Promise.resolve()
+      .then(probe)
+      .catch(() => undefined);
+    if (v) return v;
+    if (performance.now() > deadline) throw new Error(`timed out waiting for ${typeof what === "function" ? what() : what}`);
+    await new Promise<void>((resolve) => realSetTimeout(resolve, pollMs));
   }
 }

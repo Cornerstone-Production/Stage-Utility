@@ -27,9 +27,9 @@ import { describe, it, beforeEach, afterEach, mock, type TestContext } from "nod
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { makeLive } from "./fixtures/live-dto.js";
 
 import type {
-  PcoLiveDTO,
   ServiceAttendance,
   ServiceSplHistory,
   ServiceTimeline,
@@ -265,7 +265,7 @@ describe("a service still live after the boot-time close", () => {
 
     const now = CRASH + 5 * MIN;
     mock.timers.setTime(now);
-    const live: PcoLiveDTO = {
+    const live = makeLive({
       mode: "item",
       currentItemId: "message",
       label: "Message",
@@ -280,7 +280,7 @@ describe("a service still live after the boot-time close", () => {
       serviceTimeStartsAt: iso(T0),
       serviceEnded: false,
       beforeServiceStart: false,
-    };
+    });
     await splRecorder.onLiveTick(live);
     await serviceTimelineRecorder.onLiveTick(live);
 

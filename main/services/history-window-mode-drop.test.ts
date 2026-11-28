@@ -26,8 +26,6 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import type { PcoLiveDTO } from "../types/stage.js";
-
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-history-window-drop-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
@@ -39,6 +37,8 @@ const { stageController } = await import("./stage-controller.js");
 const { serviceTimelineRecorder } = await import("./service-timeline-recorder.js");
 const { splRecorder } = await import("./spl-recorder.js");
 const { attendanceRecorder } = await import("./attendance-recorder.js");
+const { feedLiveTick, loadLiveConsumers, makeLive } = await import("./fixtures/live-dto.js");
+await loadLiveConsumers();
 const { addBroadcastListener } = await import("./broadcaster.js");
 const { captureConsole } = await import("./fixtures/capture-console.js");
 const { serviceWindowOf } = await import("../../renderer/settings/sections/history-chart/service-window.js");
@@ -126,7 +126,7 @@ async function tick(atMs: number, o: TickOpts): Promise<void> {
   mock.timers.setTime(atMs);
   const at = iso(atMs);
   const inItem = o.item != null;
-  const live: PcoLiveDTO = {
+  const live = makeLive({
     mode: inItem ? "item" : (o.mode ?? "preservice"),
     currentItemId: o.item,
     label: inItem ? o.item : "Service starts",
@@ -141,13 +141,8 @@ async function tick(atMs: number, o: TickOpts): Promise<void> {
     serviceTimeStartsAt: o.serviceTimeStartsAt ?? null,
     serviceEnded: inItem ? (o.serviceEnded ?? false) : undefined,
     beforeServiceStart: inItem ? false : undefined,
-  };
-  const results = await Promise.allSettled([
-    splRecorder.onLiveTick(live),
-    attendanceRecorder.onLiveTick(live),
-    serviceTimelineRecorder.onLiveTick(live),
-  ]);
-  for (const r of results) if (r.status === "rejected") throw r.reason;
+  });
+  await feedLiveTick(live);
 }
 
 const T0 = Date.parse("2026-11-08T15:00:00.000Z");

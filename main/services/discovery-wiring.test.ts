@@ -20,6 +20,7 @@ import { after, before, test } from "node:test";
 
 import { serveOnSocket, type SocketServer } from "./fixtures/socket-server.js";
 import { udpPort } from "./fixtures/free-port.js";
+import { until } from "./fixtures/within.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-discovery-wiring-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -39,14 +40,6 @@ const checks: DiscoveryProbe[] = [];
 const replies: string[] = [];
 const realLog = console.log;
 const realWarn = console.warn;
-
-async function until(what: string, ok: () => boolean, ms = 3000): Promise<void> {
-  const end = Date.now() + ms;
-  while (!ok()) {
-    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((r) => setTimeout(r, 10));
-  }
-}
 
 /** The id discovery minted on start, as the stage state should then hold it. */
 let OWN = "";
@@ -105,7 +98,7 @@ test("STARTING DISCOVERY MINTS THE ID AND PUTS IT IN THE STAGE STATE", async () 
 });
 
 test("WHAT THE CHECK FINDS REACHES THE STAGE STATE", async () => {
-  await until("the duplicate in the state", () => stageController.getState().serverIdentity.duplicates.length > 0);
+  await until(() => stageController.getState().serverIdentity.duplicates.length > 0, "the duplicate in the state");
   assert.equal(stageController.getState().serverIdentity.duplicates[0].url, "http://192.0.2.60:8788");
 });
 
@@ -116,11 +109,11 @@ test("NEW SERVER ID IS ANSWERED WITH AT ONCE, AND CHECKED FOR AT ONCE", async ()
   assert.ok(next && next !== OWN);
 
   // A check under the new id goes out now, not at the next minute's re-check.
-  await until("a check under the new id", () => checks.some((c) => c.boundTo === next), 2000);
+  await until(() => checks.some((c) => c.boundTo === next), "a check under the new id", 2000);
 
   // And a screen naming the new id is answered as it, by the running socket.
   replies.length = 0;
   peer.send(encodeProbe({ id: "pi-1", macs: ["02:00:00:00:00:bb"], hostname: "pi", boundTo: next! }), responderPort, "127.0.0.1");
-  await until("an answer", () => replies.length > 0);
+  await until(() => replies.length > 0, "an answer");
   assert.equal(decodeReply(replies[0])?.serverId, next, "the socket still answers as the old id until a restart");
 });

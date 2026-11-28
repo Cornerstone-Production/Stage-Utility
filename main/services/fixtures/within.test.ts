@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { until } from "./within.js";
+import { until, untilValue } from "./within.js";
 
 describe("until", () => {
   it("resolves once the condition holds, with Date and setTimeout mocked", { timeout: 3000 }, async (t) => {
@@ -32,5 +32,29 @@ describe("until", () => {
       ),
       /timed out waiting for state after/,
     );
+  });
+});
+
+describe("untilValue", () => {
+  it("returns the first truthy value and treats a throwing probe as not yet", { timeout: 3000 }, async () => {
+    let n = 0;
+    const got = await untilValue(async () => {
+      if (++n < 3) throw new Error("not up yet");
+      return "ready";
+    }, "a probe that errors until it is up");
+    assert.equal(got, "ready");
+  });
+
+  it("gives up naming what it waited for, with Date and setTimeout mocked", { timeout: 3000 }, async (t) => {
+    t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1_000 });
+    await assert.rejects(untilValue(() => false, "a value that never comes", 30), /timed out waiting for a value that never comes/);
+  });
+});
+
+describe("until with an async check", () => {
+  it("awaits the check", { timeout: 3000 }, async () => {
+    let n = 0;
+    await until(async () => ++n >= 3, "an async check");
+    assert.ok(n >= 3);
   });
 });

@@ -20,6 +20,7 @@ import type { DeviceStatus } from "../../types/devices.js";
 import type { ConnectionState } from "../../types/integrations.js";
 import { startSelfSignedServer, type SelfSignedServer } from "../../services/fixtures/self-signed-page.js";
 import { SennheiserSpectera } from "./sennheiser-spectera.js";
+import { until as waitUntil } from "../../services/fixtures/within.js";
 
 const SESSION = "0f0e0d0c-test";
 
@@ -88,14 +89,8 @@ async function watch(m: Mode, probeTimeoutMs = 120): Promise<Watch> {
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Poll until `ok()` or the deadline: a loaded runner is slower, not different. */
-async function until(ok: () => boolean, ms = 3_000): Promise<boolean> {
-  const end = Date.now() + ms;
-  while (!ok()) {
-    if (Date.now() > end) return false;
-    await wait(20);
-  }
-  return true;
-}
+const until = (ok: () => boolean, ms = 3_000): Promise<boolean> =>
+  waitUntil(ok, "the condition", ms).then(() => true, () => false);
 
 describe("a Spectera stream that goes silent", () => {
   it("reads offline when the base station stops answering", async () => {
