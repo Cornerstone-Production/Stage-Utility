@@ -69,13 +69,10 @@ function mount(cues: CuesLive | null, cue: string, interactive = true, choosePre
 
 /**
  * Let the press settle: the call promise, React's state update, and the render
- * it schedules. Two macrotasks rather than one — with a single tick the last
- * setState landed after the test had ended, and node:test reported the render
- * as "asynchronous activity after the test ended" once the dom was torn down.
- *
- * act()-wrapped so that setState lands on React's own queue instead of the
- * scheduler — without it, the same race can land the flush after teardown
- * instead of merely after the test.
+ * it schedules. One act turn that waits 20 ms rather than a single tick — with
+ * a single tick the last setState landed after the test had ended, and node:test
+ * reported the render as "asynchronous activity after the test ended" once the
+ * dom was torn down.
  */
 const settle = () => sharedSettle({ ms: 20 });
 
