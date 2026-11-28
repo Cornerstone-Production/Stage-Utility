@@ -12,6 +12,7 @@ import { formatClock } from "../../lib/clock-format";
 import { useNow } from "../../lib/use-now";
 import { bFramesSentence, isObsWhipFeed } from "./b-frames-copy";
 import { plural } from "@main/services/plural";
+import { formatAge } from "../../lib/age-label";
 
 /**
  * The row's pill: its text, its tint and its dot, or null for a feed this
@@ -62,9 +63,8 @@ function codecLabel(codec: string): string {
 }
 
 /** "4 s ago", or minutes once it has been that long. */
-function agoText(ageMs: number): string {
-  const s = Math.max(0, Math.round(ageMs / 1000));
-  return s < 60 ? `${s} s ago` : `${Math.floor(s / 60)} min ago`;
+export function agoText(ageMs: number): string {
+  return formatAge(ageMs / 1000, { seconds: true, ago: true });
 }
 
 /**

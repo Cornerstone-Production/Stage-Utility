@@ -3,6 +3,7 @@
 // A screen with no view is not here: that is the readiness check "A screen has
 // no view", and "offline" would be the wrong word for something nobody routed.
 
+import { formatAge } from "../../../../lib/age-label";
 import { screenFlashId } from "../../../../settings/sections/outputs-section";
 import { splitByPresence } from "../../readiness";
 import { attentionKey, type AttentionInput, type AttentionItem, type AttentionSource } from "../types";
@@ -10,10 +11,8 @@ import { attentionKey, type AttentionInput, type AttentionItem, type AttentionSo
 /** "4 min ago", "3 h ago", or the day and time once it is more than a day. */
 export function lastSeenText(at: number | undefined, now: number): string {
   if (at === undefined) return "never connected";
-  const min = Math.max(0, Math.round((now - at) / 60_000));
-  if (min < 1) return "last seen just now";
-  if (min < 60) return `last seen ${min} min ago`;
-  if (min < 24 * 60) return `last seen ${Math.round(min / 60)} h ago`;
+  const sec = (now - at) / 1000;
+  if (sec < 24 * 3600) return `last seen ${formatAge(sec, { now: { under: 30, text: "just now" }, ago: true })}`;
   return `last seen ${new Date(at).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })}`;
 }
 
