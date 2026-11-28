@@ -152,7 +152,10 @@ describe("the edges of keeping a last name", () => {
     return call("PUT", `/api/stageplots/plots/${plotId}/items`, { version: plot.version, items: [it] });
   };
 
-  test("a patch save between a plot save's read of the patch and its write is not overwritten with the old name", async () => {
+  test("a patch save between a plot save's read of the patch and its write is not overwritten with the old name", async (t) => {
+    // The clock stands still, so the patch save inside the read lands in the same millisecond as the save before it, and
+    // the stamps must order them anyway. On a real clock this failed about one run in fifteen: the runs where they did.
+    t.mock.timers.enable({ apis: ["Date"], now: Date.now() });
     const plotId = await linkedPlot("Old Box");
     await patchStore.save(patchOf([{ id: "sb1", name: "Drum Box" }]));
     const real = patchStore.loadStrict.bind(patchStore);
