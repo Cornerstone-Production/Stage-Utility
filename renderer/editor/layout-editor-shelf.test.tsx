@@ -303,3 +303,36 @@ test("Delete and Backspace leave the canvas alone while a dialog or a list is op
     f.restore();
   }
 });
+
+// The delete keys yield to a dialog over the editor. The app's own confirm() is an
+// alertdialog, which the guard used to miss.
+async function selectFirstLayer() {
+  const layer = screen.getAllByRole("button").find((b) => b.getAttribute("draggable") === "true" && !b.getAttribute("aria-label") && /container/i.test(b.textContent ?? ""));
+  assert.ok(layer, "no layer to select");
+  await act(async () => { fireEvent.click(layer!); });
+}
+
+test("Delete removes the selected object when nothing is open", async () => {
+  await mount();
+  await selectFirstLayer();
+  const before = layerNames().length;
+  keydown(document.body, { key: "Delete" });
+  await settleAct();
+  assert.ok(layerNames().length < before, "Delete removed nothing: the control for the next test is void");
+});
+
+test("Delete does nothing while a confirm (alertdialog) is open", async () => {
+  await mount();
+  await selectFirstLayer();
+  const before = layerNames().length;
+  const dialog = document.createElement("div");
+  dialog.setAttribute("role", "alertdialog");
+  document.body.appendChild(dialog);
+  try {
+    keydown(document.body, { key: "Delete" });
+    await settleAct();
+    assert.equal(layerNames().length, before, "Delete removed the object behind an open confirm");
+  } finally {
+    dialog.remove();
+  }
+});

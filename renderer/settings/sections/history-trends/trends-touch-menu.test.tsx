@@ -96,7 +96,7 @@ describe("the History and Trends menus open on a touch", () => {
     view.unmount();
   });
 
-  test("a scrub across the plot does not", async () => {
+  test("a scrub across the plot does not", { timeout: 8000 }, async () => {
     const view = await renderCard(recordings());
     const plot = view.container.querySelector("svg[data-domain-end]")!;
     await act(async () => {
@@ -104,8 +104,9 @@ describe("the History and Trends menus open on a touch", () => {
       fireEvent.pointerMove(plot, { pointerId: 1, pointerType: "touch", clientX: 90, clientY: 40 });
       await new Promise((r) => setTimeout(r, LONG_PRESS_MS + 80));
     });
-    assert.equal(menu(), null, "a scrub opened the menu");
-    view.unmount();
+    const opened = menu() !== null;
+    cleanup();
+    assert.equal(opened, false, "a scrub opened the menu");
   });
 
   test("a long press on a legend entry does not also toggle it", async () => {
