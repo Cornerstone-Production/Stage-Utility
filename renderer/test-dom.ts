@@ -532,3 +532,29 @@ export async function unmountAndTeardown(
   await settle();
   teardown();
 }
+
+/**
+ * Forget everything the renderer's two module-level caches learned in the last case.
+ *
+ * Both outlive a test case, because a test file shares one module registry across
+ * every case in it. The stage state (`use-stage-state.ts`) keeps its snapshot and its
+ * subscribers; the SSE client (`lib/api.ts`) keeps the last frame of every hydrated
+ * channel and replays it into the next subscriber, and any read still in flight.
+ * Clearing one without the other is the half-reset a file fails on only when its
+ * cases run in the wrong order: the next case starts with a stage state that is
+ * already loaded, or a frame it never sent. Call it in `afterEach`:
+ *
+ *   afterEach(async () => {
+ *     cleanup();
+ *     await resetClientCaches();
+ *   });
+ *
+ * Both modules are imported here, when called, not at the top: they bind to the
+ * DOM global when they load, and this module is imported before installDom has run.
+ */
+export async function resetClientCaches(): Promise<void> {
+  const { __resetForTests } = await import("./main/use-stage-state.js");
+  const { __resetReplayCacheForTests } = await import("./lib/api.js");
+  __resetForTests();
+  __resetReplayCacheForTests();
+}
