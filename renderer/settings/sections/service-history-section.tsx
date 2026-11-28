@@ -206,8 +206,9 @@ export function editedTooltip(it: ServiceTimelineItem): string {
  *  `failed` is a list, not a leg; `baptismDetail` is baptism's own extra
  *  detail, not a fifth leg; and `baptism` itself is reported SEPARATELY (see
  *  describeRebuild), because unlike the other three it is a MERGE, never a
- *  replace, with its own six-way split of what happened to each session. */
-type RebuildLegName = Exclude<keyof RebuildOutcome, "failed" | "baptismDetail" | "baptism">;
+ *  replace, with its own six-way split of what happened to each session;
+ *  `gapRepair` is what the boot repair's rule did afterwards, said on its own. */
+type RebuildLegName = Exclude<keyof RebuildOutcome, "failed" | "baptismDetail" | "baptism" | "gapRepair">;
 
 /**
  * The noun each REPLACE-style leg counts, in the order they are reported.
@@ -299,8 +300,20 @@ export function describeRebuild(out: RebuildOutcome): string {
     parts.push(`the store is full, so ${out.baptismDetail.full} baptism sessions were not added`);
   }
   if (out.failed.length) parts.push(`could not save: ${out.failed.join(", ")}`);
+  const gap = GAP_REPAIR_CLAUSE[out.gapRepair ?? "none"];
+  if (gap) parts.push(gap);
   return parts.join(" · ");
 }
+
+/** What the boot repair's rule did to an item length a boot-time close left
+ *  out (see repairBootCloseGaps on the server), when it did anything. */
+const GAP_REPAIR_CLAUSE: Record<NonNullable<RebuildOutcome["gapRepair"]>, string | null> = {
+  none: null,
+  repaired: "filled in the length a crash left out",
+  left: "a length a crash left out stays unknown",
+  waiting: "a length a crash left out is filled in at the next start, once the attendance records can be read",
+  failed: "could not fill in the length a crash left out; tried again at the next start (see the log)",
+};
 
 /** A plain-text service report combining timing + attendance + audio + baptisms (shareable). */
 export function buildReport(tl: ServiceTimeline, att: ServiceAttendance | null, spl: ServiceSplHistory | null, baptisms: BaptismSession[] = []): string {

@@ -32,7 +32,7 @@ import { archiveRoot, isInside, serviceDirName } from "./archive-paths.js";
 import { unreadableArchiveFile } from "./archive-rows.js";
 import { atomicWrite } from "../write-queue.js";
 import { assertSaved } from "../history-edit.js";
-import { repairBootCloseGaps } from "../reconcile-records.js";
+import { repairArrivedRecords } from "../reconcile-records.js";
 import { encodeRow, parseRows } from "../csv.js";
 import {
   mergeAttendanceRecord,
@@ -555,7 +555,7 @@ export async function importArchive(
   let gapsRepaired: string[] = [];
   let gapRepairFailed: string | null = null;
   try {
-    const repair = await repairBootCloseGaps(touchedKeys);
+    const repair = await repairArrivedRecords(touchedKeys);
     gapsRepaired = repair.repaired;
     if (repair.waiting) gapRepairFailed = repair.waiting;
     else if (repair.failed.length) gapRepairFailed = `could not save ${repair.failed.length} repaired record(s)`;

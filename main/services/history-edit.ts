@@ -32,7 +32,7 @@ import {
 } from "./history-item-times.js";
 import { clockOf } from "./app-timezone.js";
 import { closeTimelineItem } from "./service-recorder.js";
-import { repairBootCloseGaps } from "./reconcile-records.js";
+import { repairArrivedRecords } from "./reconcile-records.js";
 import { plural } from "./plural.js";
 import { attendanceRecorder } from "./attendance-recorder.js";
 import { splRecorder } from "./spl-recorder.js";
@@ -965,7 +965,7 @@ export async function rebuildServiceRecords(serviceKey: string): Promise<Rebuild
  *  is returned, not thrown: the rebuild itself has landed. */
 async function repairRebuiltGap(serviceKey: string): Promise<GapRepairOutcome> {
   try {
-    const r = await repairBootCloseGaps(new Set([serviceKey]));
+    const r = await repairArrivedRecords(new Set([serviceKey]));
     if (r.repaired.includes(serviceKey)) {
       const tl = await serviceTimelineStore.get(serviceKey);
       if (tl) broadcastTimeline(tl);

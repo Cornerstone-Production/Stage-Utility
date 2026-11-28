@@ -128,6 +128,12 @@ export function DataArchivePanel() {
             `(${failed[0].reason}). The services are here; their samples are not. Check disk space, ` +
             `then import again — keep the file.`,
         );
+      } else if (body.gapRepairFailed) {
+        // The records landed; filling a length a crash left out in them did not.
+        toast.error(
+          `Import done${parts.length ? `: ${parts.join(", ")}` : ""}, but a length a crash left out in them ` +
+            `could not be filled in (${body.gapRepairFailed}). It is tried again when the server next starts.`,
+        );
       } else {
         toast.success(
           parts.length === 0

@@ -195,18 +195,18 @@ export async function repairBootCloseGaps(only?: ReadonlySet<string>): Promise<G
   };
   const endPhrase = (end: { iso: string; measured: boolean }) =>
     `${end.iso} (${end.measured ? "the last in-service people count" : "the latest stamp its items hold"})`;
-  /** endFor over the items alone: the record's own end may be an operator's. */
-  const itemEnd = (rec: { serviceKey: string; startedAt: string; items?: unknown }) =>
-    endFor({ serviceKey: rec.serviceKey, startedAt: rec.startedAt, endedAt: null, items: itemsOf(rec) }, witness);
   const save = async <T extends { serviceKey: string }>(
-    store: { replaceKeepingPrior(r: T, suffix: string): Promise<void> },
+    store: { replaceKeepingPrior(r: T, suffix: string): Promise<boolean> },
     next: T,
     done: string,
   ): Promise<void> => {
     try {
-      await store.replaceKeepingPrior(next, REPAIR_BACKUP_SUFFIX);
+      const copied = await store.replaceKeepingPrior(next, REPAIR_BACKUP_SUFFIX);
       result.repaired.push(next.serviceKey);
-      say(next.serviceKey, `repaired a record closed at boot: ${done}; the file as it was is kept beside it as *.${REPAIR_BACKUP_SUFFIX}`);
+      say(
+        next.serviceKey,
+        `repaired a record closed at boot: ${done}; ${copied ? "the file as it was is kept" : "an earlier copy of it is already kept, and stays"} beside it as *.${REPAIR_BACKUP_SUFFIX}`,
+      );
     } catch (err) {
       result.failed.push(next.serviceKey);
       say(next.serviceKey, `could not repair a record closed at boot (${scrub(errorMessage(err))}), so it is left as it is`);
@@ -222,7 +222,7 @@ export async function repairBootCloseGaps(only?: ReadonlySet<string>): Promise<G
       leave(rec.serviceKey, `${gap.length} items with no end, more than the one any close leaves`);
       continue;
     }
-    const end = itemEnd(rec);
+    const end = endFor(rec, witness);
     const next: ServiceSplHistory = structuredClone(rec);
     stampItemEnds([next.items[rec.items.indexOf(gap[0]!)]!], end.iso);
     next.endedAt = laterIso(end.iso, rec.endedAt);
@@ -250,7 +250,7 @@ export async function repairBootCloseGaps(only?: ReadonlySet<string>): Promise<G
     }
     const gapItem = onAir[0]!;
     const othersNote = others > 0 ? `; ${others} other item(s) with no length, not on air at its end, left as they are` : "";
-    const end = itemEnd(rec);
+    const end = endFor(rec, witness);
     if (!end.measured && gapItem.endedAt != null) {
       leave(rec.serviceKey, `no length on the item that was on air, and no in-service people count after that item began${othersNote}`);
       continue;
@@ -265,6 +265,26 @@ export async function repairBootCloseGaps(only?: ReadonlySet<string>): Promise<G
     const length =
       item.actualDurationSec != null ? `a length of ${item.actualDurationSec} s` : end.measured ? "no length (its start cannot be read)" : "no length (nothing counted people past its start)";
     await save(serviceTimelineStore, next, `the timeline item that was on air closed at ${endPhrase(end)} with ${length}${othersNote}`);
+  }
+  return result;
+}
+
+/**
+ * repairBootCloseGaps for records that arrived after the boot repair ran: an
+ * archive import's, or a service Rebuild from raw recreated. What it could not
+ * repair (an attendance record unreadable, a save that failed) is tried again
+ * at the next start: the once-per-install marker is taken back, and the boot
+ * run is a no-op on every record it already repaired.
+ */
+export async function repairArrivedRecords(keys: ReadonlySet<string>): Promise<GapRepairResult> {
+  const result = await repairBootCloseGaps(keys);
+  if (result.waiting || result.failed.length) {
+    await historyRepairsStore.update((done) => {
+      const rest = { ...done };
+      delete rest[OLD_BOOT_CLOSE_REPAIR];
+      return rest;
+    });
+    console.log("[reconcile] what could not be repaired is tried again when the server next starts");
   }
   return result;
 }

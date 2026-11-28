@@ -366,8 +366,8 @@ test("replaceKeepingPrior keeps the file's old bytes beside it, once, and never 
   await s.upsert(rec("k:1", "2026-07-26T09:00:00.000Z", "original"));
   const file = path.join(dataDir, "t-keep", "k-1.json");
   const original = await fs.readFile(file, "utf8");
-  await s.replaceKeepingPrior(rec("k:1", "2026-07-26T09:00:00.000Z", "first"), "before-x");
-  await s.replaceKeepingPrior(rec("k:1", "2026-07-26T09:00:00.000Z", "second"), "before-x");
+  assert.equal(await s.replaceKeepingPrior(rec("k:1", "2026-07-26T09:00:00.000Z", "first"), "before-x"), true, "no copy made");
+  assert.equal(await s.replaceKeepingPrior(rec("k:1", "2026-07-26T09:00:00.000Z", "second"), "before-x"), false, "said it made a second copy");
 
   assert.equal(await fs.readFile(`${file}.before-x`, "utf8"), original, "the copy is not the original");
   assert.equal((await s.get("k:1"))?.title, "second");
