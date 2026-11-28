@@ -11,7 +11,7 @@
 // palette PRESENTS a type, not part of what the type is. The spec carries the
 // label, group and blurb, which every surface needs.
 
-import { useEffect, useRef, useState, type DragEvent, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from "react";
 import {
   BoxIcon, SquareIcon, ImageIcon, SparklesIcon, TypeIcon, ClockIcon, TimerIcon,
   TagIcon, ListIcon, ListOrderedIcon, GaugeIcon, PaperclipIcon, MonitorIcon,
@@ -238,9 +238,14 @@ export function usePaletteDrag({ onDragStart, onDragEnd, onDropAt }: PaletteDrag
       draggable: true as const,
       // Click adds, drag places. Both reach the same code, so a
       // keyboard user is not stuck with a gesture they cannot make.
-      onClick: () => {
-        // The click that trails a finger drag. See `dragged`.
-        if (dragged.current) { dragged.current = false; return; }
+      onClick: (e: ReactMouseEvent<HTMLElement>) => {
+        // The click that trails a finger drag. See `dragged`. A keyboard activation
+        // (detail 0) is never that click, whatever the flag says — the same rule as
+        // use-press-drag's claimClick.
+        if (dragged.current) {
+          dragged.current = false;
+          if (e.detail !== 0) return;
+        }
         onAdd(t);
       },
       onPointerDown: (e: ReactPointerEvent<HTMLElement>) => startTouchDrag(e, t),
