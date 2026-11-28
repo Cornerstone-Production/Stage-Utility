@@ -60,7 +60,8 @@ control / telemetry (Shure networked gear uses TCP 2202).
 
 **In Stage:** Settings → Integrations → **Wireless Gear** → enable the master
 toggle → **Add connection** → pick the provider, name it, and enter Device IP,
-TCP Port, and Number of Channels → enable it → **Test connection**. The global
+TCP Port, and Number of Channels (Number of Bays for an SBC charger: two per
+SBC220, up to four linked behind one IP) → enable it → **Test connection**. The global
 meter rate is set once and applies to all wireless gear.
 
 **On a layout:** add object → wireless:

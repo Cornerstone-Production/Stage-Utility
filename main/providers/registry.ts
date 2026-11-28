@@ -71,7 +71,18 @@ const PROVIDER_DESCRIPTORS = new Map<string, IntegrationDescriptor>([
       kind: "wireless",
       label: "Shure SBC Charger",
       docs: "wireless",
-      configSchema: shureFields("2"),
+      configSchema: [
+        { key: "host", label: "Device IP / Hostname", type: "text", placeholder: "192.168.1.110" },
+        { key: "port", label: "TCP Port", type: "number", placeholder: "2202" },
+        {
+          key: "channels",
+          label: "Number of Bays",
+          type: "number",
+          // The driver's own default (ShureCharger.defaultChannels).
+          placeholder: "8",
+          help: "One SBC220 has 2 bays, and up to four can be linked behind one IP, reporting bays 1-8. Set this to 2 x the number of linked units. Bays past this number still appear once the charger reports them.",
+        },
+      ],
     },
   ],
   [
