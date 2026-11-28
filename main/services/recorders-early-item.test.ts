@@ -76,7 +76,7 @@ async function tickNoItem(atMs: number, occ: string) {
     currentItemTitle: null,
     nextItemTitle: null,
     serviceTimeId: occ,
-    serviceTimeStartsAt: iso(START.get(occ)!),
+    serviceTimeStartsAt: START.has(occ) ? iso(START.get(occ)!) : null,
   } as PcoLiveDTO;
   await splRecorder.onLiveTick(live);
   await attendanceRecorder.onLiveTick(live);
@@ -97,7 +97,7 @@ async function tick(atMs: number, occ: string, itemId: string, opts: { since?: n
     currentItemTitle: itemId,
     nextItemTitle: null,
     serviceTimeId: occ,
-    serviceTimeStartsAt: iso(START.get(occ)!),
+    serviceTimeStartsAt: START.has(occ) ? iso(START.get(occ)!) : null,
     serviceEnded: opts.serviceEnded ?? false,
     beforeServiceStart: false,
   };
@@ -304,6 +304,25 @@ describe("silence is not an end", () => {
       rec.stoppedAt = 0;
     }
     await tick(NINE + 66 * MIN, "occ-b", "message");
+
+    for (const [name, rec] of RECORDERS) {
+      assert.equal(rec.current?.serviceKey, keyFor("occ-a"), `${name}: a restart split the running service`);
+    }
+  });
+
+  it("holds through the first tick after a restart when the occurrence has no start time", async () => {
+    await tick(NINE, "occ-a", "welcome");
+    await airs(NINE + 2 * MIN, NINE + 64 * MIN, rolling, "song");
+    for (const [, rec] of RECORDERS) {
+      rec.lastLiveAt = 0;
+      rec.stoppedAt = 0;
+    }
+    START.delete("occ-b");
+    try {
+      await tick(NINE + 66 * MIN, "occ-b", "message");
+    } finally {
+      START.set("occ-b", ELEVEN);
+    }
 
     for (const [name, rec] of RECORDERS) {
       assert.equal(rec.current?.serviceKey, keyFor("occ-a"), `${name}: a restart split the running service`);

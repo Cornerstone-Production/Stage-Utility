@@ -611,7 +611,8 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     const from = this.current?.serviceTimeId ?? null;
     if (serviceTimeId == null || from == null) return true; // no two occurrences to compare
     const startsAtMs = live.serviceTimeStartsAt ? Date.parse(live.serviceTimeStartsAt) : NaN;
-    if (!Number.isFinite(startsAtMs)) return gapSinceLive < SERVICE_GAP_MS;
+    // An Infinity gap is no running tick in this process: no evidence of one.
+    if (!Number.isFinite(startsAtMs)) return !Number.isFinite(gapSinceLive) || gapSinceLive < SERVICE_GAP_MS;
 
     const untilMs = startsAtMs - Date.now();
     const hold = untilMs > SERVICE_GAP_MS;
