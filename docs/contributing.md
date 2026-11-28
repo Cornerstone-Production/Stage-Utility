@@ -447,17 +447,18 @@ When Codex submits a review on a pull request from a branch of this repository,
 each one against the code on the branch, commits a fix for those it confirms
 (under the same rules as any commit here), and replies on every thread:
 `Fixed in <sha>`, `Declined` with the reason, or `Left for review` when the fix
-is a decision, a dependency or workflow change, or too large to make unattended.
+is a decision, touches a protected file, or is too large to make unattended.
 It ends with one comment on the pull request listing each finding's outcome.
 
 | What | How |
 |---|---|
-| Who it answers | Reviews by the account in the `CODEX_REVIEW_BOT` repository variable, `chatgpt-codex-connector[bot]` when unset. A review with no inline comments is skipped. |
-| Where it runs | Same-repository pull requests whose head is not `main`, `beta`, `next` or a `release/*` branch. The workflow has to be on the pull request's base branch. |
-| How many times | Two rounds per pull request, counted by the `codex-fix-1` and `codex-fix-2` labels. A third review adds `needs-human-review` and stops it; remove the labels to start the count again. |
-| What it can write | Claude's job can only comment. Its commits reach the branch through a separate job that fast-forwards it, never forces, and refuses changes under `.github/`. If the branch moved since the review, the push is refused and the pull request says so. |
-| Checks | A push made with the workflow token starts no workflow, so the push job dispatches `ci.yml` on the branch. The commit convention and other `pull_request` checks run again on the next push. |
-| Credentials | The `CLAUDE_CODE_OAUTH_TOKEN` repository secret, made with `claude setup-token`. |
+| Who it answers | Reviews by the account in the `CODEX_REVIEW_BOT` repository variable, `chatgpt-codex-connector[bot]` when unset. A review with no inline comments is skipped, and so is a review of a commit the branch has already moved past. |
+| Where it runs | Same-repository pull requests, not opened by a bot, whose head is not `main`, `beta`, `next` or a `release/*` branch. A review event runs the workflow as it is in the pull request's merge commit, so a branch made before this workflow reached its base runs nothing until it is updated from that base, and a pull request with merge conflicts runs nothing. |
+| How many times | Two rounds per pull request, counted by the `codex-fix-1` and `codex-fix-2` labels. A third review with findings adds `needs-human-review` and stops it; remove the labels to start the count again. |
+| What it can write | Claude's job holds a token that can read the repository and write to the pull request's conversation (comment, but also edit, approve or close through the API; the prompt forbids the last three). Claude runs only git and `gh`, never the project's code. Its commits reach the branch through a separate job that fast-forwards it, never forces. |
+| What it refuses | Commits that change `.github/`, `.claude/`, `.husky/`, any `package.json` or lockfile, `CLAUDE.md`, `AGENTS.md`, `eslint.config.js`, `.npmrc`, or the scripts the checks below run. Both jobs check this, the fix job before any check runs code from the commits, and the push job again before it pushes. If the branch moved since the review, the push is refused. Any refusal is said on the pull request. |
+| Checks | Before pushing, the fix job runs the commit subject check, the public-hygiene check, lint and type-check on Claude's commits, and pushes nothing if one fails. A push made with the workflow token starts no workflow, so the push job dispatches `ci.yml` (tests) on the branch. `commit-lint.yml`, `public-hygiene.yml` and the other `pull_request` workflows do not run on Claude's commits; they show the previous commit's result until the next push of your own. None is a required check today. |
+| Credentials | The `CLAUDE_CODE_OAUTH_TOKEN` repository secret, made with `claude setup-token`. The hygiene check reads the existing `PRIVATE_TERMS` secret. |
 
 Every decision the gate makes is a `[codex-fix]` line in the run's log.
 
