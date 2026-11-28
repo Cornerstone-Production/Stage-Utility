@@ -158,20 +158,20 @@ describe("live-poller: one poll chain", () => {
     assert.equal(fetches, 2 + 5, "and it neither backs the live chain off nor starts its own");
   });
 
-  it("a throw from what a read feeds costs the tick, not the chain, and logs once", async (t) => {
+  it("a throw from what a live read feeds keeps the 1 s chain, and logs once", async (t) => {
     fakeTime(t);
     const errors = captureConsole(t, "error");
     (stageController as unknown as Controller).maybeAutoAdvance = () => {
       advances++;
       throw new Error("auto-advance exploded");
     };
-    // A failed tick waits the idle cadence: 4 s with the window held open.
-    t.mock.method(serviceWindow, "pollDelayMs", (ms: number) => ms);
+    // Dormant: a tick that fell back to the failure delay would wait 5 minutes.
+    t.mock.method(serviceWindow, "pollDelayMs", () => 5 * 60_000);
     livePoller.start();
     await settle();
     await advanceSeconds(t, 12);
 
-    assert.equal(fetches, 4, "polling must survive a throw after the read (once 1: it ended for good)");
+    assert.equal(fetches, 1 + 12, "a live item must keep its 1 s cadence through the throw (once: polling ended for good)");
     assert.equal(
       errors.filter((l) => l.includes("[live-poller] tick failed after the read: auto-advance exploded")).length,
       1,

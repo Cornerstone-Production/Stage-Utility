@@ -273,17 +273,18 @@ class LivePoller {
     if (recovered.line) console.log(recovered.line);
 
     // A throw from here on is a bug in what a read feeds, not a Planning Center
-    // failure. It costs this tick and slows the next, and says so once per run
-    // rather than once a second as an unhandled rejection would.
+    // failure. It costs what this tick had left to do and says so once per run,
+    // rather than once a second as an unhandled rejection would. The read itself
+    // was good, so the cadence stays the read's: a live item keeps polling every
+    // second, because nothing may slow a live service down to the dormant delay.
     try {
       this.act(live);
+      const healed = this.actErrors.ok(Date.now());
+      if (healed.line) console.log(healed.line);
     } catch (err) {
       const failed = this.actErrors.fail(errorMessage(err), Date.now());
       if (failed.line) console.error(failed.line);
-      return "failed";
     }
-    const healed = this.actErrors.ok(Date.now());
-    if (healed.line) console.log(healed.line);
 
     return live?.mode === "item" ? "item" : "idle";
   }
