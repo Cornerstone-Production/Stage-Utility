@@ -277,15 +277,22 @@ export async function repairBootCloseGaps(only?: ReadonlySet<string>): Promise<G
  * run is a no-op on every record it already repaired.
  */
 export async function repairArrivedRecords(keys: ReadonlySet<string>): Promise<GapRepairResult> {
-  const result = await repairBootCloseGaps(keys);
-  if (result.waiting || result.failed.length) {
+  const retryAtNextStart = async () => {
     await historyRepairsStore.update((done) => {
       const rest = { ...done };
       delete rest[OLD_BOOT_CLOSE_REPAIR];
       return rest;
     });
     console.log("[reconcile] what could not be repaired is tried again when the server next starts");
+  };
+  let result: GapRepairResult;
+  try {
+    result = await repairBootCloseGaps(keys);
+  } catch (err) {
+    await retryAtNextStart();
+    throw err;
   }
+  if (result.waiting || result.failed.length) await retryAtNextStart();
   return result;
 }
 

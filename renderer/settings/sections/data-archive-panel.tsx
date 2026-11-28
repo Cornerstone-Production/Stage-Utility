@@ -126,7 +126,8 @@ export function DataArchivePanel() {
         toast.error(
           `Import finished, but ${plural(failed.length, "raw sample file")} could not be written ` +
             `(${failed[0].reason}). The services are here; their samples are not. Check disk space, ` +
-            `then import again — keep the file.`,
+            `then import again — keep the file.` +
+            (body.gapRepairFailed ? ` A length a crash left out could not be filled in either; it is tried again when the server next starts.` : ""),
         );
       } else if (body.gapRepairFailed) {
         // The records landed; filling a length a crash left out in them did not.

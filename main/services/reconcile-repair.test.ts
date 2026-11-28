@@ -30,7 +30,7 @@ process.env.HOME = path.join(TMP, "home");
 const { settingsStore } = await import("./settings-store.js");
 await settingsStore.patch({ timezone: "America/Chicago" });
 
-const { reconcileOpenRecords } = await import("./reconcile-records.js");
+const { reconcileOpenRecords, repairArrivedRecords } = await import("./reconcile-records.js");
 const { historyRepairsStore } = await import("./history-repairs-store.js");
 const { attendanceStore } = await import("./attendance-store.js");
 const { splHistoryStore } = await import("./spl-history-store.js");
@@ -543,6 +543,45 @@ describe("gaps something else hid, or brought in after the boot repair ran", () 
     assert.deepEqual([tl?.items[1]?.endedAt, tl?.items[1]?.actualDurationSec], [iso(CRASH), (CRASH - MESSAGE_LIVE) / 1000]);
     assert.equal((await splHistoryStore.get(id.serviceKey))?.items[1]?.endedAt, iso(CRASH));
     assert.ok(result.gapsRepaired?.includes(id.serviceKey), "the import result does not say which records it repaired");
+  });
+});
+
+describe("records that arrive after the boot repair ran, when their repair cannot finish", () => {
+  beforeEach(async (t) => {
+    captureConsole(t as TestContext, "log", "warn", "error");
+    await historyRepairsStore.save({ "old-boot-close-gaps": iso(T0) });
+  });
+  it("hands a repair that waits on the people counts to the next start", async (t) => {
+    const { StoreReadError } = await import("./data-store.js");
+    t.mock.method(attendanceStore, "unreadable", () => new StoreReadError("a file in attendance-history", new Error("EIO")));
+    const result = await repairArrivedRecords(new Set(["any"]));
+    assert.ok(result.waiting);
+    assert.equal((await historyRepairsStore.load())["old-boot-close-gaps"], undefined, "the next start will not try again");
+  });
+
+  it("hands a repair whose save failed to the next start", async (t) => {
+    const id = identity();
+    await serviceTimelineStore.upsert(oldClosedTimeline(id));
+    await attendanceStore.upsert(attendance(id, CRASH));
+    t.mock.method(serviceTimelineStore, "replaceKeepingPrior", async () => {
+      throw new Error("disk full");
+    });
+    const result = await repairArrivedRecords(new Set([id.serviceKey]));
+    assert.deepEqual(result.failed, [id.serviceKey]);
+    assert.equal((await historyRepairsStore.load())["old-boot-close-gaps"], undefined, "the next start will not try again");
+  });
+
+  it("hands a repair that threw to the next start, and still throws", async (t) => {
+    t.mock.method(attendanceStore, "list", async () => {
+      throw new Error("EIO listing");
+    });
+    await assert.rejects(repairArrivedRecords(new Set(["any"])), /EIO listing/);
+    assert.equal((await historyRepairsStore.load())["old-boot-close-gaps"], undefined, "the next start will not try again");
+  });
+
+  it("leaves the marker when it finished", async () => {
+    await repairArrivedRecords(new Set(["nothing-here"]));
+    assert.ok((await historyRepairsStore.load())["old-boot-close-gaps"]);
   });
 });
 
