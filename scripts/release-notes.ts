@@ -178,21 +178,6 @@ function commits(range: string): { sha: string; subject: string; body: string }[
 }
 
 /**
- * `Beta-only: true` — this fixed a bug that never reached a stable release.
- *
- * The scope heuristic below cannot see these. It asks whether a fix's SCOPE is
- * new this release, which catches a whole new subsystem and misses a new feature
- * built under an existing one: `fix(integrations): the Setup guide links to this
- * build's branch` is a fix to something added in the same release, but
- * `integrations` is years old, so it reads as a fix to long-standing behaviour
- * and survives into the notes. In 1.13.0 there were 13 such scopes carrying 42
- * fixes — a reader coming from 1.12.1 being told about bugs they never had.
- *
- * Only the author knows, so only the author can say. Prereleases keep them
- * either way: someone on the beta track HAS been running the broken version.
- */
-
-/**
  * Corrections to a `Beta-only:` decision that can no longer be made in the commit.
  *
  * The trailer is the author's, and the author gets it wrong. Four cycles have

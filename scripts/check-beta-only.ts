@@ -27,12 +27,12 @@
 
 import { execFileSync } from "node:child_process";
 import { isMain } from "./is-main.ts";
-import { BETA_ONLY_TRAILER } from "../main/services/commit-subject.ts";
+import { BETA_ONLY_TRAILER, parseSubject } from "../main/services/commit-subject.ts";
 import COMMIT_TYPE_FILE from "../main/services/commit-types.json" with { type: "json" };
 
-const subjectOf = (types: string[]) => new RegExp(`^(${types.join("|")})(\\([^)]+\\))?!?:`);
-const PATCH_SUBJECT = subjectOf(COMMIT_TYPE_FILE.patch);
-const FEAT_SUBJECT = subjectOf(COMMIT_TYPE_FILE.minor);
+const PATCH_TYPES = new Set<string>(COMMIT_TYPE_FILE.patch);
+const FEAT_TYPES = new Set<string>(COMMIT_TYPE_FILE.minor);
+const typeOf = (subject: string) => parseSubject(subject)?.type ?? "";
 
 function git(args: string[]): string {
   return execFileSync("git", args, { encoding: "utf8" });
@@ -67,7 +67,7 @@ function featCommitsSince(stableTag: string): { sha: string; subject: string; fi
   const feats: { sha: string; subject: string; files: string[] }[] = [];
   for (const sha of shas) {
     const subject = git(["log", "-1", "--format=%s", sha]).trim();
-    if (!FEAT_SUBJECT.test(subject)) continue;
+    if (!FEAT_TYPES.has(typeOf(subject))) continue;
     feats.push({ sha, subject, files: commitFiles(sha) });
   }
   return feats;
@@ -89,7 +89,7 @@ export function findBetaOnlyCandidates(base: string, stableTag: string): BetaOnl
   const flagged: BetaOnlyCandidate[] = [];
   for (const sha of shas) {
     const subject = git(["log", "-1", "--format=%s", sha]).trim();
-    if (!PATCH_SUBJECT.test(subject)) continue;
+    if (!PATCH_TYPES.has(typeOf(subject))) continue;
 
     const body = git(["log", "-1", "--format=%b", sha]);
     if (BETA_ONLY_TRAILER.test(body)) continue;

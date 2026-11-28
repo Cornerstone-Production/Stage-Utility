@@ -1,4 +1,4 @@
-// The one reader of a commit subject, for the update dialog's "What's new"
+// The one reader of a commit subject (and of the Beta-only trailer in its body), for the update dialog's "What's new"
 // (main/services/changelog.ts) and the release notes (scripts/release-notes.ts).
 //
 // Two parsers of `type(scope)!: text` had drifted: the notes kept `refactor!:`
@@ -25,9 +25,16 @@ export const INVISIBLE_TYPES: ReadonlySet<string> = new Set([...COMMIT_TYPE_FILE
 export const INTERNAL_SCOPES: ReadonlySet<string> = new Set(INTERNAL_SCOPE_FILE.scopes);
 
 /**
- * `Beta-only: true` in a commit body: this fixed a bug that never reached a
- * stable release. Matched against the body, not the subject. Shared with
- * scripts/check-beta-only.ts.
+ * `Beta-only: true` in a commit body — this fixed a bug that never reached a stable release.
+ * Matched against the BODY, not the subject, and shared with scripts/check-beta-only.ts.
+ *
+ * The scope heuristic in the notes cannot see these. It asks whether a fix's SCOPE is new this
+ * release, which catches a whole new subsystem and misses a new feature built under an existing
+ * one: `fix(integrations): the Setup guide links to this build's branch` repairs something added
+ * in the same release, but `integrations` is years old, so it reads as a fix to long-standing
+ * behaviour. In 1.13.0 there were 13 such scopes carrying 42 fixes. Only the author knows, so
+ * only the author can say. Prereleases keep them either way: someone on the beta track HAS been
+ * running the broken version.
  */
 export const BETA_ONLY_TRAILER = /^Beta-only:\s*(true|yes)\s*$/im;
 
