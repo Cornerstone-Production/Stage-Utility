@@ -90,4 +90,40 @@ describe("a Spectera password", () => {
     }
     assert.ok(!lines.some((l) => l.includes("cleared")), `the log says the password was cleared, and the save failed. Saw: ${JSON.stringify(lines)}`);
   });
+
+  test("a move that fails to save is not reported as a clear either", async () => {
+    const id = await connection("Base station failed move");
+    const save = mock.method(secretsStore, "setManySecrets", async () => {
+      throw new Error("disk full");
+    });
+    try {
+      await assert.rejects(
+        wirelessManager.updateConnection({ id, patch: { config: { host: "elsewhere.example", password: MASK } } }),
+        /disk full/,
+      );
+    } finally {
+      save.mock.restore();
+    }
+    assert.ok(!lines.some((l) => l.includes("cleared")), `the log says the password was cleared, and the save failed. Saw: ${JSON.stringify(lines)}`);
+  });
+
+  test("a failed save leaves the connection as it was, so the next save cannot clear in silence", async () => {
+    const id = await connection("Base station rolled back");
+    const save = mock.method(secretsStore, "setManySecrets", async () => {
+      throw new Error("disk full");
+    });
+    try {
+      await assert.rejects(
+        wirelessManager.updateConnection({ id, patch: { config: { host: "spectera.example", password: "" } } }),
+        /disk full/,
+      );
+    } finally {
+      save.mock.restore();
+    }
+    const listed = wirelessManager.listConnections().find((c) => c.id === id);
+    assert.equal(listed?.config.password, MASK, "the panel shows a password the store still holds as cleared");
+    // An unrelated save afterwards must not carry the failed clear along with it.
+    await wirelessManager.updateConnection({ id, patch: { name: "Base station renamed" } });
+    assert.equal(await stored(id), SECRET, "a rename after a failed clear deleted the password, with no line saying so");
+  });
 });

@@ -160,7 +160,13 @@ class WirelessManager {
 
     const conn = this.connections[idx];
     const patch = params.patch;
-    let cleared: string[] = [];
+    // What the connection was, to put back if the save fails. Without it the
+    // in-memory copy kept a change the store never got, and the next unrelated
+    // save wrote it — a cleared password gone with no line saying so.
+    const before = { ...conn, config: { ...conn.config } };
+    // Credential lines are written once the save has succeeded: until then
+    // nothing was cleared.
+    const clearedLines: { level: "log" | "warn"; line: string }[] = [];
     // Where its credential goes now, before the patch moves anything.
     const targetBefore = wirelessCredentialTarget(conn.providerId, conn.config);
 
@@ -175,7 +181,9 @@ class WirelessManager {
       const stored = await secretsStore.getSecrets(wirelessSecretSlot(conn.id));
       const fold = foldSecrets(conn.providerId, patch.config, stored);
       const merged = fold.next;
-      cleared = fold.cleared;
+      if (fold.cleared.length > 0) {
+        clearedLines.push({ level: "log", line: `[wireless] cleared the stored ${scrub(fold.cleared.join(", "))} on ${scrub(conn.name)}` });
+      }
       // Key names and types, never values: these are credential slots.
       for (const { key, type } of fold.ignored) {
         console.warn(
@@ -207,22 +215,26 @@ class WirelessManager {
       const dropped = allCredentialKeys().filter((k) => hasSecretValue(conn.config[k]) && !isTypedSecret(patch.config?.[k]));
       for (const key of dropped) delete conn.config[key];
       if (dropped.length > 0) {
-        console.warn(
-          `[wireless] cleared the stored ${scrub(dropped.join(", "))} on ${scrub(conn.name)}: its address changed ` +
+        clearedLines.push({
+          level: "warn",
+          line:
+            `[wireless] cleared the stored ${scrub(dropped.join(", "))} on ${scrub(conn.name)}: its address changed ` +
             `from ${scrub(describeTarget(targetBefore))} to ${scrub(describeTarget(targetAfter))}, and it is never sent ` +
             "to an address it was not entered for. Enter it again if the new one needs it.",
-        );
+        });
       }
     }
 
     // The keys come off the request body, so a key holding a newline would
     // otherwise write a second, forged line to /log.
     console.log(`[wireless] updateConnection — ${scrub(conn.id)} patch keys: ${scrub(Object.keys(patch).join(", "))}`);
-    await this.persist();
-    // After the save, so a failed write cannot leave /log saying it was cleared.
-    if (cleared.length > 0) {
-      console.log(`[wireless] cleared the stored ${scrub(cleared.join(", "))} on ${scrub(conn.name)}`);
+    try {
+      await this.persist();
+    } catch (err) {
+      Object.assign(conn, before);
+      throw err;
     }
+    for (const { level, line } of clearedLines) console[level](line);
     await deviceManager.applyConnections(this.connections);
     this.broadcast();
     return this.listConnections();
