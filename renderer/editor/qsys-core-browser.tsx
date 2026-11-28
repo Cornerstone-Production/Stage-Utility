@@ -208,6 +208,14 @@ export function QsysCoreBrowser({
   const [component, setComponent] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
+  // A binding filled from elsewhere (the strip's Bind a channel) leaves no picker open over it.
+  const boundKey = value ? keyOf(value.component, value.control) : null;
+  const [seenKey, setSeenKey] = useState(boundKey);
+  if (seenKey !== boundKey) {
+    setSeenKey(boundKey);
+    setOpen(false);
+  }
+
   const offered = (comp: CatalogComponent): CatalogControl[] =>
     load.state !== "ready"
       ? []

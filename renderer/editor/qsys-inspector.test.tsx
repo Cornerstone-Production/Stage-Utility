@@ -297,6 +297,21 @@ describe("the Q-SYS inspector", () => {
     assert.deepEqual([s.gain, s.mute, s.meter, s.name], [zg("gain"), zg("mute"), null, null]);
   });
 
+  test("a field's picker, left open, closes when Bind a channel fills it", async () => {
+    const r = mount({ type: "qsys-strip", name: null, label: "", gain: null, mute: null, meter: null });
+    fireEvent.click(r.getByRole("button", { name: "Level" }));
+    await wait();
+    assert.equal(r.getByRole("button", { name: "Level" }).getAttribute("aria-expanded"), "true");
+    fireEvent.click(r.getByRole("button", { name: "Bind a channel" }));
+    await wait();
+    fireEvent.change(r.getByLabelText("Component"), { target: { value: "Input_Bank" } });
+    await wait();
+    fireEvent.click(r.getByRole("button", { name: "Input 3" }));
+    await wait();
+    assert.deepEqual(r.latest().gain, { component: "Input_Bank", control: "input.3.gain" });
+    assert.equal(r.getByRole("button", { name: /^Level$/ }).getAttribute("aria-expanded"), "false", "the Level picker stayed open over the filled field");
+  });
+
   test("Break apart is offered on a strip and calls the editor's action", () => {
     let called = 0;
     const r = render(
