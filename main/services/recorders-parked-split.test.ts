@@ -32,6 +32,8 @@ const { serviceTimelineRecorder } = await import("./service-timeline-recorder.js
 const { splRecorder } = await import("./spl-recorder.js");
 const { attendanceRecorder } = await import("./attendance-recorder.js");
 const { captureConsole } = await import("./fixtures/capture-console.js");
+const { addBroadcastListener } = await import("./broadcaster.js");
+const { serviceTimelineStore } = await import("./service-timeline-store.js");
 
 type Rec = { serviceKey: string; endedAt: string | null };
 type Held = {
@@ -50,6 +52,28 @@ const RECORDERS: [string, Held][] = [
 const MIN = 60_000;
 const iso = (ms: number) => new Date(ms).toISOString();
 const T0 = Date.parse("2026-11-08T15:00:00.000Z");
+
+/** Planning Center out of item mode: the service is over. */
+async function tickNoItem(atMs: number, occ: string) {
+  mock.timers.setTime(atMs);
+  const live: PcoLiveDTO = {
+    mode: "none",
+    currentItemId: null,
+    label: null,
+    itemType: null,
+    lengthSec: null,
+    liveStartAt: null,
+    targetAt: null,
+    serverNow: iso(atMs),
+    currentItemTitle: null,
+    nextItemTitle: null,
+    serviceTimeId: occ,
+    serviceTimeStartsAt: null,
+  } as PcoLiveDTO;
+  await splRecorder.onLiveTick(live);
+  await attendanceRecorder.onLiveTick(live);
+  await serviceTimelineRecorder.onLiveTick(live);
+}
 
 async function tick(atMs: number, occ: string, itemId: string, opts: { since?: number; serviceEnded?: boolean } = {}) {
   mock.timers.setTime(atMs);
@@ -120,5 +144,84 @@ describe("a service parked past SERVICE END, then the next one", () => {
       const first = await rec.getRecord(keyFor("occ-a"));
       assert.equal(first?.endedAt, iso(end), `${name}: the finished service was reopened`);
     }
+  });
+});
+
+// The live close (Planning Center leaving the service) closes every entry of the
+// item-shaped records, and the timeline's with a length. That is the same item
+// close the boot-time close uses; until this file nothing exercised it on the
+// live path, so deleting it left the suite green.
+describe("leaving the service", () => {
+  let planId = "";
+  let n = 0;
+  const keyFor = (occ: string) => `75953:${planId}:${occ}`;
+  type Items = { items: { itemId: string; endedAt: string | null; actualDurationSec?: number | null }[] };
+
+  beforeEach((t) => {
+    mock.timers.enable({ apis: ["Date", "setTimeout"] });
+    captureConsole(t as TestContext, "log", "warn", "error");
+    planId = `close-${++n}`;
+    (stageController as unknown as { getState(): unknown }).getState = () => ({
+      serviceTypeId: "75953",
+      serviceTypeName: "Service",
+      planId,
+      planTitle: "Close",
+      planSeriesTitle: null,
+    });
+    for (const [, rec] of RECORDERS) {
+      rec.current = null;
+      rec.currentKey = null;
+      rec.lastLiveAt = 0;
+    }
+  });
+
+  afterEach(() => {
+    for (const [, rec] of RECORDERS) {
+      rec.forget(keyFor("occ-a"));
+      rec.current = null;
+      rec.currentKey = null;
+    }
+    mock.timers.tick(61_000);
+    mock.timers.reset();
+  });
+
+  it("closes every item, and gives the timeline's last one its length", async () => {
+    await tick(T0, "occ-a", "song");
+    await tick(T0 + 10 * MIN, "occ-a", "message");
+    await tickNoItem(T0 + 25 * MIN, "occ-a");
+
+    for (const [name, rec] of [RECORDERS[0]!, RECORDERS[2]!]) {
+      const record = rec.current as unknown as (Rec & Items) | null;
+      assert.equal(record?.endedAt, iso(T0 + 25 * MIN), `${name}: the record closed`);
+      const open = record?.items.filter((it) => it.endedAt == null).map((it) => it.itemId);
+      assert.deepEqual(open, [], `${name}: a closed record still holds items with no end`);
+    }
+    const timeline = serviceTimelineRecorder.getCurrent();
+    assert.equal(timeline?.items.find((it) => it.itemId === "message")?.actualDurationSec, 15 * 60);
+  });
+
+  it("does not publish a record deleted in History while its close was saving", async (t) => {
+    await tick(T0, "occ-a", "song");
+    // The broadcaster has no unsubscribe; the listener stops collecting instead.
+    const pushes: Rec[] = [];
+    let collecting = true;
+    addBroadcastListener((channel, payload) => {
+      if (collecting && channel === "service-timeline:history") pushes.push(payload as Rec);
+    });
+    t.after(() => {
+      collecting = false;
+    });
+    const realUpsert = serviceTimelineStore.upsert.bind(serviceTimelineStore);
+    t.mock.method(serviceTimelineStore, "upsert", async (rec: Parameters<typeof realUpsert>[0]) => {
+      serviceTimelineRecorder.forget(keyFor("occ-a")); // the operator's delete lands mid-save
+      await realUpsert(rec);
+    });
+    await tickNoItem(T0 + 25 * MIN, "occ-a");
+
+    assert.deepEqual(
+      pushes.filter((p) => p?.serviceKey === keyFor("occ-a")),
+      [],
+      "a deleted record was pushed to the History page as closed",
+    );
   });
 });
