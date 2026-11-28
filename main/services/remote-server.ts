@@ -33,7 +33,6 @@ import { serverPort } from "./server-port.js";
 import { buildVersionPayload, describePortHolder, rawPortHolder } from "./port-holder.js";
 import { getUserDataPath } from "./app-paths.js";
 import { getLanIp } from "./lan-ip.js";
-import { isCrossOrigin } from "./http-origin.js";
 import { hostNames } from "./host-names.js";
 import { escapeHtml } from "./html-escape.js";
 import { hostNameRoutes } from "./routes/host-name-routes.js";
@@ -73,7 +72,7 @@ import { CHARGER_BAYS_CHANNEL, WIRELESS_STATUS_CHANNEL } from "../types/devices.
 import { updater } from "./updater.js";
 import { SERVER_VERSION } from "./server-version.js";
 
-import { type RouteCtx, json, error, readBodyOrEmpty, MAX_IMAGE_BODY_BYTES } from "./routes/context.js";
+import { type RouteCtx, json, error, readBodyOrEmpty, refuseCrossOrigin, MAX_IMAGE_BODY_BYTES } from "./routes/context.js";
 import { statusRoutes } from "./routes/status-routes.js";
 import { clientLogRoutes } from "./routes/client-log-routes.js";
 import { historyRoutes } from "./routes/history-routes.js";
@@ -1057,11 +1056,7 @@ export class RemoteServer {
     // Enforcement, independent of the preflight: writes must be same-origin. A
     // request with no Origin is not a browser's cross-site request (Companion,
     // curl, a script), so it passes — see isCrossOrigin.
-    if (MUTATING_METHODS.has(req.method ?? "") && isCrossOrigin(req.headers.origin, req.headers.host)) {
-      console.warn(`[remote-server] rejected cross-origin ${scrub(req.method)} ${scrub(pathname)} from ${scrub(req.headers.origin)}`);
-      error(res, "cross-origin request rejected", 403);
-      return;
-    }
+    if (MUTATING_METHODS.has(req.method ?? "") && refuseCrossOrigin({ req, res, method: req.method ?? "", pathname })) return;
 
     try {
       await this.handleRequest(req, res, pathname, url, req.method ?? "GET");
