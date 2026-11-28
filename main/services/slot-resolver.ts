@@ -402,6 +402,7 @@ export function fitAvatarToColumn(
 
 const NO_PEOPLE: ReadonlyMap<string, PersonCardDTO> = new Map();
 const NO_PREP: ReadonlyMap<string, PrepTags> = new Map();
+const NO_THEMED: ReadonlyMap<string, string> = new Map();
 
 /** The normalised IDs of by-person slots whose person is not on this roster: the
  *  ones the person directory has to read from Planning Center. */
@@ -474,6 +475,10 @@ export function resolveSlots(
   /** Prep tags by Planning Center person id (pco-prep-tags.ts). Read only for a
    *  slot filled by a person; a spacer, empty or static slot never gets one. */
   prep: ReadonlyMap<string, PrepTags> = NO_PREP,
+  /** Themed photos by Planning Center person id (photo-themes/service.ts
+   *  shownPhotos): what this plan's screens draw in place of a person's own
+   *  photo. Only approved photos of a plan switched to Themed are in it. */
+  themed: ReadonlyMap<string, string> = NO_THEMED,
 ): Slot[] {
   // How wide each column will be drawn, which sets the avatar crop below.
   const columns = columnCount(slots);
@@ -522,7 +527,11 @@ export function resolveSlots(
       ...(memberPrep ? { prep: { ...memberPrep, capsule: vocal ? memberPrep.capsule : null } } : {}),
       ...(member ? { takesCapsule: vocal } : {}),
       displayName: member?.name ?? null,
-      photoUrl: fitAvatarToColumn(member?.photoUrl ?? null, columns, depths[slotIndex] ?? 1, avatarFit),
+      // A themed photo is the server's own file, not a Planning Center URL, so
+      // it takes no PCO geometry: /photos serves it as it was made.
+      photoUrl:
+        (member?.personId ? themed.get(member.personId) : undefined) ??
+        fitAvatarToColumn(member?.photoUrl ?? null, columns, depths[slotIndex] ?? 1, avatarFit),
       shownPositions,
       device,
     };

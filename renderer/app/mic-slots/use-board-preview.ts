@@ -38,11 +38,15 @@ export interface BoardPreview {
 /**
  * @param live  every wireless channel's telemetry by channel id, or null until it
  *              has answered (the resolve's readings stand until then).
+ * @param photosKey  what the plan's screens draw in place of Planning Center photos
+ *              (usePhotoThemes' shownKey). The resolver answers with themed photos
+ *              or the originals by it, so a change asks again.
  */
 export function useBoardPreview(
   slots: Slot[],
   target: SlotsPreviewTarget | null,
   live: ReadonlyMap<string, DeviceStatus> | null = null,
+  photosKey = "",
 ): BoardPreview {
   const [resolution, setResolution] = useState<SlotsPreviewDTO | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -80,7 +84,7 @@ export function useBoardPreview(
       cancelled = true;
       clearTimeout(t);
     };
-  }, [slots, serviceTypeId, planId]);
+  }, [slots, serviceTypeId, planId, photosKey]);
 
   return useMemo(() => {
     const resolved = new Map((resolution?.slots ?? []).map((s) => [s.id, s]));

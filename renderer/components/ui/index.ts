@@ -5,6 +5,7 @@ export { ButtonGroup } from "./button-group";
 export { ChipToggle, ChipToggleRow, type ChipToggleProps } from "./chip-toggle";
 export { MENU_ITEM, MENU_ITEM_DANGER, menuContent } from "./menu-classes";
 export { Input, type InputProps } from "./input";
+export { Textarea, type TextareaProps } from "./textarea";
 export { NumberInput, type NumberInputProps } from "./number-input";
 export {
   NOT_OFFERED,

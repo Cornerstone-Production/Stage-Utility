@@ -59,6 +59,8 @@ import {
 import { Loader2Icon, RefreshCwIcon, EraserIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 import { formatClock } from "../lib/clock-format";
+import { useOpenAiConnection } from "../app/mic-slots/photo-themes/use-photo-themes";
+import { OPENAI_TILE_ID, OpenAiDialog, openAiTile, type OpenAiTile } from "../settings/sections/openai-card";
 
 // ---- helpers ----------------------------------------------------------------
 
@@ -162,7 +164,35 @@ function isInUse(state: IntegrationState): boolean {
  * had not moved — and one that carried less would miss a move entirely.
  */
 export function moveSignature(states: IntegrationState[]): string {
-  return states.map((s) => `${s.id}:${isInUse(s) ? 1 : 0}`).join("|");
+  return placementSignature(states.map((s) => ({ id: s.id, inUse: isInUse(s) })));
+}
+
+/** One tile's place on the page: everything the halves, the header count and the slide
+ *  animation need to know about it. The server's integrations and OpenAI's synthetic
+ *  tile are both listed this way, so a count or a signature cannot cover one and miss
+ *  the other. */
+interface Placement {
+  id: string;
+  inUse: boolean;
+  connected: boolean;
+}
+
+function placementSignature(placements: { id: string; inUse: boolean }[]): string {
+  return placements.map((p) => `${p.id}:${p.inUse ? 1 : 0}`).join("|");
+}
+
+/** Every tile the page draws: the described integrations that have a state, then OpenAI.
+ *  Ranked afterwards, where OpenAI (which has no category) sorts to the end of its half. */
+function placementsOf(
+  data: { descriptors: IntegrationDescriptor[]; states: IntegrationState[] } | undefined,
+  openAi: OpenAiTile,
+): Placement[] {
+  const states = new Map((data?.states ?? []).map((st) => [st.id, st]));
+  const described = (data?.descriptors ?? []).flatMap((d) => {
+    const st = states.get(d.id);
+    return st ? [{ id: d.id, inUse: isInUse(st), connected: st.connection === "connected" }] : [];
+  });
+  return [...described, { id: OPENAI_TILE_ID, inUse: openAi.inUse, connected: openAi.connected }];
 }
 
 /** Config keys that name the machine an integration is pointed at. */
@@ -290,23 +320,26 @@ function VideoFeedsLinkPanel() {
 
 // ---- the card ---------------------------------------------------------------
 
-/** One integration as a card: name, what it is pointed at, its connection, and
- *  an enable switch. Settings open in a dialog — the card never holds a form,
- *  which is what lets the grid stay a grid and the page fit on one screen. */
-function IntegrationTile({
-  descriptor,
-  state,
+/** The card's markup, for an integration the server describes and for OpenAI,
+ *  which it does not. One component, so the two cannot drift into lookalikes. */
+function TileShell({
+  id,
+  label,
+  dormant,
+  summary,
+  aside,
+  footer,
   onOpen,
-  onToggle,
-  toggling,
 }: {
-  descriptor: IntegrationDescriptor;
-  state: IntegrationState;
+  id: string;
+  label: string;
+  dormant: boolean;
+  summary: ReactNode;
+  /** Beside the name: the enable switch, where there is one. */
+  aside?: ReactNode;
+  footer: ReactNode;
   onOpen: (id: string) => void;
-  onToggle: (id: string, enabled: boolean) => void;
-  toggling: boolean;
 }) {
-  const dormant = !isInUse(state);
   return (
     <div
       role="button"
@@ -315,21 +348,21 @@ function IntegrationTile({
       // and is not in the DOM until the dialog opens, so a highlight aimed at it
       // would land on nothing — which is the bug useRevealNonce existed to work
       // around by remounting a collapsed body open.
-      data-flash-id={integrationFlashId(descriptor.id)}
-      data-integration-card={descriptor.id}
+      data-flash-id={integrationFlashId(id)}
+      data-integration-card={id}
       // The id, not the position, is what the slide animation follows: enabling
       // an integration moves this card into the other grid, which is a remount
       // at a different place in the tree.
-      data-slide-id={descriptor.id}
-      onClick={() => onOpen(descriptor.id)}
+      data-slide-id={id}
+      onClick={() => onOpen(id)}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
-          onOpen(descriptor.id);
+          onOpen(id);
         }
       }}
       aria-haspopup="dialog"
-      aria-label={`${descriptor.label} settings`}
+      aria-label={`${label} settings`}
       className={cn(
         "flex flex-col gap-1.5 rounded-[0.875rem] px-3 py-2.5 min-w-0 text-left cursor-pointer",
         "hover:border-line-strong transition-colors",
@@ -360,13 +393,46 @@ function IntegrationTile({
             dormant ? "font-medium text-fg-muted" : "font-semibold text-fg",
           )}
         >
-          {descriptor.label}
+          {label}
         </span>
-        {/* No switch for an integration that dials US. There was one, and
-            nothing was gated on it: turning Companion off left the module
-            connecting and controlling the app exactly as before, while the
-            row said it was disabled. */}
-        {!descriptor.inbound && (
+        {aside}
+      </div>
+      <span className="text-caption1 text-fg-muted line-clamp-2 min-w-0">{summary}</span>
+      <div className="mt-auto min-w-0">{footer}</div>
+    </div>
+  );
+}
+
+/** One integration as a card: name, what it is pointed at, its connection, and
+ *  an enable switch. Settings open in a dialog — the card never holds a form,
+ *  which is what lets the grid stay a grid and the page fit on one screen. */
+function IntegrationTile({
+  descriptor,
+  state,
+  onOpen,
+  onToggle,
+  toggling,
+}: {
+  descriptor: IntegrationDescriptor;
+  state: IntegrationState;
+  onOpen: (id: string) => void;
+  onToggle: (id: string, enabled: boolean) => void;
+  toggling: boolean;
+}) {
+  const dormant = !isInUse(state);
+  return (
+    <TileShell
+      id={descriptor.id}
+      label={descriptor.label}
+      dormant={dormant}
+      onOpen={onOpen}
+      summary={summaryLine(descriptor, state)}
+      // No switch for an integration that dials US. There was one, and
+      // nothing was gated on it: turning Companion off left the module
+      // connecting and controlling the app exactly as before, while the
+      // row said it was disabled.
+      aside={
+        !descriptor.inbound && (
           <Switch
             checked={state.enabled}
             disabled={toggling}
@@ -376,13 +442,10 @@ function IntegrationTile({
             onClick={(e: React.MouseEvent) => e.stopPropagation()}
             onCheckedChange={(v: boolean) => onToggle(descriptor.id, v)}
           />
-        )}
-      </div>
-      <span className="text-caption1 text-fg-muted line-clamp-2 min-w-0">
-        {summaryLine(descriptor, state)}
-      </span>
-      <div className="mt-auto min-w-0">
-        {dormant ? (
+        )
+      }
+      footer={
+        dormant ? (
           <span className="text-caption1 text-fg-muted">Not set up</span>
         ) : (
           <ConnectionBadge
@@ -390,9 +453,9 @@ function IntegrationTile({
             message={state.message}
             inbound={descriptor.inbound}
           />
-        )}
-      </div>
-    </div>
+        )
+      }
+    />
   );
 }
 
@@ -986,6 +1049,12 @@ export function IntegrationsPanel({ className, open: openProp, onOpenChange }: I
       : (data.descriptors.find((d) => d.id === wanted || integrationFlashId(d.id) === wanted)?.id ??
         null);
 
+  // OpenAI is not an integration the server describes, so it is read on its own: the
+  // same query the key form writes to, which is what moves the tile when a key is saved
+  // or removed.
+  const openAi = openAiTile(useOpenAiConnection());
+  const placements = placementsOf(data, openAi);
+
   // Live state updates from backend broadcasts
   useEffect(() => {
     const unsub = onNotification(
@@ -1028,7 +1097,7 @@ export function IntegrationsPanel({ className, open: openProp, onOpenChange }: I
   // between grid cells; it honours prefers-reduced-motion itself, which the
   // global CSS override cannot do for an inline transform.
   const { setHost: setSlideHost, capture: captureCardPositions } = useSlideOnMove(
-    moveSignature(data?.states ?? []),
+    placementSignature(placements),
     true,
     "data-slide-id",
   );
@@ -1039,14 +1108,17 @@ export function IntegrationsPanel({ className, open: openProp, onOpenChange }: I
   // from. Run after the commit that closed the dialog, so the card is wherever
   // it has ended up, and look it up by id rather than holding the old element.
   const wasOpen = useRef<string | null>(null);
+  // OpenAI has no descriptor, so its id (or flash id) is matched here rather than in `openId`.
+  const openAiWanted = wanted === OPENAI_TILE_ID || wanted === integrationFlashId(OPENAI_TILE_ID);
+  const shownId = openAiWanted ? OPENAI_TILE_ID : openId;
   useEffect(() => {
     const closed = wasOpen.current;
-    wasOpen.current = openId;
-    if (openId !== null || closed === null) return;
+    wasOpen.current = shownId;
+    if (shownId !== null || closed === null) return;
     document
       .querySelector<HTMLElement>(`[data-integration-card="${closed}"]`)
       ?.focus({ preventScroll: true });
-  }, [openId]);
+  }, [shownId]);
 
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const handleToggle = useCallback(
@@ -1080,15 +1152,11 @@ export function IntegrationsPanel({ className, open: openProp, onOpenChange }: I
   const stateMap = new Map(states.map((s) => [s.id, s]));
   const byId = new Map(descriptors.map((d) => [d.id, d]));
 
-  const inUse = (d: IntegrationDescriptor) => {
-    const st = stateMap.get(d.id);
-    return !!st && isInUse(st);
-  };
-  const byOrder = (a: IntegrationDescriptor, b: IntegrationDescriptor) => rank(a.id) - rank(b.id);
-  const live = descriptors.filter(inUse).sort(byOrder);
-  const dormant = descriptors.filter((d) => !inUse(d)).sort(byOrder);
-
-  const connectedCount = descriptors.filter((d) => stateMap.get(d.id)?.connection === "connected").length;
+  // OpenAI has no category, so `rank` puts it last in whichever half it lands in.
+  const ordered = [...placements].sort((a, b) => rank(a.id) - rank(b.id));
+  const live = ordered.filter((p) => p.inUse);
+  const dormant = ordered.filter((p) => !p.inUse);
+  const connectedCount = placements.filter((p) => p.connected).length;
 
   const renderTile = (descriptor: IntegrationDescriptor) => {
     const state = stateMap.get(descriptor.id);
@@ -1101,6 +1169,24 @@ export function IntegrationsPanel({ className, open: openProp, onOpenChange }: I
         onOpen={setWanted}
         onToggle={handleToggle}
         toggling={togglingId === descriptor.id}
+      />
+    );
+  };
+
+  const renderPlacement = (p: Placement) => {
+    if (p.id !== OPENAI_TILE_ID) {
+      const descriptor = byId.get(p.id);
+      return descriptor ? renderTile(descriptor) : null;
+    }
+    return (
+      <TileShell
+        key={OPENAI_TILE_ID}
+        id={OPENAI_TILE_ID}
+        label="OpenAI"
+        dormant={!openAi.inUse}
+        onOpen={setWanted}
+        summary={openAi.summary}
+        footer={openAi.footer}
       />
     );
   };
@@ -1123,11 +1209,11 @@ export function IntegrationsPanel({ className, open: openProp, onOpenChange }: I
         // no single card can tell you. The old "M to set up" is cut: those cards
         // are now on screen under a heading that names the state.
         <p className="text-caption1 text-fg-muted">
-          <span className="font-medium text-accent">{connectedCount}</span> of {descriptors.length} connected
+          <span className="font-medium text-accent">{connectedCount}</span> of {placements.length} connected
         </p>
       )}
 
-      {live.length > 0 && <div className={GRID}>{live.map(renderTile)}</div>}
+      {live.length > 0 && <div className={GRID}>{live.map(renderPlacement)}</div>}
 
       {dormant.length > 0 && (
         // A heading, not a disclosure. The same grammar as any other group
@@ -1137,7 +1223,7 @@ export function IntegrationsPanel({ className, open: openProp, onOpenChange }: I
           <span className="mb-2 block text-caption2 font-semibold uppercase tracking-wider text-fg-muted">
             Not set up
           </span>
-          <div className={GRID}>{dormant.map(renderTile)}</div>
+          <div className={GRID}>{dormant.map(renderPlacement)}</div>
         </section>
       )}
 
@@ -1146,6 +1232,7 @@ export function IntegrationsPanel({ className, open: openProp, onOpenChange }: I
           is exactly what enabling an integration does, and exactly how everything
           typed used to be lost. In a portal beside the grid it does not care what
           the grid does. */}
+      {openAiWanted && <OpenAiDialog onClose={() => setWanted(null)} />}
       {open && openState && (
         <IntegrationDialog
           key={open.id}

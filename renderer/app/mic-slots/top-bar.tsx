@@ -1,14 +1,19 @@
 // The Mic slots page's top bar: which plan, which side of it, and the two things
 // that act on everything at once.
 
-import { MoreHorizontalIcon } from "lucide-react";
+import { MoreHorizontalIcon, SparklesIcon } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
 import { useState } from "react";
 
 import { Button, ButtonGroup, MENU_ITEM, menuContent } from "../../components/ui";
+import { cn } from "../../lib/cn";
+import { INLINE_LINK } from "../../lib/link-classes";
 import { PlanSwitcher } from "../../settings/sections/plan-switcher";
 import { namedType } from "../../settings/sections/slots-target-pill";
 import { CopyFromDialog } from "./board-dialogs";
+import { ShowSwitch } from "./photo-themes/photo-bits";
+import type { ThemePhotosReason } from "./photo-themes/theme-photos-reason";
+import type { PhotoPlan, PhotoThemes } from "./photo-themes/use-photo-themes";
 import { SavedLayouts } from "./saved-layouts";
 import type { MicSlots } from "./use-mic-slots";
 
@@ -17,13 +22,26 @@ export function TopBar({
   savedOpen,
   onSavedOpen,
   savedBoardId,
+  photos,
+  photoPlan,
+  photoReason,
+  photoPanelOpen,
+  onPhotoPanel,
 }: {
   mic: MicSlots;
   savedOpen: boolean;
   onSavedOpen: (open: boolean) => void;
   savedBoardId: string | null;
+  photos: PhotoThemes;
+  /** The plan Theme photos would be for; null on a Default, or with no plan. */
+  photoPlan: PhotoPlan | null;
+  /** Why Theme photos is off, or null when it is on. */
+  photoReason: ThemePhotosReason | null;
+  photoPanelOpen: boolean;
+  onPhotoPanel: (open: boolean) => void;
 }) {
   const [copyAll, setCopyAll] = useState(false);
+  const photoPanelShown = photoPanelOpen && !photoReason;
   const noType = !mic.serviceTypeId;
   const planActions = mic.hasPlan && mic.hasOverride && mic.side === "plan";
   const typeLabel = mic.typeName ? `${mic.typeName} default` : "Default";
@@ -82,6 +100,21 @@ export function TopBar({
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
+      <Button
+        variant={photoPanelShown ? "soft" : "filled"}
+        size="small"
+        data-theme-photos-button
+        aria-pressed={photoPanelShown}
+        aria-describedby={photoReason ? "theme-photos-reason" : undefined}
+        disabled={!!photoReason}
+        tooltip={photoReason?.why ?? ""}
+        onClick={() => onPhotoPanel(!photoPanelShown)}
+      >
+        <SparklesIcon className="size-3.5" />
+        Theme photos
+      </Button>
+      {/* With the sheet open its header carries the switch: both would wrap the bar. */}
+      {photoPlan && !photoReason && !photoPanelShown && photos.hasApproved && <ShowSwitch choice={photos.choice} plan={photoPlan} photos={photos} />}
       <span className="flex-1" />
       {mic.dirty && (
         <>
@@ -105,5 +138,25 @@ export function TopBar({
         />
       )}
     </div>
+  );
+}
+
+/** Why Theme photos is off, in words, under the bar: a tooltip needs a hover and a phone has none. */
+export function ThemePhotosReasonLine({ reason, mic }: { reason: ThemePhotosReason; mic: MicSlots }) {
+  return (
+    <p
+      id="theme-photos-reason"
+      role="note"
+      data-theme-photos-reason
+      className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 rounded-lg bg-fill px-3 py-2 text-caption1 text-fg-muted"
+    >
+      <SparklesIcon className="size-3.5 flex-none" aria-hidden />
+      <span>Theme photos is off. {reason.why}.</span>
+      {reason.fix === "plan" && (
+        <button type="button" className={cn(INLINE_LINK, "font-semibold")} onClick={() => void mic.setSide("plan")}>
+          Switch to this plan
+        </button>
+      )}
+    </p>
   );
 }
