@@ -1,7 +1,8 @@
 // live-refresh.ts — keeping what a page has read current.
 //
-// In the building a page reads again on a timer. On the public page every read is a
-// request to a Cloudflare Worker with a free plan's day to spend, and the same read
+// In the building a page reads again on a timer, or, where the server announces the change
+// (the ServiceCue layouts and roles, see use-live-servicecue-lists.ts), on that frame. On the
+// public page every read is a request to a Cloudflare Worker with a free plan's day to spend, and the same read
 // every minute from every open tab is most of it for nothing. The Worker says when a
 // doc changes (`publish:docs`), so a public page reads then, after each (re)connect of
 // its socket (the transport says every doc has changed), and on a slow timer only while

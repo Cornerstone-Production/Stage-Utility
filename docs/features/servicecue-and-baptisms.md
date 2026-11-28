@@ -104,6 +104,13 @@ shut once one is; a notice when some category is in no role (see
 link to where it is set up. `/servicecue/presets#landing` opens the Landing page row,
 and keeps opening it on reload.
 
+A saved layout or role reaches every open ServiceCue screen and rundown page at once,
+without a reload: the server announces the save on the shared event stream
+(`servicecue:lists`, no contents on it) and each page reads both lists again. A read that
+failed is retried every minute until it succeeds, and a failure is a line on
+[the log](../ops/updates-and-logs.md) tagged `[servicecue]`; the screen says so on itself
+while it has no list to fall back on. The rundown itself is read every minute.
+
 **Landing page** opens to a tick box per service type (without Planning Center it says only
 to connect it, with a link to Integrations). Only the ticked types appear on
 the landing page, each with the layouts in the page's order, then All columns; the first

@@ -1,8 +1,9 @@
 // servicecue-view-reads.test.tsx — the Script display (a View on a stage monitor),
 // when its layouts or roles cannot be read.
 //
-// Both reads ride the rundown's one-minute timer and "keep the last good list"
-// when one fails. Before the first success there is no good list: the layouts
+// Both reads happen at mount and again when the server says the lists were saved (see
+// servicecue-view-live-lists.test.tsx), and a failed one is retried on a timer; a failed read
+// "keeps the last good list". Before the first success there is no good list: the layouts
 // start empty, an empty list resolves to ALL columns, and a monitor set to one
 // department's columns showed every department's notes with nothing on screen
 // to say so. A failure now says so while there is nothing to keep, and only
@@ -13,21 +14,25 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
+import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 import { eventually, installRenderDom, isPlumbing, readLedger, settle, unmountAndTeardown } from "../test-dom.js";
 import { alerts, ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
+(globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
 const { render, cleanup, act } = await import("@testing-library/react");
 const React = await import("react");
 const { ServiceCue } = await import("./servicecue-view.js");
 const { TooltipProvider } = await import("../components/ui/index.js");
 const { __resetForTests: resetStageState } = await import("./use-stage-state.js");
+const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => {
   cleanup();
   resetStageState();
+  resetReplayCache();
 });
 
 const RUNDOWN = {
@@ -133,10 +138,11 @@ test("once a list has loaded, a failed retry keeps it and changes nothing on scr
     await eventually(reads.landed);
     assert.equal(alerts(), "");
     failing.push("layouts", "roles");
-    // Two ticks of the timer: a retry that keeps failing is one failure, not
-    // one log line a minute.
-    for (let i = 0; i < 2; i++) {
-      await act(async () => t.mock.timers.tick(60_000));
+    // Two saves, each read failing: a read that keeps failing is one failure, not
+    // one log line a save. (A healthy screen reads its lists only when they are saved,
+    // so a timer tick here would read nothing.)
+    for (let seq = 1; seq <= 2; seq++) {
+      await act(async () => FakeEventSource.last?.push("servicecue:lists", { epoch: "e1", seq }));
       await settle();
       await settle();
     }

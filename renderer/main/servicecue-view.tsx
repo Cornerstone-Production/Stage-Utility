@@ -7,13 +7,13 @@ import { QrHint } from "../components/qr-hint";
 import { ErrorNote } from "../components/ui/error-note";
 import { invoke } from "../lib/api";
 import { useFailedReads } from "../lib/use-failed-reads";
+import { useLiveServiceCueLists } from "../lib/use-live-servicecue-lists";
 import { useResyncOn } from "../lib/use-resync-on";
 import { ServiceCueBody, ServiceCueHeader, useServiceCueRender } from "./servicecue-body";
 import { useDashboardState } from "./use-dashboard-state";
 import { pcoConnected } from "./use-stage-state";
 import { appZoneOf } from "../lib/app-zone";
 import { DEFAULT_TEXT_SIZE } from "./servicecue-text-size";
-import type { CategoryRole } from "../../main/types/servicecue-roles.js";
 
 interface ServiceCueProps {
   /** Which saved ServiceCue layout to render; null = all columns. */
@@ -56,8 +56,6 @@ export function ServiceCue({ serviceCueLayoutId, showHeader = true, textSizeClas
   // Null until the first read lands. "The last good list" only exists once one
   // has: before that, an empty list resolved to ALL columns (the comment on the
   // effect below), and a failure has to say so instead.
-  const [layouts, setLayouts] = useState<ServiceCueLayout[] | null>(null);
-  const [roles, setRoles] = useState<CategoryRole[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const { failed, fail, clear } = useFailedReads<"layouts" | "roles" | "rundown">("servicecue");
 
@@ -94,35 +92,24 @@ export function ServiceCue({ serviceCueLayoutId, showHeader = true, textSizeClas
     clear("rundown");
   });
 
+  // The layouts and roles are read at mount and again when they are saved (see
+  // useLiveServiceCueLists), not fetched once: fetched once, a transient failure at boot
+  // left `layouts` empty for the life of the page, and an empty list resolves to ALL
+  // columns, a display configured for one department silently showing every other
+  // department's notes. The hook retries a failed read on a timer for that reason.
+  const { layouts, roles } = useLiveServiceCueLists(!!serviceTypeId && !!pcoConfigured, { fail, clear }, {
+    layouts: "the layouts for a ServiceCue view",
+    roles: "the category roles for a ServiceCue view",
+  });
+
   // Items change rarely; refetch on a slow timer. The live position arrives
-  // separately over SSE, so a stale rundown still highlights the right row.
-  //
-  // The layouts and roles ride the same timer rather than being fetched once at
-  // mount. Fetched once, a transient failure at boot left `layouts` empty for
-  // the life of the page, and an empty list resolves to ALL columns — a display
-  // configured for one department silently showing every other department's
-  // notes, with nothing on screen to say so.
+  // separately over SSE, so a stale rundown still highlights the right row. Nothing
+  // announces a change to the plan in Planning Center, so unlike the layouts this
+  // one stays on its timer.
   useEffect(() => {
     if (!serviceTypeId || !pcoConfigured) return;
     let cancelled = false;
     const load = () => {
-      // A failure keeps the last good list, and the next tick retries. It is
-      // logged once, when it starts; it is SHOWN only while there is no good
-      // list to keep, because only then is the display wrong.
-      invoke<ServiceCueLayout[]>("servicecue:listLayouts")
-        .then((l) => {
-          if (cancelled) return;
-          setLayouts(l);
-          clear("layouts");
-        })
-        .catch((err: unknown) => { if (!cancelled) fail("layouts", "the layouts for a ServiceCue view", err); });
-      invoke<CategoryRole[]>("servicecue:listRoles")
-        .then((r) => {
-          if (cancelled) return;
-          setRoles(r);
-          clear("roles");
-        })
-        .catch((err: unknown) => { if (!cancelled) fail("roles", "the category roles for a ServiceCue view", err); });
       // The last good rundown stays on screen through a failure (see
       // ServiceCueBody), so the log is the only place a failing one shows.
       invoke<ServiceCueRundownDTO>("servicecue:rundown", { serviceTypeId })
