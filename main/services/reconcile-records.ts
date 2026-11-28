@@ -140,9 +140,10 @@ interface RepairResult {
  * end, across the items between. A record holding MORE than one such item is a
  * shape no close leaves (two old fragments merged in History can) and is left
  * and logged; a merge leaving one is indistinguishable from a step back, and is
- * filled like one. An item missing its length whose end is not the record's was
- * not closed by the old close (a window edit leaves that shape when it cannot
- * read the start) and is not touched. An open record is not touched: the boot
+ * filled like one. An item missing its length whose end is not the record's is
+ * not touched: a window edit leaves that shape when it cannot read the start,
+ * and so does an old close the record later moved past (a window extended, a
+ * record resumed on another item), which this cannot tell apart and leaves. An open record is not touched: the boot
  * close below closes those, by the same rule. Each record it changes is kept as
  * it was beside it first (see replaceKeepingPrior), and each record with the
  * gap it changes, leaves or cannot save is logged by key.

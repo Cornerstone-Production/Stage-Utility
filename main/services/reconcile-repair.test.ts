@@ -272,6 +272,17 @@ describe("records the old boot close left half-closed", () => {
     );
   });
 
+  it("gives an item the old close left with no end an end and no length, when nothing measured it", async () => {
+    const id = identity();
+    const tl = oldClosedTimeline(id);
+    tl.items[1] = { ...tl.items[1]!, endedAt: null };
+    await serviceTimelineStore.upsert(tl);
+    await reconcileOpenRecords();
+
+    const message = (await serviceTimelineStore.get(id.serviceKey))?.items[1];
+    assert.deepEqual([message?.endedAt, message?.actualDurationSec], [iso(OLD_END), null]);
+  });
+
   it("leaves a whole record byte for byte as it was, with no copy", async () => {
     const id = identity();
     const whole = oldClosedTimeline(id);
