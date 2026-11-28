@@ -14,6 +14,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, mock, test } from "node:test";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), "messages-actions-"));
 process.env.STAGE_UTILITY_DATA = DATA;
@@ -33,10 +34,8 @@ const real = { log: console.log, warn: console.warn, error: console.error };
 let green = "";
 let stage = "";
 
-beforeEach(async () => {
-  console.log = () => {};
-  console.warn = () => {};
-  console.error = () => {};
+beforeEach(async (t) => {
+  captureConsole(t, "log", "warn", "error");
   const { config } = await messagingStore.replace({
     version: messagingStore.get().version,
     groups: [{ name: "Green room" }, { name: "Stage" }],

@@ -10,6 +10,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { ProdComService } from "./prodcom-service.js";
+import { captureConsoleDuring } from "./fixtures/capture-console.js";
 
 const T0 = Date.parse("2026-09-15T12:00:00Z");
 
@@ -51,8 +52,6 @@ class TestProdCom extends ProdComService {
   }
 }
 
-const realWarn = console.warn;
-const realLog = console.log;
 
 function started(): TestProdCom {
   const svc = new TestProdCom();
@@ -64,15 +63,7 @@ function started(): TestProdCom {
 
 /** Run `body` with console.warn/log collected onto the service. */
 function capturing(svc: TestProdCom, body: () => void): void {
-  const push = (...args: unknown[]) => svc.lines.push(args.map(String).join(" "));
-  console.warn = push;
-  console.log = push;
-  try {
-    body();
-  } finally {
-    console.warn = realWarn;
-    console.log = realLog;
-  }
+  svc.lines.push(...captureConsoleDuring(["warn", "log"], body));
 }
 
 describe("reconnect back-off", () => {

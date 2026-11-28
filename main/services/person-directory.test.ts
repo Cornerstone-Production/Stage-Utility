@@ -8,6 +8,7 @@ import { describe, it } from "node:test";
 
 import { PersonDirectory, RETRY_MS } from "./person-directory.js";
 import type { PersonCardDTO } from "../types/stage.js";
+import { captureConsoleDuringAsync } from "./fixtures/capture-console.js";
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -39,19 +40,7 @@ function rig(opts: { creds?: boolean } = {}) {
   };
 }
 
-const quiet = async (fn: () => Promise<void>) => {
-  const warn = console.warn;
-  const lines: string[] = [];
-  console.warn = (...a: unknown[]) => {
-    lines.push(a.map(String).join(" "));
-  };
-  try {
-    await fn();
-  } finally {
-    console.warn = warn;
-  }
-  return lines;
-};
+const quiet = (fn: () => Promise<void>) => captureConsoleDuringAsync(["warn"], fn);
 
 describe("the person directory", () => {
   it("reads an unknown ID once, however often it is asked", async () => {

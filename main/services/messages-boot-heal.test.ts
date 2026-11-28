@@ -15,6 +15,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), "messages-boot-heal-"));
 process.env.STAGE_UTILITY_DATA = DATA;
@@ -33,20 +34,14 @@ type Ctl = { state: { outputs: Output[]; [k: string]: unknown }; broadcast: () =
 const ctl = stageController as unknown as Ctl;
 ctl.broadcast = () => {};
 
-const lines: string[] = [];
-const real = { log: console.log, warn: console.warn, error: console.error };
+let lines: string[] = [];
 const services: InstanceType<typeof MessagesService>[] = [];
 
-beforeEach(() => {
-  lines.length = 0;
-  const grab = (...args: unknown[]) => void lines.push(args.map(String).join(" "));
-  console.log = grab;
-  console.warn = grab;
-  console.error = grab;
+beforeEach((t) => {
+  lines = captureConsole(t, "log", "warn", "error");
 });
 afterEach(() => {
   for (const s of services.splice(0)) s.stop();
-  Object.assign(console, real);
   for (const f of fs.readdirSync(DATA).filter((n) => n.startsWith("messaging.json"))) fs.rmSync(path.join(DATA, f), { force: true });
 });
 
