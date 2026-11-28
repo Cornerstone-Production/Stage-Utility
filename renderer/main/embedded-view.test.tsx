@@ -141,7 +141,7 @@ describe("every kind reaches its own component", () => {
   for (const [kind, marker] of Object.entries(MARKER)) {
     test(`${kind} draws its component, not a notice`, async () => {
       const container = await draw(
-        // displayId is what the per-display kinds need; the others ignore it.
+        // The SPL rundown reads displayId for its header name; the others ignore it.
         React.createElement(EmbeddedView, { view: view(kind), ctx: ctxWith([]), displayId: "d-1" } as never),
       );
       // The view's own component reads its data behind the first paint.

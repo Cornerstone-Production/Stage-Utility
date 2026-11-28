@@ -121,8 +121,7 @@ export function EmbeddedView({
       );
     }
 
-    // None of these needs a screen behind the tile: the SPL rundown reads the
-    // display only for its header name, so it takes null as the transcription did.
+    // None of the four needs a screen behind the tile.
     case "transcription":
       return <TranscriptionView />;
 
@@ -133,11 +132,12 @@ export function EmbeddedView({
       return <StageDisplayView />;
 
     case "spl-rundown":
+      // The display is read only for the header name, so a tile with none passes null.
       return <SplRundownView displayId={displayId ?? null} />;
 
     case "calendar":
-      // Configured per VIEW, so it draws in any tile — which is the point: a producer multiview should be able to
-      // carry the month beside everything else.
+      // Configured per VIEW, so it draws in any tile — which is the point: a
+      // producer multiview should be able to carry the month beside everything else.
       //
       // ctx.now, not Date.now(): this app has one clock, corrected against the
       // server, and "which square is today" must be asked on that one. The
