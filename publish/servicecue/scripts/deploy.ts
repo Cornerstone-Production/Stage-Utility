@@ -17,6 +17,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { isMain } from "../../../scripts/is-main.ts";
 import { isViewerBuildId, viewerBuildFromHtml } from "../../../main/types/servicecue-publish.ts";
 
 const here = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -47,7 +48,7 @@ export function deployPlan(
   return { args, config };
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url, process.argv[1])) {
   const local = existsSync(localPath) ? JSON.parse(readFileSync(localPath, "utf8")) : null;
   const build = viewerBuildFromHtml(readFileSync(join(here, "public", "servicecue.html"), "utf8"));
   if (build === null) throw new Error("public/servicecue.html carries no build id: run `npm run servicecue:build` first");
