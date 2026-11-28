@@ -7,7 +7,7 @@
 
 import { errorMessage } from "../errors.js";
 import { isStringList } from "../../types/is-record.js";
-import { type RouteCtx, json, error, readBody, readBodyOrEmpty, MAX_CONFIG_BODY_BYTES } from "./context.js";
+import { type RouteCtx, json, error, readBody, readBodyOrEmpty, readJsonObject, MAX_CONFIG_BODY_BYTES } from "./context.js";
 import { stageController } from "../stage-controller.js";
 import { updater } from "../updater.js";
 import { updateNoticesStore } from "../update-notices-store.js";
@@ -123,7 +123,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (method === "POST" && pathname === "/api/update/track") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (typeof body.branch !== "string") {
         error(res, "body.branch (string) required");
         return;
@@ -149,7 +149,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (method === "POST" && pathname === "/api/update/auto") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const partial: { mode?: UpdateMode; enabled?: boolean; dayOfWeek?: number | null; hour?: number } = {};
       if (isUpdateMode(body.mode)) partial.mode = body.mode;
       if (typeof body.enabled === "boolean") partial.enabled = body.enabled;
@@ -160,7 +160,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (method === "POST" && pathname === "/api/reconnect-schedule") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const partial: Record<string, unknown> = {};
       if (typeof body.enabled === "boolean") partial.enabled = body.enabled;
       for (const k of ["leadMin", "tailMin", "dormantMin"]) {
@@ -170,7 +170,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (method === "POST" && pathname === "/api/taper-window") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const partial: Record<string, unknown> = {};
       for (const k of ["preMin", "postMin"]) {
         if (typeof body[k] === "number") partial[k] = body[k];
@@ -188,7 +188,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
     // naming neither list — or naming one with the wrong type — wiped the
     // operator's choices and answered 200.
     if (method === "POST" && pathname === "/api/checklist-sources") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (body.categories !== undefined && !isStringList(body.categories)) {
         error(res, "body.categories must be a string[]");
         return;
@@ -209,7 +209,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
     }
 
     if (method === "POST" && pathname === "/api/timezone") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const tz = typeof body.timezone === "string" ? body.timezone : null;
       try {
         json(res, await stageController.setTimezone(tz));
@@ -220,7 +220,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
     }
 
     if (method === "POST" && pathname === "/api/hour-cycle") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       try {
         json(res, await stageController.setHourCycle(body.hourCycle as "12h" | "24h"));
       } catch (err) {
@@ -273,7 +273,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (method === "POST" && pathname === "/api/backup/schedule") {
-      const body = (await readBody(req)) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const partial: Record<string, unknown> = {};
       if (typeof body.enabled === "boolean") partial.enabled = body.enabled;
       if (typeof body.includeArchive === "boolean") partial.includeArchive = body.includeArchive;
@@ -295,7 +295,7 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
     }
     // Save the current config as a named snapshot.
     if (method === "POST" && pathname === "/api/config/snapshots") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const name = typeof body.name === "string" ? body.name : "";
       json(res, await configSnapshot.save(name), 201);
       return;

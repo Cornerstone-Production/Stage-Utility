@@ -65,15 +65,21 @@ export class PatchLinksNotUpdated extends Error {
 
 /**
  * What a saved patch owes others before it is announced. `before` is the files it replaced, oldest
- * first: the one this save replaced, preceded by the one an earlier save whose follower failed
- * replaced (a retry still stamps the devices that save removed).
+ * first: the one this save replaced, preceded by the ones earlier saves whose followers failed
+ * replaced (a retry still stamps the devices those saves removed).
  */
 type SavedHook = (before: readonly PatchFile[], after: PatchFile) => Promise<void>;
 
 class PatchStore {
   private savedHooks: SavedHook[] = [];
-  /** The patch the oldest save with a failed follower replaced, until a save's followers all succeed. Held in memory: a restart forgets it. */
-  private unfollowed: PatchFile | null = null;
+  /**
+   * The patch each save whose follower failed replaced, by the order the saves were stored in, until a later save's
+   * followers all succeed with it in hand. Keyed per save so two saves in flight at once cannot overwrite each other's
+   * entry: a success clears only the entries it was handed. Held in memory: a restart forgets it.
+   */
+  private unfollowed = new Map<number, PatchFile>();
+  /** Counts saves in the order their writes landed, to key `unfollowed`. */
+  private saves = 0;
   /** The last file save() stored, for a reader that must not act on a patch older than one just saved. */
   private lastSaved: PatchFile | null = null;
 
@@ -144,13 +150,16 @@ class PatchStore {
   async save(file: PatchFile): Promise<PatchFile> {
     const next: PatchFile = { ...file, updatedAt: new Date().toISOString() };
     let before: PatchFile = EMPTY;
+    let seq = 0;
     await this.store.update((prev) => {
       before = prev;
+      seq = ++this.saves;
       return next;
     });
     this.lastSaved = next;
     const replaced = this.read(before);
-    const befores = this.unfollowed ? [this.unfollowed, replaced] : [replaced];
+    const taken = [...this.unfollowed.keys()].sort((a, b) => a - b);
+    const befores = [...taken.map((k) => this.unfollowed.get(k)!), replaced];
     let failed: unknown = null;
     for (const hook of this.savedHooks) {
       try {
@@ -160,7 +169,8 @@ class PatchStore {
         failed ??= err;
       }
     }
-    this.unfollowed = failed === null ? null : befores[0]!;
+    if (failed === null) for (const k of taken) this.unfollowed.delete(k);
+    else this.unfollowed.set(seq, replaced);
     broadcast("patch:updated", next);
     if (failed !== null) throw new PatchLinksNotUpdated(failed);
     return next;

@@ -117,10 +117,6 @@ const TranscriptLineRow = memo(
  *  fractional scrollTop a zoomed page can report. */
 const AT_BOTTOM_PX = 4;
 
-/** How long after wheel, touch or key input a scroll that moved up is taken to
- *  be the viewer's, at a pin that lands before that scroll's own event. */
-const INPUT_WINDOW_MS = 250;
-
 type Box<T> = { current: T };
 
 /** Record the viewer's intent, and let scroll anchoring act only while they
@@ -130,21 +126,30 @@ function setFollowing(el: HTMLElement, following: Box<boolean>, on: boolean): vo
   el.style.overflowAnchor = on ? "none" : "";
 }
 
+/** Within AT_BOTTOM_PX of the end. */
+function atBottom(el: HTMLElement, top: number): boolean {
+  return el.scrollHeight - top - el.clientHeight <= AT_BOTTOM_PX;
+}
+
 /**
  * Scroll to the very bottom, and remember where that left scrollTop so the next
  * scroll event is not read as the viewer scrolling up.
  *
- * Unless the viewer has just started scrolling up: input arrived a moment ago
- * and scrollTop already sits above where the last pin left it, but the scroll
- * event saying so has not been delivered yet. Pinning then would pull them back
- * down mid-gesture, so following ends here instead. Input alone ends nothing: a
- * pinch, a tap or a key that moved nothing leaves the feed following.
+ * Unless the viewer has already scrolled up: scrollTop sits above where the last
+ * pin left it and short of the bottom, but the scroll event saying so has not been
+ * delivered yet. Pinning then would pull them back down mid-gesture, so following
+ * ends here instead. Nothing but the viewer moves it up there: anchoring is off
+ * while following, and a browser's clamp when the content shrinks lands at the
+ * bottom. Any means counts (a wheel, a key, a scrollbar drag, touch momentum after
+ * the finger lifts), so no input event is needed, and input that moved nothing
+ * leaves the feed following.
  */
-function pinOrRelease(el: HTMLElement, following: Box<boolean>, lastTop: Box<number>, inputAt: Box<number>): void {
+function pinOrRelease(el: HTMLElement, following: Box<boolean>, lastTop: Box<number>): void {
   if (!following.current) return;
-  if (el.scrollTop < lastTop.current && performance.now() - inputAt.current < INPUT_WINDOW_MS) {
+  const top = el.scrollTop;
+  if (top < lastTop.current && !atBottom(el, top)) {
     setFollowing(el, following, false);
-    lastTop.current = el.scrollTop;
+    lastTop.current = top;
     return;
   }
   el.scrollTop = el.scrollHeight;
@@ -188,12 +193,10 @@ function useFollowNewest(
   const followingRef = useRef(true);
   /** scrollTop as of the last scroll event or pin, to tell an upward scroll. */
   const lastTopRef = useRef(0);
-  /** When the viewer last used the wheel, touch or a key (see pinOrRelease). */
-  const inputAtRef = useRef(-Infinity);
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (enabled && el) pinOrRelease(el, followingRef, lastTopRef, inputAtRef);
+    if (enabled && el) pinOrRelease(el, followingRef, lastTopRef);
   }, [scrollRef, enabled, lines]);
 
   useLayoutEffect(() => {
@@ -201,29 +204,17 @@ function useFollowNewest(
     const content = contentRef.current;
     if (!enabled || !el) return;
     setFollowing(el, followingRef, followingRef.current);
-    const onInput = () => {
-      inputAtRef.current = performance.now();
-    };
-    // Keys go to whatever has focus, and the feed takes none, so they are
-    // heard on the document.
-    const doc = el.ownerDocument;
-    el.addEventListener("wheel", onInput, { passive: true });
-    el.addEventListener("touchmove", onInput, { passive: true });
-    doc.addEventListener("keydown", onInput);
     // Guarded: not every embedded or kiosk browser this app runs in has it, and
     // the follow on each new line does not depend on it.
     const ro =
       typeof ResizeObserver === "undefined"
         ? null
-        : new ResizeObserver(() => pinOrRelease(el, followingRef, lastTopRef, inputAtRef));
+        : new ResizeObserver(() => pinOrRelease(el, followingRef, lastTopRef));
     ro?.observe(el);
     if (content) ro?.observe(content);
     return () => {
       el.style.overflowAnchor = "";
       ro?.disconnect();
-      el.removeEventListener("wheel", onInput);
-      el.removeEventListener("touchmove", onInput);
-      doc.removeEventListener("keydown", onInput);
     };
   }, [scrollRef, contentRef, enabled, hasLines]);
 
@@ -232,6 +223,9 @@ function useFollowNewest(
     const el = scrollRef.current;
     if (!el) return;
     const top = el.scrollTop;
+    // Read here, not through atBottom(): fit-one-measurement.test.ts lists this hook
+    // as one that observes a box and reads its content's size, and it sees only
+    // a read written inside the hook.
     if (el.scrollHeight - top - el.clientHeight <= AT_BOTTOM_PX) setFollowing(el, followingRef, true);
     // Upward, and not by us: every pin records where it left scrollTop,
     // anchoring is off while following, and a browser's own clamp when content

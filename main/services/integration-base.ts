@@ -254,17 +254,19 @@ export abstract class ConnectionLifecycle {
    * A success, for the outage log. Ends the run once no failure has followed it
    * for the settle window, which is what keeps a flapping upstream one outage.
    *
-   * Every integration calls resetBackoff() only on the success that ends a run
-   * of failures (a poller on its first good poll, a socket on connect), so
-   * nothing asks again after it. The timer does, when the window has passed;
-   * a failure in between cancels it (noteOutage), and so do a retry and stop().
+   * The first success after a failure starts the timer, and the timer asks when
+   * the window has passed; a failure in between cancels it (noteOutage), and so
+   * do a retry and stop(). Some integrations call resetBackoff() on every good
+   * poll (ProPresenter's fallback poll, SenSource, ProdCom's WebSocket frames),
+   * so a pending timer is left running: re-armed on each, a poll faster than the
+   * window kept pushing it back and the outage never ended.
    */
   private noteHealthy(): void {
     if (!this.connectionOutages.failing(OUTAGE_KEY)) return;
+    if (this.settleTimer) return;
     // Never asked on the success itself: OutageLog measures from the last
     // FAILURE, so after a retry gap as long as the window the first success
     // would be "recovered" at once and the next failure a fresh outage.
-    this.clearSettle();
     this.settleTimer = setTimeout(() => {
       this.settleTimer = null;
       if (this.running) this.sayRecovered();

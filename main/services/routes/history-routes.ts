@@ -6,7 +6,7 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
-import { type RouteCtx, json, error, readBodyOrEmpty, pcoReadFailed, readJsonObject } from "./context.js";
+import { type RouteCtx, json, error, pcoReadFailed, readJsonObject } from "./context.js";
 import { errorMessage } from "../errors.js";
 import { baptismTriggersStore } from "../baptism-triggers-store.js";
 import { stageController } from "../stage-controller.js";
@@ -144,7 +144,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
     }
     // ── Attendance history (mirrors the SPL history routes) ─────────────────
     if (method === "POST" && pathname === "/api/history/window") {
-      const body = await readBodyOrEmpty(req);
+      const body = await readJsonObject(req);
       if (typeof body.serviceKey !== "string") {
         error(res, "body.serviceKey (string) required");
         return;
@@ -160,7 +160,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (method === "POST" && pathname === "/api/history/recalc") {
-      const body = await readBodyOrEmpty(req);
+      const body = await readJsonObject(req);
       if (typeof body.serviceKey !== "string") {
         error(res, "body.serviceKey (string) required");
         return;
@@ -174,7 +174,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
     // service is still recording (ServiceIsLiveError), 500 with the reason
     // otherwise. See rebuildServiceRecords.
     if (method === "POST" && pathname === "/api/history/rebuild") {
-      const body = await readBodyOrEmpty(req);
+      const body = await readJsonObject(req);
       if (typeof body.serviceKey !== "string") {
         error(res, "body.serviceKey (string) required");
         return;
@@ -183,7 +183,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (method === "POST" && pathname === "/api/history/item-counted") {
-      const body = await readBodyOrEmpty(req);
+      const body = await readJsonObject(req);
       if (typeof body.serviceKey !== "string" || typeof body.itemId !== "string" || typeof body.counted !== "boolean") {
         error(res, "body.serviceKey, body.itemId (strings) + body.counted (boolean) required");
         return;
@@ -200,7 +200,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
     // Answers the updated record so the panel renders the effective times
     // without a second read.
     if (method === "POST" && pathname === "/api/history/item-times") {
-      const body = await readBodyOrEmpty(req);
+      const body = await readJsonObject(req);
       if (
         typeof body.serviceKey !== "string" ||
         typeof body.itemId !== "string" ||
@@ -223,7 +223,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (method === "POST" && pathname === "/api/history/merge") {
-      const body = await readBodyOrEmpty(req);
+      const body = await readJsonObject(req);
       if (typeof body.sourceKey !== "string" || typeof body.targetKey !== "string") {
         error(res, "body.sourceKey + body.targetKey (strings) required");
         return;
@@ -241,7 +241,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (method === "POST" && pathname === "/api/history/trends-prefs") {
-      const body = await readBodyOrEmpty(req);
+      const body = await readJsonObject(req);
       try {
         json(res, await trendsPrefs.setSoundMetric(body.soundMetric));
       } catch (err) {
@@ -263,7 +263,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (method === "POST" && pathname === "/api/history/milestones") {
-      const body = await readBodyOrEmpty(req);
+      const body = await readJsonObject(req);
       if (typeof body.date !== "string" || typeof body.label !== "string") {
         error(res, "body.date + body.label (strings) required");
         return;
@@ -456,7 +456,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
         // recording or when it has no baptism.csv at all, 500 with the reason
         // for an unknown serviceKey. See rebuildServiceBaptisms.
         case "rebuild": {
-          const body = await readBodyOrEmpty(req);
+          const body = await readJsonObject(req);
           if (typeof body.serviceKey !== "string") {
             error(res, "body.serviceKey (string) required");
             return;

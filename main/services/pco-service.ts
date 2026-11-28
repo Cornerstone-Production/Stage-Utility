@@ -53,8 +53,10 @@ function refusalReason(statusText: string, body: string): string {
   try {
     const first = (JSON.parse(body) as { errors?: { title?: unknown; detail?: unknown }[] }).errors?.[0];
     for (const field of [first?.title, first?.detail]) {
-      if (typeof field === "string" && field.trim()) {
-        reason = field.trim();
+      // One line: a title or detail with a line break in it would split the message an operator reads.
+      const line = typeof field === "string" ? field.replace(/\s+/g, " ").trim() : "";
+      if (line) {
+        reason = line;
         break;
       }
     }
@@ -65,10 +67,14 @@ function refusalReason(statusText: string, body: string): string {
   return reason.length > MAX_REASON ? `${reason.slice(0, MAX_REASON)}…` : reason;
 }
 
-/** A refused PCO answer's operator-facing reason, with the whole body on a tagged log
- *  line, so the message stays readable and the evidence stays in /log. */
+/** A refused PCO answer's operator-facing reason, with the start of the body on a tagged
+ *  log line, so the message stays readable and the evidence stays in /log. A 404 is an
+ *  answer (no such person, plan or item), often expected, so it is logged as information
+ *  rather than as a warning. */
 function refusal(url: PcoUrl, response: Response, body: string): string {
-  console.warn(`[pco] ${scrub(response.status)} from ${scrub(url)}: ${scrub((body || response.statusText).slice(0, MAX_LOGGED_BODY))}`);
+  const logged = (body || response.statusText).slice(0, MAX_LOGGED_BODY);
+  if (response.status === 404) console.log(`[pco] ${scrub(response.status)} from ${scrub(url)}: ${scrub(logged)}`);
+  else console.warn(`[pco] ${scrub(response.status)} from ${scrub(url)}: ${scrub(logged)}`);
   return refusalReason(response.statusText, body);
 }
 
@@ -1030,7 +1036,7 @@ class PcoService {
       }
       if (!response.ok) {
         const body = await response.text().catch(() => "");
-        if (response.status === 404) throw new PcoNotFoundError(`PCO API error 404: ${refusalReason(response.statusText, body)}`);
+        if (response.status === 404) throw new PcoNotFoundError(`PCO API error 404: ${refusal(url, response, body)}`);
         throw new Error(`PCO API error ${response.status}: ${refusal(url, response, body)}`);
       }
 

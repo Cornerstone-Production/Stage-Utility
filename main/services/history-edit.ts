@@ -337,11 +337,6 @@ export async function editServiceWindow(
     }
   }
   await assertEditable("re-windowed", serviceKey);
-  // The delete and merge paths were given this when a record was found
-  // resurrecting itself; the two edit paths were missed, so a trimmed window
-  // survived only until the recorder's next debounce wrote the untrimmed copy
-  // back over it.
-  forgetAll(serviceKey);
 
   const endMs = opts.endedAt ? Date.parse(opts.endedAt) : null;
   const trim: WindowTrim = { items: 0, itemTimeEdits: 0, samples: 0, splItems: 0 };
@@ -407,6 +402,13 @@ export async function editServiceWindow(
     }
     console.warn(`[history] ${scrub(serviceKey)}: window edit trimmed ${scrub(describeTrim(trim))}.`);
   }
+
+  // The delete and merge paths were given this when a record was found
+  // resurrecting itself; the two edit paths were missed, so a trimmed window
+  // survived only until the recorder's next debounce wrote the untrimmed copy
+  // back over it. After every refusal above, so a refused edit changes nothing,
+  // and before the first write, as forgetAll requires.
+  forgetAll(serviceKey);
 
   if (tl) {
     logOrphanedItemTimeEdits(tl.serviceKey, "the new service window", orphaned);
@@ -513,7 +515,6 @@ export async function setItemTimes(
   times: { startedAt?: string | null; endedAt?: string | null },
 ): Promise<ServiceTimeline> {
   await assertEditable("edited", serviceKey);
-  forgetAll(serviceKey); // see editServiceWindow
   // Names the RUN, not just the item: an item can appear twice in one record, and
   // a log line naming only the title cannot tell an operator which row moved.
   const run = `${itemId}#${sequence}`;
@@ -570,6 +571,8 @@ export async function setItemTimes(
     }
   }
 
+  // After every refusal above, so a refused edit changes nothing; before the record is touched. See editServiceWindow.
+  forgetAll(serviceKey);
   const rest = (tl.itemTimeEdits ?? []).filter((e) => !(e.itemId === itemId && e.sequence === sequence));
   const cleared = startedAt === undefined && endedAt === undefined;
   if (!cleared) {

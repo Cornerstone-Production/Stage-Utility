@@ -469,9 +469,10 @@ export function humaniseCueName(cue: string): string {
 }
 
 /**
- * What a person calls a cue: on a screen, in the manifest Home Assistant reads and
- * in the YAML pasted into it. THE one answer, so the same rules are the same words
- * whichever way Home Assistant was set up.
+ * What a person calls a cue: on a screen and in the manifest Home Assistant reads.
+ * Not in the YAML pasted into Home Assistant, which keeps the naming it shipped
+ * with (yamlNameOf in home-assistant-yaml.ts): its names are already entities in
+ * somebody's Home Assistant, and regenerating it must not rename them.
  *
  * The operator's own `says` first, with a trailing "on" taken off: it is there so
  * the cue can be SAID and is not part of the thing's name. "Projectors on" is a

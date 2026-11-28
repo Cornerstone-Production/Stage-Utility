@@ -167,22 +167,22 @@ class TslService extends ConnectionLifecycle {
 
   protected async connect(): Promise<void> {
     if (!this.running || !this.host || !this.port) return;
-    // Every handler below asks whether its socket's run is still current: a
-    // restart destroys this socket, and its `close` lands after start() has set
-    // `running` back to true. A `running` check marked the NEW socket
-    // disconnected and queued a reconnect that opened a second one over it.
+    // `close` asks whether its socket's run is still current: a restart destroys
+    // this socket, and its `close` lands after start() has set `running` back to
+    // true. A `running` check marked the NEW socket disconnected and queued a
+    // reconnect that opened a second one over it. `connect` and `error` need no
+    // check: a destroyed socket emits neither, and a replaced run's socket has
+    // always been destroyed (teardown).
     const run = this.run;
     const sock = net.connect({ host: this.host, port: this.port });
     this.socket = sock;
     sock.on("connect", () => {
-      if (!this.current(run)) return;
       this.connected = true;
       this.resetBackoff();
       this.report("connected", `Sending to ${this.host}:${this.port}`);
       this.sendAll(sensourceService.getLatest());
     });
     sock.on("error", (err) => {
-      if (!this.current(run)) return;
       // Said here as well as reported: the manager stores the state without
       // logging it, so a dark tally output was silent in /log.
       this.noteOutage(`${this.host}:${this.port} unreachable (${err.message})`);

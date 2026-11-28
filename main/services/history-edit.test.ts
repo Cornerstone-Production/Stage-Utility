@@ -33,6 +33,7 @@ const {
   mergeServiceRecords,
   recalcAttendance,
   ServiceIsLiveError,
+  setItemTimes,
   WindowTrimsDataError,
 } = await import("./history-edit.js");
 const { applyItemTimeEdits } = await import("./history-item-times.js");
@@ -729,6 +730,88 @@ describe("a window edit that would delete recorded data", () => {
       (err: Error & { status?: number }) => err instanceof InvalidWindowError && err.status === 400,
     );
     assert.deepEqual(await held(), before);
+  });
+});
+
+describe("a refused window edit leaves the recorders alone", () => {
+  // forgetAll releases every recorder's copy of the service. It ran before the
+  // trim refusal, so a refused (409) edit, or an end before the start (400),
+  // still dropped the recorders' caches. A refusal changes nothing.
+  const KEY = "st1:plan-forget:9am";
+  const START = "2026-11-22T15:00:00.000Z";
+  const END = "2026-11-22T16:30:00.000Z";
+  const at = (min: number) => new Date(Date.parse(START) + min * 60_000).toISOString();
+  let order: string[] = [];
+  const real = {
+    forget: RECORDERS.map(([, r]) => (r as unknown as { forget: (k: string) => void }).forget),
+    upsert: serviceTimelineStore.upsert,
+  };
+
+  beforeEach(async () => {
+    idle();
+    await serviceTimelineStore.upsert({
+      serviceKey: KEY, serviceTypeId: "st1", planId: "plan-forget", planTitle: null, seriesTitle: null,
+      serviceDate: "2026-11-22", serviceTimeId: "9am", serviceTimeStartsAt: START, startedAt: START, endedAt: END,
+      items: [
+        { itemId: "a", title: "a", sequence: 0, plannedLengthSec: null, startedAt: at(0), endedAt: at(40), actualDurationSec: 2400 },
+        { itemId: "b", title: "b", sequence: 1, plannedLengthSec: null, startedAt: at(40), endedAt: at(85), actualDurationSec: 2700 },
+      ],
+    } as never);
+    order = [];
+    for (const [name, r] of RECORDERS) {
+      const rec = r as unknown as { forget: (k: string) => void };
+      const was = rec.forget.bind(rec);
+      rec.forget = (k: string) => {
+        order.push(`forget:${name}`);
+        was(k);
+      };
+    }
+    serviceTimelineStore.upsert = (async (...a: Parameters<typeof serviceTimelineStore.upsert>) => {
+      order.push("upsert");
+      return real.upsert.apply(serviceTimelineStore, a);
+    }) as typeof serviceTimelineStore.upsert;
+  });
+
+  const restore = () => {
+    RECORDERS.forEach(([, r], i) => ((r as unknown as { forget: unknown }).forget = real.forget[i]));
+    serviceTimelineStore.upsert = real.upsert;
+  };
+
+  it("a refused trim (409) forgets nothing", async () => {
+    try {
+      await assert.rejects(() => editServiceWindow(KEY, { endedAt: at(30) }), WindowTrimsDataError);
+      assert.deepEqual(order, [], "a refused edit released the recorders' copies");
+    } finally {
+      restore();
+    }
+  });
+
+  it("an end before the start (400) forgets nothing", async () => {
+    try {
+      await assert.rejects(() => editServiceWindow(KEY, { endedAt: at(-30), trim: true }), InvalidWindowError);
+      assert.deepEqual(order, [], "a refused edit released the recorders' copies");
+    } finally {
+      restore();
+    }
+  });
+
+  it("a refused item time (an end before its start) forgets nothing", async () => {
+    try {
+      await assert.rejects(() => setItemTimes(KEY, "a", 0, { startedAt: at(30), endedAt: at(10) }), /end has to come after the start/);
+      assert.deepEqual(order, [], "a refused item time released the recorders' copies");
+    } finally {
+      restore();
+    }
+  });
+
+  it("an edit that lands forgets every recorder's copy before its first write", async () => {
+    try {
+      await editServiceWindow(KEY, { endedAt: at(95) });
+      assert.equal(order.at(-1), "upsert", order.join(", "));
+      assert.deepEqual(order.slice(0, -1).sort(), ["forget:attendance", "forget:spl", "forget:timeline"], order.join(", "));
+    } finally {
+      restore();
+    }
   });
 });
 
