@@ -49,6 +49,7 @@ import { type TslFeed, tslService } from "./tsl-service.js";
 import { relayConnectionState, relayLifecycle } from "./video/relay-lifecycle.js";
 import { videoService } from "./video/video-service.js";
 import { wirelessManager } from "./wireless-manager.js";
+import { WriteQueue } from "./write-queue.js";
 // One definition of "this is the mask, not a value" and "is there anything in
 // this field", shared with the wireless half and the renderer rather than
 // written again here. A leaf module, so the panels can import it too.
@@ -1290,7 +1291,7 @@ export async function applySecretMigration(plan: SecretMigration): Promise<Secre
 
 class IntegrationManager {
   /** The tail of the Planning Center reconciles, which run one at a time. */
-  private pcoReconcile: Promise<void> = Promise.resolve();
+  private readonly pcoReconcile = new WriteQueue();
   private states = new Map<string, IntegrationState>();
 
   /**
@@ -2620,7 +2621,7 @@ class IntegrationManager {
    * @returns whether it is on, so the caller can decide whether to check it.
    */
   private reconcilePco(): Promise<boolean> {
-    const run = this.pcoReconcile.then(async () => {
+    return this.pcoReconcile.enqueue(async () => {
       const settings = await settingsStore.load();
       const on = enabledFor(PCO_DESCRIPTOR, settings.integrationEnabled);
       if (on) {
@@ -2631,11 +2632,6 @@ class IntegrationManager {
       }
       return on;
     });
-    this.pcoReconcile = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return run;
   }
 
   // Background: the caller has already answered. verifyPcoCredentials() puts its own

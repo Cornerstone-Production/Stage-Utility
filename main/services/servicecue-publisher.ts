@@ -78,6 +78,7 @@ import type {
 } from "../types/stage.js";
 import type { CategoryRole } from "../types/servicecue-roles.js";
 import type { PublishProblem, PublisherStatus, SourceProblem } from "../types/servicecue-publish-status.js";
+import { WriteQueue } from "./write-queue.js";
 import { backoffMs } from "./timers.js";
 import { FIXED_DOC_KEYS, FRAME_DOCS, PUBLISH_UPCOMING_DAYS, assetContentType, isFrameChannel, rundownKey, type FrameChannel, type PublicState } from "../types/servicecue-publish.js";
 
@@ -257,7 +258,7 @@ class Run {
   heldForPco = false;
 
   // Work in flight.
-  tail: Promise<unknown> = Promise.resolve();
+  readonly requests = new WriteQueue();
   trickling: Promise<void> | null = null;
   flushing: Promise<void> = Promise.resolve();
   readonly pending = new Set<FrameChannel>();
@@ -285,7 +286,7 @@ export class ServiceCuePublisher {
   private listening = false;
   /** Has this process ever had a request accepted by a page? If not, there is nothing out there for it to drop. */
   private everSent = false;
-  private applying: Promise<unknown> = Promise.resolve();
+  private readonly applying = new WriteQueue();
 
   /** When this server last deployed the page. */
   private deployedAt = 0;
@@ -339,9 +340,7 @@ export class ServiceCuePublisher {
    * it answered comes back so the card can say so if it could not.
    */
   apply(opts: { dropCopy?: boolean } = {}): Promise<{ dropped?: DropResult }> {
-    const run = this.applying.then(() => this.applyNow(opts));
-    this.applying = run.catch(() => undefined);
-    return run;
+    return this.applying.enqueue(() => this.applyNow(opts));
   }
 
   private async applyNow(opts: { dropCopy?: boolean }): Promise<{ dropped?: DropResult }> {
@@ -504,12 +503,7 @@ export class ServiceCuePublisher {
       if (this.run === run) this.after(run, item, result);
       return result;
     };
-    const next = run.tail.then(go, go);
-    run.tail = next.then(
-      () => undefined,
-      () => undefined,
-    );
-    return next;
+    return run.requests.enqueue(go);
   }
 
   private after(run: Run, item: string, r: PushResult): void {

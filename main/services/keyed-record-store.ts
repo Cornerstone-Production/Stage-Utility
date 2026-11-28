@@ -28,7 +28,7 @@ import { StoreReadError } from "./data-store.js";
 import { errorMessage, isNotFound } from "./errors.js";
 import { scrub } from "./scrub.js";
 import { registerStore, type StoreClass } from "./store-registry.js";
-import { atomicWrite } from "./write-queue.js";
+import { WriteQueue, atomicWrite } from "./write-queue.js";
 
 /** One stamp per server run, so a held save from this run never replaces one
  *  an earlier run held for the same service. */
@@ -51,7 +51,7 @@ function safeName(key: string): string {
 
 export class KeyedRecordStore<T extends Keyed> {
   private cache: Map<string, T> | null = null;
-  private chain: Promise<unknown> = Promise.resolve();
+  private readonly writes = new WriteQueue();
   /** In-flight load, so concurrent callers share one directory scan. */
   private loading: Promise<Map<string, T>> | null = null;
   /** Bumped by invalidate(), so an in-flight load cannot install a stale cache. */
@@ -96,12 +96,7 @@ export class KeyedRecordStore<T extends Keyed> {
 
   /** Serialise writes, so two concurrent upserts cannot interleave. */
   private enqueue<R>(fn: () => Promise<R>): Promise<R> {
-    const result = this.chain.then(fn, fn);
-    this.chain = result.then(
-      () => undefined,
-      () => undefined,
-    );
-    return result;
+    return this.writes.enqueue(fn);
   }
 
   /**
