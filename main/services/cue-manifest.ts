@@ -250,14 +250,18 @@ export async function cueManifest(opts: { includeHidden?: boolean } = {}): Promi
     });
   }
 
-  // Two cues may be called the same (rule names are not unique the way cue names
-  // are): the YAML tells them apart, so the manifest does too, by the same function.
-  const distinct = distinctSpokenNames([
-    ...switches.map((s) => ({ key: `switch:${s.id}`, kind: "switch" as const, id: s.id, friendly: s.name })),
-    ...buttons.map((b) => ({ key: `button:${b.id}`, kind: "button" as const, id: b.id, friendly: b.name })),
-  ]);
-  for (const s of switches) s.name = distinct.get(`switch:${s.id}`) ?? s.name;
-  for (const b of buttons) b.name = distinct.get(`button:${b.id}`) ?? b.name;
+  // Two cues of one kind may say the same words: told apart within the kind, by the
+  // function the YAML uses. Never a switch against a button: the integration has
+  // always shown a switch and a button of one name as they are, and comparing them
+  // would rename both in Home Assistant on upgrade.
+  const switchNames = distinctSpokenNames(
+    switches.map((s) => ({ key: s.id, kind: "switch" as const, id: s.id, friendly: s.name })),
+  );
+  const buttonNames = distinctSpokenNames(
+    buttons.map((b) => ({ key: b.id, kind: "button" as const, id: b.id, friendly: b.name })),
+  );
+  for (const s of switches) s.name = switchNames.get(s.id) ?? s.name;
+  for (const b of buttons) b.name = buttonNames.get(b.id) ?? b.name;
 
   reportHidden(hidden);
   const state = stageController.getState();

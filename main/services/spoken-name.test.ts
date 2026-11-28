@@ -77,3 +77,14 @@ describe("two cues with the same words are told apart the same way in both", () 
     for (const n of names) assert.equal(inYaml(yamlOf(), n), true, n);
   });
 });
+
+describe("a switch and a button of one name", () => {
+  test("keep it in the manifest: the two kinds are not compared", async () => {
+    RULES = [cue("", "projectors_on"), cue("", "projectors_off"), cue("", "projectors")];
+    const m = await cueManifest();
+    assert.deepEqual(
+      [m.switches.map((s) => s.name), m.buttons.map((b) => b.name)],
+      [["Projectors"], ["Projectors"]],
+    );
+  });
+});
