@@ -25,10 +25,13 @@ function answer(status: number, body: string, statusText = "") {
 
 describe("a refused Planning Center answer", () => {
   let warned: string[] = [];
+  let logged: string[] = [];
   beforeEach(() => {
     pcoService.clearCache();
     warned = [];
+    logged = [];
     mock.method(console, "warn", (line: unknown) => warned.push(String(line)));
+    mock.method(console, "log", (line: unknown) => logged.push(String(line)));
   });
   afterEach(() => {
     mock.restoreAll();
@@ -60,5 +63,23 @@ describe("a refused Planning Center answer", () => {
       () => pcoService.getPerson("app", "secret", "100000001"),
       (err: Error) => err.message.length < 160 && err.message.endsWith("…"),
     );
+  });
+
+  it("logs a 404 with its body too, as information: a 404 is often an answer, not a fault", async () => {
+    answer(404, JSON.stringify({ errors: [{ title: "Not Found", meta: { trace: "def456" } }] }));
+    await assert.rejects(
+      () => pcoService.listPlanTimes("app", "secret", "1", "2"),
+      (err: Error) => err.name === "PcoNotFoundError" && err.message === "PCO API error 404: Not Found",
+    );
+    assert.equal(logged.filter((l) => l.startsWith("[pco] 404 from ") && l.includes("def456")).length, 1, JSON.stringify(logged));
+    assert.equal(warned.length, 0, JSON.stringify(warned));
+  });
+
+  it("keeps a title with a line break in it on one line", async () => {
+    answer(403, JSON.stringify({ errors: [{ title: "Forbidden\r\nfor this app\n" }] }));
+    await assert.rejects(() => pcoService.getPerson("app", "secret", "100000001"), (err: Error) => {
+      assert.equal(err.message, "PCO API error 403: Forbidden for this app");
+      return true;
+    });
   });
 });
