@@ -188,6 +188,7 @@ level, mute, meter and second meter fill from the controls named for that channe
 
 A **Gain block** (a component of type `gain`) is offered as one channel with no
 number: its level fills from `gain` and its mute from `mute`; it has no meter or name.
+If it also has numbered controls (`input.1.gain`), those channels are offered beside it.
 
 These are the names a Core gives a mixer's controls. A crosspoint
 (`input.1.output.2.gain`) is no channel's. A Core's meters are usually on a meter
@@ -460,13 +461,16 @@ A panel's settings travel in its view bundle (see
   or **Discard my edits**.
   **Add a control** opens the Core's controls, every one it does not report
   read-only and that is not already listed, and adds the one you pick as an unsaved
-  row: its label is the control's name and its limits start at the Core's own range
-  (none when the Core reports none, which a number needs before it can be written).
+  row: its label is the component and control (`Lobby_Mixer gain`) and its limits start at the
+  Core's own range (none when the Core reports none, which a number needs before it can
+  be written). A text, on-off or trigger control shows its kind in place of limit boxes.
   Tighten the limits, then **Save the allowlist**. It needs the Core connected.
   **Export** downloads the saved list as the allowlist file; **Import** reads one,
   asks, and replaces the list with it (over the revision the page last read). A file the
   server refuses is shown as the server said it and the list stays; a refusal is also
-  logged as `[qsys]`. Import is off while there are unsaved edits.
+  logged as `[qsys]`. If the list changed elsewhere since the page read it, the page
+  reads it again and the next import goes through. Export and Import are off while there
+  are unsaved edits.
   **Add all controls <panel> uses** adds every control that panel's objects change
   (a fader's level, a mute, a button, a switch, presets, a selector, a strip's gain
   and mute; never a meter, a label or an indicator) that the list lacks, at the
