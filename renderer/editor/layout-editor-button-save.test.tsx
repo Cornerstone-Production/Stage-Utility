@@ -14,7 +14,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, test } from "node:test";
 
 import type { LayoutObject, View } from "@main/types/views.js";
-import { eventually, installRenderDom, unmountAndTeardown, mountInAct } from "../test-dom.js";
+import { eventually, installRenderDom, mountInAct, resetClientCaches, unmountAndTeardown } from "../test-dom.js";
 import { serve } from "../test-fixtures/button-server.js";
 import { reply } from "../test-fixtures/fetch-log.js";
 import { NoStream } from "../test-fixtures/no-stream.js";
@@ -28,8 +28,6 @@ const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query
 const { TooltipProvider } = await import("../components/ui/index.js");
 const { LayoutEditor } = await import("./layout-editor.js");
 const { timing } = await import("./action-pane.js");
-const { __resetForTests: resetStageState } = await import("../main/use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 const { RouterContextProvider, createRouter, createRootRoute, createMemoryHistory } = await import("@tanstack/react-router");
 const testRouter = createRouter({
   routeTree: createRootRoute({}),
@@ -40,11 +38,10 @@ after(() => unmountAndTeardown(cleanup, teardown));
 beforeEach(() => {
   timing.fieldWriteMs = 500;
 });
-afterEach(() => {
+afterEach(async () => {
   cleanup();
   localStorage.clear();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
   timing.fieldWriteMs = 0;
 });
 

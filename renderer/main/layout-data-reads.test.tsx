@@ -24,7 +24,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { installRenderDom, resetClientCaches, settle, unmountAndTeardown } from "../test-dom.js";
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 
 const teardown = installRenderDom();
@@ -68,8 +68,6 @@ const { useLayoutData } = await import("./layout-renderer.js");
 const { useDashboardState, useProPresenterStatus } = await import("./use-dashboard-state.js");
 const { LAYOUT_OBJECTS, usesPropInstance } = await import("./layout-objects.js");
 const { DEFAULT_STAGE_STATE } = await import("./test-render-ctx.js");
-const { __resetForTests: resetStageState } = await import("./use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 const { HOME_VIEW_ID, defaultHomeLayout } = await import("@main/services/home-view");
 
 STATE = DEFAULT_STAGE_STATE;
@@ -119,8 +117,7 @@ beforeEach(() => {
 afterEach(async () => {
   cleanup();
   await settle();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 after(() => unmountAndTeardown(cleanup, teardown));
 

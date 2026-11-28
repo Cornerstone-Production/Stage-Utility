@@ -10,7 +10,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installDom, mountInAct, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installDom, mountInAct, resetClientCaches, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom(undefined, { intersectionObserver: true, matchMedia: true });
 
@@ -112,8 +112,6 @@ const { CustomizeProvider, useCustomize } = await import("./customize-mode.js");
 const { CustomizeTray } = await import("./sidebar-tray.js");
 const { PageActionsProvider } = await import("./page-actions.js");
 const { Toaster, TooltipProvider } = await import("../components/ui/index.js");
-const { __resetForTests: resetStageState } = await import("../main/use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 const { DEFAULT_BAR_ORDER, normalizeBarRows } = await import("./bar-items.js");
 const { narrowWarning } = await import("./bar-editor.js");
 
@@ -137,12 +135,11 @@ beforeEach(() => {
   releaseHold = null;
   saves.length = 0;
 });
-afterEach(() => {
+afterEach(async () => {
   // A save a failed test left waiting must not keep the run open.
   releaseHold?.();
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
   listeners.clear();
 });
 

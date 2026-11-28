@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, test } from "node:test";
 
-import { installRenderDom, isPlumbing, settle, unmountAndTeardown } from "../../test-dom.js";
+import { installRenderDom, isPlumbing, resetClientCaches, settle, unmountAndTeardown } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -33,8 +33,6 @@ const React = (await import("react")).default;
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { CopyFromDialog } = await import("./board-dialogs.js");
 const { planLabel } = await import("../../settings/sections/plan-date-label.js");
-const { __resetForTests } = await import("../../main/use-stage-state.js");
-const { __resetReplayCacheForTests } = await import("../../lib/api.js");
 const { serverZoneApartFromBrowser } = await import("../../test-fixtures/zones.js");
 
 let client: InstanceType<typeof QueryClient> | null = null;
@@ -62,10 +60,9 @@ function offered(): string[] {
   return select ? [...select.options].map((o) => o.textContent ?? "") : [];
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   cleanup();
-  __resetForTests();
-  __resetReplayCacheForTests();
+  await resetClientCaches();
 });
 afterEach(async () => {
   cleanup();

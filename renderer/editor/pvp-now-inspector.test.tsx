@@ -8,7 +8,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { installRenderDom, resetClientCaches, settle, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -17,16 +17,13 @@ const React = await import("react");
 const { PvpNowInspector } = await import("./inspector.js");
 const { TooltipProvider } = await import("../components/ui/index.js");
 const { LAYOUT_OBJECTS } = await import("../main/layout-objects.js");
-const { __resetForTests: resetStageState } = await import("../main/use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
 import type { LayoutObjectConfig } from "@main/types/views";
 
 after(() => unmountAndTeardown(cleanup, teardown));
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 
 type Cfg = Extract<LayoutObjectConfig, { type: "pvp-now" }>;

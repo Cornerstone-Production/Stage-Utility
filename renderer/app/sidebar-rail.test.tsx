@@ -10,7 +10,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installDom, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installDom, resetClientCaches, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom(undefined, { intersectionObserver: true, matchMedia: true });
 
@@ -124,8 +124,6 @@ const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query
 const { Rail } = await import("./rail.js");
 const { CustomizeProvider, useCustomize } = await import("./customize-mode.js");
 const { Toaster, TooltipProvider } = await import("../components/ui/index.js");
-const { __resetForTests: resetStageState } = await import("../main/use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 const { DEFAULT_SIDEBAR } = await import("@main/services/sidebar-arrangement");
 
 after(() => unmountAndTeardown(cleanup, teardown));
@@ -145,12 +143,11 @@ beforeEach(() => {
   saves.length = 0;
   consoleHides = 0;
 });
-afterEach(() => {
+afterEach(async () => {
   // A save a failed test left waiting must not keep the run open.
   releaseHold?.();
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
   listeners.clear();
 });
 

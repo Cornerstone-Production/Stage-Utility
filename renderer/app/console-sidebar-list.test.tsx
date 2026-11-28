@@ -18,7 +18,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
-import { eventually, installDom, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installDom, resetClientCaches, unmountAndTeardown } from "../test-dom.js";
 import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 import type { View } from "../../main/types/views.js";
 
@@ -41,13 +41,10 @@ const React = (await import("react")).default;
 const { createRootRoute, createRouter, createMemoryHistory, RouterProvider } = await import("@tanstack/react-router");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { Rail } = await import("./rail.js");
-const { __resetForTests: resetStageState } = await import("../main/use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 after(() => unmountAndTeardown(cleanup, teardown));
 

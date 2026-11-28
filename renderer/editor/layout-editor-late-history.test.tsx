@@ -14,7 +14,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
-import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, resetClientCaches, settle, unmountAndTeardown } from "../test-dom.js";
 import { ok, reply, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 import { NoStream } from "../test-fixtures/no-stream.js";
 
@@ -31,8 +31,6 @@ const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query
 const { TooltipProvider } = await import("../components/ui/index.js");
 const { LayoutEditor } = await import("./layout-editor.js");
 const { DEFAULT_STAGE_STATE } = await import("../main/test-render-ctx.js");
-const { __resetForTests: resetStageState } = await import("../main/use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 const { RouterContextProvider, createRouter, createRootRoute, createMemoryHistory } = await import("@tanstack/react-router");
 const router = createRouter({ routeTree: createRootRoute({}), history: createMemoryHistory({ initialEntries: ["/"] }) });
 
@@ -40,10 +38,9 @@ after(() => {
   Element.prototype.getBoundingClientRect = realRect;
   unmountAndTeardown(cleanup, teardown);
 });
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 
 const settleAct = async () => act(async () => settle());

@@ -9,7 +9,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installDom } from "../test-dom.js";
+import { eventually, installDom, resetClientCaches } from "../test-dom.js";
 
 const teardown = installDom();
 
@@ -99,8 +99,6 @@ const { render, screen, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { CaptionColorsPanel } = await import("./caption-colors-panel.js");
 const { TooltipProvider } = await import("./ui/tooltip-provider.js");
-const { __resetForTests } = await import("../main/use-stage-state.js");
-const { __resetReplayCacheForTests } = await import("../lib/api.js");
 
 const settle = () => act(async () => new Promise((r) => setTimeout(r, 0)));
 
@@ -112,10 +110,9 @@ function toRgb(hex: string): string {
   return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   cleanup();
-  __resetForTests();
-  __resetReplayCacheForTests();
+  await resetClientCaches();
   listeners.clear();
   posts.length = 0;
   resetState();

@@ -25,27 +25,23 @@ const { useStageState } = await import("./main/use-stage-state.js");
 after(() => unmountAndTeardown(cleanup, teardown));
 afterEach(() => cleanup());
 
-/** What a consumer mounting RIGHT NOW is handed on its first render. */
-function Probe({ onFirst, onRender }: { onFirst: (loading: boolean, appName: string | null) => void; onRender?: (appName: string | null) => void }) {
+type Seen = { loading: boolean; appName: string | null };
+
+/** Reports what it was handed on every committed render, the first one included. */
+function Probe({ onRender }: { onRender: (seen: Seen) => void }) {
   const { state, isLoading } = useStageState();
   const appName = (state as { appName?: string } | null)?.appName ?? null;
-  const reported = React.useRef(false);
-  if (!reported.current) {
-    reported.current = true;
-    onFirst(isLoading, appName);
-  }
   React.useEffect(() => {
-    onRender?.(appName);
+    onRender({ loading: isLoading, appName });
   });
   return null;
 }
 
-/** Mount a consumer and report its first render. */
-function mountFirstRender(): { loading: boolean; appName: string | null } {
-  let first!: { loading: boolean; appName: string | null };
-  const view = render(React.createElement(Probe, { onFirst: (loading, appName) => (first = { loading, appName }) }));
-  view.unmount();
-  return first;
+/** Mount a consumer and report what its first render was handed: what a consumer mounting RIGHT NOW reads. */
+function mountFirstRender(): Seen {
+  const seen: Seen[] = [];
+  render(React.createElement(Probe, { onRender: (s) => seen.push(s) })).unmount();
+  return seen[0];
 }
 
 /** Subscribe to a hydrated channel and report whether the first delivery was a replay. */
@@ -63,7 +59,7 @@ describe("resetClientCaches", () => {
   test("clears the stage state", async () => {
     // One consumer stays mounted to receive the broadcast.
     let latest: string | null = null;
-    const first = render(React.createElement(Probe, { onFirst: () => {}, onRender: (appName) => (latest = appName) }));
+    const first = render(React.createElement(Probe, { onRender: (seen) => (latest = seen.appName) }));
     await settle();
     await act(async () => FakeEventSource.last!.push("stage:state-changed", { appName: "Chapel" }));
     await eventually(() => assert.equal(latest, "Chapel"));

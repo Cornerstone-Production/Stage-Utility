@@ -31,7 +31,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown, mountInAct } from "../test-dom.js";
+import { installRenderDom, mountInAct, resetClientCaches, settle, unmountAndTeardown } from "../test-dom.js";
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 
 const teardown = installRenderDom();
@@ -55,8 +55,6 @@ const React = (await import("react")).default;
 const { act } = await import("react");
 const { PatchView } = await import("./patch-view.js");
 const { DEFAULT_STAGE_STATE } = await import("./test-render-ctx.js");
-const { __resetForTests: resetStageState } = await import("./use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
 // jsdom has no matchMedia and no scrollIntoView. The first decides the layout,
 // the second is what Jump to exists to call.
@@ -199,8 +197,7 @@ beforeEach(() => {
 afterEach(async () => {
   cleanup();
   await settle();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 after(() => unmountAndTeardown(cleanup, teardown));
 
