@@ -18,6 +18,7 @@ import type { OscArg, OscFeedbackDTO, OscTarget, OscTargetConfig } from "../type
 import { broadcast } from "./broadcaster.js";
 import { decodePacket, encodeMessage } from "./osc-codec.js";
 import { oscStore } from "./osc-store.js";
+import { trailing } from "./timers.js";
 import { settingsStore } from "./settings-store.js";
 
 const FEEDBACK_THROTTLE_MS = 200;
@@ -49,8 +50,11 @@ class OscManager {
   private feedbackPort = 9000;
   private feedback: Record<string, number | string | boolean> = {};
   private subTimers = new Map<string, ReturnType<typeof setInterval>>();
-  private dirty = false;
-  private throttleTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly feedbackThrottle = trailing(FEEDBACK_THROTTLE_MS, () => {
+    broadcast("osc:feedback", this.getFeedback());
+    this.settleBroadcast();
+  });
+  private settleBroadcast: () => void = () => {};
   /** The throttled `osc:feedback` broadcast in flight, if any. See
    *  whenBroadcastSettled(). Never rejects, same reasoning as `resolving` and
    *  `listening` below. */
@@ -193,10 +197,8 @@ class OscManager {
       clearInterval(this.resolveTimer);
       this.resolveTimer = null;
     }
-    if (this.throttleTimer) {
-      clearTimeout(this.throttleTimer);
-      this.throttleTimer = null;
-    }
+    this.feedbackThrottle.cancel();
+    this.settleBroadcast();
     this.closeRecv();
     if (this.sendSocket) {
       try {
@@ -643,20 +645,10 @@ class OscManager {
   }
 
   private scheduleBroadcast(): void {
-    this.dirty = true;
-    if (this.throttleTimer) return;
-    let settle = (): void => {};
+    if (!this.feedbackThrottle.schedule()) return;
     this.broadcastSettled = new Promise((resolve) => {
-      settle = resolve;
+      this.settleBroadcast = resolve;
     });
-    this.throttleTimer = setTimeout(() => {
-      this.throttleTimer = null;
-      if (this.dirty) {
-        this.dirty = false;
-        broadcast("osc:feedback", this.getFeedback());
-      }
-      settle();
-    }, FEEDBACK_THROTTLE_MS);
   }
 
   /**
