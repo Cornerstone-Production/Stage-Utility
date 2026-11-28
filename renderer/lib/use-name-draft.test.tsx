@@ -124,4 +124,22 @@ describe("useNameDraft", () => {
     assert.match(String(thrown), /boom/, "the throw was swallowed");
     assert.equal(hook.result.current.draft, "Lobby");
   });
+
+  test("a refusal that lands after the stored name became the sent one keeps the new stored name", async (t) => {
+    let answer!: (ok: boolean) => void;
+    const rename = () => new Promise<boolean>((r) => { answer = r; });
+    const view = render(<Field stored="Lobby" onRename={rename} />);
+    t.after(() => cleanup());
+    const input = view.getByLabelText("name") as HTMLInputElement;
+    typeAndLeave(input, "Foyer");
+    act(() => {
+      view.rerender(<Field stored="Foyer" onRename={rename} />);
+    });
+    await act(async () => {
+      answer(false);
+      await Promise.resolve();
+    });
+    await settle();
+    assert.equal(input.value, "Foyer", "the refusal put back the name from before the save");
+  });
 });

@@ -552,6 +552,28 @@ describe("the app name field", () => {
       brandingAnswer = null;
     }
   });
+
+  // Another browser saves the very name that was sent, and then this save's refusal
+  // lands: the field shows the name the app now has, not the one from before.
+  test("a refusal that lands after the saved name changed restores the new saved name", async () => {
+    let answer!: (status: number) => void;
+    brandingAnswer = new Promise<number>((r) => (answer = r));
+    try {
+      await mount();
+      await act(async () => api!.open("sidebar"));
+      const name = (await eventually(() => screen.getByLabelText("App name"))) as HTMLInputElement;
+      await act(async () => fireEvent.change(name, { target: { value: "Same name" } }));
+      await act(async () => fireEvent.blur(name));
+      state = { ...state, appName: "Same name" };
+      await act(async () => emitState());
+      await eventually(() => assert.equal(name.value, "Same name"));
+      await act(async () => answer(400));
+      await act(async () => new Promise((r) => setTimeout(r, 50)));
+      assert.equal(name.value, "Same name", "the refusal put back the name from before the save");
+    } finally {
+      brandingAnswer = null;
+    }
+  });
 });
 
 describe("which menu opens", () => {

@@ -9,8 +9,8 @@
 //
 // NOT covered here: closing or reloading the tab. React runs no cleanup then, so
 // no unmount flush can catch it, and in Chrome a reload inside the pause does lose
-// the text. Sending it on pagehide needs a keepalive request, which api.ts does
-// not offer.
+// the text. The fix is a keepalive send on pagehide, as client-log.ts does, through
+// api.ts, which this change leaves alone; it is a known gap, not a limit.
 
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
