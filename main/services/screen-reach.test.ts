@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { MAX_VIEWS_VISITED, viewsDrawnBy } from "./screen-reach.js";
+import { captureConsoleDuring } from "./fixtures/capture-console.js";
 
 const view = (id: string, ...configs: unknown[]): View =>
   ({
@@ -39,15 +40,10 @@ describe("viewsDrawnBy", () => {
   it("ends on a loop, and on a screen routed to nothing or embedding one that is", () => {
     const views = [view("a", { type: "view-embed", viewId: "b" }), view("b", { type: "view-embed", viewId: "a" }, { type: "screen-embed", outputId: "none" }, { type: "screen-embed", outputId: "gone" })];
     const outputs = [out("main", "a"), out("none", null)];
-    const lines: string[] = [];
-    const warn = console.warn;
-    console.warn = (...a: unknown[]) => void lines.push(a.map(String).join(" "));
-    try {
+    const lines = captureConsoleDuring(["warn"], () => {
       assert.deepEqual([...viewsDrawnBy(outputs[0], views, outputs)].sort(), ["a", "b"]);
       assert.deepEqual([...viewsDrawnBy(out("empty", null), views, outputs)], []);
-    } finally {
-      console.warn = warn;
-    }
+    });
     // A loop is cut by the seen set, not by running into the cap.
     assert.deepEqual(lines, [], "the loop ran until the hard cap");
   });
@@ -55,15 +51,10 @@ describe("viewsDrawnBy", () => {
   it("stops at a hard cap and says so, so a runaway fails with a message rather than at the job timeout", () => {
     // 300 distinct views, each embedding the next: no loop for the seen set to cut.
     const views = Array.from({ length: 300 }, (_, i) => view(`v${i}`, { type: "view-embed", viewId: `v${i + 1}` }));
-    const lines: string[] = [];
-    const warn = console.warn;
-    console.warn = (...a: unknown[]) => void lines.push(a.map(String).join(" "));
-    try {
+    const lines = captureConsoleDuring(["warn"], () => {
       const reached = viewsDrawnBy(out("main", "v0"), views, []);
       assert.equal(reached.size, MAX_VIEWS_VISITED, "the walk did not stop at the cap");
-    } finally {
-      console.warn = warn;
-    }
+    });
     assert.deepEqual(lines, [`[messages] the views screen main draws run past ${MAX_VIEWS_VISITED}; stopped looking for the widget there`]);
   });
 });

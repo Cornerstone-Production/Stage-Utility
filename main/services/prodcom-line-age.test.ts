@@ -25,6 +25,7 @@ import { describe, it } from "node:test";
 
 import { addBroadcastListener } from "./broadcaster.js";
 import { ProdComService } from "./prodcom-service.js";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 /** The service with a clock we control and its event entry points exposed. */
 class TestProdCom extends ProdComService {
@@ -71,28 +72,20 @@ const backfillRow = (id: string, text: string, at: number) => ({
 });
 
 describe("backfill skips ProdCom history older than the horizon", () => {
-  it("keeps a 2-minute-old row and skips a 64-hour-old row, logging once", () => {
+  it("keeps a 2-minute-old row and skips a 64-hour-old row, logging once", (t) => {
     const svc = new TestProdCom();
-    const logs = { calls: [] as unknown[][] };
-    const original = console.log;
-    console.log = (...args: unknown[]) => logs.calls.push(args);
+    const logged = captureConsole(t, "log");
 
-    try {
-      svc.backfillRows([
-        backfillRow("old", "Thursday's sermon", svc.clock - 64 * 60 * 60_000),
-        backfillRow("recent", "this morning's welcome", svc.clock - 2 * 60_000),
-      ]);
-    } finally {
-      console.log = original;
-    }
+    svc.backfillRows([
+      backfillRow("old", "Thursday's sermon", svc.clock - 64 * 60 * 60_000),
+      backfillRow("recent", "this morning's welcome", svc.clock - 2 * 60_000),
+    ]);
 
     const lines = svc.lines();
     assert.equal(lines.length, 1, `expected only the recent row, got: ${JSON.stringify(lines)}`);
     assert.equal(lines[0].text, "this morning's welcome");
 
-    const skipLogs = logs.calls
-      .map((args) => args[0])
-      .filter((a): a is string => typeof a === "string" && a.startsWith("[prodcom] backfill skipped"));
+    const skipLogs = logged.filter((l) => l.startsWith("[prodcom] backfill skipped"));
     assert.equal(skipLogs.length, 1, `expected exactly one skip log, got: ${JSON.stringify(skipLogs)}`);
     assert.equal(skipLogs[0], "[prodcom] backfill skipped 1 line(s) older than 4h");
   });
@@ -107,9 +100,7 @@ describe("a final ages out of the live buffer on its own", () => {
     t.mock.timers.enable({ apis: ["setInterval", "setTimeout"] });
     const svc = new TestProdCom();
     const broadcasts = spyOnTranscriptBroadcasts();
-    const logs = { calls: [] as unknown[][] };
-    const original = console.log;
-    console.log = (...args: unknown[]) => logs.calls.push(args);
+    const logged = captureConsole(t, "log");
 
     svc.feed(final("EM", "good morning church", svc.clock));
     assert.equal(svc.lines().length, 1);
@@ -119,17 +110,11 @@ describe("a final ages out of the live buffer on its own", () => {
     svc.clock += 4 * 60 * 60_000 + 1_000; // just past the horizon
     t.mock.timers.tick(5_000); // one sweep tick is enough — the clock jump did the aging
 
-    try {
-      assert.equal(svc.lines().length, 0, "the aged-out final is gone");
-      assert.ok(broadcasts.length > broadcastsBefore, "the sweep broadcast once the final went stale");
-      const dropLogs = logs.calls
-        .map((args) => args[0])
-        .filter((a): a is string => typeof a === "string" && a.startsWith("[prodcom] dropped"));
-      assert.equal(dropLogs.length, 1, `expected exactly one drop log, got: ${JSON.stringify(dropLogs)}`);
-      assert.equal(dropLogs[0], "[prodcom] dropped 1 line(s) older than 4h");
-    } finally {
-      console.log = original;
-    }
+    assert.equal(svc.lines().length, 0, "the aged-out final is gone");
+    assert.ok(broadcasts.length > broadcastsBefore, "the sweep broadcast once the final went stale");
+    const dropLogs = logged.filter((l) => l.startsWith("[prodcom] dropped"));
+    assert.equal(dropLogs.length, 1, `expected exactly one drop log, got: ${JSON.stringify(dropLogs)}`);
+    assert.equal(dropLogs[0], "[prodcom] dropped 1 line(s) older than 4h");
 
     // Guard proof: with pruneStaleFinals()'s filter removed (finals never pruned
     // by age), lines().length stays 1 here instead of 0, and this goes red.
