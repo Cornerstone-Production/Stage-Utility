@@ -18,7 +18,6 @@
 
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, test } from "node:test";
-import { captureConsole } from "../fixtures/capture-console.js";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fsp from "node:fs/promises";
@@ -254,14 +253,20 @@ describe("the token gate on a call", () => {
     assert.equal(r.status, 401);
   });
 
-  test("the refusal line says WHICH header problem it was", async (t) => {
+  test("the refusal line says WHICH header problem it was", async () => {
     // Three refusals that read identically as a 401 and are fixed in three
     // different places. The log used to say "no valid token" for all of them.
     await withCue();
-    const warns = captureConsole(t, "warn");
-    await callRoute(cueRoutes, "/api/cues/projectors_on", { method: "POST" });
-    await call("projectors_on", { headers: { authorization: "su_bare_no_scheme" } });
-    await call("projectors_on", { headers: { authorization: "Bearer su_wrong" } });
+    const warns: string[] = [];
+    const real = console.warn;
+    console.warn = (...a: unknown[]) => { warns.push(a.map(String).join(" ")); };
+    try {
+      await callRoute(cueRoutes, "/api/cues/projectors_on", { method: "POST" });
+      await call("projectors_on", { headers: { authorization: "su_bare_no_scheme" } });
+      await call("projectors_on", { headers: { authorization: "Bearer su_wrong" } });
+    } finally {
+      console.warn = real;
+    }
     const refusals = warns.filter((w) => w.includes("[cues] refused"));
     assert.equal(refusals.length, 3, `expected three refusal lines, got ${JSON.stringify(warns)}`);
     assert.match(refusals[0]!, /no Authorization header/);
@@ -376,17 +381,20 @@ describe("the secrets file will not take the write", () => {
     }
   });
 
-  test("the route answers 200 with the failure in `detail`, and says so on the log", async (t) => {
+  test("the route answers 200 with the failure in `detail`, and says so on the log", async () => {
     await withCue();
     const minted = await cueTokens.mint("Read-only disk 2");
-    const warns = captureConsole(t, "warn");
+    const warns: string[] = [];
+    const realWarn = console.warn;
     let r;
     try {
       secretsStore.setSecret = async () => {
         throw new Error("ENOSPC: no space left on device");
       };
+      console.warn = (...a: unknown[]) => void warns.push(a.map(String).join(" "));
       r = await call("projectors_on", { headers: { authorization: `Bearer ${minted.secret}` } });
     } finally {
+      console.warn = realWarn;
       secretsStore.setSecret = realSetSecret;
     }
 
