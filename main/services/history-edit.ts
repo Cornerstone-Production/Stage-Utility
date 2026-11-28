@@ -34,6 +34,7 @@ import {
 import { clockOf } from "./app-timezone.js";
 import { plural } from "./plural.js";
 import { attendanceRecorder } from "./attendance-recorder.js";
+import { clampItemsToWindow, closeTimelineItem, laterEnd } from "./service-recorder.js";
 import { splRecorder } from "./spl-recorder.js";
 import { serviceTimelineRecorder } from "./service-timeline-recorder.js";
 
@@ -273,9 +274,10 @@ export class InvalidWindowError extends Error {
 }
 
 /**
- * Adjust a service's start/end window across all three records: trim the
- * timeline's trailing items, drop attendance samples / SPL items outside the
- * window, and recompute derived values. Either stamp may be omitted to leave it
+ * Adjust a service's start/end window across all three records: drop timeline
+ * and SPL items that start after the new end and close those still running at
+ * it (clampItemsToWindow, one rule for both), re-window the attendance samples,
+ * and recompute derived values. Either stamp may be omitted to leave it
  * unchanged.
  *
  * Trimming is what this is for — a capture that kept recording through a parked
@@ -327,16 +329,9 @@ export async function editServiceWindow(
   let orphaned: ServiceItemTimeEdit[] = [];
   if (tl) {
     if (endMs != null) {
-      const before = tl.items.length;
-      tl.items = tl.items.filter((it) => Date.parse(it.startedAt) <= endMs); // drop items starting after the end
-      trim.items = before - tl.items.length;
-      for (const it of tl.items) {
-        if (it.endedAt == null || Date.parse(it.endedAt) > endMs) {
-          it.endedAt = new Date(endMs).toISOString();
-          const s = Date.parse(it.startedAt);
-          if (Number.isFinite(s)) it.actualDurationSec = Math.max(0, Math.round((endMs - s) / 1000));
-        }
-      }
+      const fit = clampItemsToWindow(tl.items, endMs, closeTimelineItem);
+      tl.items = fit.kept;
+      trim.items = fit.dropped;
     }
     // The items have been trimmed to the new window; the corrections OVER them
     // had not been, so a recording trimmed to fifteen minutes could still show
@@ -358,9 +353,12 @@ export async function editServiceWindow(
 
   const spl = rewindow(await splHistoryStore.get(serviceKey));
   if (spl && endMs != null) {
-    const before = spl.items.length;
-    spl.items = spl.items.filter((it) => Date.parse(it.startedAt) <= endMs);
-    trim.splItems = before - spl.items.length;
+    // Closed the way the timeline's items just were: an SPL item still running
+    // at the new end ends there too, rather than past the service its timeline
+    // twin was cut back to. Its levels are not re-derived (see clampItemsToWindow).
+    const fit = clampItemsToWindow(spl.items, endMs, (it, endIso) => { it.endedAt = endIso; });
+    spl.items = fit.kept;
+    trim.splItems = fit.dropped;
   }
 
   if (trimTotal(trim) > 0) {
@@ -1535,6 +1533,23 @@ function adoptIdentity<T extends OccurrenceIdentity>(record: T, identity: Occurr
   return { ...record, ...identity };
 }
 
+/**
+ * Union two records' item runs and number them in the order they ran.
+ *
+ * By RUN, not by item id — see mergeItemRuns. Keyed on the id alone, a source
+ * that ran an item twice contributed at most one of them. Re-ordered by when
+ * each run actually started, so a run taken from the source lands where it
+ * happened rather than after everything the target recorded. The timeline and
+ * the SPL record both merge this way; mergeItemRuns returns the objects it was
+ * given, which is what lets the timeline re-key its corrections afterwards.
+ */
+function mergeRunsInTimeOrder<T extends { itemId: string; startedAt: string; sequence: number }>(target: T[], source: T[]): T[] {
+  const runs = mergeItemRuns(target, source);
+  runs.sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
+  runs.forEach((it, i) => { it.sequence = i; });
+  return runs;
+}
+
 /** What a merge actually did, per store. Reported rather than assumed: this
  *  rewrites the source of truth, and "it worked" is not evidence. */
 export interface MergeOutcome {
@@ -1580,8 +1595,9 @@ async function mergeArchives(sourceKey: string, targetKey: string): Promise<bool
  * stores, then delete the source. Fixes a mis-split service (e.g. a run that
  * overran its planned end and rolled the tail into the next occurrence's record):
  * merge the wrong record back into the right one. Items are matched by itemId so a
- * duplicated boundary item isn't doubled; attendance samples are concatenated and
- * aggregates re-derived; the target window extends to cover both.
+ * duplicated boundary item isn't doubled; attendance samples are put in one frame
+ * and aggregates re-derived; each record's end becomes the later of the two
+ * (laterEnd). Its start stays the target's, even when the source began earlier.
  */
 export async function mergeServiceRecords(sourceKey: string, targetKey: string): Promise<MergeOutcome> {
   const outcome: MergeOutcome = { merged: [], moved: [], archivesMoved: false };
@@ -1623,16 +1639,11 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     // Without this the operator's corrections would still be in the merged
     // record and would land, silently, on whichever rows took those numbers.
     const boundEdits = bindItemTimeEdits(tgtTl, srcTl);
-    // By RUN, not by item id — see mergeItemRuns. Keyed on the id alone, a
-    // source that ran an item twice contributed at most one of them.
-    tgtTl.items = mergeItemRuns(tgtTl.items, srcTl.items);
-    tgtTl.items.sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
-    tgtTl.items.forEach((it, i) => { it.sequence = i; });
+    tgtTl.items = mergeRunsInTimeOrder(tgtTl.items, srcTl.items);
     const rekeyed = rekeyItemTimeEdits(boundEdits, tgtTl.items);
     if (rekeyed.length) tgtTl.itemTimeEdits = rekeyed;
     else delete tgtTl.itemTimeEdits;
-    const ends = tgtTl.items.map((i) => (i.endedAt ? Date.parse(i.endedAt) : NaN)).filter(Number.isFinite);
-    if (ends.length) tgtTl.endedAt = new Date(Math.max(...ends)).toISOString();
+    tgtTl.endedAt = laterEnd(tgtTl.endedAt, srcTl.endedAt);
     await serviceTimelineStore.upsert(tgtTl);
     await serviceTimelineStore.delete(sourceKey);
     broadcastTimeline(tgtTl);
@@ -1669,9 +1680,7 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     }
     tgtAt.attendanceBaseline = aligned.attendanceBaseline;
     tgtAt.samples = aligned.samples;
-    if (srcAt.endedAt && (!tgtAt.endedAt || Date.parse(srcAt.endedAt) > Date.parse(tgtAt.endedAt))) {
-      tgtAt.endedAt = srcAt.endedAt;
-    }
+    tgtAt.endedAt = laterEnd(tgtAt.endedAt, srcAt.endedAt);
     tgtAt.totalAttendance = Math.max(tgtAt.totalAttendance, srcAt.totalAttendance);
     recomputeAttendance(tgtAt);
     await attendanceStore.upsert(tgtAt);
@@ -1692,15 +1701,8 @@ export async function mergeServiceRecords(sourceKey: string, targetKey: string):
     splHistoryStore.get(targetKey),
   ]);
   if (srcSpl && tgtSpl) {
-    // By RUN, as the timeline above, and re-ordered by when each run actually
-    // started so a run taken from the source lands where it happened rather than
-    // after everything this box recorded.
-    tgtSpl.items = mergeItemRuns(tgtSpl.items, srcSpl.items);
-    tgtSpl.items.sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
-    tgtSpl.items.forEach((it, i) => { it.sequence = i; });
-    if (srcSpl.endedAt && (!tgtSpl.endedAt || Date.parse(srcSpl.endedAt) > Date.parse(tgtSpl.endedAt))) {
-      tgtSpl.endedAt = srcSpl.endedAt;
-    }
+    tgtSpl.items = mergeRunsInTimeOrder(tgtSpl.items, srcSpl.items);
+    tgtSpl.endedAt = laterEnd(tgtSpl.endedAt, srcSpl.endedAt);
     await splHistoryStore.upsert(tgtSpl);
     await splHistoryStore.delete(sourceKey);
     broadcast("spl:history", tgtSpl);
