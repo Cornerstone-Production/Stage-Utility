@@ -18,6 +18,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it, before, beforeEach, after } from "node:test";
+import { captureConsole } from "./fixtures/capture-console.js";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -550,19 +551,13 @@ describe("a plan target naming the wrong service type", () => {
   // and there are no credentials here. listPlans throws, the controller logs the
   // reason and ACCEPTS — an unreachable integration is not evidence that a plan
   // belongs to another service type. That branch is what runs below.
-  it("is allowed when Planning Center cannot say, and says so on a tagged line", async () => {
-    const warns: string[] = [];
-    const realWarn = console.warn;
-    console.warn = (...args: unknown[]) => warns.push(args.map((a) => String(a)).join(" "));
-    try {
-      await stageController.setViewSlots(VIEW, [slot("s1", "07")], {
-        kind: "plan",
-        planId: "plan-elsewhere",
-        serviceTypeId: TYPE,
-      });
-    } finally {
-      console.warn = realWarn;
-    }
+  it("is allowed when Planning Center cannot say, and says so on a tagged line", async (t) => {
+    const warns = captureConsole(t, "warn");
+    await stageController.setViewSlots(VIEW, [slot("s1", "07")], {
+      kind: "plan",
+      planId: "plan-elsewhere",
+      serviceTypeId: TYPE,
+    });
     assert.equal((await slotsStore.getOverride(VIEW, "plan-elsewhere"))?.slots[0]?.id, "s1");
     assert.ok(
       warns.some((l) => l.includes("[slots] could not check which service type a plan belongs to")),

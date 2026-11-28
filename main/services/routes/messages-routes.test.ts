@@ -13,6 +13,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { beforeEach, describe, it } from "node:test";
+import { captureConsole } from "../fixtures/capture-console.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-messages-route-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -138,18 +139,16 @@ describe("POST /api/messages", () => {
     assert.deepEqual(messagesService.state().messages, []);
   });
 
-  it("a failed write is a failure, not a refusal: the error is left for the server's handler", async () => {
+  it("a failed write is a failure, not a refusal: the error is left for the server's handler", async (t) => {
     const real = messagesStore.save.bind(messagesStore);
     messagesStore.save = (async () => {
       throw new Error("ENOSPC: no space left on device");
     }) as typeof messagesStore.save;
-    const quiet = console.error;
-    console.error = () => {};
+    captureConsole(t, "error");
     try {
       await assert.rejects(() => send({ to: [EVERYONE], text: "x" }), /ENOSPC/);
     } finally {
       messagesStore.save = real;
-      console.error = quiet;
     }
     assert.deepEqual(messagesService.state().messages, []);
   });

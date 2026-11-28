@@ -8,6 +8,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
+import { captureConsole } from "../fixtures/capture-console.js";
 
 const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "su-devices-unreadable-"));
 process.env.STAGE_UTILITY_DATA = dataDir;
@@ -30,17 +31,11 @@ after(async () => {
 
 describe("device routes with unreadable bindings", () => {
   // The first /enroll in this file, so it is the one that logs.
-  it("/enroll answers a page that reloads itself, so a kiosk recovers once the file reads", async () => {
-    const lines: string[] = [];
-    const real = console.warn;
-    console.warn = (...a: unknown[]) => void lines.push(a.join(" "));
+  it("/enroll answers a page that reloads itself, so a kiosk recovers once the file reads", async (t) => {
+    const lines = captureConsole(t, "warn");
     let r;
-    try {
-      r = await callRoute(kioskDeviceRoutes, "/enroll?device=pi-1&token=secret");
-      for (let i = 0; i < 2; i++) await callRoute(kioskDeviceRoutes, "/enroll?device=pi-2");
-    } finally {
-      console.warn = real;
-    }
+    r = await callRoute(kioskDeviceRoutes, "/enroll?device=pi-1&token=secret");
+    for (let i = 0; i < 2; i++) await callRoute(kioskDeviceRoutes, "/enroll?device=pi-2");
     assert.equal(r.status, 503);
     assert.match(r.headers["content-type"] ?? "", /text\/html/);
     assert.match(r.body, /Cannot read the screen list/);

@@ -9,6 +9,7 @@
 
 import assert from "node:assert/strict";
 import { afterEach, describe, test } from "node:test";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 import {
   __resetForTests,
@@ -265,7 +266,7 @@ describe("polling", () => {
     assert.equal(timers.length, 0, "nothing may poll after a terminal state");
   });
 
-  test("a channels.list failure still saves the token, but logs why the channel name is unknown", async () => {
+  test("a channels.list failure still saves the token, but logs why the channel name is unknown", async (t) => {
     installFakes();
     await startPending();
     handlers[TOKEN] = () => ({
@@ -274,14 +275,8 @@ describe("polling", () => {
     });
     handlers[CHANNELS] = () => ({ status: 403, body: { error: { message: "insufficient scope" } } });
 
-    const warnings: string[] = [];
-    const realWarn = console.warn;
-    console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(" "));
-    try {
-      await advance(5000);
-    } finally {
-      console.warn = realWarn;
-    }
+    const warnings = captureConsole(t, "warn");
+    await advance(5000);
 
     assert.deepEqual(saved, [{ refreshToken: "refresh-1", channelTitle: "" }]);
     assert.ok(

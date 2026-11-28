@@ -7,6 +7,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-host-names-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -23,8 +24,6 @@ let clock = Date.parse("2026-10-20T12:00:00Z");
 let names: InstanceType<typeof HostNames>;
 let warned: string[] = [];
 let broadcasts: unknown[] = [];
-const realWarn = console.warn;
-const realLog = console.log;
 
 addBroadcastListener((channel, payload) => {
   if (channel === HOST_NAMES_CHANNEL) broadcasts.push(payload);
@@ -46,11 +45,10 @@ function make() {
   return n;
 }
 
-beforeEach(async () => {
-  warned = [];
+beforeEach(async (t) => {
+  warned = captureConsole(t, "warn");
   broadcasts = [];
-  console.warn = (...a: unknown[]) => void warned.push(a.join(" "));
-  console.log = () => {};
+  captureConsole(t, "log");
   await hostNamesConfigStore.save({ accepted: [], dismissed: [] });
   await hostNamesSeenStore.save({ names: [] });
   names = make();
@@ -59,8 +57,6 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await names.stop();
-  console.warn = realWarn;
-  console.log = realLog;
 });
 
 describe("answered with no list", () => {

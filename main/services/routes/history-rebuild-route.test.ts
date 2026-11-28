@@ -11,6 +11,7 @@
 
 import assert from "node:assert/strict";
 import { after, beforeEach, describe, it } from "node:test";
+import { captureConsole } from "../fixtures/capture-console.js";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -612,7 +613,7 @@ describe("POST /api/history/rebuild", () => {
     // was merely hoping to do — the timeline leg lands first (so this is a
     // partial failure, 200 with `failed: ["baptism"]`, not a 500), and the
     // baptism leg's own counts must reflect that its own write never landed.
-    it("reports no updated/added for the baptism leg when its write fails, even after another leg lands", async () => {
+    it("reports no updated/added for the baptism leg when its write fails, even after another leg lands", async (t) => {
       await fs.writeFile(path.join(serviceDirPath(KEY, DATE), "baptism.csv"), BAPTISM_CSV, "utf8");
 
       const { baptismStore } = await import("../baptism-store.js");
@@ -620,15 +621,12 @@ describe("POST /api/history/rebuild", () => {
       baptismStore.mergeRebuilt = async () => {
         throw new Error("EACCES (test double)");
       };
-      const warnings: string[] = [];
-      const realWarn = console.warn;
-      console.warn = (...args: unknown[]) => void warnings.push(args.map(String).join(" "));
+      const warnings = captureConsole(t, "warn");
       let out: Awaited<ReturnType<typeof callRoute>>;
       try {
         out = await callRoute(historyRoutes, "/api/history/rebuild", { method: "POST", body: { serviceKey: KEY } });
       } finally {
         baptismStore.mergeRebuilt = original;
-        console.warn = realWarn;
       }
 
       assert.equal(out.status, 200, `a partial failure (an earlier leg already landed) must still answer 200, got ${out.status}: ${out.body}`);

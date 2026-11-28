@@ -13,6 +13,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, afterEach, describe, mock, test } from "node:test";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), "su-layout-slugs-"));
 process.env.STAGE_UTILITY_DATA = dir;
@@ -123,23 +124,17 @@ describe("a duplicate layout name", () => {
     assert.equal(slugify("Audio"), slugify("audio"));
   });
 
-  test("the controller refuses it with LayoutNameRefused, saves nothing, and logs it", async () => {
+  test("the controller refuses it with LayoutNameRefused, saves nothing, and logs it", async (t) => {
     await serviceCueLayoutsStore.save([{ id: "1", name: "Audio", order: 0, columnRoles: [] }]);
     const before = await fs.readFile(FILE, "utf8");
-    const lines: string[] = [];
-    const log = console.log;
-    console.log = (...a: unknown[]) => { lines.push(a.join(" ")); };
-    try {
-      await assert.rejects(
-        stageController.saveServiceCueLayouts([
-          { id: "1", name: "Audio", order: 0, columnRoles: [] },
-          { id: "2", name: "AUDIO", order: 1, columnRoles: [] },
-        ]),
-        LayoutNameRefused,
-      );
-    } finally {
-      console.log = log;
-    }
+    const lines = captureConsole(t, "log");
+    await assert.rejects(
+      stageController.saveServiceCueLayouts([
+        { id: "1", name: "Audio", order: 0, columnRoles: [] },
+        { id: "2", name: "AUDIO", order: 1, columnRoles: [] },
+      ]),
+      LayoutNameRefused,
+    );
     assert.equal(await fs.readFile(FILE, "utf8"), before);
     assert.ok(lines.some((l) => l.startsWith("[servicecue]") && l.includes("refused")), lines.join("\n"));
   });

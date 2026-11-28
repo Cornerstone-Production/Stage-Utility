@@ -6,7 +6,8 @@
 // this is driven through the real handler in remote-server-subscribe.test.ts.
 
 import assert from "node:assert/strict";
-import { afterEach, beforeEach, describe, test } from "node:test";
+import { beforeEach, describe, test } from "node:test";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 import {
   ChannelReports,
@@ -20,17 +21,11 @@ import {
 let clock = 0;
 let reports: ChannelReports;
 let logged: string[] = [];
-const realLog = console.log;
 
-beforeEach(() => {
+beforeEach((t) => {
   clock = 1_000_000;
   reports = new ChannelReports({ now: () => clock });
-  logged = [];
-  console.log = (...args: unknown[]) => void logged.push(args.join(" "));
-});
-
-afterEach(() => {
-  console.log = realLog;
+  logged = captureConsole(t, "log");
 });
 
 describe("a report nothing claims", () => {

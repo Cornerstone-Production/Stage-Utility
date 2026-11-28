@@ -23,6 +23,7 @@
 
 import assert from "node:assert/strict";
 import { after, before, beforeEach, describe, test } from "node:test";
+import { captureConsole } from "./fixtures/capture-console.js";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -332,7 +333,7 @@ describe("a stored rule may not wear a built-in's id", () => {
     await automationEngine.removeRule(made.id);
   });
 
-  test("a restored file carrying one is reported at boot", async () => {
+  test("a restored file carrying one is reported at boot", async (t) => {
     // The only other way in: a restore writes the rules file raw, with no
     // per-rule validation point, so the load is where it is caught. Reported,
     // never renamed — an id is what a layout's cue button refers to.
@@ -348,14 +349,11 @@ describe("a stored rule may not wear a built-in's id", () => {
         oncePerService: false,
       },
     ]);
-    const warnings: string[] = [];
-    const realWarn = console.warn;
-    console.warn = (...args: unknown[]) => warnings.push(args.map(String).join(" "));
+    const warnings = captureConsole(t, "warn");
     try {
       await automationEngine.init();
       await automationEngine.setSettings({ simulate: false, disarmed: false });
     } finally {
-      console.warn = realWarn;
       await automationStore.saveRules([]);
       await automationEngine.init();
       await automationEngine.setSettings({ simulate: false, disarmed: false });
@@ -369,21 +367,15 @@ describe("a stored rule may not wear a built-in's id", () => {
 });
 
 describe("the boot line", () => {
-  test("init says what is offered, without anything reading the manifest", async () => {
+  test("init says what is offered, without anything reading the manifest", async (t) => {
     // An install with no Home Assistant and no panel open never reads the
     // manifest, so the count line — emitted on a read — was never said at all
     // and `/log` had nothing about the cues a console is bound to.
     __resetBuiltinCues();
     ENABLED = new Set(["obs"]);
-    const said: string[] = [];
-    const realLog = console.log;
-    console.log = (...args: unknown[]) => said.push(args.map(String).join(" "));
-    try {
-      await automationEngine.init();
-      await automationEngine.setSettings({ simulate: false, disarmed: false });
-    } finally {
-      console.log = realLog;
-    }
+    const said = captureConsole(t, "log");
+    await automationEngine.init();
+    await automationEngine.setSettings({ simulate: false, disarmed: false });
     assert.deepEqual(
       said.filter((l) => l.includes("built-in cues offered")),
       ["[cues] 4 built-in cues offered (obs 3, app 1)"],

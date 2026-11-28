@@ -19,6 +19,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, describe, test } from "node:test";
+import { captureConsole } from "../fixtures/capture-console.js";
 
 const DIR = fs.mkdtempSync(path.join(os.tmpdir(), "pco-outage-"));
 process.env.STAGE_UTILITY_DATA = DIR;
@@ -94,16 +95,14 @@ describe("a PCO read that fails answers 502, not 500", () => {
   });
 
   for (const { path: routePath, route, method } of PCO_READS) {
-    test(`${routePath} answers 502 when PCO is down`, async () => {
+    test(`${routePath} answers 502 when PCO is down`, async (t) => {
       const controller = stageController as unknown as Record<string, unknown>;
       const original = controller[method];
       assert.equal(typeof original, "function", `stageController.${method} is not a method any more`);
       controller[method] = () => Promise.reject(new Error(OUTAGE));
       // The operator's only evidence: pco-service logs a retry, never the read
       // that finally failed, so the route has to say it or nothing does.
-      const warned: string[] = [];
-      const warn = console.warn;
-      console.warn = (...args: unknown[]) => { warned.push(args.map(String).join(" ")); };
+      const warned = captureConsole(t, "warn");
       try {
         const out = await callRoute(route, routePath);
         assert.equal(
@@ -118,7 +117,6 @@ describe("a PCO read that fails answers 502, not 500", () => {
           `${routePath} failed without one [pco] line saying so — got ${JSON.stringify(warned)}`,
         );
       } finally {
-        console.warn = warn;
         controller[method] = original;
       }
     });

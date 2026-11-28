@@ -5,6 +5,7 @@
 
 import { strict as assert } from "node:assert";
 import { test, beforeEach } from "node:test";
+import { captureConsole } from "../fixtures/capture-console.js";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -648,11 +649,9 @@ test("a failure on a later secret restores the earlier ones, empties slots that 
   assert.equal(feeds[0].source.url, "rtsp://192.0.2.31:554/box");
 });
 
-test("a failed import logs the outcome of the rollback, scrubbed", async () => {
+test("a failed import logs the outcome of the rollback, scrubbed", async (t) => {
   const box = await add(PULL);
-  const errors: string[] = [];
-  const realErr = console.error;
-  console.error = (...a: unknown[]) => { errors.push(a.map(String).join(" ")); };
+  const errors = captureConsole(t, "error");
   const restore = failNthSetSecret(2);
   try {
     await assert.rejects(apply({ bundle: ROLLBACK_FILE(box) }));
@@ -671,7 +670,6 @@ test("a failed import logs the outcome of the rollback, scrubbed", async () => {
   } finally {
     restore2();
     secretsStore.setSecrets = realSet;
-    console.error = realErr;
   }
   const line = errors.find((l) => l.startsWith("[video-import]"))!;
   assert.match(line, /^\[video-import\] import failed and could not restore: disk full/);

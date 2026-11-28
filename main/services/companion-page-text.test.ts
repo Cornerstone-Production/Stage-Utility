@@ -14,6 +14,7 @@
 
 import assert from "node:assert/strict";
 import { afterEach, describe, test } from "node:test";
+import { captureConsole } from "./fixtures/capture-console.js";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fsp from "node:fs/promises";
@@ -28,7 +29,6 @@ type CompanionPageView = import("./companion-export.js").CompanionPageView;
 const realFetch = companionDeps.fetch;
 const realTarget = companionDeps.getTarget;
 const realDeadline = pageVariableDeps.deadlineMs;
-const realWarn = console.warn;
 const realLog = console.log;
 
 // A stuck read holds one of the shared slots until it ends, so a test that sticks one lets it go.
@@ -41,7 +41,6 @@ afterEach(async () => {
   companionDeps.fetch = realFetch;
   companionDeps.getTarget = realTarget;
   pageVariableDeps.deadlineMs = realDeadline;
-  console.warn = realWarn;
   console.log = realLog;
   companionApi.invalidate();
 });
@@ -160,10 +159,9 @@ describe("withLiveText", () => {
     assert.deepEqual(textsOf(out), ["In 12/40", "10:30:00"]);
   });
 
-  test("a variable Companion does not have stays as written, and says so once on a tagged line", async () => {
+  test("a variable Companion does not have stays as written, and says so once on a tagged line", async (t) => {
     serve({});
-    const warned: string[] = [];
-    console.warn = (...a: unknown[]) => void warned.push(a.join(" "));
+    const warned = captureConsole(t, "warn");
     const v = view(key(0, 0, "Gone $(Nope:missing)"));
     assert.deepEqual(textsOf(await companionApi.withLiveText(v)), ["Gone $(Nope:missing)"]);
     // A second view of the same page, past the cache: still failing, still one line.
