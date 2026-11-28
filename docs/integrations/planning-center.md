@@ -173,7 +173,10 @@ Planning Center at most every three minutes (45 seconds around a service). A
 replacement is noticed only if the version changes: when Planning Center reports
 neither `updated_at` nor a size, the id alone names the file and a replacement under
 the same id is not noticed, and when only the size is known, a replacement of the
-same size is not. A link that expires early is re-opened once. A
+same size is not. A link that expires early is re-opened once. A download is
+refused past 100 MB, counted from the bytes that arrive, and abandoned when the link
+goes quiet for 30 seconds or takes longer than 10 minutes in all, so a stalled link
+cannot hold a file's requests until a restart. A
 file that will not download is logged once per outage with its name and the
 reason, and one line says when it downloads again
 ([Plan file](../reference/widgets.md#pco--service)).
