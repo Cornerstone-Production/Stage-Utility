@@ -33,6 +33,7 @@ import { collectRefsFrom } from "@main/services/view-refs";
 import type { ViewBundle, ImportReport, UnresolvableRef } from "@main/types/view-bundle";
 import type { ServiceTypeDTO } from "@main/types/pco";
 import { plural } from "@main/services/plural";
+import { readBundleFile } from "../../lib/read-bundle-file";
 
 /** What the review screen shows, derived from the file alone. */
 interface Review {
@@ -121,13 +122,7 @@ export function ImportLayout({ serviceTypes = [], currentServiceTypeId = null }:
     setError(null);
     setReport(null);
     try {
-      const parsed = JSON.parse(await file.text()) as ViewBundle;
-      // Refused BY NAME here as well as on the server: picking the config
-      // snapshot by mistake is the likely error, and the operator should learn
-      // that without a round trip.
-      if (parsed?.kind !== "stage-utility-view") {
-        throw new Error(`That is a "${String(parsed?.kind ?? "unknown")}" file, not a view export.`);
-      }
+      const parsed = await readBundleFile<ViewBundle>(file, "stage-utility-view", "a view export");
       if (!Array.isArray(parsed.views) || parsed.views.length === 0) {
         throw new Error("That file has no views in it.");
       }

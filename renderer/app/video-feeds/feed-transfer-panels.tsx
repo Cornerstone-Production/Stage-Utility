@@ -29,6 +29,7 @@ import { Button, Checkbox, ErrorNote, Select, SelectContent, SelectItem, SelectT
 import { cn } from "../../lib/cn";
 import { invoke } from "../../lib/api";
 import { joinWithAnd } from "../../lib/join-with-and";
+import { readBundleFile } from "../../lib/read-bundle-file";
 import { useStageState } from "../../main/use-stage-state";
 import { appZoneOf } from "../../lib/app-zone";
 import { SIDE_PANE } from "./side-pane";
@@ -300,17 +301,7 @@ export function ImportPanel() {
     setReport(null);
     setBusy(true);
     try {
-      let bundle: VideoFeedsBundle;
-      try {
-        bundle = JSON.parse(await file.text()) as VideoFeedsBundle;
-      } catch {
-        throw new Error("That file is not JSON, so it is not a video feeds export.");
-      }
-      // Refused by name here as well as on the server, so picking a view or
-      // config file by mistake is explained without a round trip.
-      if (bundle?.kind !== BUNDLE_KIND) {
-        throw new Error(`That is a "${String(bundle?.kind ?? "unknown").slice(0, 60)}" file, not a video feeds export.`);
-      }
+      const bundle = await readBundleFile<VideoFeedsBundle>(file, BUNDLE_KIND, "a video feeds export");
       const preview = await invoke<ImportPreview>("video:previewImport", { bundle });
       setChoices(new Map());
       setUsePorts(false);
