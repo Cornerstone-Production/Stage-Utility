@@ -3649,7 +3649,9 @@ export class StageController {
     next.hour = clampAutoUpdateHour(next.hour);
     next.dayOfWeek = clampAutoUpdateDay(next.dayOfWeek);
     console.log(`[stage-controller] setAutoUpdate →`, scrub(next));
-    if (next.mode === "manual") this.updateOwed = null;
+    // An update owed by the old schedule is not owed by a new one: the new day and hour decide.
+    const prev = this.state.autoUpdate;
+    if (next.mode === "manual" || next.dayOfWeek !== prev.dayOfWeek || next.hour !== prev.hour) this.updateOwed = null;
     this.state = { ...this.state, autoUpdate: next };
     this.state = { ...this.state, autoUpdateWindow: this.autoUpdateWindowOf() };
     await settingsStore.patch({ autoUpdate: next });

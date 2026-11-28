@@ -52,8 +52,8 @@ every time (*Sunday 03:00* with a Thursday rehearsal) or losing the slot a servi
 ran over. The log says when it becomes owed, again if what holds it changes, and
 when it applies late, and the Updates card says, under the schedule, when
 the next scheduled time falls inside a window and when that window closes. An owed
-update is dropped when updates go manual, when nothing is behind any more, and by a
-restart, after which the next scheduled hour decides again. Planning Center not answering holds nothing
+update is dropped when updates go manual, when the day or hour changes (the new
+schedule decides), when nothing is behind any more, and by a restart, after which the next scheduled hour decides again. Planning Center not answering holds nothing
 by itself: outside every window the scheduled hour applies, so an outage holds an
 update only when the scheduled hour falls in a planned service. A plan, or a service
 type's plan list, that could not be read keeps the window its last good read gave,

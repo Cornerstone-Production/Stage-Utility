@@ -281,7 +281,7 @@ describe("an update a service window held at its scheduled time", () => {
     assert.equal(applied, 1, "the slot a service ran over was lost for the week");
   });
 
-  it("is no longer owed once the mode goes manual, or nothing is behind", async (t) => {
+  it("is no longer owed once the mode goes manual", async (t) => {
     setup(t);
     await tick(sunday(3));
     ctl.state = { ...ctl.state, autoUpdate: { mode: "manual", dayOfWeek: 0, hour: 3 } };
@@ -289,6 +289,30 @@ describe("an update a service window held at its scheduled time", () => {
     ctl.state = { ...ctl.state, autoUpdate: { mode: "auto-full", dayOfWeek: 0, hour: 3 } };
     await tick(sunday(15));
     assert.equal(applied, 0, "an update owed before the switch to manual applied after it");
+  });
+
+  it("is no longer owed once nothing is behind, even if a release comes out again", async (t) => {
+    setup(t);
+    await tick(sunday(3));
+    const u = updater as unknown as Record<string, unknown>;
+    u.checkForUpdate = async () => ({ behind: 0 });
+    await tick(sunday(13));
+    u.checkForUpdate = async () => ({ behind: 1 });
+    await tick(sunday(14));
+    assert.equal(applied, 0, "an update owed while behind applied a later release off its schedule, after nothing had been behind");
+  });
+
+  it("is no longer owed once the schedule changes: the new day and hour decide", async (t) => {
+    setup(t);
+    await tick(sunday(3));
+    await stageController.setAutoUpdate({ hour: 5 });
+    await tick(sunday(14));
+    assert.equal(applied, 0, "an update owed by the old schedule applied off the new one");
+    await stageController.setAutoUpdate({ hour: 3 });
+    await tick(sunday(3));
+    await stageController.setAutoUpdate({ dayOfWeek: 6 });
+    await tick(sunday(15));
+    assert.equal(applied, 0, "an update owed by the old day applied after the day changed");
   });
 });
 
