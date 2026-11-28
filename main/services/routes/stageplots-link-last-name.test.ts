@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { after, test } from "node:test";
+import { after, describe, test } from "node:test";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stageplots-last-name-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -87,4 +87,55 @@ test("a rack removed with devices in it: every linked point keeps its device's l
   await patchStore.save(patchOf([{ id: "sb1", name: "Rack A / Box" }, { id: "rack", name: "Rack A" }]));
   await patchStore.save({ ...patchOf([]), sheets: [] });
   assert.equal((await stored(plotId)).lastName, "Rack A / Box");
+});
+
+// A draft opened before a patch save carries the last name it loaded. Saving it must not put
+// that name back over the newer one the patch save stamped.
+describe("an editor's older draft saved after a patch save", () => {
+  const stalePut = async (plotId: string, edit: (it: Record<string, unknown>) => Record<string, unknown> = (it) => it) => {
+    const plot = (await stageplotsStore.get()).plots.find((p) => p.id === plotId)!;
+    // What the editor loaded: the point as it was linked, before any stamp.
+    const old = { ...plot.items[0]!, label: "Stage Left Box", color: null, patchLink: { ...plot.items[0]!.patchLink!, lastName: "Stage Left Box", lastColor: null } };
+    return call("PUT", `/api/stageplots/plots/${plotId}/items`, { version: plot.version, items: [edit({ ...old })] });
+  };
+
+  test("a device that is gone keeps the stamped name and colour over the draft's", async () => {
+    const plotId = await linkedPlot("Stage Left Box");
+    await patchStore.save(patchOf([{ id: "sb1", name: "Drum Box", color: "#e5484d" }]));
+    await patchStore.save(patchOf([]));
+    const r = await stalePut(plotId, (it) => ({ ...it, x: 55 }));
+    assert.equal(r.status, 200, r.body);
+    const s = await stored(plotId);
+    assert.deepEqual([s.label, s.lastName, s.lastColor, s.color], ["Drum Box", "Drum Box", "#e5484d", "#e5484d"]);
+    assert.equal((await stageplotsStore.get()).plots.find((p) => p.id === plotId)!.items[0]!.x, 55, "the editor's own change was dropped");
+  });
+
+  test("a device still there is stamped against the patch as it is now", async () => {
+    const plotId = await linkedPlot("Stage Left Box");
+    await patchStore.save(patchOf([{ id: "sb1", name: "Drum Box" }]));
+    const r = await stalePut(plotId);
+    assert.equal(r.status, 200, r.body);
+    assert.equal((await stored(plotId)).lastName, "Drum Box");
+  });
+
+  test("a point the editor relinked is saved as sent", async () => {
+    const plotId = await linkedPlot("Stage Left Box");
+    await patchStore.save(patchOf([{ id: "sb1", name: "Drum Box" }, { id: "sb2", name: "Other" }]));
+    const r = await stalePut(plotId, (it) => ({ ...it, label: "Other", patchLink: { sheetId: "main", deviceId: "sb2", lastName: "Other", lastColor: null } }));
+    assert.equal(r.status, 200, r.body);
+    const s = await stored(plotId);
+    assert.deepEqual([s.label, s.lastName], ["Other", "Other"]);
+  });
+
+  test("a point the editor unlinked is saved as sent", async () => {
+    const plotId = await linkedPlot("Stage Left Box");
+    await patchStore.save(patchOf([{ id: "sb1", name: "Drum Box" }]));
+    const r = await stalePut(plotId, (it) => {
+      const { patchLink: _gone, ...rest } = it;
+      return { ...rest, label: "Mine" };
+    });
+    assert.equal(r.status, 200, r.body);
+    const it = (await stageplotsStore.get()).plots.find((p) => p.id === plotId)!.items[0]!;
+    assert.deepEqual([it.label, it.patchLink], ["Mine", undefined]);
+  });
 });

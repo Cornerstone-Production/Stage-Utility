@@ -297,6 +297,33 @@ export function stampDoc<D extends { plots: { items: PlotItem[] }[] }>(doc: D, p
   return changed ? { ...doc, plots } : doc;
 }
 
+/**
+ * The items an editor saved, with each linked point's name and colour kept current. A draft
+ * opened before a patch save carries an older last name; it must not overwrite the newer one the
+ * patch save stamped. A point still linked to the device the stored plot linked (the editor did
+ * not unlink or relink it): its device is stamped as the patch has it now, and where the device
+ * is gone, or the patch cannot be read, the stored point's name and colour stay. A point the
+ * editor linked or relinked is as sent. The same list when nothing changes.
+ */
+export function keepNewerLinks(incoming: readonly PlotItem[], stored: readonly PlotItem[], patch: PatchRead | null): PlotItem[] {
+  const before = new Map(stored.map((it) => [it.id, it]));
+  const ctx: PatchContext = { serviceTypeId: null, planId: null };
+  let changed = false;
+  const out = incoming.map((it) => {
+    const link = it.patchLink;
+    const was = before.get(it.id)?.patchLink;
+    if (!link || !was || was.sheetId !== link.sheetId || was.deviceId !== link.deviceId) return it;
+    const r = patch?.ok ? resolvePatchLink(link, patch, ctx) : null;
+    const kept = before.get(it.id)!;
+    const [label, color, lastName, lastColor] =
+      r?.state === "linked" ? [r.name, r.color, r.name, r.color] : [kept.label, kept.color, was.lastName, was.lastColor];
+    if (it.label === label && it.color === color && link.lastName === lastName && link.lastColor === lastColor) return it;
+    changed = true;
+    return { ...it, label, color, patchLink: { ...link, lastName, lastColor } };
+  });
+  return changed ? out : (incoming as PlotItem[]);
+}
+
 /** A point that will be published unlinked, for the [stageplots] log line saying so. */
 export interface UnresolvedLink {
   label: string;
