@@ -16,7 +16,7 @@
 // broadcasts nothing until its fetch resolves.
 
 import assert from "node:assert/strict";
-import { describe, it, beforeEach, afterEach } from "node:test";
+import { describe, it, beforeEach, afterEach, after } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -29,6 +29,8 @@ process.env.HOME = path.join(TMP, "home");
 const { livePoller } = await import("./live-poller.js");
 const { stageController } = await import("./stage-controller.js");
 const { addBroadcastListener, setSubscriberCheck } = await import("./broadcaster.js");
+
+after(() => fs.rm(TMP, { recursive: true, force: true }));
 type Controller = {
   fetchLive: () => Promise<unknown>;
   getLastLive: () => unknown;
