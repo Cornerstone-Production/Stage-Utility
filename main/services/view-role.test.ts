@@ -25,6 +25,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { beforeEach, describe, it } from "node:test";
+import { captureConsoleDuringAsync } from "./fixtures/capture-console.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-view-role-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -197,14 +198,7 @@ describe("setViewRole — to a wall display", () => {
 /** The controller's own log lines from `fn`, which is how an operator at 9am
  *  would learn what a call decided. */
 async function logged(fn: () => Promise<unknown>): Promise<string[]> {
-  const lines: string[] = [];
-  const original = console.log;
-  console.log = (...a: unknown[]) => { lines.push(a.join(" ")); };
-  try {
-    await fn();
-  } finally {
-    console.log = original;
-  }
+  const lines = await captureConsoleDuringAsync(["log"], fn);
   return lines.filter((l) => l.startsWith("[stage-controller] setViewRole"));
 }
 

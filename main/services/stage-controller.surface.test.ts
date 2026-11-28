@@ -11,6 +11,7 @@ import { describe, it, before, beforeEach } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { captureConsoleDuringAsync } from "./fixtures/capture-console.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-surface-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -162,14 +163,7 @@ describe("which kinds of view can be made a control surface", () => {
 /** The `[screens]` lines `fn` logged, which is how an operator at 9am learns a
  *  screen started or stopped working. */
 async function screensLog(fn: () => Promise<unknown>): Promise<string[]> {
-  const lines: string[] = [];
-  const original = console.log;
-  console.log = (...a: unknown[]) => { lines.push(a.join(" ")); };
-  try {
-    await fn();
-  } finally {
-    console.log = original;
-  }
+  const lines = await captureConsoleDuringAsync(["log"], fn);
   return lines.filter((l) => l.startsWith("[screens]"));
 }
 

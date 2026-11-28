@@ -7,6 +7,7 @@ import { test, describe } from "node:test";
 
 import type { ObsStatusDTO } from "../types/stage.js";
 import { logOutputChange, reduceObsEvent } from "./obs-service.js";
+import { captureConsoleDuring } from "./fixtures/capture-console.js";
 
 const OFFLINE: ObsStatusDTO = {
   connected: false,
@@ -134,11 +135,7 @@ describe("logOutputChange", () => {
   // The Sunday-morning question "did the recording actually run" had no line
   // to answer it: the state reached displays and never the log.
   function captured(fn: () => void): string[] {
-    const lines: string[] = [];
-    const real = console.log;
-    console.log = (...a: unknown[]) => { lines.push(a.map(String).join(" ")); };
-    try { fn(); } finally { console.log = real; }
-    return lines;
+    return captureConsoleDuring(["log"], fn);
   }
   const idle = { ...OFFLINE, connected: true };
 

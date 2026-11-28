@@ -39,6 +39,7 @@ import {
   type StubEntry,
   type StubOptions,
 } from "./fixtures/prodcom-stub.js";
+import { captureConsoleDuringAsync } from "./fixtures/capture-console.js";
 
 const NOW = Date.parse("2026-09-11T12:00:00Z");
 
@@ -102,19 +103,8 @@ async function connected(
 }
 
 /** Run `fn` with console.log/warn captured. */
-async function withLogs(fn: () => Promise<void>): Promise<string[]> {
-  const lines: string[] = [];
-  const log = console.log;
-  const warn = console.warn;
-  console.log = (...a: unknown[]) => lines.push(String(a[0]));
-  console.warn = (...a: unknown[]) => lines.push(String(a[0]));
-  try {
-    await fn();
-  } finally {
-    console.log = log;
-    console.warn = warn;
-  }
-  return lines;
+function withLogs(fn: () => Promise<void>): Promise<string[]> {
+  return captureConsoleDuringAsync(["log", "warn"], fn);
 }
 
 /** Poll until `ready()` or give up — for the handful of assertions that observe

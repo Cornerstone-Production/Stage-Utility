@@ -12,6 +12,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, afterEach, test, mock } from "node:test";
+import { captureConsoleDuringAsync } from "./fixtures/capture-console.js";
 
 const dir = await fs.mkdtemp(path.join(os.tmpdir(), "su-seed-log-"));
 process.env.STAGE_UTILITY_DATA = dir;
@@ -25,17 +26,14 @@ after(() => fs.rm(dir, { recursive: true, force: true }));
 
 /** Every console.log line `run` writes. */
 async function linesOf(run: () => Promise<unknown>): Promise<{ lines: string[]; error: unknown }> {
-  const lines: string[] = [];
-  const log = console.log;
-  console.log = (...a: unknown[]) => { lines.push(a.join(" ")); };
   let error: unknown = null;
-  try {
-    await run();
-  } catch (err) {
-    error = err;
-  } finally {
-    console.log = log;
-  }
+  const lines = await captureConsoleDuringAsync(["log"], async () => {
+    try {
+      await run();
+    } catch (err) {
+      error = err;
+    }
+  });
   return { lines: lines.filter((l) => l.startsWith("[servicecue]")), error };
 }
 
