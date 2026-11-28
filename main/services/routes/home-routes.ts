@@ -12,7 +12,7 @@
 
 import { homeSnoozes, SnoozeRefused } from "../home-snoozes.js";
 import { stageController } from "../stage-controller.js";
-import { type RouteCtx, error, json, readBodyOrEmpty } from "./context.js";
+import { type RouteCtx, error, json, readJsonObject } from "./context.js";
 
 export async function homeRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
@@ -23,7 +23,7 @@ export async function homeRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "POST" && pathname === "/api/home/snoozes") {
-    const body = await readBodyOrEmpty(req);
+    const body = await readJsonObject(req);
     try {
       json(res, await homeSnoozes.snooze(body.key, body.severity, stageController.getState().pcoConfigured), 201);
     } catch (err) {

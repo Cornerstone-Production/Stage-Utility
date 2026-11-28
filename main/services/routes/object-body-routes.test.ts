@@ -27,6 +27,9 @@ const { kioskDeviceRoutes } = await import("./kiosk-device-routes.js");
 const { serviceCuePublishRoutes } = await import("./servicecue-publish-routes.js");
 const { videoRoutes } = await import("./video-routes.js");
 const { displaySettingsRoutes } = await import("./display-settings-routes.js");
+const { historyRoutes } = await import("./history-routes.js");
+const { clientLogRoutes } = await import("./client-log-routes.js");
+const { homeRoutes } = await import("./home-routes.js");
 type RouteCtx = import("./context.js").RouteCtx;
 
 after(async () => {
@@ -62,9 +65,9 @@ const ROUTES: [string, string, Route][] = [
 ];
 
 /** What a client gets: the route's own answer, or what the dispatcher makes of its throw. */
-async function answer(route: Route, method: string, url: string, body: unknown): Promise<{ status: number | null; error: string }> {
+async function answer(route: Route, method: string, url: string, body: unknown, raw?: string): Promise<{ status: number | null; error: string }> {
   try {
-    const r = await callRoute(route, url, { method, body });
+    const r = await callRoute(route, url, raw === undefined ? { method, body } : { method, raw });
     return { status: r.status, error: String((r.json as { error?: unknown } | null)?.error ?? r.body) };
   } catch (err) {
     return { status: handlerErrorStatus(err), error: (err as Error).message };
@@ -80,3 +83,39 @@ for (const [kind, body] of [["null", null], ["an array", []], ["a string", "x"]]
     }
   });
 }
+
+// Routes that need a field and read the body with readBodyOrEmpty answered a body that
+// is not JSON with "body.serviceKey (string) required", which sends the caller looking
+// at the wrong thing. They say the body is not JSON now; an empty body still reads as
+// `{}` and is refused for the field it lacks.
+const NEEDS_FIELDS: [string, string, Route, string][] = [
+  ["POST", "/api/baptism/rebuild", historyRoutes, "body.serviceKey (string) required"],
+  ["POST", "/api/devices/enabled", kioskDeviceRoutes, "body.deviceId is required"],
+  ["POST", "/api/history/item-counted", historyRoutes, "body.serviceKey, body.itemId (strings) + body.counted (boolean) required"],
+  ["POST", "/api/history/item-times", historyRoutes, "body.serviceKey + body.itemId (strings) and body.sequence (number) required"],
+  ["POST", "/api/history/merge", historyRoutes, "body.sourceKey + body.targetKey (strings) required"],
+  ["POST", "/api/history/milestones", historyRoutes, "body.date + body.label (strings) required"],
+  ["POST", "/api/history/rebuild", historyRoutes, "body.serviceKey (string) required"],
+  ["POST", "/api/history/recalc", historyRoutes, "body.serviceKey (string) required"],
+  ["POST", "/api/history/trends-prefs", historyRoutes, ""],
+  ["POST", "/api/history/window", historyRoutes, "body.serviceKey (string) required"],
+  ["POST", "/api/home/snoozes", homeRoutes, ""],
+  ["POST", "/api/log/client", clientLogRoutes, 'body.tag must be a short lower-case tag, e.g. "history"'],
+];
+
+describe("a body that is not JSON", () => {
+  for (const [method, url, route] of NEEDS_FIELDS) {
+    test(`${method} ${url} answers 400 Invalid JSON body`, async () => {
+      assert.deepEqual(await answer(route, method, url, undefined, "{not json"), { status: 400, error: "Invalid JSON body" });
+    });
+  }
+});
+
+describe("an empty body", () => {
+  for (const [method, url, route, refusal] of NEEDS_FIELDS) {
+    if (!refusal) continue;
+    test(`${method} ${url} still reads as {} and is refused for what it lacks`, async () => {
+      assert.deepEqual(await answer(route, method, url, undefined, ""), { status: 400, error: refusal });
+    });
+  }
+});

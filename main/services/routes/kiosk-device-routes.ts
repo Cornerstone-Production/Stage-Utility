@@ -4,7 +4,7 @@
 // redirects to the display it is bound to, or shows the holding screen — so the
 // SD card holds no display number and the server decides what a screen shows.
 
-import { type RouteCtx, json, error, readBody, readBodyOrEmpty, readJsonObject } from "./context.js";
+import { type RouteCtx, json, error, readBody, readJsonObject, readObjectBody } from "./context.js";
 import { BindingsRestoring, bindingWritesHeld, kioskDevicesStore, authorise, claim, release, findById, findByOutput, matchByMac, withoutTokens, pinSecret, setEnabled, updateDevices } from "../kiosk-devices-store.js";
 import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen, recordHealth, noteSwitchAnswer, takeChange, forgetChange, healthList, forgetHealth, firstSecretMismatch, forgetSecretMismatch, forgetSecret, announceDevices } from "../kiosk-presence.js";
 import { MachineUpdates, minutes, parseCheck, REPORT_TTL_MS } from "../machine-updates.js";
@@ -601,8 +601,9 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
   // Switch one output of a Mac helper on or off. The helper hears it in the
   // answer to its next health post. Same-origin like every other write here.
   if (method === "POST" && pathname === "/api/devices/enabled") {
-    // A body of `null` or an array is a 400 here, not a 500.
-    const body = await readBodyOrEmpty(req);
+    // Answered here, not by the dispatcher: a body that is not JSON, or JSON that is not an object, is a 400 with why.
+    const body = await readObjectBody(req, res);
+    if (!body) return;
     const id = typeof body.deviceId === "string" ? body.deviceId : "";
     if (!id) {
       error(res, "body.deviceId is required");

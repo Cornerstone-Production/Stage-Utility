@@ -18,7 +18,7 @@
 // client spinning the buffer, which is what the rate limit is for.
 
 import { scrub } from "../scrub.js";
-import { type RouteCtx, error, json, readBodyOrEmpty } from "./context.js";
+import { type RouteCtx, error, json, readJsonObject } from "./context.js";
 
 /** A tag the log page can filter on: the same shape the server's own tags have.
  *  Bounded, so a client cannot write a 4KB `[…]` prefix. */
@@ -88,7 +88,7 @@ export async function clientLogRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, method } = c;
   if (method !== "POST" || pathname !== "/api/log/client") return;
 
-  const body = await readBodyOrEmpty(req);
+  const body = await readJsonObject(req);
   const tag = typeof body.tag === "string" ? body.tag : "";
   const message = typeof body.message === "string" ? body.message.trim() : "";
   if (!TAG.test(tag)) {
