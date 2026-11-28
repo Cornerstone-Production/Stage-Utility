@@ -231,6 +231,8 @@ describe("slugForCue", () => {
     assert.equal(slugForCue("Proj. 1"), "proj_1");
   });
   test("a label with nothing usable in it yields nothing, not an underscore", () => {
+    // Not accent-folded: the import re-derives this from a label and compares it with the stored name.
+    assert.equal(slugForCue("Café lights"), "caf_lights");
     assert.equal(slugForCue("---"), "");
     assert.equal(slugForCue(""), "");
   });
