@@ -82,6 +82,11 @@ class TestProdCom extends ProdComService {
   public wsSettled(): Promise<void> {
     return this.wsBaselinePriming;
   }
+  /** The promoted check has adopted a baseline: its first window has read REST. Promotion
+   *  clears the baseline, so false until then. */
+  public get baselineHeld(): boolean {
+    return this.wsBaseline !== null;
+  }
   public get deliveredIdsHeld(): number {
     return this.wsDeliveredIdCount;
   }
@@ -166,7 +171,7 @@ describe("the silence check on a box whose transcript is already a full rolling 
     // verdict needed, and re-syncs the baseline to the newest page's ids for
     // free (see runPromotedSilenceCheck's deliveredThisWindow branch).
     stub.wsPing();
-    await sleep(150);
+    await eventually(() => svc.baselineHeld, "the promoted check's first window to adopt its baseline");
 
     // Then it goes quiet for good while the window keeps rolling forward —
     // totalCount stays pinned at CAP the entire time.
@@ -254,7 +259,7 @@ describe("what the check does and does not count as missed", () => {
     // A healthy window passes. The "delivered this window" refresh reads
     // REST while it still knows nothing about the line — baseline is taken
     // with the line absent from it.
-    await sleep(150);
+    await eventually(() => svc.baselineHeld, "the promoted check's first window to adopt its baseline");
 
     // REST catches up. If the check trusted the refreshed baseline alone,
     // this spoken row — not in a baseline taken before REST had it — would

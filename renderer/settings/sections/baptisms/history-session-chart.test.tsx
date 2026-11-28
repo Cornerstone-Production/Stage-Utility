@@ -290,11 +290,10 @@ test("a KEYLESS session (matched by time overlap) always gets the 'no timeline' 
 
 test("a load failure shows its own error note, distinct from 'no timeline was recorded'", async () => {
   const realFetch = globalThis.fetch;
-  globalThis.fetch = (async (input: string, init?: RequestInit) => {
+  globalThis.fetch = (async (input: string) => {
     const url = String(input);
     if (url.includes("/api/log/client")) return ok({});
     if (url.includes("/api/baptism/lane")) throw new Error("network down");
-    void init;
     return ok({});
   }) as unknown as typeof fetch;
   try {

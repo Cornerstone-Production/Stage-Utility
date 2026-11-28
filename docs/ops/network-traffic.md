@@ -22,9 +22,10 @@ page first loads.
 | `pco:live` | ~1.2 KB | on change, else a 15s keepalive |
 | `messages:state` | see below | when a message is sent, an alert is cleared or runs out, a group or a quick list changes, or the nightly clear removes messages |
 | `spl:metrics` | under 1 KB | up to 4 Hz while Smaart is connected |
-| `home:snoozes` | under 1 KB | only when a snooze is set, cleared or lapses |
+| `home:snoozes` | under 1 KB | only when a snooze is set, cleared or lapses, and once on connect |
+| `trends:prefs` | under 0.1 KB | only when somebody chooses the Trends sound metric, sent only to an open History page, and once on connect |
 | `wireless:chargers` | ~0.3 KB per bay | when a bay's reading changes (a charging pack moves about a percent a minute), only to a page drawing bays: a Charger battery widget, the Mic slots page |
-| `boards:changed` | ~0.1 KB per board named | once per write to the slot boards, sent only to an open Mic slots page; screens do not name it |
+| `boards:changed` | ~0.1 KB per board named | once per write to the slot boards, sent only to an open Mic slots page, and once on connect; screens do not name it |
 | People's photos | ~1.3 MB total | once, then cached |
 | App bundle | ~900 KB | once per deploy |
 
@@ -90,6 +91,18 @@ otherwise. The connect-time snapshot is the last frame.
   subscribes to everything, so every widget's preview has data.
 - **Nothing is produced for nobody.** An integration with no subscribers stops
   resolving and serialising.
+- **Screens previews kept while the operator is away ride the shared stream.**
+  The Screens page stays mounted, hidden, for ten minutes after the operator
+  leaves it (see [Previews](../features/operator-app.md#previews)), and its
+  previews go on receiving updates through the browser's one shared event stream.
+  That adds no connection: the server sees one from that browser either way. It
+  does keep the previews' channels in that stream's subscriptions for up to the
+  ten minutes, so the cost shows only when a previewed layout draws a channel the
+  page now open does not, and the real screens showing those layouts are
+  subscribed to the same channels already. A browser not on the shared stream
+  does not keep the page at all. A preview that falls off it while the page is
+  hidden says so in its next live report, and the kept page is dropped then, so a
+  hidden preview holds a connection of its own only for that moment.
 - **Images are content-addressed and immutable.** Logos and layout images are
   named by a hash of their bytes, and a person's photo by Planning Center's URL,
   which changes when the photo does; all are cached for a year, except a
@@ -105,8 +118,12 @@ otherwise. The connect-time snapshot is the last frame.
   against 837 KB on the full-size screens. See
   [Photos](../integrations/planning-center.md#photos).
 
-Idle, the stream is silent: measured at 0 bytes over 12 seconds on a server with
-nothing happening.
+Idle, the stream is all but silent: measured at 0 bytes over 12 seconds on a
+server with nothing happening, and then a heartbeat of about 40 bytes every 20
+seconds, which is how a page tells a quiet stream from a dead one (see
+[API](../reference/api.md)). A page that has heard nothing for 50 seconds reopens
+its stream once, which replaces a connection that died without being closed; it
+does not reopen again until the new stream has opened and gone quiet in turn.
 
 A screen on the [polling transport](../display-urls.md#polling-transport)
 (`?transport=poll`) is the exception: it costs one request every two seconds

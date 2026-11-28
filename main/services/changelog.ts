@@ -45,11 +45,11 @@ import { externKeyed } from "../types/extern-keyed.js";
 /**
  * Scopes that name the release machinery itself. A `fix(release)` is honestly a
  * fix, and an operator cannot see it — 1.18.0 listed four such lines. Shared
- * with scripts/release-notes.mjs and scripts/release-level.sh.
+ * with scripts/release-notes.ts and scripts/release-level.sh.
  */
 const INTERNAL_SCOPES = new Set<string>(INTERNAL_SCOPE_FILE.scopes);
 
-/** Jargon scopes and what to call them. Shared with scripts/release-notes.mjs. */
+/** Jargon scopes and what to call them. Shared with scripts/release-notes.ts. */
 const SCOPE_LABELS: Record<string, string> = externKeyed(
   Object.fromEntries(
     Object.entries(SCOPE_LABEL_FILE).filter(([k]) => !k.startsWith("_")),

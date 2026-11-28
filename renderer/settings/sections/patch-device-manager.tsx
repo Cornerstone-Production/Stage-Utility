@@ -1,24 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { Trash2Icon, PlusIcon, ChevronRightIcon } from "lucide-react";
 
+import { PATCH_COLORS, PATCH_KIND_LABELS } from "@main/types/patch";
+
 import { Button, NumberInput, Input } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { uid } from "../../lib/uid";
 import { DeviceDot } from "./patch-dot";
 import { generateLabels } from "../../lib/patch-ripple";
 
-const KINDS: { value: PatchDeviceKind; label: string }[] = [
-  { value: "rack", label: "Input Rack" },
-  { value: "snake", label: "Snake" },
-  { value: "drop-snake", label: "Drop snake" },
-  { value: "pocket", label: "Floor pocket" },
-  { value: "wireless", label: "Wireless / RF" },
-  { value: "array", label: "Array" },
-  { value: "other", label: "Other" },
-];
-
-// A curated, dark-legible palette for tinting a device's channels.
-const PATCH_COLORS = ["#e5484d", "#f76b15", "#ffb224", "#46a758", "#12a594", "#0091ff", "#3e63dd", "#8e4ec6", "#e93d82", "#8b8d98"];
+const KINDS: { value: PatchDeviceKind; label: string }[] = (Object.keys(PATCH_KIND_LABELS) as PatchDeviceKind[]).map((value) => ({
+  value,
+  label: PATCH_KIND_LABELS[value],
+}));
 
 /** One-line summary of a device's current connector labels, e.g. "B-1…B-12". */
 function labelSummary(labels: string[] | undefined): string | null {

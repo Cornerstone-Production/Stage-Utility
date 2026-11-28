@@ -72,6 +72,7 @@ import { deviceManager } from "./main/services/device-manager.js";
 import { baptismTimerService } from "./main/services/baptism-timer-service.js";
 import { messagesService } from "./main/services/messages-service.js";
 import { homeSnoozes } from "./main/services/home-snoozes.js";
+import { trendsPrefs } from "./main/services/trends-prefs.js";
 import { scrubError } from "./main/services/scrub.js";
 import { backupScheduler } from "./main/services/backup-scheduler.js";
 import { configSnapshot } from "./main/services/config-snapshot.js";
@@ -92,6 +93,7 @@ import { calendarBroadcaster } from "./main/services/calendar-broadcaster.js";
 import { reconcileOpenRecords } from "./main/services/reconcile-records.js";
 import { videoService } from "./main/services/video/video-service.js";
 import { servicecuePublisher } from "./main/services/servicecue-publisher-instance.js";
+import { stageplotsPublisher } from "./main/services/stageplots-publish-instance.js";
 
 // ── Data directory ────────────────────────────────────────────────────────────
 //
@@ -144,6 +146,8 @@ for (const { what, error } of await messagesService.start()) {
 }
 // Home's snoozed problems: load them, and watch pco:live for a service starting.
 await homeSnoozes.start();
+// The History Trends card's chosen sound metric: loaded so the hello burst can serve it.
+await trendsPrefs.start();
 // Unattended backups, if the operator has turned them on.
 backupScheduler.start();
 
@@ -175,6 +179,8 @@ livePoller.start();
 // for the settings and the token, which are files, and for no request: a page that is
 // down must not hold the server back, and its first request is a timer away.
 await servicecuePublisher.start();
+// A venue's published stage plots follow its changes, and the plan, from here on. It makes no request until one changes.
+stageplotsPublisher.start();
 
 // Keep the photo + attachment disk caches from growing unbounded over months.
 cacheMaintenance.start();
@@ -192,6 +198,7 @@ async function shutdown(signal: string): Promise<void> {
   livePoller.stop();
   // The public page keeps what it holds: a restart is not a reason to blank it.
   servicecuePublisher.stop();
+  void stageplotsPublisher.stop();
   cacheMaintenance.stop();
   propresenterService.stop();
   resiService.stop();

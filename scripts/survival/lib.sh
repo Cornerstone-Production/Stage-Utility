@@ -24,7 +24,7 @@ SPAWN_POLL_SECONDS=0.25
 # the precondition the test needs -- there IS a detached child to outlive the
 # teardown -- so all three platforms wait for it.
 #
-# PARENT-SPAWN-FAILED (parent.mjs:40) ends the wait immediately. The child is
+# PARENT-SPAWN-FAILED (parent.ts:40) ends the wait immediately. The child is
 # never coming, and burning the full deadline on a question already answered
 # just delays the diagnosis by a minute per case.
 #
@@ -53,7 +53,7 @@ spawn_diagnosis() {
   local failed
   failed=$(grep "PARENT-SPAWN-FAILED" "$1" 2>/dev/null || true)
   if [ -n "$failed" ]; then
-    # The message parent.mjs caught, carried through rather than swallowed —
+    # The message parent.ts caught, carried through rather than swallowed —
     # it is the only description of the actual error anyone gets.
     echo "started but could not spawn its child: ${failed#PARENT-SPAWN-FAILED }"
   elif grep -q "PARENT-START" "$1" 2>/dev/null; then

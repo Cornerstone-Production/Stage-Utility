@@ -1,0 +1,367 @@
+// stageplots.ts — venues, their stage plots, and the backgrounds plots draw on.
+//
+// One config store (stageplots.json) holds all three lists. A plot's
+// coordinates are plot units: the canvas is 1000 units wide and its height
+// follows its background's aspect ratio (16:9 when it has none), so items keep
+// their place on the drawing when the background changes or is re-converted.
+// See docs/features/stageplots.md.
+//
+// It imports nothing: the public page's contract (servicecue-publish.ts) takes
+// STAGEPLOT_LIMITS from here, and the ServiceCue Worker and plain Node load it.
+
+export type VenueKind = "home" | "offsite";
+
+export interface Venue {
+  id: string;
+  name: string;
+  /**
+   * The venue's address on /stageplots: `/stageplots/<slug>`. Made from its name when the
+   * venue is created and never changed by a rename. Null for a venue created before addresses
+   * existed, which answers at its id until one is set. See venueSlugProblem for the rules.
+   */
+  slug: string | null;
+  /** Addresses it had before, newest last, at most STAGEPLOT_LIMITS.oldSlugs: each still opens it. */
+  oldSlugs: string[];
+  /** Only groups the list: home venues first. */
+  kind: VenueKind;
+  notes: string;
+  /** This venue's plots, in tab order. Every id names a plot whose venueId is this venue. */
+  plotIds: string[];
+  /** One of plotIds, or null only while the venue has no plots. */
+  defaultPlotId: string | null;
+  /** Present while the venue is published to the public page. */
+  publish?: VenuePublish;
+}
+
+/**
+ * A venue published behind a secret link: `<origin>/stageplots/<secret>`. The secret is
+ * made on the server (32 random bytes, base64url) and is never logged. It rides in config
+ * backups; a restore that keeps this server's own id drops it, so two servers never
+ * publish one link (see docs/features/stageplots.md#publishing).
+ */
+export interface VenuePublish {
+  /** 43 characters of base64url. */
+  secret: string;
+  /** The page it was published to, as an origin ("https://host"). */
+  origin: string;
+  /** When a publish last went through, as an ISO instant. */
+  publishedAt: string;
+  /**
+   * When this link (this secret on this page) was made, as an ISO instant: a publish, regenerate
+   * or move, never a republish. Not a secret: the Publish card reads the link again only when it
+   * changes. A state saved before it existed reads it as publishedAt.
+   */
+  linkAt?: string;
+  /** The last failure, said in the operator's words and never naming the secret; null once one goes through. */
+  lastError: { at: string; message: string } | null;
+  /** Converted backgrounds (by hash) the page holds under this secret. Sorted. */
+  publishedImages: string[];
+  /** Backgrounds this venue's plots draw that the page does not hold yet, by hash, sorted. Publish now tries them again. */
+  unpublishedImages: string[];
+  /**
+   * Shown on the page's landing page, its own address: the venue's name, plot count and link,
+   * to anyone who opens it. Off until turned on; kept through a regenerate and a page move,
+   * gone with an unpublish. See docs/ops/servicecue-on-the-web.md#the-landing-page.
+   */
+  listed: boolean;
+}
+
+/** A venue's publish state as a browser sees it: never the secret. The manage page reads the
+ *  link itself through GET /api/stageplots/venues/:id/link (VenueLink). */
+export type VenuePublishView = Omit<VenuePublish, "secret">;
+
+/** A venue as GET /api/stageplots, every stageplots:updated frame and every route answer carry it. */
+export type VenueView = Omit<Venue, "publish"> & { publish?: VenuePublishView };
+
+/** GET /api/stageplots/venues/:id/link: the venue's public link, or null while it is not published. The one answer with a secret in it. */
+export interface VenueLink {
+  url: string | null;
+}
+
+/** Why a secret waits to be removed from a page. "publishing" is a publish in flight: written
+ *  before its first request, so a secret is never sent anywhere the store does not know of. */
+export const PENDING_REASONS = ["address changed", "not taken back", "publishing", "regenerated", "restored over", "unpublished", "venue deleted"] as const;
+export type PendingReason = (typeof PENDING_REASONS)[number];
+
+/**
+ * A secret that may still be live on a page and that nothing here shows any more: an old link
+ * after a regenerate, a venue unpublished or deleted while its page could not be reached, a
+ * publish whose take-back failed, a link a restore wrote over. The publisher removes it from
+ * that page (a drop of the whole secret) whenever it can, and the editor shows what is left.
+ */
+export interface PendingRemoval {
+  secret: string;
+  /** The page it was published to. Removed only with that page's token. */
+  origin: string;
+  /** When it was queued, as an ISO instant. */
+  since: string;
+  reason: PendingReason;
+}
+
+/** A pending removal as a browser sees it: never the secret. */
+export type PendingRemovalView = Omit<PendingRemoval, "secret">;
+
+export type BackgroundOriginalMime = "image/png" | "image/jpeg" | "application/pdf";
+export type BackgroundSourceExt = "png" | "jpg";
+
+/**
+ * An uploaded drawing, converted once. Hashes are the content names the image
+ * store gives a file: the first 16 hex of its SHA-256.
+ */
+export interface Background {
+  id: string;
+  name: string;
+  /** What was uploaded. A PNG or JPEG is its own source; a PDF is kept beside
+   *  the images and never served. */
+  original: { hash: string; mime: BackgroundOriginalMime; bytes: number };
+  /** The raster the conversion reads: the upload itself, or the page the
+   *  browser rendered from a PDF. Kept so clean-up can be toggled later. */
+  source: { hash: string; ext: BackgroundSourceExt };
+  /** The WebP every plot draws. */
+  converted: { hash: string; width: number; height: number; bytes: number };
+  cleanup: boolean;
+  /** The PDF page the source was rendered from, 1-based, and how many the PDF has. */
+  pdfPage: number | null;
+  pdfPages: number | null;
+}
+
+/** A background as the API serves it: with the URLs of its converted image
+ *  and of the source raster it was converted from (the editor's Before). */
+export interface BackgroundView extends Background {
+  url: string;
+  sourceUrl: string;
+}
+
+/** What drawing a plot needs of its background: the image's URL ("" for one not to draw)
+ *  and its size. A BackgroundView is one; the published page makes its own. */
+export type PlotBackground = Pick<BackgroundView, "url" | "converted">;
+
+/** Every kind of item a plot can carry. */
+export const ITEM_TYPES = ["box", "circle", "zone", "cable", "conn", "symbol", "text"] as const;
+export type ItemType = (typeof ITEM_TYPES)[number];
+
+/** The nine symbols, sorted. Their drawings are renderer/main/stageplots/symbols.ts. */
+export const SYMBOL_KINDS = ["amp", "camera", "console", "drumkit", "keyboard", "micstand", "piano", "speaker", "wedge"] as const;
+export type SymbolKind = (typeof SYMBOL_KINDS)[number];
+
+export const TEXT_KINDS = ["label", "callout", "dimension"] as const;
+export type TextKind = (typeof TEXT_KINDS)[number];
+
+/** One point of a cable, in plot units. */
+export type CablePoint = [number, number];
+
+/**
+ * One drawn item, in plot units. x and y are the top-left of the unrotated box
+ * and rotation turns it about its centre, in degrees within (-180, 180]. A
+ * cable is its points; its x, y, w and h are their bounding box and it does
+ * not rotate. `color` is one of PATCH_COLORS, or null for the plot's ink.
+ */
+export interface PlotItem {
+  id: string;
+  type: ItemType;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  rotation: number;
+  label: string;
+  color: string | null;
+  notes: string;
+  /** What plugs in here, in order: input names. */
+  inputs: string[];
+  /** Only on a symbol. */
+  symbol?: SymbolKind;
+  /** Only on text. */
+  textKind?: TextKind;
+  /** Only on a cable: 2 to 50 points. */
+  points?: CablePoint[];
+  /** Only on a cable. */
+  dashed?: boolean;
+  /** Only on a connection point: the patch sheet device it follows. */
+  patchLink?: PatchLink;
+}
+
+/**
+ * A connection point's link to a device on a patch sheet. Read-only: the point takes the
+ * device's name and colour while the sheet can be read and the device is there, and lists
+ * the channels whose path runs through it. lastName and lastColor are what the device had at
+ * the last patch save, and what the point shows ("unlinked") when the sheet cannot be read or
+ * the device is gone. See docs/features/stageplots.md#patch-link.
+ */
+export interface PatchLink {
+  sheetId: string;
+  deviceId: string;
+  /** At most labelChars long. */
+  lastName: string;
+  /** One of PATCH_COLORS, or null. */
+  lastColor: string | null;
+}
+
+/** One patch channel whose path runs through a linked point's device, as a tap lists it. */
+export interface PatchChannelRow {
+  /** The console channel: "Ch 3", or the console's own name for it ("Mix 2"); "" when unset. */
+  channel: string;
+  /** The source (an input) or destination (an output). */
+  label: string;
+  /** The connector on the linked device it comes through: "SB-1/3". */
+  path: string;
+}
+
+/** What a tap on a linked point lists: the sheet's name and the channels through its device. */
+export interface PatchChannels {
+  sheet: string;
+  channels: PatchChannelRow[];
+}
+
+/**
+ * An item as the public page gets it. Never the link itself (no sheet or device id, no
+ * last name): a linked point's label and colour are the device's as resolved at publish
+ * time, and `patch` is present only on a linked point with channels to list.
+ */
+export type PublishedItem = Omit<PlotItem, "patchLink"> & { patch?: PatchChannels };
+
+export interface Plot {
+  id: string;
+  venueId: string;
+  name: string;
+  backgroundId: string | null;
+  /** How far the background is faded toward the paper, 0 to 1. */
+  bgFade: number;
+  items: PlotItem[];
+  /** Bumped by every change to the plot. */
+  version: number;
+}
+
+/**
+ * One Planning Center plan given a plot other than its venue's default, for
+ * that plan only. Kept after the plan has happened: it is the operator's
+ * record. Removed with its plot or its venue.
+ */
+export interface PlotOverride {
+  planId: string;
+  venueId: string;
+  /** One of the venue's plots. */
+  plotId: string;
+  /** The plan's date as Planning Center sorts it, as an ISO instant, so the
+   *  override can be named ("Sun 16 Nov") when the plan is past, further out
+   *  than the upcoming list, or Planning Center cannot be read. Null when it
+   *  was not known at the time. */
+  planDate: string | null;
+}
+
+export interface StagePlotsDoc {
+  venues: Venue[];
+  backgrounds: Background[];
+  plots: Plot[];
+  /** Sorted by planId, then venueId; one per plan and venue. A document
+   *  saved before overrides existed reads as []. */
+  overrides: PlotOverride[];
+  /** Secrets to remove from a page, sorted by origin then secret, one per pair. A document
+   *  saved before they existed reads as []. */
+  pendingRemovals: PendingRemoval[];
+}
+
+/** GET /api/stageplots, and every stageplots:updated frame. No secret: the crew's /stageplots reads it too. */
+export interface StagePlotsView {
+  venues: VenueView[];
+  backgrounds: BackgroundView[];
+  plots: Plot[];
+  overrides: PlotOverride[];
+  /** The pending removals' pages, ages and reasons; the in-flight ("publishing") ones and every secret left out. */
+  pendingRemovals: PendingRemovalView[];
+  /** What following the last Public link save could not do (stageplots-publish.ts), for the Publish card. Absent when it did it all. */
+  notice?: { at: string; message: string };
+  /** Why the page's landing page does not show the venues listed on it (an older Worker, a page that refused), for the Publish card. Absent when it does. */
+  landing?: { at: string; message: string };
+}
+
+/** A venue's `index` on the public page, as the server publishes it. */
+export interface PublishedVenue {
+  name: string;
+  notes: string;
+  /** Its plots, in tab order. */
+  plots: { id: string; name: string }[];
+  defaultPlotId: string | null;
+  /** The plot it showed when it was published, and why: the plan's override, or the default. */
+  shown: { plotId: string | null; reason: "plan" | "default" };
+  /** The plan the shown plot is for, when it is the plan's: its ISO date and Planning Center's own words. */
+  plan: { date: string | null; dates: string | null } | null;
+  /** The zone dates are shown in. */
+  timeZone: string;
+}
+
+/** One `plot/<id>` on the public page. */
+export interface PublishedPlot {
+  id: string;
+  name: string;
+  bgFade: number;
+  items: PublishedItem[];
+  /** Its background's size, and its hash once the page holds the image (null until then). */
+  background: { hash: string | null; width: number; height: number } | null;
+}
+
+export const STAGEPLOT_LIMITS = {
+  /** The largest PNG or JPEG upload, and the largest page raster. */
+  imageBytes: 12 * 1024 * 1024,
+  /** The largest PDF upload. */
+  pdfBytes: 25 * 1024 * 1024,
+  venues: 50,
+  plotsPerVenue: 20,
+  backgrounds: 50,
+  nameChars: 60,
+  notesChars: 500,
+  itemsPerPlot: 500,
+  inputsPerItem: 64,
+  labelChars: 60,
+  inputChars: 40,
+  cablePointsMin: 2,
+  cablePointsMax: 50,
+  /** A patch link's sheet and device ids. */
+  patchIdChars: 100,
+  /** Channels a tap lists for one linked point, on /stageplots and the public page. */
+  patchChannelsPerPoint: 128,
+  /** An item's smallest and largest width and height, in plot units. */
+  itemMinSize: 8,
+  itemMaxSize: 1000,
+  /** Overrides across every venue and plan, past ones included. */
+  overrides: 2000,
+  /** Pending removals the store holds. A restore and a failed take-back cannot refuse, so this is
+   *  far above what an action may queue (pendingRemovalsQueue). */
+  pendingRemovals: 1000,
+  /** Past this many, a regenerate or a publish is refused rather than queue another. */
+  pendingRemovalsQueue: 200,
+  /** A venue's address, in characters. */
+  slugChars: 60,
+  /** Old addresses a venue keeps answering to; past this the oldest goes. */
+  oldSlugs: 10,
+} as const;
+
+/** The plot canvas is this many units wide. */
+export const PLOT_UNITS_WIDE = 1000;
+
+/**
+ * A plot's unsaved items, kept on the server so the editor loses nothing to a reload, a
+ * closed tab or a crash (stageplot-drafts.json). One per plot. Never the plot itself: not on
+ * /stageplots, not published, until Save.
+ */
+export interface PlotDraft {
+  plotId: string;
+  /** The plot's version the draft was drawn on. Behind the plot's (its items changed since), it opens as saved elsewhere. */
+  baseVersion: number;
+  items: PlotItem[];
+  /** When it was last kept, as an ISO instant. */
+  savedAt: string;
+}
+
+/** What stageplots:drafts carries: which plots have a draft, and since when. Never the items. */
+export interface PlotDraftNotes {
+  drafts: { plotId: string; savedAt: string }[];
+}
+
+/** Broadcast with PlotDraftNotes whenever a draft is kept or goes. Not hydrated: the
+ *  editor reads GET /api/stageplots/drafts on mount. */
+export const STAGEPLOT_DRAFTS_CHANNEL = "stageplots:drafts";
+
+/** Broadcast with the whole StagePlotsView after every change. Not hydrated:
+ *  a page reads GET /api/stageplots on mount, like patch:updated. */
+export const STAGEPLOTS_CHANNEL = "stageplots:updated";

@@ -11,7 +11,7 @@ import { describe, it } from "node:test";
 import { FIXED_DOC_KEYS } from "../types/servicecue-publish.js";
 import { FakeReceiver, waitFor } from "./fixtures/publish-receiver.js";
 import { fixtureSource, fixtureState, PLANS } from "./fixtures/publish-source.js";
-import { framesOf, harness, installPublisherHooks, lastPut, logs, MANUAL, publishAll, sleep, TOKEN } from "./fixtures/publisher-harness.js";
+import { framesOf, freezeClock, harness, installPublisherHooks, lastPut, logs, MANUAL, passTime, publishAll, sleep, TOKEN } from "./fixtures/publisher-harness.js";
 import { backoffMs, ServiceCuePublisher } from "./servicecue-publisher.js";
 
 installPublisherHooks();
@@ -78,6 +78,18 @@ describe("what a cycle sends", () => {
     assert.equal(body("rundown-100-1002").isDefaultPlan, false);
   });
 
+  it("sends each layout's address and not the editor's own autoNamed flag, which the page never reads", async () => {
+    const h = await harness();
+    h.source.data.layouts = [
+      { id: "svl1", name: "Audio", slug: "audio", order: 0, columnRoles: [] },
+      { id: "svl2", name: "Layout 2", slug: "layout-2", order: 1, columnRoles: [], autoNamed: true },
+    ];
+    await publishAll(h);
+    const sent = JSON.parse(lastPut(h, "servicecue-layouts")!) as Record<string, unknown>[];
+    assert.deepEqual(sent.map((l) => l.slug), ["audio", "layout-2"]);
+    assert.deepEqual(sent.filter((l) => "autoNamed" in l).map((l) => l.id), [], "autoNamed left the building");
+  });
+
   it("sends a document again only when its text changed, and the edited one alone", async () => {
     const h = await harness();
     await publishAll(h);
@@ -132,6 +144,7 @@ describe("when Planning Center is read", () => {
   });
 
   it("reads the plan list every cycle inside a service window, and between windows only when the hour is up or something was edited", async () => {
+    freezeClock();
     const h = await harness({ dormantRefreshMs: 400 });
     await h.pub.start();
     await h.pub.runCycle();
@@ -147,12 +160,13 @@ describe("when Planning Center is read", () => {
     h.pub.nudge();
     await h.pub.runCycle();
     assert.equal(reads(), 3, "an edit to the landing page did not bring the read forward");
-    await sleep(450);
+    passTime(450);
     await h.pub.runCycle();
     assert.equal(reads(), 4, "between windows the list was not read when the hour was up");
   });
 
   it("reads each of the other plans every quarter hour inside a window and every few hours between", async () => {
+    freezeClock();
     for (const [dormant, soon, later] of [[false, "slowEveryMs", "dormantSlowEveryMs"], [true, "dormantSlowEveryMs", "slowEveryMs"]] as const) {
       const h = await harness({ [soon]: 120, [later]: 3_600_000 });
       h.source.data.dormant = dormant;
@@ -163,7 +177,7 @@ describe("when Planning Center is read", () => {
       assert.equal(reads(), 1);
       await h.pub.trickle();
       assert.equal(reads(), 1, `dormant ${dormant}: read again before it was due`);
-      await sleep(150);
+      passTime(150);
       await h.pub.trickle();
       assert.equal(reads(), 2, `dormant ${dormant}: not read when it was due`);
     }
@@ -566,6 +580,7 @@ describe("the page forgetting what it was sent", () => {
 
   it("leaves alone what the page still holds, and asks only now and then", async (t) => {
     const lines = logs(t);
+    freezeClock();
     const h = await harness({ reconcileMs: 400 });
     await publishAll(h);
     const before = h.page.requests.length;
@@ -573,7 +588,7 @@ describe("the page forgetting what it was sent", () => {
     await h.pub.runCycle();
     assert.equal(h.page.statusRequests(), 1, "the page was asked what it holds on every cycle");
     assert.equal(h.page.requests.length, before, "documents the page holds were sent again");
-    await sleep(450);
+    passTime(450);
     await h.pub.runCycle();
     assert.equal(h.page.statusRequests(), 2);
     assert.equal(h.page.requests.length, before + 1, "asking was more than asking");

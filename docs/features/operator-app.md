@@ -27,11 +27,14 @@ done. Dismiss it and it stays dismissed.
 | Group | Pages |
 |---|---|
 | — | **Home** |
-| Content | **ServiceCue**, **Patch** |
+| Content | **ServiceCue**, **Patch**, **Stage plots** |
 | Screens | **Screens**, **Mic slots**, **Video feeds** |
 | Devices | **Automation** |
 | Services | **Plan**, **History**, **Baptisms** |
 | Settings | **Integrations**, **Messages**, **Branding**, **Advanced** |
+
+That is the default arrangement. Every install can rearrange it: see
+[Customizing the sidebar](#customizing-the-sidebar).
 
 **Screens** carries a number when devices have been heard on the network that are
 not set up, from any page, and it goes when they are set up or stop being heard.
@@ -43,6 +46,67 @@ its right edge to resize it, or collapse it to icons; on a phone it becomes a
 drawer. Double-click the resize handle to reset the width — on a touch screen,
 tap and hold it for a **Reset sidebar width** item, since a finger has no
 double-click.
+
+### Customizing the sidebar
+
+Right-click the sidebar (tap and hold on a phone) and choose **Customize
+sidebar…**, or use **Settings → Advanced → General → Layout → Sidebar**. The real
+sidebar becomes editable in place, the page beside it dims, and a tray docks under
+the page (a bottom sheet on a phone). The arrangement is saved as you go, on the
+server, so every browser on every device sees the same sidebar and a config backup
+carries it. **Done**, or Escape, closes the mode; in a field, Escape first
+cancels that edit. The tray's **Context bar** tab arranges the
+[context bar](context-bar.md#customizing-the-bar) the same way, in place,
+without leaving the mode.
+
+| To | Do |
+|---|---|
+| Reorder a page, or move it to another section | Drag it. A caret shows where it will land |
+| Put a page beside Home | Drag it into the unnamed group at the top |
+| Hide a page | Drag it out of the sidebar, or press its **×**. It goes to the tray and still opens from a link, from Home and from settings search |
+| Bring a page back | Click its tile in the tray to return it to the section it came from, or drag the tile to a place |
+| Move a section | Drag its heading by the grip |
+| Rename a section | Click its name |
+| Remove a section | Press **×** on its heading. Its pages go to the tray, and the toast offers **Undo** |
+| Add a section | **New section**, in the sidebar or the tray. An empty section is not drawn outside the mode |
+| Start over | **Restore default sidebar** in the tray, with **Undo** |
+
+**Consoles** holds consoles only: new consoles join it at the end, a console
+cannot leave it and a page cannot enter it (a drop that would break this shows no
+caret and does nothing). It can be renamed and moved, not removed. Hiding a
+console turns off its **List in the sidebar** setting (see [Consoles](#consoles)),
+so the two places always agree, and **Restore default sidebar** leaves that
+setting alone.
+
+**Advanced** can move but never hide: it carries the update and duplicate-server
+warnings, and it is the way back to this editor.
+
+**The name and the logo.** In the mode the app name is a field: it is Branding's
+**App name**, the same setting. The logo opens a menu with **Replace logo…**
+(Branding's logo dialog), **Recolor to match theme** and **Open Branding**. Once a
+home-screen icon exists, the recolor switch hands over to Branding, which redraws
+the icon with it.
+
+**Without the mode.** Right-click a page (or tap and hold it) for **Hide** and
+**Move to**; both carry **Undo** on their toast. A console offers **Hide** only.
+
+A collapsed sidebar opens out while you customize and folds back on **Done**,
+and its headings are thin dividers.
+
+A page added in a later release appears in its default section on an install
+that has already customized its sidebar, and a page or console that no longer
+exists is left out, said on a `[sidebar]` line in the [log](../ops/updates-and-logs.md).
+A refused save is logged there with its reason. A `sidebar-config.json` that
+breaks the rules at start-up is copied beside it as
+`sidebar-config.json.invalid-<time>`, the sidebar is drawn from what in it can be
+read, and the next save replaces the original. A page keeps its place when its
+route is renamed: the arrangement names pages by a stable id, not by address.
+
+Each change's **Undo** puts back that change only: a newer change takes the
+older toast down. A change's toast appears once the server has accepted it. One
+the server refuses shows its reason instead, and the sidebar goes back to what is
+saved. Two browsers customizing at once see each other's changes as they are
+saved.
 
 **On a phone the hamburger is the only way in.** There is no swipe from the left
 edge of the screen — that edge belongs to the browser's own back gesture, and a
@@ -135,17 +199,32 @@ somebody has edited is left as it is. Placed on a wall or console, it draws the
 same rows with no buttons.
 
 A row is **critical** (red) or **warn** (amber), critical first. The tile's edge
-takes the colour of the worst problem showing. At the medium size the list is
-three rows and **+N more**, which opens the rest inside the tile.
+takes the colour of the worst problem showing. The tile never scrolls and nothing
+in it overlaps: it measures its box and shows as many whole rows as fit, then
+**+N more**; on Home, **+N more** opens every problem in an overlay (the one
+Screens uses), each row with its full-size Snooze and fix, and the snoozed list,
+open if the tile was showing it, and closing it returns focus to the control.
+On a wall or console, and on Home while it is being arranged, it stays a
+count. The healthy line keeps its own line at the foot and drops out when
+there is no room for it beside a row. Buttons shrink as the box narrows, then
+Snooze goes, then the fix, and titles and reasons end in an ellipsis. The same
+holds wherever it is placed, on Home or on a layout.
 
 | Problem | When it appears | Severity | The fix |
 |---|---|---|---|
 | Readiness | Each readiness check that fails, in the order to fix them (Planning Center, a plan, a view of your own, every screen has a view). "Screens online" is not repeated here: the next row says it per screen | Warn | The page and control the check names |
+| Plan held live | Auto mode is still following the plan past its planned end and the hour's grace, because Planning Center reports it live: "Still following Sunday Gathering (November 16, 2026)", with how long past its end. Nothing time-based moves off a live service, so a plan left live with no SERVICE END header, or with Live left on its last item, is followed until Planning Center says it has ended. Decided by the server, and gone once the service ends or another plan is picked | Warn | **Pick a plan** (Plan settings) |
 | Wireless battery | A mic assigned to a slot whose runtime is less than the time the service has left (plan length less elapsed). Where the receiver reports no runtime, or the time left is not known, 20% or less. A pack on a charger is not listed | Critical while live, warn otherwise | **Open slots** (the Mic slots page, see [Slots](../slots.md)) |
 | Wireless offline | A mic assigned to a slot that is not reporting, while a service is live | Critical | **Open slots** |
+| Duplicate server id | Another server answers discovery with this server's id, one row per address: screens bound here can switch between the two. Found by the server itself (see [Two servers with one id](../kiosk-devices.md#two-servers-with-one-id)) | Warn; critical while live | **Open setting** (the Server id field on Advanced → Network) |
 | Screen offline | A screen with a view and no browser attached, with when it was last seen | Warn; critical while live | **Open screen** (the screen's card) |
 | Recorder idle | The service is live and an enabled, connected REAPER or OBS is not recording | Warn | **Start recording**, which presses the built-in recording command in place, so Simulate and Disarm apply as they do to the Recording tile |
 | Integration down | An enabled integration in error or disconnected for more than 30 seconds, as this browser has seen it | Warn; critical for Planning Center while live | **Open integration** (its card) |
+| Note categories | Planning Center note categories, on the ServiceCue landing page's service types, that no category role claims, so no layout can show them as a column: "2 note categories are in no column". Counted as the **Categories in no role** list on the ServiceCue layouts page counts them: over the landing types, each name once (the notice at the top of that page names each once too, under every service type it is in). Not shown before any role exists, or when no landing type is ticked | Warn | **Open roles** (the Category roles section of the ServiceCue layouts page) |
+
+The note-categories row reads ServiceCue's roles and the landing types' categories when Home opens and again when the
+live plan changes, never on a timer, and only with Planning Center connected and a landing type ticked. A read that
+fails leaves it unknown, with a `[home]` line on [`/log`](../ops/updates-and-logs.md).
 
 A source that has not answered yet adds nothing: the page does not tell you to
 fix something it has not heard about, and a half-loaded Home draws no severity
@@ -155,9 +234,16 @@ until it knows whether a service is live.
 booth and the iPad agree on what is handled. Outside Planning Center it lasts
 12 hours, and with it a snooze still lapses after 7 days if no service starts
 in that time. At most 500 can be held at once. A problem that clears and comes back stays snoozed, but one that gets
-worse (a warn that becomes critical) shows again. **Show N snoozed** at the foot
-lists what is hidden, each with **Unsnooze**. Snoozes are not part of a
-configuration backup and restoring one does not bring any back.
+worse (a warn that becomes critical) shows again. **Show N snoozed**, at the
+foot of the tile, replaces the problem list with **Snoozed · N**: what is
+hidden, each with **Unsnooze**, as many as fit and **+N more** for the rest.
+**Hide snoozed**, in that list's header, goes back to the problems, and so does
+a new problem appearing or a snoozed one getting worse; unsnoozing one leaves
+the list open. A tile with no room for a row of that list does not offer it. A
+Snooze or Unsnooze that fails says which problem and why ("Could not snooze
+Screen 2 is offline: ..."), and a fix that fails says why, in place of the
+tile's title for five seconds, so it never takes a row's room. Snoozes are not part of
+a configuration backup and restoring one does not bring any back.
 
 ### Expanding a tile
 
@@ -196,7 +282,7 @@ by accident and too public to get wrong.
 for three seconds; a second press inside that stops, and one after it lapses is
 a first press again. **Start** shows a spinner until the recorder itself reports
 that it is recording, and says so on the tile if it has not within ten seconds.
-A failed action names the problem on the tile for five seconds.
+A failed action says what went wrong on the tile for five seconds.
 
 Start and Stop press the built-in commands **REAPER recording** and **OBS
 recording** (`reaper_record_on` / `_off`, `obs_record_on` / `_off`), the same
@@ -244,6 +330,12 @@ afterwards, which is what lets you leave a deliberate gap between two widgets.
 Dropping onto an occupied cell pushes what was there downward rather than
 covering it, and so does growing a placed card, from its size chips or its
 right-click menu: it keeps its cell and the cards it grows onto move down.
+
+A gap between two rows of cards is for editing. Outside edit mode a row with no
+visible card in it closes up, so a card hidden by its **When** setting, or an
+empty row left in the layout, never leaves a blank band; a gap beside a card in
+the same row stays as placed. Editing shows the whole grid, so a card can still
+be dropped into an empty row.
 
 **Pack tight**, beside the pencil while editing, throws every placement away and
 lets the page flow again. It appears only once something has actually been
@@ -296,6 +388,54 @@ Stage, Transcription, ServiceCue, SPL Rundown, Calendar or a Custom Layout, and 
 a custom layout whether it is a wall view or a control surface), **Import layout…**
 (see [Moving a view](../moving-a-view.md)) and **Refresh all**, which reloads every
 connected display.
+
+### Previews
+
+Each card's preview is the screen's own display page, scaled down to fit. A preview
+loads once its card is within 200px of the part of the page in view, and at most
+twelve load at a time; a card past that shows **Preview paused — tap to load**. A
+preview is black until its page has drawn and is receiving live updates, then fades
+in.
+
+One that has not managed that within ten seconds stays black and says **Preview
+didn't load**, with the line *This preview only: the screen's own status is
+above.* and a **Retry**. The line is there because the notice is about the picture
+on the card, not the screen: the screen's own **Online** is beside its name. `/log`
+gets a line naming the card: `[preview] <name>: the preview did not go live
+(<why>)`, where the reason is `the page did not load` (the frame loaded an error
+page instead) or `no answer in 10 s`.
+
+Leaving Screens keeps the page, hidden, for ten minutes. Come back within that and
+every preview that was showing is there at once, still live, with no reload, and
+the page is scrolled to where you left it, so the cards you were looking at are the
+ones still showing. The ten minutes start again each time you leave. After that, or
+after reloading the browser tab, the page opens at the top and the previews load
+again as above.
+
+A kept preview is never a still passing for live. Each preview tells its card
+whether it is receiving live updates, and the card asks again as you come back. One
+that has stopped stays on the card, dimmed and grey, under a **Not live** chip with
+**Retry**, until it is live again:
+
+| Chip | Means |
+|---|---|
+| **Not live · updated just now** | its updates stopped less than a minute ago |
+| **Not live · updated N min ago** | its updates stopped N minutes ago |
+| **Not live** | asked as you came back, the preview did not answer within three seconds, so when it stopped is not known |
+
+A stream that stays open but goes quiet counts as stopped: the server sends every
+page a heartbeat every 20 seconds, and a page that has heard nothing for 50 seconds
+takes its stream as down and reopens it once. Retry loads that preview afresh.
+
+The page is kept only while the browser shares one event stream between all its
+tabs and previews, which it does by default, and while every preview on it does too.
+A browser that cannot (one with no SharedWorker, one where it has been turned off,
+or the app opened with `?transport=poll`), or a preview that has fallen back to a
+stream of its own, would hold a connection for every hidden preview. So there
+leaving Screens drops the page as it always did, and `/log` says why, once per page
+load: `[preview] not keeping the Screens previews while away: <reason>`, with a
+reason such as `poll transport`, `worker abandoned: …` or `a preview is off the
+shared event stream`.
 
 ### The settings panel
 
@@ -474,7 +614,8 @@ list. That suits a console that lives on a stage display as a control surface an
 has no business being a place the operator works from. Turn off **List in the
 sidebar** in the [View settings](#view-settings) of the console or the
 [Screen settings](#screen-settings) of a screen showing it, or **Show in the
-sidebar** in the menu of a console no screen shows. It is a setting
+sidebar** in the menu of a console no screen shows, or choose **Hide** on its
+row in the sidebar (see [Customizing the sidebar](#customizing-the-sidebar)). It is a setting
 on the view, `showInSidebar`, and a console with none is listed — so every
 console you had before it existed still is. Only the *list* changes. A console kept out of it
 keeps its live controls on every screen showing it, still opens at
@@ -609,7 +750,9 @@ behind this are listed in the [API](../reference/api.md).
 
 ## Advanced
 
-**Settings → Advanced** holds the settings you touch rarely. It is split into tabs, and
+**Settings → Advanced** holds the settings you touch rarely, among them the
+[Public link](servicecue-and-baptisms.md#on-the-web) that publishes ServiceCue to a page of your own,
+on its own **Public link** tab. It is split into tabs, and
 each tab has its own address, `/settings/advanced/<tab>`, so a tab can be bookmarked or
 sent to someone. `/settings/advanced` opens General; an address that is not a tab shows
 General too. The sidebar keeps **Advanced** lit on every tab. **Server log** at the
@@ -663,19 +806,22 @@ the reconnect timings while **Wake around service times** is off, is not searche
 
 ## Read-only links to hand out
 
-Two pages are meant to be sent to people outside Production, and are read-only
+Three pages are meant to be sent to people outside Production, and are read-only
 for that reason:
 
 | | |
 |---|---|
 | `/history` | service history, timing and attendance, without the controls that change it |
 | `/patch` | this week's stage patch, following the live or next plan on its own |
+| `/stageplots` | every venue's stage plots, and `/stageplots/<venue>` for one (its QR code) |
 
-`/history` also renders with none of the app's chrome — no sidebar, no context
-bar — since the person it is sent to has nothing else on the page to reach.
+`/history` and `/stageplots` also render with none of the app's chrome — no sidebar,
+no context bar — since the person they are sent to has nothing else on the page to reach.
 `/patch` keeps the ordinary shell; it is read-only in what it lets you do, not in
 what surrounds it.
 
 The operator's own versions are in the sidebar: **History** (which is
 `/history/manage`, and keeps Edit times, Merge, Rebuild from raw and Delete in
-a service's header) and **Patch**, whose editor is at `/patch/edit`.
+a service's header), **Patch**, whose editor is at `/patch/edit`, and **Stage
+plots** (which is `/stageplots/manage`, with Edit), whose editor is at
+`/stageplots/edit`.

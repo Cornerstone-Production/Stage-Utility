@@ -88,13 +88,16 @@ the running server reports its own path as `dataDir` at `/api/version`:
 | `osc-targets.json`, `rosstalk-targets.json`, `rosstalk-settings.json` | control targets |
 | `wireless-connections.json` | receivers and chargers (never their passwords) |
 | `kiosk-devices.json` | which machine drives which screen |
-| `bar-config.json`, `saved-colors.json` | the context bar's arrangement, and your colors |
+| `bar-config.json`, `sidebar-config.json`, `saved-colors.json` | the context bar's and the sidebar's arrangements, and your colors |
 | `baptism-triggers.json`, `scores-favourites.json` | per-plan baptism items, followed teams |
 | `history-milestones.json` | the dates you marked on the History trend chart |
 | `video-feeds.json` | the [video feeds](../integrations/video-feeds.md) and the relay's ports, never a camera or publish password |
 | `messaging.json` | the stage-message groups, quick messages and quick replies |
 | `host-names.json` | the host names the server has been told to accept or ignore, on the Host names card |
-| `branding-images/`, `layout-images/` | uploaded images, named by content hash |
+| `stageplots.json` | [stage plot](../features/stageplots.md) venues, plots, backgrounds and per-plan overrides |
+| `stageplot-drafts.json` | the [stage plot](../features/stageplots.md#save-and-discard) editor's unsaved drafts |
+| `branding-images/`, `layout-images/`, `stageplot-images/` | uploaded images, named by content hash |
+| `stageplot-originals/` | uploaded stage-plot PDFs, kept but never served |
 
 **What it observed** — deliberately not restored, because it describes this
 machine's history rather than how you set it up:
@@ -111,7 +114,7 @@ machine's history rather than how you set it up:
 | `automation-log.json` | the Activity log |
 | `signals.json` | the values Companion reads |
 | `stream-starts.json` | when each platform was first seen live |
-| `update-notices.json` | which release has been announced |
+| `update-notices.json` | which release has been announced, the after-update notice until it is dismissed, and the running release's notes for What's new |
 | `video-ffmpeg.json` | the ffmpeg path set in Advanced: it names a file on this machine, so a restore onto another one must not carry it |
 | `video-seen.json` | when each video feed was last confirmed live |
 
@@ -351,12 +354,71 @@ says, as a branding upload is checked, while a layout image is held to only what
 a layout upload checks, which has never included its contents. If any file or
 image breaks a rule, the whole restore is refused with each one and the reason,
 and nothing on the machine changes: nothing is written, no stored credential is
-cleared, and nothing that runs in the background is paused.
+cleared, and nothing that runs in the background is paused. Once the files pass, the
+live poller, the stage controller's timers and the stage plots publisher are paused
+before anything is written; if any of them cannot be, the restore is refused, the
+others are resumed, nothing is written, and `[config-snapshot]` names which.
 
 - A restore never writes `secrets.bin` or `encryption.key`. A credential found
   inside a config file (a wireless password, an integration's API key) is dropped
   rather than stored, and a screen binding's token is restored empty, so the
   screen pins a new one when it next connects.
+- **The server id.** Kiosks and Mac outputs bind to a server by its id
+  (`serverId` in `settings.json`), and a config carries the id of the server it
+  was saved on. When that is not this server's id, **Upload & restore** and
+  **Recall** say "This config was saved on another server." and ask **Use the
+  config's server id**, unticked. Unticked, this server keeps its own id, which
+  is right for a second box, and the only safe answer while the original still
+  runs: two servers with one id both answer the same screens, which then switch
+  between them. Ticked, it takes the config's id and its screen bindings
+  (`kiosk-devices.json`), so that server's screens and Mac outputs follow this
+  one; use it only when this box replaces that one. A config whose server never
+  set up a screen has no bindings to take, and this server's own are released
+  instead, as below. A config that carries no id
+  (absent or `null`), or this server's own, asks nothing, and this server keeps
+  its id. Either decision is logged on `[config-snapshot]` when the two ids
+  differ. A restore through the API keeps this server's id unless it says
+  otherwise ([API](../reference/api.md)).
+- **Screen bindings follow the id.** A config's bindings are written only when
+  its id is taken (this server's own config, or ticked). A restore that keeps
+  this server's id but brings the config's screens (its `settings.json`), or
+  takes another server's id from a config with no bindings in it, **releases**
+  every screen set up on this server: screen ids are counters
+  (`display-2`) that mean a different screen on every server, so a device left
+  bound would show whatever the config calls `display-2`. Each released device is
+  named on `[config-snapshot]`, shows under **Not set up yet**, and is set up again
+  from Screens. Whenever a restore or recall will do this, and a screen is set up
+  here, its dialog says "Screens set up on this server will be released and need
+  setting up again.", including for a config with no server id, which asks
+  nothing else; with the box ticked, only when the config brings no bindings. A bundle with no `settings.json` changes no screens, and leaves
+  this server's bindings as they are. While a restore lands, nothing writes the
+  bindings: a screen's probe, heartbeat or first enrolment skips its write (the enrolment still opens its display), and setting a screen up or
+  releasing one is refused with a `503` until the server is back, so nothing puts the bindings from
+  before the restore back over the restored file.
+- **Stage plots links are merged, never lost.** A published venue's secret link is in
+  `stageplots.json`, and a restore merges the bundle's with the live file's so that no
+  link is left live on the page with nothing here that knows it, and none that was
+  revoked comes back:
+  - a link both files hold on a venue stays published, whatever the ids say;
+  - otherwise a bundle's link comes back published only when the config's id is taken
+    from another server (ticked), or onto a fresh install (no stage plots yet, or no
+    venues). Restoring this server's own older config does not bring back a link revoked
+    since: the venue comes back unpublished and the link is queued for removal;
+  - another server's config, with this server's id kept, brings its venues back
+    unpublished, and its links stay with that server;
+  - every live link the result does not hold (one published after the backup, the newer
+    one after a regenerate) is queued for removal, and removed when the server starts.
+    Restoring an older backup therefore takes down links made since, even ones nobody
+    revoked: publish those venues again for new links;
+  - a live `stageplots.json` that does not parse is never taken for a fresh install: no
+    bundle link comes back published, and each is queued for removal, since the live file
+    may have revoked it. One that parses but fails its check is read for its links alone;
+    a link in it whose secret or page address is malformed cannot be removed by any page
+    and is dropped, counted on `[config-snapshot]`.
+
+  The stage plots publisher is paused while a restore lands: every action, a venue delete
+  and **Remove now** answer `503` until the server is back. Logged on
+  `[config-snapshot]` with how many venues came back unpublished and links were queued.
 - An automation rule with fields that need attention restores as it was saved,
   showing Needs setup, as it does after an upgrade; a command name that would clash
   or is not usable refuses the restore.

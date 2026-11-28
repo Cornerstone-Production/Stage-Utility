@@ -24,9 +24,10 @@ export interface TrendRecording {
    *  recordings are not plotted: a service with no counter is not a service of
    *  zero people. */
   peakOccupancy: number | null;
-  /** The loudest reading of this recording on the operator's PRIMARY Smaart
-   *  metric. Null when nothing was recorded, or when this browser surfaces no
-   *  metric the recording carries — the same rule the day-list rows apply. */
+  /** The loudest reading of this recording on the Trends sound metric, one for
+   *  the whole card (see sound-metric.ts). Null when nothing was recorded, or
+   *  when the recording carries no reading on that metric: no point, rather
+   *  than another metric's figure. */
   peakDb: number | null;
   /**
    * The recording has ENDED.
@@ -120,6 +121,27 @@ export const COMPARABLE_ABOVE: Record<TrendMeasure, number> = {
   sound: 0,
 };
 
+/**
+ * How many decimals a measure prints, and so the precision its tile's figures
+ * are ROUNDED to. Whole people; tenths of a decibel.
+ *
+ * ONE definition, read by `typeTrends` when it rounds the headline and the prior
+ * average AND by the card when it prints them, so what is printed is exactly
+ * what was rounded. Rounding to whole units here and printing tenths there is how
+ * a 113.91 dB peak read "114.0 dB": a figure that cannot carry the precision it
+ * is printed at.
+ */
+export const DECIMALS: Record<TrendMeasure, number> = {
+  attendance: 0,
+  sound: 1,
+};
+
+/** Round to `dp` decimal places. */
+export function atPrecision(v: number, dp: number): number {
+  const f = 10 ** dp;
+  return Math.round(v * f) / f;
+}
+
 /** How many DAYS a tile's SPARKLINE draws, and the only thing this bounds. The
  *  change and the chart are both bounded by the RANGE CONTROL — see `rangeSpan`
  *  — so the sparkline is the last eight days the range contains, not the last
@@ -212,25 +234,6 @@ export interface TrendClock {
  * to come, and treating it as one would hold the tile in its partial-day mode
  * all day.
  */
-/**
- * Which zone a browser should answer "what day is it" in.
- *
- * In the server's own order: the operator's SETTING first, then the SERVER's
- * host clock, which is what `appTimeZone()` resolves to when nothing is set.
- *
- * The last fallback is this browser's own zone, and it is only reached when
- * stage state has not arrived yet. Reaching for it sooner is the bug: a UTC
- * server viewed from a laptop in Chicago would have the page deciding the day
- * ended five hours before the server did, and the two would disagree about
- * which Sunday a 7pm service belongs to.
- */
-export function appZoneOf(
-  state: { timezone?: string | null; hostTimezone?: string | null } | null | undefined,
-  browserZone: TimeZone,
-): TimeZone {
-  return state?.timezone ?? state?.hostTimezone ?? browserZone;
-}
-
 export function trendClock(
   now: number,
   zone: TimeZone,
@@ -704,8 +707,10 @@ export function typeTrends(
       ? mean(basisDays.map((d) => combineFirst(d.values, basisSlice(d), measure)))
       : null;
 
-    const rounded = latest == null ? null : Math.round(latest);
-    const priorRounded = priorMean == null ? null : Math.round(priorMean);
+    // To the measure's OWN precision, never whole units: see DECIMALS. Whole
+    // units are right for a head count and wrong for a level read to a tenth.
+    const rounded = latest == null ? null : atPrecision(latest, DECIMALS[measure]);
+    const priorRounded = priorMean == null ? null : atPrecision(priorMean, DECIMALS[measure]);
     /** Both figures are there, and the prior one is something to compare
      *  against. Narrows for the type checker as well as reading once. */
     const comparable = rounded != null && priorRounded != null && priorRounded > COMPARABLE_ABOVE[measure];

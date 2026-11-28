@@ -9,7 +9,9 @@ import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
 
 import type { LayoutObject } from "@main/types/views";
+import { visibleCards } from "./home-cards.js";
 import {
+  boxesForPage,
   boxesOf,
   clampCol,
   overlaps,
@@ -245,5 +247,57 @@ describe("the drop area", () => {
     const boxes = boxesOf([card("a", "s", { col: 1, row: 1 }), card("b", "l", { col: 2, row: 3 })]);
     // b ends on row 4, so the page must draw at least a couple of rows beyond it.
     assert.ok(rowsNeeded(boxes) >= 6, `${rowsNeeded(boxes)} rows is not past the last card`);
+  });
+});
+
+describe("a page drawn for reading", () => {
+  // The layout that left ~720px blank on a real Home: Needs attention XL in rows
+  // 1-2, nothing in rows 3-4, a live-only card in row 5, three Smalls in row 7.
+  const layout = (): LayoutObject[] => [
+    card("attention", "xl", { col: 1, row: 1 }),
+    {
+      ...card("live", "m", { col: 1, row: 5 }),
+      home: { size: "m", when: "live", col: 1, row: 5 },
+    } as LayoutObject,
+    card("rec", "s", { col: 1, row: 7 }),
+    card("spl", "s", { col: 2, row: 7 }),
+    card("screens", "s", { col: 3, row: 7 }),
+  ];
+  const rowsOf = (boxes: readonly Box[]) => boxes.map((b) => `${b.id}:${b.col}:${b.row}`);
+
+  test("a stray empty row in the layout closes up", () => {
+    const all = layout().filter((o) => o.id !== "live");
+    assert.deepEqual(rowsOf(boxesForPage(all, false)), [
+      "attention:1:1", "rec:1:3", "spl:2:3", "screens:3:3",
+    ]);
+  });
+
+  test("a card hidden by its when setting gives its rows back", () => {
+    // Standby: the live-only card is not in the visible list, so rows 3-6 are
+    // all empty and the Smalls sit straight under the XL.
+    const standby = visibleCards(layout(), "idle");
+    assert.deepEqual(rowsOf(boxesForPage(standby, false)), [
+      "attention:1:1", "rec:1:3", "spl:2:3", "screens:3:3",
+    ]);
+    // During a service the same layout keeps the live card, with the stray
+    // rows 3-4 still closed.
+    assert.deepEqual(rowsOf(boxesForPage(visibleCards(layout(), "live"), false)), [
+      "attention:1:1", "live:1:3", "rec:1:4", "spl:2:4", "screens:3:4",
+    ]);
+  });
+
+  test("editing keeps the whole grid, empty rows included", () => {
+    assert.deepEqual(rowsOf(boxesForPage(layout(), true)), rowsOf(boxesOf(layout())));
+  });
+
+  test("a gap beside a card stays where it was placed", () => {
+    const beside = [card("a", "s", { col: 1, row: 1 }), card("b", "s", { col: 3, row: 1 })];
+    assert.deepEqual(rowsOf(boxesForPage(beside, false)), ["a:1:1", "b:3:1"]);
+  });
+
+  test("a tall card keeps every row it spans", () => {
+    const spans = [card("big", "l", { col: 1, row: 1 }), card("s", "s", { col: 3, row: 4 })];
+    // Rows 1-2 are the Large's, row 3 is empty, row 4 holds the Small.
+    assert.deepEqual(rowsOf(boxesForPage(spans, false)), ["big:1:1", "s:3:3"]);
   });
 });

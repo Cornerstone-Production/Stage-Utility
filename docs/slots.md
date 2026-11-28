@@ -368,7 +368,8 @@ Two modes, set on the Plan page:
 | **Within a type** | a dropdown of the active service types | that type's plans, Default first and then each upcoming date |
 | **Upcoming plans** | the date and the type, e.g. "Wed Sep 10 · Youth Night" | every active type's plans in date order |
 
-In **Upcoming plans** the middle's dropdown lists the next ten plans and a
+In **Upcoming plans** the middle's dropdown lists ten plans with the one you are
+on in the middle, so the dates before it stay in reach after you jump ahead, and a
 **Defaults…** group with each active type's default. The arrows do not wrap: at
 either end of the list the arrow is simply disabled.
 
@@ -380,7 +381,9 @@ listed plan rather than on the top of the week.
 The list covers the last seven days and the next sixty, refreshed from Planning
 Center at most every five minutes. When Planning Center cannot be reached the
 switcher shows the plan the screens are following, disables the arrows and says
-"Planning Center unreachable"; the boards on screen are still editable.
+"Planning Center unreachable"; the boards on screen are still editable. That answer
+is held for thirty seconds, so however many pages are open, Planning Center is asked
+again at most twice a minute while it is down.
 
 Switching with unsaved edits asks first, the same question leaving the page asks. A
 new tab, or a reload, always opens on the plan the screens are following: where the

@@ -35,6 +35,13 @@ describe("seedRoles", () => {
     assert.deepEqual(seedRoles([]), []);
   });
 
+  test("an id another role already has, or another name reduces to, gets a suffix", () => {
+    // A role keeps its id through a rename or losing its category, so a category it
+    // was seeded for can come back to be seeded again; "A&V" and "A V" share an id.
+    assert.deepEqual(seedRoles(["Graphics"], ["role-graphics"]).map((r) => r.id), ["role-graphics-2"]);
+    assert.deepEqual(seedRoles(["A&V", "A V"]).map((r) => r.id), ["role-a-v", "role-a-v-2"]);
+  });
+
   test("names that differ only in case collapse to one role", () => {
     // "EG 1 (Lead)" and "EG 1 (LEAD)" both exist in the wild.
     assert.equal(seedRoles(["EG 1 (Lead)", "EG 1 (LEAD)"]).length, 1);

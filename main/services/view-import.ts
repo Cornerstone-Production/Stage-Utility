@@ -15,7 +15,7 @@ import { viewsStore } from "./views-store.js";
 import { settingsStore } from "./settings-store.js";
 import { slotsStore, type NewBoard } from "./slots-store.js";
 import { stripResolvedFields } from "./slot-resolver.js";
-import { patchStore } from "./patch-store.js";
+import { PatchLinksNotUpdated, patchStore } from "./patch-store.js";
 import { presetsStore } from "./presets-store.js";
 import { scrub } from "./scrub.js";
 import { notesStore } from "./notes-store.js";
@@ -25,6 +25,7 @@ import { oscStore } from "./osc-store.js";
 import { rosstalkStore } from "./rosstalk-store.js";
 import { saveLayoutImageBytes } from "./layout-image-store.js";
 import { isSafeKey } from "./safe-key.js";
+import { isRecord } from "../types/is-record.js";
 import { hasLegacyGridFields, migrateBoards } from "./slot-boards.js";
 import { walkLayoutObjects } from "./view-refs.js";
 import { isLayoutShape } from "../types/views.js";
@@ -42,8 +43,8 @@ import type { NotesContent } from "./notes-store.js";
  * would otherwise reject on its own write path are rejected here too.
  */
 function assertBundle(b: unknown): asserts b is ViewBundle {
-  const o = b as Record<string, unknown> | null;
-  if (!o || typeof o !== "object" || Array.isArray(o)) throw new Error("import — not a JSON object");
+  if (!isRecord(b)) throw new Error("import — not a JSON object");
+  const o = b;
   if (o.kind !== "stage-utility-view") {
     // Named, because picking the config snapshot by mistake is the likely error
     // and "invalid file" would teach nobody anything.
@@ -127,8 +128,8 @@ function assertBundle(b: unknown): asserts b is ViewBundle {
       if (typeof e.sheetId !== "string" || typeof e.sheetName !== "string") {
         throw new Error("import — a patch variant entry does not name its sheet");
       }
-      const v = e.variant as Record<string, unknown> | null;
-      if (!v || typeof v !== "object" || Array.isArray(v)) {
+      const v = e.variant;
+      if (!isRecord(v)) {
         throw new Error(`import — the patch variant for "${e.sheetName}" is not an object`);
       }
       if (typeof v.id !== "string" || !v.id || typeof v.name !== "string") {
@@ -432,12 +433,23 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
     // explains, re-implemented here without the guard.
     const add: typeof svIncoming = [];
     for (const l of svIncoming) {
+      if (!isRecord(l) || typeof l.id !== "string" || typeof l.name !== "string") {
+        skipped.push("a ServiceCue layout with no id or name");
+        continue;
+      }
       // A local preset of the same id wins, like a target does — but say so,
       // because the imported view then renders with the LOCAL columns.
-      if (svHave.has(l.id)) skipped.push(`ServiceCue preset "${l.name ?? l.id}" — kept the one already here`);
+      if (svHave.has(l.id)) skipped.push(`ServiceCue layout "${l.name}" — kept the one already here`);
       else { svHave.add(l.id); add.push(l); }
     }
-    if (add.length) await serviceCueLayoutsStore.save([...svAfter, ...add]);
+    // Through the store's own rules for a name and an address, which rename rather than
+    // refuse: a throw here would come after the views were written.
+    const renamed = add.length ? await serviceCueLayoutsStore.importLayouts(add) : [];
+    for (const r of renamed) {
+      const why = r.from.trim() ? "that name was taken here" : "it had no name";
+      skipped.push(`ServiceCue layout "${r.from}" — imported as "${r.to}", ${why}`);
+      console.log(`[view-import] ServiceCue layout "${scrub(r.from)}" imported as "${scrub(r.to)}": ${scrub(why)}`);
+    }
   }
 
   // A view can point at a preset that was already missing at the source: export
@@ -446,7 +458,7 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
   // setViewServiceCueLayout refuses one.
   for (const v of named) {
     if (v.serviceCueLayoutId && !svHave.has(v.serviceCueLayoutId)) {
-      skipped.push(`"${v.name}" points at a ServiceCue preset that is not in the file or here`);
+      skipped.push(`"${v.name}" points at a ServiceCue layout that is not in the file or here`);
     }
   }
 
@@ -602,16 +614,22 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
       try {
         await patchStore.save(file);
       } catch (err) {
-        const msg = errorMessage(err);
-        skipped.push(`patch variants — could not be saved: ${msg}`);
-        console.error(`[view-import] patch variants failed: ${scrub(msg)}`);
-        // "kept" and "no-such-sheet" wrote nothing either way, so they are still
-        // true. Everything else described a write that did not happen.
-        const survived = patchOutcomes.filter(
-          (o) => o.outcome === "kept" || o.outcome === "no-such-sheet",
-        );
-        patchOutcomes.length = 0;
-        patchOutcomes.push(...survived);
+        if (err instanceof PatchLinksNotUpdated) {
+          // Stored and announced: every outcome stands. Only the stage plot points did not follow.
+          skipped.push("patch variants — saved, but the stage plot connection points could not be updated to follow the patch; saving the patch again retries it");
+          console.error(`[view-import] patch variants saved, stage plot points not updated: ${scrub(errorMessage(err.cause))}`);
+        } else {
+          const msg = errorMessage(err);
+          skipped.push(`patch variants — could not be saved: ${msg}`);
+          console.error(`[view-import] patch variants failed: ${scrub(msg)}`);
+          // "kept" and "no-such-sheet" wrote nothing either way, so they are still
+          // true. Everything else described a write that did not happen.
+          const survived = patchOutcomes.filter(
+            (o) => o.outcome === "kept" || o.outcome === "no-such-sheet",
+          );
+          patchOutcomes.length = 0;
+          patchOutcomes.push(...survived);
+        }
       }
     }
   }

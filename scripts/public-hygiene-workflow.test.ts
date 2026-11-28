@@ -47,8 +47,8 @@ describe("public-hygiene workflow", () => {
 
   it("has one run step, and it is exactly the script", () => {
     assert.equal(check.length, 1);
-    assert.equal(check[0].run, "node scripts/check-public-hygiene.mjs");
-    assert.ok(fs.existsSync(path.join(HERE, "check-public-hygiene.mjs")), "the script the workflow runs does not exist");
+    assert.equal(check[0].run, "node scripts/check-public-hygiene.ts");
+    assert.ok(fs.existsSync(path.join(HERE, "check-public-hygiene.ts")), "the script the workflow runs does not exist");
   });
 
   it("gives that step the secret list, and requires it only for a same-repo, non-Dependabot PR", () => {

@@ -50,10 +50,13 @@ const EXPECTED_IDS = [
   "kiosk-discovery",
   "kiosk-setup",
   "public-address",
+  "public-link",
   "reconnect-idle",
   "reconnect-lead",
   "reconnect-tail",
   "reconnect-wake",
+  "server-id",
+  "sidebar",
   "taper-post",
   "taper-pre",
   "timezone",
@@ -89,6 +92,8 @@ function stubFetch() {
     }
     if (url.includes("/api/config/snapshots")) return ok([]);
     if (url.includes("/api/history/milestones")) return ok([]);
+    // The Public link card lists the layouts and service types it publishes.
+    if (url.endsWith("/api/servicecue/layouts") || url.endsWith("/api/service-types")) return ok([]);
     // The real ports form, not the Loading placeholder: it is the form that carries the id.
     if (url.endsWith("/api/video/state")) return ok({ rev: 1, relay: { state: "off" }, kinds: [], ports: DEFAULT_VIDEO_PORTS, feeds: [] });
     return ok({});

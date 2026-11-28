@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { build as viteBuild, type Plugin } from "vite";
 
 import { PUBLIC_STATIC_FILES } from "../main/types/servicecue-publish.js";
-import { BUILD_INPUT_PREFIXES, needsBuild } from "./build-inputs.mjs";
+import { BUILD_INPUT_PREFIXES, NOT_BUILD_INPUTS, needsBuild } from "./build-inputs.ts";
 import { bundleServiceCue } from "./servicecue-bundle.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -70,7 +70,7 @@ describe("everything a build reads is a build input", () => {
     ["the Worker's bundle", worker.workerInputs.map((p) => path.relative(ROOT, path.join(ROOT, "publish/servicecue", p)).split(path.sep).join("/")).filter((p) => !p.includes("node_modules"))],
     ["the files the page's build reads by path", READ_BY_PATH],
     ["the files the interface's build copies from public/", filesUnder("public", "")],
-    ["the documents the builds start from", ["index.html", "app.html", "servicecue.html"]],
+    ["the documents the builds start from", ["index.html", "app.html", "servicecue.html", "stageplots.html", "landing.html"]],
   ];
 
   for (const [what, files] of sets) {
@@ -96,10 +96,11 @@ describe("what does not make an update rebuild", () => {
       "README.md",
       "CLAUDE.md",
       "publish/servicecue/README.md",
-      "publish/servicecue/test/worker.integration.test.mjs",
+      "publish/servicecue/test/worker.integration.test.ts",
       "scripts/update.sh",
       "scripts/update.ps1",
-      "scripts/build-inputs.mjs",
+      "scripts/build-inputs.ts",
+      "tsconfig.tooling.json",
       "helper/macos/Package.swift",
       ".github/workflows/ci.yml",
     ]) {
@@ -107,7 +108,8 @@ describe("what does not make an update rebuild", () => {
     }
   });
 
-  test("the list is sorted, one per line", () => {
+  test("the lists are sorted, one per line", () => {
     assert.deepEqual([...BUILD_INPUT_PREFIXES], [...BUILD_INPUT_PREFIXES].sort());
+    assert.deepEqual([...NOT_BUILD_INPUTS], [...NOT_BUILD_INPUTS].sort());
   });
 });

@@ -46,7 +46,6 @@ const presencePosts: { at: number; body: Record<string, unknown> }[] = [];
   return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
 };
 
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // `performance.now()`, faked by hand the same way poll-transport.test.ts's
 // own `perfNow` is — mock.timers has no "performance" API to enable (Node

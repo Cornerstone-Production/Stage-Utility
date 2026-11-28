@@ -155,7 +155,7 @@ function deployLine(d: DeployStatus, zone: string | undefined, elapsedMs: number
       const wait = e.retryAt != null ? e.retryAt - d.now - elapsedMs : null;
       return {
         tone: "bad",
-        text: `Couldn't update the page: ${reason}. The page is unchanged.`,
+        text: `Couldn't update the page: ${reason}. ${e.unsure ? "Whether the page took it is not known." : "The page is unchanged."}`,
         detail: e.refused
           ? "The token may have been deleted or its role changed. Make a new one and paste it above."
           : wait == null

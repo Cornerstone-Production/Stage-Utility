@@ -20,9 +20,9 @@
 // in an editable field, a ServiceCue plan draws ServiceCueHeader), so the shell
 // adding the section's name above it would be a second, wronger title.
 
-import { screensListViews } from "@main/services/home-view";
-import { viewShownInSidebar, viewSurface, type View } from "@main/types/views";
+import { viewShownInSidebar, type View } from "@main/types/views";
 import { ALL_DESTINATIONS, NESTED_ROUTES } from "./destinations";
+import { consoleViews } from "@main/services/sidebar-arrangement";
 
 /** What the chrome needs to know about a page. A Destination minus its icon and
  *  its component, so a page that has no rail entry can still have a name. */
@@ -53,7 +53,9 @@ export interface ActivePage {
  * `/consoles/home` redirects to `/`.
  */
 export function consoleViewList(views: readonly View[] | undefined): View[] {
-  return screensListViews(views ?? []).filter((v) => viewSurface(v) === "console");
+  // The sidebar's own reading of the same question, shared with the server,
+  // which validates and resolves a saved sidebar against it.
+  return consoleViews(views);
 }
 
 /**
@@ -152,13 +154,13 @@ export function consoleHidesChrome(
 
 /**
  * Shared (non-console) pages that are always chromeless, keyed by their exact
- * path. `/history` is the first: it is the read-only link handed to
+ * path. `/history` was the first, `/stageplots` the second: each is the read-only link handed to
  * volunteers, and it must not flash the rail while `views` is still loading —
  * unlike a console, its chromelessness is not the operator's per-View setting,
  * it is a property of the route itself. A second shared chromeless page later
  * is a one-line addition here rather than a new matcher.
  */
-export const SHARED_CHROMELESS_PATHS: ReadonlySet<string> = new Set(["/history"]);
+export const SHARED_CHROMELESS_PATHS: ReadonlySet<string> = new Set(["/history", "/stageplots"]);
 
 /**
  * Is this a shared chromeless page? The router serves `/history/` as the same
@@ -173,7 +175,11 @@ export function isSharedChromelessPath(pathname: string): boolean {
   // bar belong to the operator and not the reader. `/servicecue/presets` edits
   // layouts and stays an ordinary settings page, so only the exact launcher
   // path and the three-deep rundown path qualify.
-  return bare === "/servicecue" || /^\/servicecue\/(?!presets$)[^/]+\/[^/]+$/.test(bare);
+  if (bare === "/servicecue" || /^\/servicecue\/(?!presets$)[^/]+\/[^/]+$/.test(bare)) return true;
+  // One venue on the crew's stage plots (the list is in the set above): the link and QR code
+  // handed out at load-in. /stageplots/manage (the app's own, with Edit) and the editor keep
+  // the shell.
+  return /^\/stageplots\/(?!edit$|manage$)[^/]+$/.test(bare);
 }
 
 /**
@@ -204,6 +210,12 @@ export function resolvePage(
   pathname: string,
   consoles: readonly PageIdentity[] = [],
 ): ActivePage | null {
+  // A page that names its destination is that destination's child, whatever its
+  // path would prefix-match. Never exact: the page draws its own heading.
+  const parent = NESTED_ROUTES.find((r) => r.parent && r.path === pathname)?.parent;
+  const owner = parent ? ALL_DESTINATIONS.find((d) => d.path === parent) : undefined;
+  if (owner) return { page: { path: owner.path, label: owner.label, description: owner.description }, exact: false };
+
   const page = [
     ...ALL_DESTINATIONS.map((d) => ({
       path: d.path,

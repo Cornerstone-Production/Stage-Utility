@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it, beforeEach, afterEach, mock } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -9,11 +9,28 @@ process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
 import type { BaptismState } from "../types/stage.js";
-import { sleep } from "./baptism-save-harness.js";
 
 const { baptismTimerService } = await import("./baptism-timer-service.js");
 const { baptismStore } = await import("./baptism-store.js");
 const { segmentElapsedMs } = await import("./baptism-elapsed.js");
+
+// Every wait in this file was a clock: a real sleep so a segment banked some time, or a stretch
+// came out a known size. A real sleep is only as long as the machine lets it be, so the
+// "< 100" ceiling on a nominal 40 ms baptism was a bet against load. The Date the timer reads is
+// moved by hand instead: tick(n) is exactly n ms. Only Date is mocked; fs and the store stay real.
+// Each case starts an hour apart, since a session's id derives from its start time.
+let caseNumber = 0;
+const FAKE_START = Date.now();
+function tick(ms: number): void {
+  mock.timers.tick(ms);
+}
+beforeEach(() => {
+  caseNumber += 1;
+  mock.timers.enable({ apis: ["Date"], now: FAKE_START + caseNumber * 3_600_000 });
+});
+afterEach(() => {
+  mock.timers.reset();
+});
 
 describe("default workflow", () => {
   it("starts grouped, because that is how a baptism is run here", async () => {
@@ -119,14 +136,14 @@ describe("undo around the first person in takes back one press, not two", () => 
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
     baptismTimerService.start(); // person 1's testimony
-    await sleep(30);
+    tick(30);
     baptismTimerService.next(); // person 1's testimony banked, person 2's begins
-    await sleep(40);
+    tick(40);
     const armedAt = baptismTimerService.startBaptisms(); // person 2's testimony folds in, the section arms
     assert.equal(armedAt.people.length, 2, "sanity: both testimonies are in");
 
     baptismTimerService.advance(); // "First person in", a beat early: nobody is in the water
-    await sleep(150);
+    tick(150);
     const undone = baptismTimerService.undo();
 
     // Nothing but that press changed the state since the arming, so taking back
@@ -136,13 +153,13 @@ describe("undo around the first person in takes back one press, not two", () => 
     // the testimony time the arming banked for them and not a millisecond more.
     assert.deepEqual(undone, armedAt, "undo after First person in must take back that press alone");
 
-    await sleep(150); // the real walk-up, which belongs to nobody while armed
+    tick(150); // the real walk-up, which belongs to nobody while armed
     const running = baptismTimerService.advance(); // "First person in", for real
     assert.equal(running.armed ?? false, false, "sanity: the re-armed section takes the first press again");
     assert.notEqual(running.segmentStartedAt, null, "sanity: and starts person 1's clock");
-    await sleep(40); // person 1's baptism
+    tick(40); // person 1's baptism
     baptismTimerService.advance(); // "Next person in"
-    await sleep(30); // person 2's baptism
+    tick(30); // person 2's baptism
     const finished = baptismTimerService.finish(); // "Last person out"
 
     assert.deepEqual(
@@ -151,7 +168,7 @@ describe("undo around the first person in takes back one press, not two", () => 
       "every testimony is exactly what the arming banked — none absorbed the undone press or the walk-up",
     );
     const [first, second] = finished.people;
-    // Person 1 carries only the baptism after the second press (~40ms). Had the
+    // Person 1 carries only the baptism after the second press (40ms). Had the
     // undo kept their clock, the undone press's 150ms would be on them; had it
     // restarted their clock instead of re-arming, the 150ms walk-up would be.
     assert.ok(
@@ -171,10 +188,10 @@ describe("undo around the first person in takes back one press, not two", () => 
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
     baptismTimerService.start();
-    await sleep(20);
+    tick(20);
     const armedAt = baptismTimerService.startBaptisms();
     baptismTimerService.advance(); // "First person in"
-    await sleep(30);
+    tick(30);
     const paused = baptismTimerService.pause();
     assert.ok((paused.segmentAccumMs ?? 0) > 0, "sanity: the pause banked person 1's time");
 
@@ -192,7 +209,7 @@ describe("undo around the first person in takes back one press, not two", () => 
     baptismTimerService.setMode("grouped");
     baptismTimerService.start();
     baptismTimerService.next();
-    await sleep(40); // a testimony long enough that resuming from zero cannot match it
+    tick(40); // a testimony long enough that resuming from zero cannot match it
     const armedAt = baptismTimerService.startBaptisms();
     const folded = armedAt.people[armedAt.people.length - 1]!;
     assert.ok(folded.testimonyMs > 0, "sanity: the folded testimony banked real time");
@@ -345,7 +362,7 @@ describe("I-B: resume() must count on from what pause() banked", () => {
     baptismTimerService.reset();
     baptismTimerService.setMode("grouped");
     baptismTimerService.start();
-    await new Promise((r) => setTimeout(r, 20)); // let some real time bank
+    tick(20); // let some time bank
 
     const paused = baptismTimerService.pause();
     const banked = paused.segmentAccumMs ?? 0;

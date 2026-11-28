@@ -43,7 +43,7 @@ jobs:
           # only thing worse than a rule in two places is a local check that
           # disagrees with the CI enforcing it.
           git fetch -q origin "$BASE_REF"
-          node scripts/check-commit-subjects.mjs "origin/$BASE_REF"
+          node scripts/check-commit-subjects.ts "origin/$BASE_REF"
 
       - name: Flag changes that look beta-only
         env:
@@ -52,7 +52,7 @@ jobs:
           set -uo pipefail
           # A heuristic reminder, not a gate: warns when a fix, perf or polish
           # shares a file with a feat commit from this release cycle. See
-          # scripts/check-beta-only.mjs for what it catches and what it
+          # scripts/check-beta-only.ts for what it catches and what it
           # cannot. Always exits 0.
           git fetch -q origin "$BASE_REF"
-          node scripts/check-beta-only.mjs "origin/$BASE_REF"
+          node scripts/check-beta-only.ts "origin/$BASE_REF"

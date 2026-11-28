@@ -2,7 +2,6 @@
 // (its name and status pill, its source line, and a line on how it plays),
 // with "Add feed" directly under the last row.
 
-import { useEffect, useState } from "react";
 import { PlusIcon } from "lucide-react";
 
 import type { FeedState, ScreenVideoHealth, VideoFeedView, VideoProbeEntry, VideoProbeState } from "@main/types/video";
@@ -10,6 +9,7 @@ import type { FeedState, ScreenVideoHealth, VideoFeedView, VideoProbeEntry, Vide
 import { Button } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { formatClock } from "../../lib/clock-format";
+import { useNow } from "../../lib/use-now";
 import { bFramesSentence, isObsWhipFeed } from "./b-frames-copy";
 import { plural } from "@main/services/plural";
 
@@ -199,18 +199,8 @@ export function bFramesHint(feed: VideoFeedView): string | null {
   return bFramesSentence(isObsWhipFeed(feed));
 }
 
-/** A monotonic clock (host clock steps cannot move it), re-read every
- *  `everyMs` — what keeps "checked 4 s ago" from freezing between probe
- *  answers. Always ticking, so it is never more than one interval stale when a
- *  result first appears. */
-function useNow(everyMs: number): number {
-  const [now, setNow] = useState(() => performance.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(performance.now()), everyMs);
-    return () => clearInterval(t);
-  }, [everyMs]);
-  return now;
-}
+/** A monotonic clock (host clock steps cannot move it): what keeps "checked 4 s ago" from freezing between probe answers. */
+const monotonic = () => performance.now();
 
 /** How often the "checked N s ago" text is re-read. */
 const AGE_REFRESH_MS = 5000;
@@ -237,7 +227,7 @@ export function FeedList({
   onSelect: (id: string) => void;
   onAddFeed: () => void;
 }) {
-  const now = useNow(AGE_REFRESH_MS);
+  const now = useNow(AGE_REFRESH_MS, monotonic);
   return (
     <div className="flex min-w-0 flex-col">
       {feeds.length === 0 && !draft && <p className="border-b border-line px-4 py-3 text-caption1 text-fg-subtle">No feeds yet.</p>}

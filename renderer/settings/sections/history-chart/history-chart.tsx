@@ -249,6 +249,7 @@ export function HistoryChart({
     }
     return out;
   }, [peakMarks, shown, items]);
+  const hiddenNote = hiddenLinesNote(series, shown, Boolean(customize));
   const peakRowH = peakPoints.length ? PEAK_ROW_H : 0;
   const plotY0 = PAD_T + peakRowH;
   const plotY1 = plotY0 + PLOT_H;
@@ -597,7 +598,7 @@ export function HistoryChart({
           className="rounded-lg border border-dashed border-line-strong px-4 py-10 text-center text-caption1 text-fg-muted"
           onContextMenu={onSeriesContextMenu ? (e) => onSeriesContextMenu(null, e) : undefined}
         >
-          {emptyNote ?? "Nothing recorded yet — the chart fills in as the service runs."}
+          {hiddenNote ?? emptyNote ?? "Nothing recorded yet — the chart fills in as the service runs."}
         </div>
         {legend}
       </div>
@@ -1169,6 +1170,34 @@ export function fitLabel(text: string, room: number, measure: (t: string) => num
 
 function fmt(s: ChartSeries, v: number): string {
   return s.format ? s.format(v) : Math.round(v).toLocaleString();
+}
+
+/**
+ * Why an empty plot is empty, when the reason is that the lines WITH READINGS are
+ * switched off. That is not "nothing recorded yet" — the figures above read the
+ * same readings — and it outranks a caller's own empty note, which describes a
+ * different emptiness (no recordings in range). It points at the control that
+ * undoes it: the legend, and Customize when the section has one.
+ *
+ * Asked of the readings, not of how many lines are on. The Trends card keeps a
+ * service type with no reading for its metric as a line that is on and empty, so
+ * hiding the one type that had readings left a line "shown" and the plot saying
+ * there was no reading in the range.
+ */
+function hiddenLinesNote(
+  series: readonly ChartSeries[],
+  shown: readonly ChartSeries[],
+  hasCustomize: boolean,
+): string | undefined {
+  if (shown.some((s) => s.points.length > 0)) return undefined;
+  const hidden = series.filter((s) => s.on === false && s.points.length > 0);
+  if (!hidden.length) return undefined;
+  // Every line off: "the line" / "every line". Some still on and empty: name what
+  // is hidden, because "every line is hidden" would not be true.
+  const [subject, count] = shown.length
+    ? [hidden.length === 1 ? `${hidden[0]!.label} is` : "Every line with readings is", hidden.length]
+    : [series.length === 1 ? "The line is" : "Every line is", series.length];
+  return `${subject} hidden. Turn ${count === 1 ? "it" : "one"} on in the legend${hasCustomize ? " or in Customize" : ""}.`;
 }
 
 /** A series' drawn stroke width — see ChartSeries.role. ONE definition, read by

@@ -35,6 +35,8 @@ type Mutable = {
   // joined its key — fails tsc here instead of throwing at runtime inside a case
   // about something else entirely.
   upcomingCache: { at: number; days: number; allowed: string[]; plans: UpcomingPlan[]; incomplete: string[] } | null;
+  /** The unavailable answer held for thirty seconds: each case starts without one. */
+  upcomingOutage: { at: number; days: number; allowed: string[]; reason: string } | null;
   listServiceTypes: () => Promise<ServiceTypeDTO[]>;
   readPlans: (serviceTypeId: string) => Promise<{ plans: PlanDTO[]; recentFailed: boolean }>;
 };
@@ -86,6 +88,7 @@ beforeEach(() => {
     outputs: [],
   };
   ctl.upcomingCache = null;
+  ctl.upcomingOutage = null;
   byType = {
     "st-sun": [plan("sun-now", 5, "Sunday morning"), plan("sun-next", 12, "Sunday morning")],
     "st-youth": [plan("youth-next", 2, "Youth night")],

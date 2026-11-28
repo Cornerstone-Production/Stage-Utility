@@ -73,7 +73,6 @@ import { STREAMER_FOR, sourceOptions } from "../app/recording-status";
 import { formatClock } from "../lib/clock-format";
 import {
   isKnownObjectType,
-  isOfferableInEmbedPicker,
   objectRetired,
   isStylingOnly,
   typeLabel,
@@ -95,6 +94,7 @@ import { readConfig, timerSource } from "../main/timer-config";
 import { ResponsiveControls } from "./responsive-controls";
 import { MessagesGroupsPicker } from "./messages-groups-picker";
 import { ButtonInspector } from "./button-inspector";
+import { EmbeddedViewRows } from "./embedded-view-rows";
 import type { PressSettle } from "./button-presses";
 import { cn } from "../lib/cn";
 import { ColorField } from "../components/ui/color-field";
@@ -1052,40 +1052,7 @@ export function Inspector({
           </div>
         );
       })()}
-      {c.type === "view-embed" && (() => {
-        // Both the picker and the renderer ask the same function — see
-        // isEmbeddableViewKind. Every kind renders now; a view that would
-        // contain itself is refused at render time, per box, by embed-chain.ts.
-        const embeddable = (embedViews ?? []).filter((v) => isOfferableInEmbedPicker(v.kind));
-        return embeddable.length === 0 ? (
-          <p className="text-caption2 text-fg-muted">
-            No other views yet — make one, then point this at it.
-          </p>
-        ) : (
-          <RowSelect
-            label="View"
-            hint="Renders that view's content here, natively. Dashboard, stage and SPL-rundown views are configured per screen, not per view — pick an Embedded screen for those instead. A view cannot contain itself, and nesting stops after three levels."
-            value={c.viewId ?? ""}
-            options={[{ value: "", label: "None" }, ...embeddable.map((v) => ({ value: v.id, label: `${v.name} (${v.kind})` }))]}
-            onChange={(v) => onConfig({ ...c, viewId: v || null })}
-          />
-        );
-      })()}
-      {c.type === "view-embed" && c.viewId && (
-        <RowSwitch
-          label="Show the view's header"
-          checked={c.showHeader ?? false}
-          onChange={(v) => onConfig({ ...c, showHeader: v })}
-        />
-      )}
-      {c.type === "view-embed" && c.viewId && (
-        <RowSwitch
-          label="Follow the live item"
-          hint="Scrolls the rundown to keep Planning Center's live item on screen, so a service that runs past the bottom of the box does not need anyone to touch the display. Only ever scrolls this object, never the rest of the layout. Turn off for a box parked on the top of the plan."
-          checked={c.autoScroll ?? true}
-          onChange={(v) => onConfig({ ...c, autoScroll: v })}
-        />
-      )}
+      {c.type === "view-embed" && <EmbeddedViewRows c={c} onConfig={onConfig} hostViewId={viewId} views={embedViews} />}
       {c.type === "screen-embed" && (() => {
         const outputs = stageState?.outputs ?? [];
         return outputs.length === 0 ? (

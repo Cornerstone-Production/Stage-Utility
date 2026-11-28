@@ -13,7 +13,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { BAR_ITEM_CLASS } from "./context-bar";
+import { BAR_ITEM_CLASS } from "./bar-strip";
 
 describe("the context bar's items share a baseline", () => {
   it("aligns an item's parts on their baseline, not their boxes", () => {
@@ -33,7 +33,7 @@ describe("the parts with no baseline of their own centre instead", () => {
   // Flex gives a childless box no baseline, so it aligns its BOTTOM MARGIN EDGE
   // to the text baseline — the live dot would sink to sit on the words' feet.
   // Each of these must say `self-center` for itself.
-  const SOURCE = new URL("./context-bar.tsx", import.meta.url);
+  const SOURCE = new URL("./bar-strip.tsx", import.meta.url);
 
   it("the live dot and the item glyph both opt out", async () => {
     const { readFile } = await import("node:fs/promises");

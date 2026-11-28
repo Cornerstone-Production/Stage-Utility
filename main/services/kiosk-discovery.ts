@@ -11,6 +11,7 @@
 // string and array before they reach a Map that lives in memory.
 
 import { DEVICE_OUTPUT_KINDS, type DeviceOutput, type DiscoveryProbe, type DiscoveryReply } from "../types/kiosk.js";
+import { isRecord } from "../types/is-record.js";
 
 /** Marks our datagrams so we ignore whatever else is on the port. */
 const MAGIC = "stageUtility";
@@ -50,6 +51,7 @@ export function encodeProbe(p: DiscoveryProbe): string {
     unreachable: p.unreachable || undefined,
     mode: p.mode,
     output: p.output,
+    check: p.check || undefined,
   });
 }
 
@@ -63,8 +65,8 @@ export function encodeProbe(p: DiscoveryProbe): string {
  * today" promises.
  */
 function decodeOutput(v: unknown): DeviceOutput | undefined {
-  if (!v || typeof v !== "object" || Array.isArray(v)) return undefined;
-  const o = v as Record<string, unknown>;
+  if (!isRecord(v)) return undefined;
+  const o = v;
   const kind = DEVICE_OUTPUT_KINDS.find((k) => k === o.kind);
   const name = str(o.name);
   const port = str(o.port);
@@ -84,8 +86,8 @@ export function decodeProbe(buf: Buffer | string): DiscoveryProbe | null {
   let o: Record<string, unknown>;
   try {
     const parsed: unknown = JSON.parse(buf.toString());
-    if (!parsed || typeof parsed !== "object") return null;
-    o = parsed as Record<string, unknown>;
+    if (!isRecord(parsed)) return null;
+    o = parsed;
   } catch {
     // Anything at all can land on a broadcast port. Not ours, not an error.
     return null;
@@ -104,6 +106,9 @@ export function decodeProbe(buf: Buffer | string): DiscoveryProbe | null {
     // "1920x1080" — bounded like everything else off the wire.
     mode: str(o.mode, MAX_MODE_LEN),
     ...(output && { output }),
+    // Only a literal true, and absent otherwise, so a plain probe decodes exactly
+    // as it did before the field existed.
+    ...(o.check === true && { check: true }),
   };
 }
 
@@ -117,8 +122,8 @@ export function decodeReply(buf: Buffer | string): DiscoveryReply | null {
   let o: Record<string, unknown>;
   try {
     const parsed: unknown = JSON.parse(buf.toString());
-    if (!parsed || typeof parsed !== "object") return null;
-    o = parsed as Record<string, unknown>;
+    if (!isRecord(parsed)) return null;
+    o = parsed;
   } catch {
     return null;
   }
@@ -204,6 +209,60 @@ export function decideProbe(
   if (opts.bound) return { answer: true, list: "mine" };
   if (probe.boundTo === serverId) return { answer: true, list: "unclaimed" };
   return { answer: opts.scanning, list: "unclaimed" };
+}
+
+/** One interface as os.networkInterfaces() reports it, as far as this reads. */
+export interface InterfaceAddress {
+  address: string;
+  netmask: string;
+  family: string | number;
+  internal: boolean;
+}
+
+const ipv4ToInt = (a: string): number | null => {
+  const parts = a.split(".").map(Number);
+  if (parts.length !== 4 || parts.some((p) => !Number.isInteger(p) || p < 0 || p > 255)) return null;
+  return ((parts[0] << 24) | (parts[1] << 16) | (parts[2] << 8) | parts[3]) >>> 0;
+};
+const intToIpv4 = (n: number): string => [n >>> 24, (n >>> 16) & 255, (n >>> 8) & 255, n & 255].join(".");
+
+/**
+ * Where the duplicate-id check is broadcast: each IPv4 interface's own directed
+ * broadcast address, sorted, or the limited broadcast when there is none.
+ *
+ * Not 255.255.255.255 alone. macOS refuses a send to the limited broadcast with
+ * EHOSTUNREACH on a typical setup, which is why the Mac helper and the macOS
+ * agent probe each interface's directed broadcast too; a check that never leaves
+ * the box finds nobody. A directed broadcast also covers a server on wired plus
+ * wifi. Loopback, a host route (a /32, such as a VPN tunnel: its "broadcast" is
+ * its own address) and anything that is not IPv4 are skipped.
+ */
+export function broadcastAddresses(interfaces: Record<string, readonly InterfaceAddress[] | undefined>): string[] {
+  const out = new Set<string>();
+  for (const list of Object.values(interfaces)) {
+    for (const n of list ?? []) {
+      if (n.internal || (n.family !== "IPv4" && n.family !== 4)) continue;
+      const address = ipv4ToInt(n.address);
+      const mask = ipv4ToInt(n.netmask);
+      if (address === null || mask === null || mask === 0xffffffff) continue;
+      out.add(intToIpv4((address | ~mask) >>> 0));
+    }
+  }
+  return out.size > 0 ? [...out].sort() : ["255.255.255.255"];
+}
+
+/**
+ * Is this duplicate-id check (a probe with `check`) another server checking for
+ * THIS server's id? Then it is answered (that is what tells the other server),
+ * never listed as a screen, and is itself the evidence: two servers carry one id.
+ *
+ * This server's own check, heard back off the broadcast, is not: it is told apart
+ * by the per-start id it carries, not by MAC, because a box that reports no MAC,
+ * or a second server on the same machine, shares or lacks them. A check for any
+ * other id is nothing to answer and nothing to list.
+ */
+export function isDuplicateCheck(probe: DiscoveryProbe, serverId: string, ownCheckId: string): boolean {
+  return probe.id !== ownCheckId && probe.boundTo === serverId;
 }
 
 /**

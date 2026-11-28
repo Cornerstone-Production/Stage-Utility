@@ -25,7 +25,6 @@ import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 import { installDom } from "../../test-dom.js";
 
 const teardown = installDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
@@ -114,7 +113,6 @@ const gate = () => {
     return ok(server.attendance);
   }
   if (url === "/api/spl/summary") return ok([]);
-  if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
   if (url === "/api/baptism/sessions") return ok([]);
   const spl = /^\/api\/spl\/history\/([^/?]+)$/.exec(url);
   if (spl) {

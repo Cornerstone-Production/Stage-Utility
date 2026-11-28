@@ -6,7 +6,7 @@ Stage Utility uses [Conventional Commits](https://www.conventionalcommits.org/).
 CI checks every subject and the release tooling reads the types, so the convention
 decides the version number.
 
-`node scripts/check-commit-subjects.mjs [base]` runs the same check locally over
+`node scripts/check-commit-subjects.ts [base]` runs the same check locally over
 the commits since `base` (default `origin/beta`), naming each subject that does
 not conform.
 
@@ -126,7 +126,7 @@ the author knows whether the bug ever shipped, so only the author can say.
 Rule of thumb: if somebody upgrading from the last stable release could not have
 hit the bug, mark it.
 
-CI runs a heuristic check (`scripts/check-beta-only.mjs`) that warns, but never
+CI runs a heuristic check (`scripts/check-beta-only.ts`) that warns, but never
 fails the build, on a `fix:`, `perf:` or `polish:` commit that touches a file also
 touched by a `feat:` commit from this release cycle. It is a reminder, not a
 judge: sharing a file does not mean sharing a bug, and a fix to a new feature in a
@@ -199,7 +199,10 @@ push to `beta` or `main`, releasable or not, and only then tags, so a red build
 cannot become a release. It is the one gate a push gets: the CI workflow runs on
 pull requests only, and the release PR from `beta` to `main` is skipped there
 because its head is a `beta` commit the release run has already verified and
-marked with a `build` status.
+marked with a `build` status. On `main` the gate is not run again when beta's release
+run passed it on the same tree, apart from the version its release bump changed in
+`package.json` and `package-lock.json` (`scripts/verified-tree.ts`); any other
+difference, or any doubt, and it runs.
 
 To force a major, mark the commit breaking — `feat(types)!: …` plus an explanation in
 the body.
@@ -226,7 +229,9 @@ everything since the last stable tag.
   two PRs on a casual "you can merge them".)
 - **Nothing is pushed directly to `beta` or `main`.** Every change — including a
   one-line fix — goes through a pull request off `beta`. Release automation is the
-  exception: it commits the version bump and tag to those branches by design.
+  exception: it commits the version bump and tag to those branches by design. A
+  ruleset can enforce this, admitting only the maintainer and the release app (see
+  [The release app](ops/distribution.md#the-release-app)).
 
 ## Running it locally
 
@@ -264,8 +269,8 @@ npm run lint && npm run type-check && npm test && npm run build
 
 CI runs the same four, plus `npm audit --audit-level=high`. Lint is clean; a new
 warning is yours to fix. Two cheap checks run on every pull request and are worth
-running first: `node scripts/check-public-hygiene.mjs` (see
-[Public hygiene](#public-hygiene)) and `node scripts/check-commit-subjects.mjs`.
+running first: `node scripts/check-public-hygiene.ts` (see
+[Public hygiene](#public-hygiene)) and `node scripts/check-commit-subjects.ts`.
 
 CI runs them side by side rather than one after another: lint, type-check, build
 and the audit in one job, the test suite split across four more with
@@ -391,6 +396,40 @@ no SARIF output; theirs are annotations on the PR diff. A fork or Dependabot pul
 request cannot write to code scanning and skips the upload; the job still gates on
 the scan.
 
+### Tooling scripts
+
+The scripts under `scripts/`, the screenshot kit and the ServiceCue Worker's
+`scripts/deploy.ts` and tests are TypeScript run directly by Node 24, which strips
+the types: no `tsx`, no build, no install. That is what lets a CI job that never runs
+`npm ci` call one, and what lets the update scripts call them on an install that has
+not fetched its dependencies yet. A script a test imports is run by `tsx` there, so
+both ways of running a file have to work.
+
+Node only erases types, so `tsconfig.tooling.json` makes `npm run type-check` refuse
+what it cannot run: no `enum`, `namespace` or constructor parameter property; a
+type-only import says `import type`; no path alias. A script run by `tsx` that imports
+`main/` is left out of that project and is checked by `tsconfig.json` alone.
+
+A relative import names its `.ts` file. tsc cannot hold the tooling to that: it
+resolves `./x.js` to `x.ts`, which plain Node does not. `scripts/tooling-imports.test.ts`
+does, for every file that project includes and every file they import.
+
+`scripts/manifest-changed.mjs` and `scripts/build-inputs.mjs` forward to their `.ts`
+files, and stay. An update script is loaded before the pull, and an install updates
+from whatever release it is on straight to the newest, so an older install runs an
+update script that calls the `.mjs` paths. Renaming any script either update script
+calls needs a permanent forwarder at the old path.
+
+A script whose output a caller parses (`verified-tree.ts` writes `$GITHUB_OUTPUT`,
+`release-notes.ts` writes the notes) or whose stderr an update script shows runs with
+`node --no-warnings`: older Node 24 releases print a type-stripping warning to stderr.
+
+Every `node … scripts/<file>` call, in a workflow, a composite action, any
+`package.json` or a shell or PowerShell script, is one line of the sorted list in
+`scripts/tooling-invocations.test.ts`, so a new or renamed call is added there. The same
+test fails a workflow job that runs TypeScript without an `actions/setup-node` step for
+Node 24 or later before it.
+
 ### Merge-friendly guards
 
 A test that pins an exact registry (every layout object type, every route,
@@ -412,7 +451,8 @@ configuration is reviewed like code.
 | `.github/workflows/codeql-language.yml` | One language's analysis, or an empty result for a language that was skipped |
 | `.github/codeql/codeql-config.yml` | The query suite (`security-extended`) and the paths ignored, read by every language |
 | `.github/codeql/extensions/stage-utility-models/` | The model pack: data extensions that teach the JavaScript analysis about this code |
-| `.github/codeql/tests/` | The model pack's own CodeQL tests |
+| `.github/codeql/queries/` | A query pack: the one stock query this repository replaces (see Queries) |
+| `.github/codeql/tests/` | CodeQL tests for the model pack and for the query pack |
 
 An alert is fixed in the code, not dismissed. [Code scanning decisions](reference/code-scanning.md)
 lists the two rules whose alerts are dismissed once each, with the reason.
@@ -465,6 +505,26 @@ Making `c.url` and `c.req` reachable would mean changing how handlers are dispat
 A model's type is `file:<path>`, relative to the source root, naming the module the
 calling code imports.
 
+### Queries
+
+`js/http-to-file-access` has a `Sanitizer` class meant to be subclassed, but a data
+extension cannot add to it and the query reads no `barrierModel`, so the model pack
+cannot mark anything safe for it. `.github/codeql/queries/` holds the stock query
+unchanged (`HttpToFileAccess.ql`) plus `EncodeRowBarrier.qll`, which subclasses
+`Sanitizer` for the result of `encodeRow` in `main/services/csv.ts`. The stock
+configuration is reused as it is, so anything CodeQL adds to it applies here too.
+`codeql-config.yml` drops the stock query with a `query-filters` entry by path (a filter
+by id would drop the copy too), and the JavaScript run adds the copy through `init`'s
+`queries` input (`+`, so it adds to the configuration's queries; an empty input is
+unset, so the other languages ignore it). The rule id is kept so an alert the copy no
+longer reports closes rather than being replaced by a new one.
+
+The barrier asserts CSV structure only; `EncodeRowBarrier.qll` says what that leaves
+uncovered. When the CodeQL version moves, compare `HttpToFileAccess.ql` with the stock
+query (`Security/CWE-912/HttpToFileAccess.ql` in `codeql/javascript-queries`): a renamed
+module or class fails the build of the query and the CodeQL tests with it, and a
+changed select or metadata is for the comparison to catch.
+
 To add a model:
 
 1. Add the row to a file under `extensions/stage-utility-models/models/`, with a
@@ -479,7 +539,7 @@ To add a model:
 5. Delete the row and run the test again. It must fail.
 
 ```bash
-codeql test run .github/codeql/tests --additional-packs=$PWD/.github/codeql/extensions --learn
+codeql test run .github/codeql/tests --additional-packs=$PWD/.github/codeql/extensions:$PWD/.github/codeql/queries --learn
 ```
 
 Drop `--learn` to run the tests. CI runs them whenever `.github/codeql/` changes, with
@@ -609,7 +669,7 @@ because they are believed.
 ## Public hygiene
 
 This repository is public, so tracked files carry no real addresses, people or
-places. `node scripts/check-public-hygiene.mjs` reads every file `git ls-files`
+places. `node scripts/check-public-hygiene.ts` reads every file `git ls-files`
 lists (binaries and lockfiles are skipped) and exits 1 on any of:
 
 | Rule | Fails on | Use instead |

@@ -2,7 +2,7 @@
 // list-of-names sentence in the app reads in, no Oxford comma.
 //
 // Three private copies of this exact join (automation-section.tsx's
-// joinWithAnd, bar-configurator.tsx's nameList, and cards.tsx's theList one
+// joinWithAnd, bar-editor.tsx's nameList, and cards.tsx's theList one
 // step removed — see its own wrapper) drifted into being independently. One
 // exported helper, so a fourth caller reaches for this rather than writing a
 // fourth copy.

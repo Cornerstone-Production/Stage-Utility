@@ -2,8 +2,7 @@ import { describe, test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-// @ts-expect-error: a plain .mjs script with no type declarations
-import { deployPlan } from "../scripts/deploy.mjs";
+import { deployPlan } from "../scripts/deploy.ts";
 
 const CONFIG = readFileSync(join(import.meta.dirname, "..", "wrangler.jsonc"), "utf8");
 // Every deploy says which version and build it is, as the server's own do (scripts/servicecue-deploy-script.test.ts holds that).

@@ -1,6 +1,5 @@
-// The words a target is called by: a plan's short date, "the Weekend", and the
-// save message. A wrong date points a save at the wrong week and the formatting is
-// where that would come from.
+// The words a target is called by: "the Weekend" and the save message. A plan's
+// short date is planLabel, tested in plan-date-label.test.ts.
 //
 // The target controls themselves are tested where they live, with the page:
 // mic-slots-page.test.tsx.
@@ -8,30 +7,9 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-const { planLabel, savedMessage, namedType } = await import("./slots-target-pill.js");
+const { savedMessage, namedType } = await import("./slots-target-pill.js");
 
 describe("labelling", () => {
-  test("a plan's sort date becomes a short weekday date", () => {
-    // A fixed zone, so the assertion does not depend on where the box is.
-    assert.equal(planLabel("2026-09-13T14:00:00Z", "September 13, 2026", "UTC"), "Sun, Sep 13");
-  });
-
-  test("falls back to Planning Center's own words with no sort date", () => {
-    assert.equal(
-      planLabel(null, "September 13-14, 2026", "UTC"),
-      "September 13-14, 2026",
-      "parsing what somebody typed into a weekday would be guessing, and a wrong date here points a save at the wrong week",
-    );
-  });
-
-  test("falls back again with neither", () => {
-    assert.equal(planLabel(null, null, null), "This plan");
-  });
-
-  test("an unparseable sort date does not become Invalid Date", () => {
-    assert.equal(planLabel("not-a-date", "September 13, 2026", "UTC"), "September 13, 2026");
-  });
-
   test("the save message names which board it landed on", () => {
     assert.equal(
       savedMessage("plan", "Wed Sep 13", "Youth Night"),

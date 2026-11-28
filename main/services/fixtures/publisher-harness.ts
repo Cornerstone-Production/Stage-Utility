@@ -5,7 +5,7 @@
 // test files, which say what each is about; the hooks that stop every publisher and close every
 // receiver are installed by the file that calls `installPublisherHooks()`.
 
-import { afterEach, beforeEach, type TestContext } from "node:test";
+import { afterEach, beforeEach, mock, type TestContext } from "node:test";
 
 import { captureConsole } from "./capture-console.js";
 import { FakeReceiver } from "./publish-receiver.js";
@@ -72,6 +72,7 @@ export function installPublisherHooks(): void {
     live = [];
   });
   afterEach(async () => {
+    mock.timers.reset();
     for (const h of live) {
       h.pub.stop();
       await h.page.close();
@@ -92,6 +93,21 @@ export const framesOf = (h: Harness, channel: string) => h.page.frames().filter(
 
 /** The text of the last document PUT under `key`, or, for the three the page keeps from frames, what it holds. */
 export const lastPut = (h: Harness, key: string) => h.page.puts().filter((p) => p.key === key).at(-1)?.body;
+
+/**
+ * Stand the clock still, at the case's first line: the due times the publisher keeps (a plan's next read, the hour
+ * between reads of the list, the reconcile interval) are all Date.now() sums, and a slow machine that runs a case's
+ * own work for longer than the interval makes them come due unasked. Only Date is mocked, so timers and sockets stay
+ * real; it is put back after the case.
+ */
+export function freezeClock(): void {
+  mock.timers.enable({ apis: ["Date"], now: Date.now() });
+}
+
+/** Let `ms` of the clock pass, without waiting for it. The clock must have been frozen first. */
+export function passTime(ms: number): void {
+  mock.timers.tick(ms);
+}
 
 export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 

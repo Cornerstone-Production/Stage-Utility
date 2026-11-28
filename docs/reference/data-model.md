@@ -15,7 +15,7 @@ View kinds:
 | **Slots** | the mic channel grid — its own slot set per service type |
 | **Dashboard** | clock, service countdown, ProPresenter now/next |
 | **Stage** | confidence view — slide text, section, chords, thumbnail, timers |
-| **Captions** | full-screen auto-scrolling transcription |
+| **Captions** | full-screen transcription that follows the newest line; scroll up to read back, and back to the bottom to follow again |
 | **ServiceCue** | the full rundown with note columns, headers, lengths, live countdown |
 | **SPL Rundown** | a compact item-plus-level list for the live service |
 | **Calendar** | a month of [Planning Center Calendar](../integrations/planning-center.md#calendar) events, filtered by calendar and tag |
@@ -415,7 +415,7 @@ class means for backups.
 | `home-snoozes.json` | runtime | What is snoozed on Home's [Needs attention](../features/operator-app.md#needs-attention); cleared when a service starts |
 | `host-names-seen.json` | runtime | Every host name the server has been reached by |
 | `host-names.json` | config | The host names Settings > Advanced > Host names accepts or has dismissed |
-| `kiosk-devices.json` | config | Which device drives which screen |
+| `kiosk-devices.json` | config | Which device drives which screen. Bindings are to this server's id: a restore writes a config's only when it takes the config's id, and one that keeps this server's id but brings the config's screens releases these (see [Restoring a config snapshot](../ops/reliability.md#restoring-a-config-snapshot)) |
 | `layout-groups.json` | config | Reusable object groups for the layout editor |
 | `layout-templates.json` | config | Saved custom layouts |
 | `messages.json` | runtime | The day's [stage messages](#stage-messages) |
@@ -433,12 +433,16 @@ class means for backups.
 | `servicecue-publish.json` | config | Whether ServiceCue is [published to the web](../features/servicecue-and-baptisms.md#on-the-web), and the address of its page. The token is in `secrets.bin`, which a backup does not carry |
 | `servicecue-roles.json` | config | ServiceCue category roles |
 | `service-timeline.json` | runtime | Per-item timing recordings, one file per service in a folder of the same name |
-| `settings.json` | config | Service type and plan mode, screens, integration settings (not credentials), branding, schedules, time zone |
+| `settings.json` | config | Service type and plan mode, screens, integration settings (not credentials), branding, schedules, time zone, and `serverId`, the id kiosks and Mac outputs bind to, which a restore keeps unless told otherwise |
+| `sidebar-config.json` | config | How the [sidebar](../features/operator-app.md#customizing-the-sidebar) is arranged: its sections, their order and names, and the pages hidden, by each page's stable id (`console:<view id>` for a console). Empty is the default. A file that breaks the rules at start-up is copied beside it as `sidebar-config.json.invalid-<time>` before the next save replaces it |
 | `signals.json` | runtime | The values the Companion module reads |
 | `slots.json` | config | [Slot](#slots) boards: their names and column widths, and each board's layouts by service type and plan |
 | `spl-history.json` | runtime | Sound-level recordings, one file per service in a folder of the same name |
+| `stageplot-drafts.json` | config | The [stage plot](../features/stageplots.md#save-and-discard) editor's unsaved drafts, one per plot |
+| `stageplots.json` | config | [Stage plot](../features/stageplots.md) venues, plots, the backgrounds they draw on, and each plan's plot overrides |
 | `stream-starts.json` | runtime | When each streaming platform was first seen live |
-| `update-notices.json` | runtime | Which release has been announced |
+| `trends-prefs.json` | config | Which Smaart metric the Trends card plots under Sound |
+| `update-notices.json` | runtime | Which release has been announced, the after-update notice until it is dismissed, and the running release's notes kept for What's new |
 | `video-feeds.json` | config | [Video feeds](../integrations/video-feeds.md) and the relay's ports |
 | `video-ffmpeg.json` | runtime | The ffmpeg path set in Advanced; machine-specific, so never restored |
 | `video-seen.json` | runtime | When each feed was last confirmed live |
@@ -448,8 +452,10 @@ class means for backups.
 The three recordings are keyed stores: the name in the table is the legacy
 single-document file a pre-split install may still hold, and the live data is the
 folder beside it (`attendance-history/`, `service-timeline/`, `spl-history/`).
-Uploaded logos and layout images are files in `branding-images/` and
-`layout-images/`, named by content hash and carried by a config snapshot.
+Uploaded logos, layout images and stage-plot backgrounds are files in
+`branding-images/`, `layout-images/` and `stageplot-images/`, named by content hash
+and carried by a config snapshot. Uploaded stage-plot PDFs are in
+`stageplot-originals/`, carried by a snapshot and never served.
 
 The custom tab and home-screen icon is nine `settings.json` fields: `appIcon`
 (the square art the sizes are drawn from), `appIconOriginal` and `appIconCrop`

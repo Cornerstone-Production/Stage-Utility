@@ -1,9 +1,9 @@
-// The ServiceCue layout editor: what its "Shows" list offers, and the ground its
-// preview draws the rundown on.
+// The ServiceCue layout editor: what its Under the title row offers, and the ground
+// its preview draws the rundown on.
 //
 // Both are things that render, keep every other test green, and are wrong:
 //
-//   the Time signature entry   delete one line of ELEMENTS and the switch is gone
+//   the Time signature toggle  delete one line of UNDER_TITLE and the toggle is gone
 //                              from the editor while the rundown, the spec and
 //                              their tests all still work — there was simply no
 //                              way left to turn the time signature off
@@ -56,7 +56,7 @@ const RUNDOWN: ServiceCueRundownDTO = {
   isDefaultPlan: true,
 };
 
-function stubFetch() {
+function stubFetch(rundown: ServiceCueRundownDTO = RUNDOWN) {
   return stubFetchWithLog((url) => {
     if (url.includes("/api/state")) return ok({ pcoConfigured: true });
     if (url.includes("/api/service-types")) return ok([{ id: "st1", name: "Weekend" }]);
@@ -64,7 +64,7 @@ function stubFetch() {
     if (url.includes("/api/servicecue/config")) return ok({ serviceTypeIds: ["st1"] });
     if (url.includes("/api/servicecue/roles")) return ok([{ id: "r1", name: "Sound", members: ["Audio"] }]);
     if (url.includes("/api/servicecue/note-categories")) return ok(["Audio"]);
-    if (url.includes("/api/servicecue/rundown")) return ok(RUNDOWN);
+    if (url.includes("/api/servicecue/rundown")) return ok(rundown);
     return ok({});
   });
 }
@@ -72,27 +72,24 @@ function stubFetch() {
 async function mountOpen(): Promise<void> {
   render(React.createElement(QueryClientProvider, { client: new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } }) }, React.createElement(TooltipProvider, null, React.createElement(ServiceCueSection))));
   for (let i = 0; i < 4; i++) await settle();
-  fireEvent.click(screen.getByRole("button", { name: "Expand" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Audio,/ }));
   await settle();
   await settle();
 }
 
-test("the Shows list offers a Time signature switch, on for a layout saved without it", async () => {
+test("Under the title offers a Time signature toggle, on for a layout saved without it", async () => {
   const f = stubFetch();
   try {
     await mountOpen();
-    fireEvent.click(screen.getByRole("button", { name: /^Shows, Audio/ }));
-    await settle();
-    // Names read from the rendered list, in order: the time signature sits with
-    // the other two pieces of song meta, between BPM and Arrangement.
-    const labels = Array.from(document.querySelectorAll("[role=dialog] *"))
-      .filter((e) => e.children.length === 0)
-      .map((e) => e.textContent ?? "");
+    // The toggles in the order the row draws them: the time signature sits with the
+    // other two pieces of song meta, between BPM and Arrangement.
+    const toggles = screen.getAllByRole("button").filter((b) => b.hasAttribute("aria-pressed") && !b.hasAttribute("data-grip"));
+    const labels = toggles.map((b) => b.textContent ?? "");
     const at = (name: string) => labels.indexOf(name);
-    assert.ok(at("Time signature") > -1, `no Time signature switch in: ${JSON.stringify(labels)}`);
+    assert.ok(at("Time signature") > -1, `no Time signature toggle in: ${JSON.stringify(labels)}`);
     assert.ok(at("BPM") < at("Time signature") && at("Time signature") < at("Arrangement"), JSON.stringify(labels));
-    // Eight on, Max SPL (opt-in) off: the layout has no showMeter field at all.
-    assert.match(document.querySelector("[role=dialog]")?.textContent ?? "", /^8 of 9/);
+    // The layout has no showMeter field at all: shown.
+    assert.equal(toggles[at("Time signature")].getAttribute("aria-pressed"), "true");
   } finally {
     f.restore();
   }
@@ -107,5 +104,29 @@ test("the layout preview draws the rundown on a kiosk ground", async () => {
     assert.equal(!!table?.closest(".kiosk-surface"), true, "the preview is off the kiosk ground: department notes draw #000 in the light app");
   } finally {
     f.restore();
+  }
+});
+
+test("the preview draws Clock at a card's width, as the Columns row says, where a narrow rundown would drop it", async () => {
+  // A rundown under 1024px wide drops the Clock column first. The editor's preview is
+  // that narrow inside its card, so a layout with Clock on previewed without one.
+  // jsdom measures nothing: the observer reports the card's width.
+  const g = globalThis as unknown as { ResizeObserver?: unknown };
+  const real = g.ResizeObserver;
+  g.ResizeObserver = class {
+    constructor(private cb: (e: { contentRect: { width: number } }[]) => void) {}
+    observe() { this.cb([{ contentRect: { width: 880 } }]); }
+    unobserve() {}
+    disconnect() {}
+  };
+  // A plan with a service time, which is what gives the Clock column times to show.
+  const f = stubFetch({ ...RUNDOWN, serviceTimes: ["2026-11-15T15:00:00Z"] });
+  try {
+    await mountOpen();
+    const heads = [...document.querySelectorAll("[data-preview] th")].map((th) => th.textContent ?? "");
+    assert.equal(heads.includes("Clock"), true, `the preview left out the Clock its layout shows: ${JSON.stringify(heads)}`);
+  } finally {
+    f.restore();
+    g.ResizeObserver = real;
   }
 });

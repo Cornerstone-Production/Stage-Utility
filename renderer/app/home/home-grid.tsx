@@ -16,13 +16,14 @@ import { HOME_VIEW_ID } from "@main/services/home-view";
 import { ObjectContent, boxStyle, statusCtx, useLayoutData } from "../../main/layout-renderer";
 import type { LayoutRenderCtx } from "../../main/layout-renderer";
 import { COLUMNS, SIZES, sizeOf } from "./home-cards";
-import { boxesOf, rowsNeeded, type Box } from "./home-placement";
+import { boxesForPage, rowsNeeded, type Box } from "./home-placement";
 import { useSlideOnMove } from "../../lib/use-slide-on-move";
 import { useContextMenuTrigger } from "../../components/ui/context-menu-trigger";
 import { useCoarsePointer } from "../../lib/use-media-query";
 import { LAYOUT_OBJECTS } from "../../main/layout-objects";
 import { displayType } from "../../main/timer-config";
 import { ExpandableTile } from "./expanded/expandable-tile";
+import { HomeEditing } from "./home-editing";
 
 /**
  * The widget's own styling MINUS everything Home supplies itself: the frame AND
@@ -162,7 +163,7 @@ const NOMINAL_H = ROW_PX * 6;
  */
 function useHomeCtx(
   layout: LayoutDTO,
-  menuCardId: string | null,
+  menuCardId: string | null | undefined,
   choosePress: ((objectId: string) => void) | undefined,
 ): LayoutRenderCtx | null {
   // HOME_VIEW_ID, matching `embedChain` below: the gate walks embedded layouts
@@ -311,17 +312,8 @@ export function HomeCardCell({
   );
 }
 
-export function HomeGrid({
-  layout,
-  cards,
-  chrome,
-  boxes: boxesOverride,
-  animate = false,
-  gridRef,
-  onCardContextMenu,
-  menuCardId = null,
-  onChoosePress,
-}: {
+/** What HomeGrid takes: everything the grid draws from, minus the context it builds. */
+export interface HomeGridProps {
   layout: LayoutDTO;
   /** The cards to draw, already filtered and ordered by the caller. */
   cards: readonly LayoutObject[];
@@ -351,16 +343,40 @@ export function HomeGrid({
   /** Open the sheet that chooses what a Button with nothing chosen presses, from
    *  tapping its tile. Absent where Home cannot be edited. */
   onChoosePress?: (objectId: string) => void;
-}) {
-  const ctx = useHomeCtx(layout, menuCardId, onChoosePress);
-  const boxes = boxesOverride ?? boxesOf(cards);
+}
+
+/**
+ * The grid as HomeGridView draws it, over a render context already built.
+ *
+ * HomeGrid itself needs the whole Home data context (stage state from the SSE
+ * stream) before it draws anything, so the placement decisions made here —
+ * which rows exist while editing and while reading — could not be reached by a
+ * test. They can through this, with a context the test supplies.
+ */
+export function HomeGrid(props: HomeGridProps) {
+  const ctx = useHomeCtx(props.layout, props.menuCardId, props.onChoosePress);
+  return ctx ? <HomeGridView {...props} ctx={ctx} /> : null;
+}
+
+export function HomeGridView({
+  cards,
+  chrome,
+  boxes: boxesOverride,
+  animate = false,
+  gridRef,
+  onCardContextMenu,
+  ctx,
+}: HomeGridProps & { ctx: LayoutRenderCtx }) {
+  // Outside edit mode a row with no card in it is a blank band, so it closes up.
+  // The editor (chrome present) draws the full grid, spare rows included, so a
+  // card can still be dropped into one. A drag preview is only ever drawn there.
+  const editing = !!chrome;
+  const boxes = boxesOverride ?? boxesForPage(cards, editing);
   const byId = new Map(boxes.map((b) => [b.id, b]));
   // A signature rather than the array: the effect must run when a card MOVES,
   // and an array identity changes on every render.
   const signature = boxes.map((b) => `${b.id}:${b.col}:${b.row}`).join("|");
   const { setHost } = useSlideOnMove(signature, animate);
-  if (!ctx) return null;
-
   return (
     <div
       // NO kiosk-surface. Home is an app page, and its widgets wear the app's
@@ -383,8 +399,9 @@ export function HomeGrid({
         // page is somewhere a widget can actually be dropped. Without it the
         // grid ends at its content and "leave a gap at the bottom" had no
         // surface to land on.
-        style={{ gridTemplateRows: `repeat(${rowsNeeded(boxes)}, ${ROW_PX}px)` }}
+        style={{ gridTemplateRows: `repeat(${rowsNeeded(boxes, editing ? 2 : 0)}, ${ROW_PX}px)` }}
       >
+        <HomeEditing value={editing}>
         {cards.map((o) => {
           const { w, h } = SIZES[sizeOf(o)];
           const box = byId.get(o.id);
@@ -399,13 +416,14 @@ export function HomeGrid({
               chrome={chrome}
             >
               <CardFrame o={o}>
-                <ExpandableTile o={o} ctx={ctx} editing={!!chrome}>
+                <ExpandableTile o={o} ctx={ctx} editing={editing}>
                   <ObjectContent o={o} ctx={ctx} />
                 </ExpandableTile>
               </CardFrame>
             </HomeCardCell>
           );
         })}
+        </HomeEditing>
       </div>
       <style>{`
         /* A widget is a fixed box. It does not scroll — a tile you can scroll

@@ -72,10 +72,14 @@ Orientation for working in the codebase.
 
 ## Development notes
 
-- **React Compiler** is enabled in `vite.config.ts` via `@rolldown/plugin-babel` +
-  `reactCompilerPreset()` — components are auto-memoized at build time. (Vite 8 /
-  Rolldown is oxc-based, so `@vitejs/plugin-react`'s `babel` option doesn't apply;
-  the Rolldown Babel plugin is used instead.)
+- **React Compiler** is enabled in both Vite configs via `@rolldown/plugin-babel` +
+  `reactCompiler()` (`main/services/vite-react-compiler.ts`) — components are
+  auto-memoized at build time. (Vite 8 / Rolldown is oxc-based, so
+  `@vitejs/plugin-react`'s `babel` option doesn't apply; the Rolldown Babel plugin is
+  used instead.) `reactCompiler()` is plugin-react's `reactCompilerPreset()` with the
+  Babel preset given as a function rather than a file path: Babel `require()`s a
+  preset file, and under `node --import tsx` (the ServiceCue bundle script and the
+  test suite) tsx compiles that ES module to CommonJS without `import.meta.resolve`.
 - The backend is run directly as TypeScript via `tsx`; there is no separate compile
   step. `tsx` is a runtime dependency for this reason.
 - **Multiple displays in dev:** the Vite proxy mishandles several concurrent SSE

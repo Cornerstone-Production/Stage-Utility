@@ -68,6 +68,18 @@ export function storedImageHeaders(mime: string, cacheControl: string): Record<s
   return { "Content-Type": mime, "Cache-Control": cacheControl, "Content-Security-Policy": STORED_IMAGE_POLICY };
 }
 
+export type RasterKind = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+
+/** The raster format `bytes` are, by their magic number, or null for none of the four. */
+export function imageKind(bytes: Uint8Array): RasterKind | null {
+  const starts = (...sig: number[]) => sig.every((b, i) => bytes[i] === b);
+  if (starts(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return "image/png";
+  if (starts(0xff, 0xd8, 0xff)) return "image/jpeg";
+  if (starts(0x47, 0x49, 0x46, 0x38)) return "image/gif";
+  if (starts(0x52, 0x49, 0x46, 0x46) && Buffer.from(bytes.subarray(8, 12)).toString("ascii") === "WEBP") return "image/webp";
+  return null;
+}
+
 /**
  * Do the bytes actually look like the format the data URL claimed?
  *
@@ -76,26 +88,15 @@ export function storedImageHeaders(mime: string, cacheControl: string): Record<s
  * image. Checking the magic number is what turns that into a rejection.
  */
 function looksLike(mime: string, bytes: Buffer): boolean {
-  const starts = (...sig: number[]) => sig.every((b, i) => bytes[i] === b);
-  switch (mime) {
-    case "image/png":
-      return starts(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
-    case "image/jpeg":
-      return starts(0xff, 0xd8, 0xff);
-    case "image/gif":
-      return starts(0x47, 0x49, 0x46, 0x38);
-    case "image/webp":
-      return starts(0x52, 0x49, 0x46, 0x46) && bytes.subarray(8, 12).toString("ascii") === "WEBP";
-    case "image/svg+xml":
-      // Text, not binary — an XML declaration or the root element, comments aside.
-      return /^\s*(<\?xml|<!--|<svg)/i.test(bytes.subarray(0, 256).toString("utf8"));
-    default:
-      return false;
-  }
+  // Text, not binary — an XML declaration or the root element, comments aside.
+  if (mime === "image/svg+xml") return /^\s*(<\?xml|<!--|<svg)/i.test(bytes.subarray(0, 256).toString("utf8"));
+  return imageKind(bytes) === mime;
 }
 
-/** The name saveImage gives `bytes`: the first 16 hex of their SHA-256, and the extension. */
-function contentName(bytes: Buffer, ext: string): string {
+/** The name saveImage gives `bytes`: the first 16 hex of their SHA-256, and the
+ *  extension. Exported for a folder of content-addressed files that are not
+ *  images (stage-plot PDF originals), so the naming rule lives in one place. */
+export function contentName(bytes: Buffer, ext: string): string {
   return `${crypto.createHash("sha256").update(bytes).digest("hex").slice(0, 16)}.${ext}`;
 }
 
@@ -149,16 +150,26 @@ export async function saveImage(dirName: string, dataUrl: string, rule: ContentR
   if (!m) throw new Error("expected a base64 data:image/… URL");
   const ext = EXT_BY_MIME[m[1].toLowerCase()];
   if (!ext) throw new Error(`unsupported image type: ${m[1]}`);
-  const bytes = Buffer.from(m[2], "base64");
+  return `/${dirName}/${await saveImageBytes(dirName, Buffer.from(m[2], "base64"), ext, rule)}`;
+}
+
+/**
+ * Persist image bytes into `<data>/<dirName>/` under a content hash, for an
+ * upload that arrives as bytes rather than a data URL. `ext` is one saveImage
+ * writes. Returns the file name, `<hash>.<ext>`.
+ */
+export async function saveImageBytes(dirName: string, bytes: Buffer, ext: string, rule: ContentRule = { checkContent: true }): Promise<string> {
+  const mime = SAVED_EXTS.has(ext) ? MIME_BY_EXT[ext] : undefined;
+  if (!mime) throw new Error(`unsupported image type: ${ext}`);
   if (bytes.length === 0) throw new Error("empty image");
   if (bytes.length > MAX_IMAGE_BYTES) throw new Error("image too large (max 12 MB)");
-  if (rule.checkContent && !looksLike(m[1].toLowerCase(), bytes)) throw new Error(`not a valid ${m[1]} image`);
+  if (rule.checkContent && !looksLike(mime, bytes)) throw new Error(`not a valid ${mime} image`);
 
   const file = contentName(bytes, ext);
   const d = imageDir(dirName);
   await fs.mkdir(d, { recursive: true });
   await atomicWrite(path.join(d, file), bytes);
-  return `/${dirName}/${file}`;
+  return file;
 }
 
 /** Read a stored image for serving. `file` is untrusted — anything with a path

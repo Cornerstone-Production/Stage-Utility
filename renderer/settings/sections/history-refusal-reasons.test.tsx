@@ -18,7 +18,6 @@ import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 import { ok, reply } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
 const DATE = "2026-09-17";
@@ -68,7 +67,6 @@ function installFetch(refusal: Refusal) {
     if (url === "/api/service-timeline") return ok([timeline()]);
     if (url === "/api/attendance/history?summary=1") return ok([]);
     if (url === "/api/spl/summary") return ok([]);
-    if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
     if (url === "/api/baptism/sessions") return ok([]);
     if (url.match(/^\/api\/service-timeline\/[^/]+$/)) return ok(timeline());
     if (url.match(/^\/api\/attendance\/history\/[^/]+$/)) return ok(null);

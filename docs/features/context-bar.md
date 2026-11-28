@@ -13,11 +13,13 @@ See [Every page says its name](operator-app.md#every-page-says-its-name). Neithe
 is an item and neither can be configured — the readings below are what you
 arrange.
 
-**Right-click the bar and choose "Configure bar"** — or tap and hold it — or use
-**Settings → Advanced → General → Context bar**. All three open the same thing.
-On a touch device the bar also carries a **⋯ button** at its right edge, since
-there is no right-click to discover. There are two arrangements, both shared by
-everybody: the one above a desktop page, and the one a phone shows.
+**Right-click the bar and choose "Customize bar…"** (or tap and hold it), or use
+**Settings → Advanced → General → Layout → Context bar**. Both open
+[Customize mode](operator-app.md#customizing-the-sidebar) on its **Context bar**
+tab, where the bar itself is edited in place. On a touch device the bar also
+carries a **⋯ button** at its right edge, since there is no right-click to
+discover. There are two arrangements, both shared by everybody: the one above a
+desktop page, and the one a phone shows.
 
 ## What it can show
 
@@ -68,37 +70,50 @@ you never configured is absent, not disconnected. When something is down the
 count becomes a button: it names them, and clicking one opens its card on the
 Integrations page.
 
-## The configurator
+## Customizing the bar
 
-The dialog works the way the macOS toolbar editor does. Along the top is every
-item, as a tile; below it is the bar itself, live, showing real readings.
+In Customize mode, on the **Context bar** tab, the bar above the page gets a
+dashed outline and every reading becomes a chip; the page's own name and
+controls step aside. The tray docked under the page holds a tile for every item,
+plus **Space** and **Flexible space**. It works the way the macOS toolbar editor
+does.
 
 - **Drag a tile into the bar** to add it, at the point you drop it. Clicking a
   tile appends it to the end, which is the same thing without a mouse.
 - **Drag an item out of the bar** and let go anywhere else to remove it. The
-  small × on an item does the same.
-- **Drag an item along the bar** to move it. A line shows where it will land —
+  small × on an item does the same; on a touch screen it is always shown.
+- **Drag an item along the bar** to move it. A line shows where it will land:
   drop on the left half of an item to go before it, the right half to go after.
   No line means letting go there places nothing: a bar item is removed, and a
-  palette tile springs back.
+  tile springs back.
+- On a touch screen, hold an item or a tile still for a moment to pick it up; a
+  swipe scrolls instead.
+- While you edit, the strip wraps onto another line when it runs out of room,
+  so every item can be reached; the bar itself never wraps (see
+  [When it runs out of room](#when-it-runs-out-of-room)). An item dragged off
+  the bar shows in red before you let go.
 - A tile already in the bar is dimmed. **Space** and **Flexible space** never
   dim, because you can use as many of either as you like.
-- **Use the default set** puts the bar back to how it ships.
-- **A bar you empty stays empty.** Take every item off and the strip is
-  blank until you put something back; it does not refill itself with the
-  default set.
+- **Use the default set** puts the bar back to how it ships, with **Undo** on
+  the toast.
+- **A bar you empty stays empty.** Take every item off and the strip says
+  *Drag something in.* until you put something back; it does not refill itself
+  with the default set.
 
-**Desktop and Phone** at the top of the dialog choose which of the two bars you
-are arranging. The strip below shows the one you picked, at the width it will
-have.
+**Desktop and Phone** in the tray choose which of the two bars you are
+arranging. A phone opens on its own set. On a wider screen the phone's set is
+held to a phone's width (390px), labelled **Phone bar**, so you see what it
+will look like.
 
-Under it, a line says what will happen on a 320px phone — the narrowest screen
-the bar promises to fit. It appears only for a set a phone actually shows: the
-Phone tab always, and the Desktop tab while the phone is still following the
-desktop bar. Once the phone has a set of its own, the desktop bar is never drawn
-below 640px and the line goes.
+Under the tiles, a warning says when a set will be cut short on a 320px phone,
+the narrowest screen the bar promises to fit. It appears only for a set a phone
+actually shows: the Phone set always, and the Desktop set while the phone is
+still following it. Once the phone has a set of its own, the desktop bar is
+never drawn below 640px and the warning goes.
 
-Every change saves as you make it. There is nothing to apply.
+Every change saves as you make it; a save the server refuses puts the bar back
+as it was. **Sidebar** in the tray switches to arranging the sidebar without
+leaving the mode, and **Done**, or Escape, ends it.
 
 ## A phone can have its own set
 
@@ -107,7 +122,7 @@ arrangements: the one above a desktop page, and the one a phone shows. They are
 chosen independently, and both are shared — one desktop bar and one phone bar for
 everybody, like the rest of this app's config.
 
-**A phone follows the desktop bar until you give it a set of its own.** Opening the Phone tab changes nothing — it shows what the phone is already showing. The first change you make there is
+**A phone follows the desktop bar until you give it a set of its own.** Choosing Phone in the tray changes nothing — it shows what the phone is already showing. The first change you make there is
 what splits the two apart; **Follow the desktop bar** puts them back together.
 
 "A phone" means **narrower than 640px**, the same width at which the sidebar
@@ -117,8 +132,8 @@ not a second one the bar invented.
 Curating a phone's set is how you keep a reading whole rather than cut. The
 service type, the plan title and the current item are the only readings on the
 bar with no predictable length, and they are the only ones a narrow screen ever
-has to shorten — so taking one off the phone's bar is usually all it takes. The dialog measures your
-arrangement at 320px and tells you which way it lands before you leave it.
+has to shorten — so taking one off the phone's bar is usually all it takes. The
+tray measures your arrangement at 320px and says when something will be cut.
 
 ## One page can turn the bar off
 

@@ -349,7 +349,7 @@ describe("prefers-reduced-motion", () => {
   test("off: the panel starts on the tile and is carried out", async () => {
     // 250x200 at (100,200) growing into 1000x800 at (0,0).
     const { transform, transition } = await transformOnOpen(false);
-    assert.equal(transform, "translate(100px, 200px) scale(0.25, 0.25)",
+    assert.equal(transform, "translate(100px, 200px) scale(0.25)",
       "the panel did not start on the tile — an overlay that appears at full size reads as the page having jumped");
     assert.equal(transition, "none", "the inverted position was itself animated");
   });

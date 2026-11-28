@@ -44,7 +44,7 @@ const { automationLog } = await import("../../../main/services/automation-log.js
 const { stageController } = await import("../../../main/services/stage-controller.js");
 const { viewsStore } = await import("../../../main/services/views-store.js");
 
-const { installRealRoutesFetch, BROWSER: browser } = await import("../../test-fixtures/real-routes-fetch.js");
+const { installRealRoutesFetch } = await import("../../test-fixtures/real-routes-fetch.js");
 const bridge = installRealRoutesFetch(
   [
     { prefix: "/api/automation/", handler: automationRoutes },
@@ -67,7 +67,6 @@ const { resetClientLogLimits } = await import("../../../main/services/routes/cli
 
 type Rule = import("../../../main/types/automation.js").Rule;
 type View = import("../../../main/types/views.js").View;
-void browser;
 
 const realDeps = { ...consoleButtonDeps };
 const ctl = stageController as unknown as {

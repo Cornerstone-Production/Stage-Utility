@@ -1,7 +1,9 @@
-import { Component, useEffect, useState } from "react";
+import { Component, useEffect, useState, useSyncExternalStore } from "react";
 import { Tooltip } from "../components/ui/tooltip";
 import type { ReactNode, ErrorInfo } from "react";
-import { onNotification } from "../lib/api";
+import { getStreamStatus, onNotification, onSharedStreamChange, onStreamStatusChange, sharedStreamInUse } from "../lib/api";
+import { useLatestRef } from "../lib/use-latest-ref";
+import { PREVIEW_MSG, readPreviewMessage, sendPreviewMessage, type PreviewLiveReport } from "./preview-messages";
 import { SlotPanel } from "../components/slot-panel";
 import { SlotsColumns } from "../components/slots-columns";
 import { QrHint } from "../components/qr-hint";
@@ -341,31 +343,59 @@ function KioskError({ message, title = "Could not load stage state" }: { message
   );
 }
 
-// ---- live draft preview bridge ----------------------------------------------
-// The settings Views page posts UNSAVED, already-resolved slot edits into this
-// preview iframe so the preview reflects drafts live. Only "/preview-<id>"
-// contexts honor these messages — a real display never sets previewViewId, so it
-// ignores them entirely. Same-origin is enforced.
-const PREVIEW_DRAFT_MSG = "stage-utility:preview-draft";
-const PREVIEW_READY_MSG = "stage-utility:preview-ready";
+// ---- the preview's side of its card --------------------------------------------
+// Only "/preview-<id>" pages take part: a real display never sets previewViewId,
+// so it neither hears nor sends any of this. See preview-messages.ts.
 
+/**
+ * UNSAVED, already-resolved slot edits the card posts in, so the preview draws a
+ * draft live. Announces `ready` once its listener is up, so the card (re)sends
+ * the current draft.
+ */
 function usePreviewDraftSlots(previewViewId: string | null): Slot[] | null {
   const [draft, setDraft] = useState<Slot[] | null>(null);
   useEffect(() => {
     if (!previewViewId) return;
     function onMessage(e: MessageEvent) {
-      if (e.origin !== window.location.origin) return;
-      const data = e.data as { type?: string; viewId?: string; slots?: Slot[] | null } | null;
-      if (data?.type === PREVIEW_DRAFT_MSG && data.viewId === previewViewId) {
-        setDraft(Array.isArray(data.slots) ? data.slots : null);
-      }
+      const m = readPreviewMessage(e, window.parent, previewViewId!);
+      if (m?.type === PREVIEW_MSG.DRAFT) setDraft(m.slots);
     }
     window.addEventListener("message", onMessage);
-    // Tell the parent our listener is live, so it (re)posts the current draft.
-    window.parent?.postMessage({ type: PREVIEW_READY_MSG, viewId: previewViewId }, window.location.origin);
+    sendPreviewMessage(window.parent, { type: PREVIEW_MSG.READY, viewId: previewViewId });
     return () => window.removeEventListener("message", onMessage);
   }, [previewViewId]);
   return previewViewId ? draft : null;
+}
+
+/**
+ * Tell the card whether this preview is live: drawn with a state, and its event
+ * stream delivering. Also whether that stream is the shared one, which is what lets
+ * the kept Screens page cost no connection (kept-screens.tsx). Sent on every
+ * change, and in answer to the card asking, which it does as the kept page comes
+ * back into view.
+ */
+function usePreviewLiveReport(previewViewId: string | null, drawn: boolean): void {
+  const stream = useSyncExternalStore(onStreamStatusChange, getStreamStatus, getStreamStatus);
+  const shared = useSyncExternalStore(onSharedStreamChange, sharedStreamInUse, sharedStreamInUse);
+  const live = drawn && stream.up;
+  const since = live ? null : stream.downSince;
+  const report: PreviewLiveReport = { live, since, shared };
+  const reportRef = useLatestRef(report);
+  useEffect(() => {
+    if (!previewViewId) return;
+    sendPreviewMessage(window.parent, { type: PREVIEW_MSG.LIVE, viewId: previewViewId, live, since, shared });
+  }, [previewViewId, live, since, shared]);
+  useEffect(() => {
+    if (!previewViewId) return;
+    function onMessage(e: MessageEvent) {
+      const m = readPreviewMessage(e, window.parent, previewViewId!);
+      if (m?.type === PREVIEW_MSG.ASK) {
+        sendPreviewMessage(window.parent, { type: PREVIEW_MSG.LIVE, viewId: previewViewId!, ...reportRef.current });
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [previewViewId, reportRef]);
 }
 
 // ---- main view --------------------------------------------------------------
@@ -445,6 +475,10 @@ export function StageView() {
     previewViewId,
     previewOutputId: previewOutput,
   });
+
+  // Live once it can draw from a state: not while loading, and not on the error
+  // screen, which is a picture of a failure and must not pass for one of the room.
+  usePreviewLiveReport(previewViewId, !!state && screen.k !== "loading" && screen.k !== "error");
 
   // Keep the browser tab title in sync with the brand + this display's name, so
   // renaming a display (Settings) updates its kiosk tab too.

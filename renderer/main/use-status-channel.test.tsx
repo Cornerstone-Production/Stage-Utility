@@ -20,11 +20,6 @@ import { installDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 
 const teardown = installDom();
-// React only act-wraps a render, and only warns when an update escapes one,
-// once it is told it is in a test environment. Without this the file reads
-// as clean while 10 updates land outside act — which is why it was
-// cleared the first time round.
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 (globalThis as unknown as { fetch: unknown }).fetch = async () => ({
@@ -94,6 +89,19 @@ describe("useStatusChannel failed", () => {
     await act(async () => FakeEventSource.last!.push("obs:status", { connected: true, recording: false, rev: 1 }));
     await settle();
     assert.equal(seen.failed, false, "a live push is an answer");
+  });
+
+  test("onReadFailure is told why the read failed, so a caller can say it on /log", async () => {
+    const told: string[] = [];
+    // Memoised as every caller's is; the callback need not be.
+    const read = () => Promise.reject(new Error("timeout"));
+    function Probe(): React.ReactElement {
+      useStatusChannel<Dto>(read, "obs:status", true, { onReadFailure: (err) => told.push((err as Error).message) });
+      return React.createElement("output");
+    }
+    render(React.createElement(Probe));
+    await settle();
+    assert.deepEqual(told, ["timeout"]);
   });
 
   test("a read that succeeds is not failed", async () => {
@@ -344,5 +352,35 @@ describe("useStatusChannel while disabled", () => {
     await settle();
     assert.equal(seen.known, true);
     assert.equal((seen.value as Dto | null)?.connected, true);
+  });
+});
+
+describe("useStatusChannel resubscribeKey", () => {
+  test("a bump opens a fresh window: known resets until the new read answers", async () => {
+    // The old shape re-identified `read`, which reset `known`; a key bump must do
+    // the same, or a caller that gates a claim on `known` (Home's Needs attention,
+    // Mic slots) keeps asserting on the previous window's answer.
+    const second = deferred<Dto | null>();
+    let reads = 0;
+    const read = () => (++reads === 1 ? Promise.resolve({ connected: true, recording: false, rev: 1 }) : second.promise);
+    let bump!: () => void;
+    const seen = { known: false };
+    function Probe(): React.ReactElement {
+      const [key, setKey] = React.useState(0);
+      bump = () => setKey((k) => k + 1);
+      seen.known = useStatusChannel<Dto>(read, "obs:status", true, { resubscribeKey: key }).known;
+      return React.createElement("output", null, String(key));
+    }
+    render(React.createElement(Probe));
+    await settle();
+    assert.equal(seen.known, true, "the first read answered");
+
+    await act(async () => bump());
+    assert.equal(reads, 2, "a bump reads again");
+    assert.equal(seen.known, false, "the new window has not answered yet");
+
+    await act(async () => second.resolve({ connected: true, recording: true, rev: 2 }));
+    await settle();
+    assert.equal(seen.known, true);
   });
 });

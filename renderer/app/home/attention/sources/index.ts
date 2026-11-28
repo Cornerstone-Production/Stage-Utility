@@ -3,18 +3,24 @@
 // by source, then by subject.
 
 import type { AttentionSource } from "../types";
+import { duplicateServer } from "./duplicate-server";
 import { integrationDown } from "./integration-down";
+import { noteCategories } from "./note-categories";
 import { readiness } from "./readiness";
 import { recorderIdle } from "./recorder-idle";
+import { rolloverHeld } from "./rollover-held";
 import { screenOffline } from "./screen-offline";
 import { wirelessBattery } from "./wireless-battery";
 import { wirelessOffline } from "./wireless-offline";
 
 export const ATTENTION_SOURCES: readonly AttentionSource[] = [
   readiness,
+  rolloverHeld,
   wirelessBattery,
   wirelessOffline,
+  duplicateServer,
   screenOffline,
   recorderIdle,
   integrationDown,
+  noteCategories,
 ];

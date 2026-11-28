@@ -17,7 +17,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { eventually, installRenderDom } from "../../test-dom.js";
+import { eventually, installRenderDom, mountInAct } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -34,7 +34,7 @@ Object.defineProperty(Element.prototype, "getBoundingClientRect", {
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const React = await import("react");
-const { SplDetail } = await import("./spl-history-section.js");
+const { SplDetailOnPage } = await import("../../test-fixtures/spl-detail.js");
 
 const T0 = Date.parse("2026-09-17T20:15:00.000Z");
 const MIN = 60_000;
@@ -102,8 +102,8 @@ test("hovering a sound lane segment reads the item's PLANNED length off the time
   const realFetch = globalThis.fetch;
   globalThis.fetch = splFetch;
   try {
-    render(
-      React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+    await mountInAct(render, 
+      React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
         detail: SPL,
         timeline: TIMELINE,
       }),

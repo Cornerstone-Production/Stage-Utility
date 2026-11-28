@@ -19,7 +19,7 @@
 import type { OwnedBy, Rule } from "../types/automation.js";
 import type { View } from "../types/stage.js";
 import type { LayoutObject } from "../types/views.js";
-import { CALL_TRIGGER_ID, calledCueName, parseAliases } from "./cue-aliases.js";
+import { CALL_TRIGGER_ID, calledCueName, cueKey, parseAliases } from "./cue-aliases.js";
 import { scrub } from "./scrub.js";
 import { HOME_VIEW_ID } from "./home-view.js";
 import { viewsStore } from "./views-store.js";
@@ -43,7 +43,7 @@ function cueButtonsIn(objects: readonly LayoutObject[] | undefined): { object: L
   walkLayoutObjects(objects ?? [], (object) => {
     const cfg = object.config as { type?: string; cue?: unknown };
     if (cfg?.type === "cue-button" && typeof cfg.cue === "string" && cfg.cue.trim()) {
-      out.push({ object, cue: cfg.cue.trim().toLowerCase() });
+      out.push({ object, cue: cueKey(cfg.cue) });
     }
   });
   return out;

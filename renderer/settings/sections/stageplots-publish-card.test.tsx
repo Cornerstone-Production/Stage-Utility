@@ -1,0 +1,438 @@
+// The editor's Publish card, every state and both confirms, with the wording of the
+// approved mockup (section 5), against a fake of the four publish routes and the
+// Public link settings the card reads its host from.
+//
+// What is NOT here: the copy on a real plain-HTTP page, and how the link is cut short,
+// are driven in a browser. jsdom has a document.execCommand that does nothing and no
+// layout, so only the fallback's choice (a selected field holding the whole link) is
+// checked here, not that a person can copy from it; and it measures no width, so that a
+// long host truncates while "/stageplots/q7Hk2v…Hk2E" stays whole is a screenshot, not a test.
+//
+// Every name below is invented. This is a public repository.
+
+import { strict as assert } from "node:assert";
+import { afterEach, beforeEach, describe, test } from "node:test";
+
+import type { PendingRemovalView, Venue, VenuePublish, VenueView } from "@main/types/stageplots";
+
+import { installRenderDom, settle } from "../../test-dom.js";
+
+installRenderDom();
+
+const ORIGIN = "https://plots.example.workers.dev";
+const SECRET = "A".repeat(42) + "E";
+
+/** The venue as the fake server stores it, secret and all. The card is handed it as a browser gets it (asView). */
+let VENUE: Venue;
+/** Every GET of the venue's link, and, while set, the status the next one fails with. */
+let linkReads = 0;
+let linkFails: number | null = null;
+/** While set, a link read waits for it before it answers. */
+let linkGate: Promise<void> | null = null;
+let PENDING: PendingRemovalView[] = [];
+/** What GET /api/servicecue/publish answers. */
+let SETTINGS: { url: string; token: string } = { url: ORIGIN, token: "••••" };
+let sent: string[] = [];
+/** The next publish call answers this status and error instead. */
+let refuse: { status: number; error: string } | null = null;
+/** A notice the next successful call carries beside the venue. */
+let notice: string | null = null;
+/** What the server says following the last Public link save could not do (StagePlotsView.notice). */
+let FOLLOW: { at: string; message: string } | undefined;
+/** What the server says the landing page could not take (StagePlotsView.landing). */
+let LANDING: { at: string; message: string } | undefined;
+
+function published(extra: Partial<VenuePublish> = {}): VenuePublish {
+  return {
+    secret: SECRET,
+    origin: ORIGIN,
+    publishedAt: "2026-11-12T20:32:00.000Z",
+    linkAt: "2026-11-12T20:32:00.000Z",
+    lastError: null,
+    publishedImages: [],
+    unpublishedImages: [],
+    listed: false,
+    ...extra,
+  };
+}
+
+/** The venue with no secret, as GET /api/stageplots, stageplots:updated and every answer carry it. */
+function asView(v: Venue): VenueView {
+  if (!v.publish) return v;
+  const { secret: _secret, ...publish } = v.publish;
+  return { ...v, publish };
+}
+
+(globalThis as unknown as { fetch: unknown }).fetch = async (url: unknown, init?: RequestInit) => {
+  const u = new URL(String(url), "http://localhost");
+  const method = init?.method ?? "GET";
+  let status = 200;
+  let json: unknown = {};
+  if (u.pathname === "/api/servicecue/publish") json = { enabled: false, ...SETTINGS };
+  else if (method === "GET" && /^\/api\/stageplots\/venues\/[^/]+\/link$/.test(u.pathname)) {
+    linkReads++;
+    if (linkGate) await linkGate;
+    if (linkFails !== null) {
+      status = linkFails;
+      json = { error: "unavailable" };
+    } else json = { url: VENUE.publish ? `${VENUE.publish.origin}/stageplots/${VENUE.publish.secret}` : null };
+  }
+  else if (method === "POST" && u.pathname === "/api/stageplots/pending/remove") {
+    sent.push(`${method} ${u.pathname}`);
+    const here = PENDING.filter((e) => e.origin === ORIGIN).length;
+    PENDING = PENDING.filter((e) => e.origin !== ORIGIN);
+    json = { removed: here, left: 0, waiting: PENDING.length };
+  }
+  else if (method === "POST" && /^\/api\/stageplots\/venues\/[^/]+\/listed$/.test(u.pathname)) {
+    sent.push(`${method} ${u.pathname} ${String(init?.body)}`);
+    const listed = (JSON.parse(String(init?.body)) as { listed: boolean }).listed;
+    VENUE = { ...VENUE, publish: { ...VENUE.publish!, listed } };
+    json = asView(VENUE);
+  }
+  else if (method === "POST" && /^\/api\/stageplots\/venues\/[^/]+\/(publish|regenerate|unpublish|publish-now)$/.test(u.pathname)) {
+    sent.push(`${method} ${u.pathname}`);
+    if (refuse) {
+      ({ status } = refuse);
+      json = { error: refuse.error };
+      refuse = null;
+    } else {
+      const action = u.pathname.split("/").pop();
+      VENUE = action === "unpublish" ? { ...VENUE, publish: undefined } : { ...VENUE, publish: published() };
+      json = notice ? { ...asView(VENUE), notice } : asView(VENUE);
+      notice = null;
+    }
+  }
+  return { ok: status < 300, status, statusText: String(status), json: async () => json, text: async () => JSON.stringify(json) };
+};
+
+const { render, cleanup, screen, fireEvent } = await import("@testing-library/react");
+const React = (await import("react")).default;
+const { act } = await import("react");
+const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
+const { PublishCard, PendingLinksCard, shortSecret } = await import("./stageplots-publish-card.js");
+const { ConfirmHost } = await import("../../components/ui/confirm-dialog.js");
+const { setDisplayHourCycle } = await import("../../lib/clock-format.js");
+
+async function mount() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
+  const save = async <T,>(fn: () => Promise<T>) => {
+    try {
+      return { ok: true as const, value: await fn() };
+    } catch (err) {
+      return { ok: false as const, error: (err as Error).message };
+    }
+  };
+  const view = () =>
+    React.createElement(
+      QueryClientProvider,
+      { client },
+      VENUE.id === "none"
+        ? React.createElement(PendingLinksCard, { pending: PENDING, save, notice: FOLLOW, timeZone: "America/Chicago" })
+        : React.createElement(PublishCard, { venue: asView(VENUE), pending: PENDING, save, timeZone: "America/Chicago", follow: FOLLOW, landing: LANDING }),
+      React.createElement(ConfirmHost),
+    );
+  let rerender!: (ui: React.ReactElement) => void;
+  await act(async () => {
+    ({ rerender } = render(view()));
+  });
+  for (let i = 0; i < 3; i++) await settle();
+  return { refresh: async () => act(async () => rerender(view())) };
+}
+
+async function click(el: Element) {
+  await act(async () => {
+    fireEvent.click(el);
+  });
+  for (let i = 0; i < 3; i++) await settle();
+}
+
+const card = () => screen.getByRole("region", { name: "Publish" });
+const text = () => card().textContent ?? "";
+
+beforeEach(() => {
+  VENUE = { id: "v-1", name: "Room One", slug: null, oldSlugs: [], kind: "home", notes: "", plotIds: [], defaultPlotId: null };
+  SETTINGS = { url: ORIGIN, token: "••••" };
+  sent = [];
+  linkReads = 0;
+  linkFails = null;
+  linkGate = null;
+  refuse = null;
+  notice = null;
+  PENDING = [];
+  FOLLOW = undefined;
+  LANDING = undefined;
+  setDisplayHourCycle("24h");
+});
+afterEach(async () => {
+  cleanup();
+  await settle();
+});
+
+describe("the Publish card, off", () => {
+  test("explains publishing in the mockup's words and publishes on its button", async () => {
+    const m = await mount();
+    assert.equal(screen.getByTestId("publish-pill").textContent, "Off");
+    assert.match(text(), /Put Room One on plots\.example\.workers\.dev behind a secret link\. Anyone with the link can view its plots, read-only\. Nothing lists it\./);
+    await click(screen.getByRole("button", { name: "Publish Room One" }));
+    assert.deepEqual(sent, ["POST /api/stageplots/venues/v-1/publish"]);
+    await m.refresh();
+    assert.equal(screen.getByTestId("publish-pill").textContent, "Published");
+  });
+
+  test("a refusal is shown beside the button, and the plots are said to be saved", async () => {
+    await mount();
+    refuse = { status: 502, error: "plots.example.workers.dev needs updating before it can show stage plots: deploy the Worker." };
+    await click(screen.getByRole("button", { name: "Publish Room One" }));
+    assert.match(screen.getByRole("alert").textContent ?? "", /^Not published: plots\.example\.workers\.dev needs updating before it can show stage plots: deploy the Worker\. Your plots save and show on this network as usual; only the public link waits\.$/);
+    assert.equal(screen.getByTestId("publish-pill").textContent, "Off");
+  });
+
+  test("with no page address or token, the button is off and the card says where to set them", async () => {
+    SETTINGS = { url: "", token: "" };
+    await mount();
+    assert.equal((screen.getByRole("button", { name: "Publish Room One" }) as HTMLButtonElement).disabled, true);
+    assert.match(text(), /Set up the public link first, in Settings > Advanced > Public link\./);
+    assert.equal(screen.getByRole("link", { name: "Settings > Advanced > Public link" }).getAttribute("href"), "/settings/advanced/public-link");
+  });
+});
+
+describe("the landing page switch", () => {
+  const sw = () => screen.getByRole("switch", { name: "Show on the landing page" });
+
+  test("is off to start, says who sees the venue, and turning it on lists the venue", async () => {
+    VENUE.publish = published();
+    const { refresh } = await mount();
+    assert.equal(sw().getAttribute("aria-checked"), "false");
+    assert.match(text(), /Show on the landing pageAnyone who opens plots\.example\.workers\.dev sees Room One and can open its plots\./);
+    await click(sw());
+    assert.deepEqual(sent, ['POST /api/stageplots/venues/v-1/listed {"listed":true}']);
+    await refresh();
+    assert.equal(sw().getAttribute("aria-checked"), "true");
+    await click(sw());
+    assert.equal(sent.at(-1), 'POST /api/stageplots/venues/v-1/listed {"listed":false}');
+  });
+
+  test("is not there while the venue is not published", async () => {
+    await mount();
+    assert.equal(screen.queryByRole("switch", { name: "Show on the landing page" }), null);
+  });
+
+  test("says the page needs updating when the page could not take the list", async () => {
+    VENUE.publish = published({ listed: true });
+    LANDING = { at: "2026-11-14T14:32:00.000Z", message: "plots.example.workers.dev needs updating before it can show a landing page: deploy the Worker." };
+    await mount();
+    assert.equal(screen.getByTestId("landing-note").textContent, LANDING.message);
+    assert.doesNotMatch(text(), /Anyone who opens/);
+  });
+});
+
+describe("the Publish card, published", () => {
+  test("shows when it was last published, in the app's zone, and the link cut short with the whole of it on hover", async () => {
+    VENUE.publish = published();
+    await mount();
+    assert.equal(screen.getByTestId("publish-pill").textContent, "Published");
+    assert.match(text(), /Last publishedThu 12 Nov, 14:32/);
+    assert.equal(screen.getByTestId("publish-link").textContent, `plots.example.workers.dev/stageplots/${shortSecret(SECRET)}`);
+    assert.equal(shortSecret(SECRET), "AAAAAA…AAAE");
+    assert.equal(screen.getByTestId("publish-link").parentElement!.getAttribute("title"), `plots.example.workers.dev/stageplots/${SECRET}`);
+    assert.equal(screen.queryByRole("alert"), null);
+  });
+
+  test("the link is its own read, read again when another desk regenerates it, and the old one is never offered meanwhile", async () => {
+    VENUE.publish = published();
+    const m = await mount();
+    assert.equal(linkReads, 1);
+    assert.equal(screen.getByTestId("publish-link").textContent, `plots.example.workers.dev/stageplots/${shortSecret(SECRET)}`);
+    // Regenerated elsewhere: the document says only that it was published again.
+    const NEW = "B".repeat(42) + "Q";
+    let open!: () => void;
+    linkGate = new Promise((r) => (open = r));
+    VENUE.publish = published({ secret: NEW, publishedAt: "2026-11-12T21:05:00.000Z", linkAt: "2026-11-12T21:05:00.000Z" });
+    await m.refresh();
+    for (let i = 0; i < 3; i++) await settle();
+    assert.equal(linkReads, 2, "the link was not read again");
+    assert.equal(screen.getByTestId("publish-link").textContent, "plots.example.workers.dev/stageplots/…", "the old link is still shown");
+    assert.equal((screen.getByRole("button", { name: "Copy link" }) as HTMLButtonElement).disabled, true, "Copy offers the old link");
+    await act(async () => open());
+    for (let i = 0; i < 3; i++) await settle();
+    assert.equal(screen.getByTestId("publish-link").textContent, `plots.example.workers.dev/stageplots/${shortSecret(NEW)}`);
+    // A save that leaves the link as it was reads nothing.
+    VENUE.publish = { ...VENUE.publish, listed: true };
+    await m.refresh();
+    for (let i = 0; i < 3; i++) await settle();
+    assert.equal(linkReads, 2);
+  });
+
+  test("a republish (a new publishedAt, the same link) reads nothing and leaves the hand-copy field open", async () => {
+    VENUE.publish = published();
+    delete (navigator as { clipboard?: unknown }).clipboard;
+    Object.defineProperty(window, "isSecureContext", { configurable: true, value: false });
+    (document as unknown as { execCommand: () => boolean }).execCommand = () => false;
+    const m = await mount();
+    await click(screen.getByRole("button", { name: "Copy link" }));
+    assert.ok(screen.queryByRole("textbox", { name: "Link" }), "no hand-copy field, so this tests nothing");
+    // Every edit anywhere republishes, which writes a new publishedAt and leaves the link alone.
+    VENUE.publish = { ...VENUE.publish, publishedAt: "2026-11-12T21:09:00.000Z" };
+    await m.refresh();
+    for (let i = 0; i < 3; i++) await settle();
+    assert.equal(linkReads, 1, "a republish read the link again");
+    assert.ok(screen.queryByRole("textbox", { name: "Link" }), "the hand-copy field closed under the operator on an automatic republish");
+  });
+
+  test("a link that cannot be read says so, offers no link, and Try again reads it", async () => {
+    VENUE.publish = published();
+    linkFails = 503;
+    await mount();
+    assert.match(screen.getByRole("alert").textContent ?? "", /The link could not be read from the server\./);
+    assert.equal((screen.getByRole("button", { name: "Copy link" }) as HTMLButtonElement).disabled, true);
+    linkFails = null;
+    await click(screen.getByRole("button", { name: "Try again" }));
+    assert.equal(screen.queryByRole("alert"), null);
+    assert.equal(screen.getByTestId("publish-link").textContent, `plots.example.workers.dev/stageplots/${shortSecret(SECRET)}`);
+  });
+
+  test("Copy writes the whole link where there is a clipboard", async () => {
+    VENUE.publish = published();
+    const wrote: string[] = [];
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: async (t: string) => void wrote.push(t) } });
+    Object.defineProperty(window, "isSecureContext", { configurable: true, value: true });
+    try {
+      await mount();
+      await click(screen.getByRole("button", { name: "Copy link" }));
+      assert.deepEqual(wrote, [`${ORIGIN}/stageplots/${SECRET}`]);
+      assert.match(text(), /Copied\./);
+    } finally {
+      delete (navigator as { clipboard?: unknown }).clipboard;
+      Object.defineProperty(window, "isSecureContext", { configurable: true, value: false });
+    }
+  });
+
+  test("on plain HTTP, with no clipboard and a copy command that does nothing, the whole link is put in a field and selected", async () => {
+    VENUE.publish = published();
+    delete (navigator as { clipboard?: unknown }).clipboard;
+    Object.defineProperty(window, "isSecureContext", { configurable: true, value: false });
+    (document as unknown as { execCommand: () => boolean }).execCommand = () => false;
+    await mount();
+    await click(screen.getByRole("button", { name: "Copy link" }));
+    const field = screen.getByRole("textbox", { name: "Link" }) as HTMLInputElement;
+    assert.equal(field.value, `${ORIGIN}/stageplots/${SECRET}`);
+    assert.equal(document.activeElement, field, "the link was not focused for copying");
+    assert.equal(field.selectionEnd! - field.selectionStart!, field.value.length, "the link was not selected whole");
+    assert.match(text(), /Selected: press Ctrl\+C \(⌘C on a Mac\) to copy it\./);
+  });
+
+  test("Regenerate… asks in the mockup's words, does nothing on Cancel, and regenerates on its button", async () => {
+    VENUE.publish = published();
+    await mount();
+    await click(screen.getByRole("button", { name: "Regenerate…" }));
+    const dialog = screen.getByRole("alertdialog");
+    assert.match(dialog.textContent ?? "", /Regenerate the link\?/);
+    assert.match(dialog.textContent ?? "", /Room One is published under a new secret link\. The old link stops working as soon as the new one is up, so anyone using it will need the new one\./);
+    await click(screen.getByRole("button", { name: "Cancel" }));
+    assert.deepEqual(sent, []);
+    await click(screen.getByRole("button", { name: "Regenerate…" }));
+    await click(screen.getByRole("button", { name: "Regenerate link" }));
+    assert.deepEqual(sent, ["POST /api/stageplots/venues/v-1/regenerate"]);
+  });
+
+  test("Unpublish… asks in the mockup's words, naming the host, and unpublishes on its button", async () => {
+    VENUE.publish = published();
+    const m = await mount();
+    await click(screen.getByRole("button", { name: "Unpublish…" }));
+    const dialog = screen.getByRole("alertdialog");
+    assert.match(dialog.textContent ?? "", /Unpublish Room One\?/);
+    assert.match(dialog.textContent ?? "", /Its page and backgrounds are removed from plots\.example\.workers\.dev and the link stops working\. The plots stay here\. Publishing again makes a new link\./);
+    await click(screen.getByRole("button", { name: "Cancel" }));
+    assert.deepEqual(sent, []);
+    await click(screen.getByRole("button", { name: "Unpublish…" }));
+    await click(screen.getByRole("button", { name: "Unpublish" }));
+    assert.deepEqual(sent, ["POST /api/stageplots/venues/v-1/unpublish"]);
+    await m.refresh();
+    assert.equal(screen.getByTestId("publish-pill").textContent, "Off");
+  });
+
+  test("a notice the server sends with the answer stays on the card after it turns Off", async () => {
+    VENUE.publish = published();
+    const m = await mount();
+    notice = "The copy published to old.example.workers.dev is left on old.example.workers.dev: this server has no token for that page any more.";
+    await click(screen.getByRole("button", { name: "Unpublish…" }));
+    await click(screen.getByRole("button", { name: "Unpublish" }));
+    await m.refresh();
+    assert.equal(screen.getByTestId("publish-pill").textContent, "Off");
+    assert.match(text(), /left on old\.example\.workers\.dev: this server has no token for that page any more\./);
+  });
+
+  test("backgrounds not yet published are counted, and Publish now sends them", async () => {
+    VENUE.publish = published({ unpublishedImages: ["0000000000000001", "0000000000000002"], publishedImages: [] });
+    await mount();
+    assert.match(text(), /2 backgrounds not yet published\. Publish now/);
+    await click(screen.getByRole("button", { name: "Publish now" }));
+    assert.deepEqual(sent, ["POST /api/stageplots/venues/v-1/publish-now"]);
+  });
+
+  test("the last error, with its time, says the plots are saved here", async () => {
+    VENUE.publish = published({ lastError: { at: "2026-11-12T20:31:00.000Z", message: "plots.example.workers.dev did not answer (timed out after 10 s)." } });
+    await mount();
+    assert.equal(
+      screen.getByRole("alert").textContent,
+      "Last error 14:31: plots.example.workers.dev did not answer (timed out after 10 s). Your plots save and show on this network as usual; only the public link waits.",
+    );
+    // A failure with every background published still has a way to try again.
+    assert.ok(screen.getByRole("button", { name: "Publish now" }));
+  });
+});
+
+describe("old links still live", () => {
+  const entry = (origin: string, reason: PendingRemovalView["reason"] = "regenerated"): PendingRemovalView => ({ origin, since: "2026-11-12T20:00:00.000Z", reason });
+
+  test("are counted by page, and Remove now drains those on the page set up", async () => {
+    VENUE.publish = published();
+    PENDING = [entry(ORIGIN), entry(ORIGIN, "unpublished")];
+    const m = await mount();
+    assert.match(text(), /2 old links still live on plots\.example\.workers\.dev\./);
+    await click(screen.getByRole("button", { name: "Remove now" }));
+    assert.deepEqual(sent, ["POST /api/stageplots/pending/remove"]);
+    await m.refresh();
+    assert.equal(/old links? still live/.test(text()), false);
+  });
+
+  test("on a page that is not set up here say so, and offer nothing that cannot work", async () => {
+    PENDING = [entry("https://old.example.workers.dev", "address changed")];
+    await mount();
+    assert.match(text(), /1 old link still live on old\.example\.workers\.dev\. Set that page up again to remove it\./);
+    assert.equal(screen.queryByRole("button", { name: "Remove now" }), null);
+  });
+
+  test("show with no venue selected, so a deleted venue's link is never out of sight", async () => {
+    VENUE = { ...VENUE, id: "none" };
+    PENDING = [entry(ORIGIN, "venue deleted")];
+    await mount();
+    assert.match(text(), /1 old link still live on plots\.example\.workers\.dev\./);
+    assert.ok(screen.getByRole("button", { name: "Remove now" }));
+  });
+});
+
+describe("what following a page address could not do", () => {
+  const FAILED = { at: "2026-11-13T15:04:00.000Z", message: "The old links on old.example.workers.dev could not be removed with its token." };
+
+  test("shows on the card with a venue selected, never read as success", async () => {
+    VENUE.publish = published();
+    FOLLOW = FAILED;
+    await mount();
+    assert.match(screen.getByTestId("follow-notice").textContent ?? "", /^Page address saved 09:04: The old links on old\.example\.workers\.dev could not be removed with its token\.$/);
+  });
+
+  test("shows with no venue selected, even with no old links waiting", async () => {
+    VENUE = { ...VENUE, id: "none" };
+    FOLLOW = FAILED;
+    await mount();
+    assert.ok(card());
+    assert.match(screen.getByTestId("follow-notice").textContent ?? "", /could not be removed with its token/);
+  });
+
+  test("is not shown when the follow did all of it", async () => {
+    VENUE = { ...VENUE, id: "none" };
+    await mount();
+    assert.equal(screen.queryByTestId("follow-notice"), null);
+  });
+});

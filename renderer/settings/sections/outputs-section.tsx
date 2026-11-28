@@ -545,6 +545,7 @@ export function OutputRow({ output, views, baseUrl, online, struggles, lags, out
           // The preview iframe sets pointer-events:none, so the click lands here.
           <LazyPreview
             viewId={output.viewId}
+            name={output.name}
             // This card IS a screen, so its preview speaks for that screen and
             // not merely for the View behind it. It is what makes the Top bar
             // switch in Screen settings visibly do something: the card loses
@@ -751,6 +752,7 @@ function UnassignedViewCard({
       <div className="pt-2">
         <LazyPreview
           viewId={view.id}
+          name={view.name}
           onExpand={onEditLayout}
           expandLabel={`Edit ${view.name}`}
           following={panelOpen ? { label: `Show settings for ${view.name}` } : undefined}
@@ -928,7 +930,7 @@ export function OutputsSection({
                   // used to say the built-in kinds "would open an editor with
                   // nothing to edit" — which was simply wrong: a slots view's
                   // editor is where its slot set and column positions live, and
-                  // a ServiceCue view's is where its column preset is chosen.
+                  // a ServiceCue view's is where its layout is chosen.
                   // Greying this out left no way to edit a mic board at all.
                   onEditLayout && output.viewId ? () => onEditLayout(output.viewId!) : undefined
                 }

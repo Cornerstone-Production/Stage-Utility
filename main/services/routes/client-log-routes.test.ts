@@ -14,17 +14,8 @@ const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-client-log-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
 
-const { initLogCapture, getLogLines, setLogSink } = await import("../log-buffer.js");
+const { initLogCapture, getLogLines } = await import("../log-buffer.js");
 initLogCapture();
-// A SINK IS REQUIRED FOR THE BUFFER TO FILL AT ALL, which is not obvious and is
-// not this change's doing: log-buffer's `record()` is written
-// `sink?.(push(level, msg, t))`, and an optional call does not evaluate its
-// argument — so with no sink installed, `push` never runs and the ring buffer
-// stays empty. In production log-persist installs one at boot and it works by
-// ordering. Reported rather than fixed here: it is shipped infrastructure, and
-// widening a History change into the log pipeline is how a PR stops being
-// reviewable.
-setLogSink(() => {});
 
 const { clientLogRoutes, resetClientLogLimits } = await import("./client-log-routes.js");
 const { callRoute } = await import("./route-harness.js");

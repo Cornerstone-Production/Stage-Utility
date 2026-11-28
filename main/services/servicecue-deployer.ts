@@ -25,7 +25,9 @@
 // back from Cloudflare. A page with no such record (deployed by hand) is deployed over.
 //
 // A failure leaves the page as it was and is retried on the publisher's doubling backoff, a minute to
-// once an hour; a 401 or 403 is not retried until the credentials change. A deploy that succeeds but
+// once an hour; a 401 or 403 is not retried until the credentials change. An upload of the Worker
+// that got no answer, or a 5xx, may have swapped it all the same: Cloudflare is asked what it holds,
+// and if it holds this build, the deploy went through. A deploy that succeeds but
 // leaves the page serving the old build means the Worker is not the page: auto deploys stop until the
 // credentials or the bundle change. One deploy at a time: a request during one joins it.
 //
@@ -45,6 +47,7 @@ import {
   createCloudflare,
   readBundle,
   readManifest,
+  type CloudflareClient,
   type CloudflareOrigin,
 } from "./servicecue-cloudflare.js";
 import type { DeployCredentials } from "./servicecue-deploy-store.js";
@@ -113,7 +116,15 @@ export type DeployNowOutcome =
   | { kind: "newer"; pageVersion: string; runningVersion: string }
   | { kind: "other-build"; pageBuild: string | null; version: string }
   | { kind: "limited"; retryAfterSec: number }
-  | { kind: "failed"; message: string; code: number | null; status: number | null; step: string };
+  | {
+      kind: "failed";
+      message: string;
+      code: number | null;
+      status: number | null;
+      step: string;
+      /** The upload got no answer and what Cloudflare holds could not be read either: the page may have taken it. */
+      unsure?: true;
+    };
 
 type DeployOutcome = DeployNowOutcome | AutoOnly;
 
@@ -441,15 +452,42 @@ export class ServiceCueDeployer implements DeployHook {
         `deploy:${manifest.build}:${running}`,
         `deploying build ${manifest.build} as ${running}: the page ${pageBuild === null || pageBuild === undefined ? "reports no build" : `serves build ${pageBuild}`}${mode === "now" ? ", and the update was asked for" : ""}${confirmed && (older || otherBuild) ? ", over a page left alone until now, as confirmed" : ""}${mode === "now" && unknown ? ", with the service state unknown, as asked (no service is known to be live)" : ""}`,
       );
-      const files = await client.deploy(readBundle(this.deps.bundleDir, manifest), running, (plan) => {
-        this.files = plan;
-        this.log("info", `${plural(plan.uploaded, "file")} to upload, ${plan.held} already on Cloudflare`);
-      });
+      let files: { uploaded: number; held: number };
+      try {
+        files = await client.deploy(readBundle(this.deps.bundleDir, manifest), running, (plan) => {
+          this.files = plan;
+          this.log("info", `${plural(plan.uploaded, "file")} to upload, ${plan.held} already on Cloudflare`);
+        });
+      } catch (err) {
+        const took = await this.tookItAnyway(client, err, manifest.build, running);
+        if (took === "unknown") return this.failedWith(err, generation, false, true);
+        if (!took) throw err;
+        files = this.files ?? { uploaded: 0, held: 0 };
+      }
       if (mode === "now") this.lastNowDeployAt = Date.now();
       return this.deployed(manifest.build, running, key, files, mode === "now" && unknown);
     } catch (err) {
       return this.failedWith(err, generation);
     }
+  }
+
+  /**
+   * A deploy whose upload of the Worker failed with no answer, or a 5xx, may have swapped it before its
+   * answer was lost. Cloudflare is asked: true when it holds this build at this version, false when it
+   * does not or the failure could not have changed the page, "unknown" when it cannot be asked either.
+   */
+  private async tookItAnyway(client: CloudflareClient, err: unknown, build: string, version: string): Promise<boolean | "unknown"> {
+    if (!(err instanceof CloudflareError) || !err.mayHaveLanded) return false;
+    let holds;
+    try {
+      holds = await client.deployedPage();
+    } catch (readErr) {
+      this.log("warn", `the update failed ${err.describe()}, and what Cloudflare holds could not be read to see whether it went through: ${errorMessage(readErr)}`);
+      return "unknown";
+    }
+    if (holds.build !== build || holds.version !== version) return false;
+    this.log("info", `the update failed ${err.describe()}, but Cloudflare holds build ${build} as ${version}: it went through`);
+    return true;
   }
 
   /** Not now: a service is live, its window is open, or neither is known. Looked at again each half minute on its own account. */
@@ -536,11 +574,18 @@ export class ServiceCueDeployer implements DeployHook {
   }
 
   /** The failure goes to the card, the log and the caller. Retried on the backoff, unless the token was refused; ignored when the credentials changed under the attempt. */
-  private failedWith(err: unknown, generation: number, read = false): DeployNowOutcome {
+  private failedWith(err: unknown, generation: number, read = false, unsure = false): DeployNowOutcome {
     if (err instanceof BundleUnavailable) return this.noCopy(err);
     const failure = err instanceof CloudflareError ? err : new CloudflareError(errorMessage(err), null, null, "deploy");
     const where = read ? "reading what is deployed failed" : "the update failed";
-    const outcome = { kind: "failed", message: scrub(failure.message, 300), code: failure.code, status: failure.status, step: failure.step } as const;
+    const outcome = {
+      kind: "failed",
+      message: scrub(failure.message, 300),
+      code: failure.code,
+      status: failure.status,
+      step: failure.step,
+      ...(unsure ? { unsure: true as const } : {}),
+    } as const;
     if (generation !== this.generation) {
       this.log("warn", `${where} ${failure.describe()}; that was with credentials since replaced, so it is ignored`);
       if (this.state === "updating") this.state = this.creds ? "unchecked" : "off";
@@ -549,13 +594,13 @@ export class ServiceCueDeployer implements DeployHook {
     this.failures += 1;
     const refused = failure.refused;
     const wait = backoffMs(this.failures, this.timings.backoffMinMs, this.timings.backoffMaxMs);
-    this.error = { message: outcome.message, code: failure.code, status: failure.status, step: failure.step, at: Date.now(), refused, retryAt: refused ? null : Date.now() + wait };
+    this.error = { message: outcome.message, code: failure.code, status: failure.status, step: failure.step, at: Date.now(), refused, retryAt: refused ? null : Date.now() + wait, ...(unsure ? { unsure: true as const } : {}) };
     if (!read || refused) this.state = "failed";
     this.files = null;
     this.said = "";
     this.log(
       "warn",
-      `${where} ${failure.describe()}. The page is unchanged. ${refused ? "Not trying again until the token changes." : `Trying again in ${Math.round(wait / 1000)} s (attempt ${this.failures}).`}`,
+      `${where} ${failure.describe()}. ${unsure ? "Whether the page took it is not known." : "The page is unchanged."} ${refused ? "Not trying again until the token changes." : `Trying again in ${Math.round(wait / 1000)} s (attempt ${this.failures}).`}`,
     );
     if (!refused && this.read !== undefined) this.arm(wait);
     return outcome;

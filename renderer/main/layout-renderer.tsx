@@ -13,6 +13,7 @@ import { useLatestRef } from "@renderer/lib/use-latest-ref";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useServerClock } from "@renderer/lib/server-clock";
 import { invoke } from "../lib/api";
+import { rasterizePdf } from "../lib/pdf-raster";
 import { logReadFailure, logToServer } from "../lib/client-log";
 import { BrandLogo } from "../components/brand-logo";
 import { Readout } from "./readout";
@@ -2401,21 +2402,8 @@ function ChargerBattery({
 }
 
 // ── Plan-attachment object (e.g. the PCO stage plot) ─────────────────────────
-// pdf.js is lazy-loaded (code-split) so only displays that actually use a
-// plan-attachment object pull it in. Vite resolves the worker via ?url.
-
-let pdfjsPromise: Promise<typeof import("pdfjs-dist")> | null = null;
-async function loadPdfjs(): Promise<typeof import("pdfjs-dist")> {
-  if (!pdfjsPromise) {
-    pdfjsPromise = (async () => {
-      const pdfjs = await import("pdfjs-dist");
-      const worker = await import("pdfjs-dist/build/pdf.worker.min.mjs?url");
-      pdfjs.GlobalWorkerOptions.workerSrc = (worker as { default: string }).default;
-      return pdfjs;
-    })();
-  }
-  return pdfjsPromise;
-}
+// PDFs are rasterized by renderer/lib/pdf-raster.ts, which lazy-loads pdf.js so
+// only displays that actually use a plan-attachment object pull it in.
 
 /** Post-processing applied to the rasterized file (NOT the source PDF). */
 export interface AttachmentProcessOpts {
@@ -2426,31 +2414,6 @@ export interface AttachmentProcessOpts {
 }
 
 const NEAR_WHITE = 244; // r,g,b all above this counts as "page white"
-
-// Rasterize a PDF page (~1600px wide, capped) to a fresh canvas.
-async function rasterizePdf(data: ArrayBuffer, pageNum: number): Promise<HTMLCanvasElement> {
-  const pdfjs = await loadPdfjs();
-  // pdf.js v6: cleanup is via the loading task (PDFDocumentProxy.destroy() was
-  // removed); render() now takes the `canvas` itself, not just its 2D context.
-  const loadingTask = pdfjs.getDocument({ data });
-  const doc = await loadingTask.promise;
-  try {
-    const n = clamp(Math.round(pageNum) || 1, 1, doc.numPages);
-    const page = await doc.getPage(n);
-    const base = page.getViewport({ scale: 1 });
-    const scale = Math.min(3, 1600 / base.width);
-    const viewport = page.getViewport({ scale });
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.ceil(viewport.width);
-    canvas.height = Math.ceil(viewport.height);
-    const c2d = canvas.getContext("2d");
-    if (!c2d) throw new Error("no 2d context");
-    await page.render({ canvas, canvasContext: c2d, viewport }).promise;
-    return canvas;
-  } finally {
-    void loadingTask.destroy();
-  }
-}
 
 // Draw an image blob to a fresh canvas (~1600px wide, capped).
 async function rasterizeImage(buf: ArrayBuffer, contentType: string): Promise<HTMLCanvasElement> {

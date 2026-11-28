@@ -12,8 +12,6 @@ import {
   DndContext,
   DragOverlay,
   KeyboardSensor,
-  MouseSensor,
-  TouchSensor,
   closestCenter,
   pointerWithin,
   useSensor,
@@ -22,11 +20,11 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { useBlocker } from "@tanstack/react-router";
 import { Loader2Icon, PanelRightIcon, PlusIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-import { Button, EmptyState, ErrorNote, confirm } from "../../components/ui";
+import { LeaveGuard } from "../../components/leave-guard";
+import { Button, EmptyState, ErrorNote } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { usePageActions } from "../page-actions";
 import { useSearchParam, useRouterHandle } from "../../lib/use-search-param";
@@ -40,6 +38,7 @@ import type { DragData, DropData } from "./board-preview";
 import { PlanCheck } from "./plan-check";
 import { SlotInspector, SpacerInspector } from "./slot-inspector";
 import { makeSharesWith } from "./shares-with";
+import { usePointerSensors } from "../drag-parts";
 import { TopBar } from "./top-bar";
 import { displayWidthOf, showTargets, useMicSlots, type ShowTarget } from "./use-mic-slots";
 
@@ -56,30 +55,11 @@ const collide: CollisionDetection = (args) => {
   return closestCenter(args);
 };
 
-/** Leaving the page with unsaved work asks first, for a link, Back and a closing
- *  tab alike. Rendered only under a router: useBlocker needs one. */
-export function LeaveGuard({ dirty, count }: { dirty: boolean; count: number }) {
-  const blocker = useBlocker({
-    shouldBlockFn: () => dirty,
-    enableBeforeUnload: () => dirty,
-    withResolver: true,
-  });
-  const asked = useRef(false);
-  useEffect(() => {
-    if (blocker.status !== "blocked" || asked.current) return;
-    asked.current = true;
-    void confirm({
-      title: "Leave without saving?",
-      message: `${plural(count, "board")} ${count === 1 ? "has" : "have"} changes that are not saved. Leaving loses them.`,
-      confirmLabel: "Leave",
-      destructive: true,
-    }).then((ok) => {
-      asked.current = false;
-      if (ok) blocker.proceed?.();
-      else blocker.reset?.();
-    });
-  }, [blocker, count]);
-  return null;
+/** Leaving with unsaved boards asks first, naming how many. */
+export function MicSlotsLeaveGuard({ dirty, count }: { dirty: boolean; count: number }) {
+  return (
+    <LeaveGuard dirty={dirty} message={`${plural(count, "board")} ${count === 1 ? "has" : "have"} changes that are not saved. Leaving loses them.`} />
+  );
 }
 
 export function MicSlotsPage() {
@@ -114,14 +94,8 @@ export function MicSlotsPage() {
     if (first) mic.select(first.id);
   }, [linkedBoard, mic]);
 
-  const sensors = useSensors(
-    // Mouse and touch separately: a single PointerSensor claims a touch gesture
-    // on touch-down, which stops the page scrolling on a phone. See the note in
-    // use-stage-settings.
-    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
-    useSensor(KeyboardSensor),
-  );
+  // Mouse and touch as everywhere else (see usePointerSensors), plus the keyboard.
+  const sensors = useSensors(...usePointerSensors(), useSensor(KeyboardSensor));
 
   const dialogs: BoardDialogs = {
     copyFrom: setCopying,
@@ -213,7 +187,7 @@ export function MicSlotsPage() {
 
   return (
     <div className="flex flex-col gap-4 pb-[50vh] max-sm:pb-24" data-mic-slots-page>
-      {router && <LeaveGuard dirty={mic.dirty} count={mic.dirtyIds.length} />}
+      {router && <MicSlotsLeaveGuard dirty={mic.dirty} count={mic.dirtyIds.length} />}
       <TopBar mic={mic} savedOpen={savedOpen} onSavedOpen={setSavedOpen} savedBoardId={savedBoard ?? sel?.boardId ?? mic.boards[0]?.id ?? null} />
       {mic.targetsFailed != null && (
         <ErrorNote>Couldn't read a board's layouts: {errorMessage(mic.targetsFailed)}. A board that could not be read cannot be edited until it is.</ErrorNote>
@@ -283,7 +257,12 @@ export function MicSlotsPage() {
             inspectorOpen ? "mt-4 lg:mt-0 lg:ml-4 lg:w-[340px]" : "max-lg:hidden lg:ml-0 lg:w-0",
           )}
         >
-          <div className="flex w-full flex-col gap-3.5 lg:w-[340px]">
+          {/* Pinned, the inspector must fit the window and scroll itself: the outer
+              box hides overflow for the slide, so without a cap a tall slot's
+              settings are cut off and the wheel scrolls the page instead.
+              9.25rem = the shell chrome above the scroller (~60px) + top-14 + a
+              32px bottom margin. x stays hidden, as the outer box already had it. */}
+          <div className="flex w-full flex-col gap-3.5 lg:max-h-[calc(100dvh-9.25rem)] lg:w-[340px] lg:overflow-x-hidden lg:overflow-y-auto lg:overscroll-contain">
             {sel && mic.selectedSlot && selBoard ? (
               isSpacer(mic.selectedSlot) ? (
                 <SpacerInspector

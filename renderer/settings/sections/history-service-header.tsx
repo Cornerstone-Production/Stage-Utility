@@ -23,9 +23,10 @@ import { ClockIcon, CopyIcon, GitMergeIcon, RotateCcwIcon, Trash2Icon, WrenchIco
 import { cn } from "../../lib/cn";
 import { prefersReducedMotion } from "../../lib/reduced-motion";
 import { Button } from "../../components/ui";
-import { StatStrip, useStoredKeysVersion, type StatFigure } from "./history-chart";
+import { StatStrip, type StatFigure } from "./history-chart";
 
-import { SPL_METRICS_STORAGE_KEY, servicePeakLevel, type ServicePeakLevel } from "./spl-history-section";
+import { servicePeakLevel, type ServicePeakLevel } from "./spl-history-section";
+import { peakLabel, type PlotPrefs } from "./sound-plot";
 import { fmtDelta, fmtDur, fmtTime, isCountedItem, summarize } from "./overview-data";
 
 /** Mean per-item over/under (seconds) + how many ran over, for items with both
@@ -109,8 +110,6 @@ const LEVEL_EMPTY_NOTE: Record<ServicePeakLevel["kind"], string | undefined> = {
   level: undefined,
   "no-record": "no sound recorded",
   "no-metrics": "no metrics recorded",
-  // Points at the control that fixes it, by the name on screen.
-  hidden: "metric hidden in Sound",
   "no-samples": "no peak recorded",
 };
 
@@ -145,7 +144,7 @@ function markLevel<F extends StatFigure & { sub?: string }>(figures: F[], sub: s
  * the same on the day they were written and had nothing holding them together
  * afterwards.
  */
-function serviceFigureParts(timeline: ServiceTimeline, spl: ServiceSplHistory | null, now?: number) {
+function serviceFigureParts(timeline: ServiceTimeline, spl: ServiceSplHistory | null, plot: PlotPrefs, now?: number) {
   const sum = summarize(timeline, now);
   const over = overrunStats(timeline);
   const firstStartMs = Date.parse(sum.firstStart);
@@ -160,7 +159,7 @@ function serviceFigureParts(timeline: ServiceTimeline, spl: ServiceSplHistory | 
     [...timeline.items].reverse().find((it) => isCountedItem(it, timeline) && it.endedAt)?.endedAt ??
     timeline.endedAt ??
     null;
-  return { sum, over, projectedEnd, totalDelta, actualEnd, peakLevel: servicePeakLevel(spl) };
+  return { sum, over, projectedEnd, totalDelta, actualEnd, peakLevel: servicePeakLevel(spl, plot) };
 }
 
 /**
@@ -177,9 +176,11 @@ export function serviceKpis(
   timeline: ServiceTimeline,
   attendance: ServiceAttendanceSummary | null,
   spl: ServiceSplHistory | null,
+  /** What the peak figure plots: the Trends metric, unless this browser chose its own. */
+  plot: PlotPrefs,
   now?: number,
 ): (StatFigure & { sub?: string })[] {
-  return serviceKpisFrom(serviceFigureParts(timeline, spl, now), attendance);
+  return serviceKpisFrom(serviceFigureParts(timeline, spl, plot, now), attendance);
 }
 
 /** The formatting half, over parts already derived — so a caller that wants
@@ -262,7 +263,7 @@ function serviceKpisFrom(
       key: "level",
       // Named after the metric it actually read, so a church metering LCeq is
       // not told it peaked at an LAeq it never recorded.
-      label: peakLevel.kind === "level" ? `Peak ${peakLevel.metric}` : "Peak level",
+      label: peakLevel.kind === "level" ? peakLabel(peakLevel.metric, "prefix") : "Peak level",
       value: peakLevel.kind === "level" ? `${Math.round(peakLevel.db)} dB` : "—",
       // WHY there is no level, because only one of these is a fault in the
       // recording. "no metric recorded" used to cover all of them, so an
@@ -301,6 +302,7 @@ export function serviceRowFigures(
   timeline: ServiceTimeline,
   attendance: ServiceAttendanceSummary | null,
   spl: ServiceSplHistory | null,
+  plot: PlotPrefs,
   now?: number,
 ): { started: StatFigure & { sub?: string }; figures: (StatFigure & { sub?: string })[] } {
   const live = timeline.endedAt == null;
@@ -308,7 +310,7 @@ export function serviceRowFigures(
   // ONE derivation. `serviceKpis` calls `serviceFigureParts` itself, and taking
   // the delta from a second call ran `summarize` and `overrunStats` over every
   // item of every row twice for one number that was already in hand.
-  const parts = serviceFigureParts(timeline, spl, at);
+  const parts = serviceFigureParts(timeline, spl, plot, at);
   const by = new Map(serviceKpisFrom(parts, attendance).map((k) => [k.key, k]));
   const pick = (key: string): StatFigure & { sub?: string } =>
     by.get(key) ?? { key, label: key, value: "—" };
@@ -332,7 +334,7 @@ export function serviceRowFigures(
           },
         ]),
       // The level's `sub` is KEPT. It is the only thing that says WHY there is
-      // no number — "no sound recorded", "metric hidden in Sound" — and a row
+      // no number — "no sound recorded", "no metrics recorded" — and a row
       // showing a bare "—" sends an operator to look at a meter that is fine.
       pick("level"),
     ],
@@ -486,6 +488,9 @@ export interface ServiceHeaderProps {
    *  the list's own summary can stand in while the full record is read. */
   attendance: ServiceAttendanceSummary | null;
   spl: ServiceSplHistory | null;
+  /** The page's plot preferences (`usePlotPrefs`): what the peak figure plots,
+   *  the Trends metric unless this browser picked its own in the Sound card. */
+  plot: PlotPrefs;
   /** The sound record could not be read. Its absence then means nothing about
    *  the service, so the level figure must not say "no sound recorded". */
   soundUnavailable?: boolean;
@@ -526,6 +531,7 @@ export function ServiceHeader({
   timeline,
   attendance,
   spl,
+  plot,
   soundUnavailable = false,
   soundLoading = false,
   now,
@@ -541,24 +547,19 @@ export function ServiceHeader({
   sections = SERVICE_SECTIONS,
 }: ServiceHeaderProps) {
   const live = timeline.endedAt == null;
-  // `serviceKpis` reads the Smaart metric selection through `servicePeakLevel`,
-  // and that selection is owned by the Sound card's Customize — a different
-  // component, whose write React knows nothing about. Without this in the
-  // dependency list the memo held, and switching metric relabelled the card
-  // while the header went on quoting the old metric's level.
-  const metricsVersion = useStoredKeysVersion(SPL_METRICS_STORAGE_KEY);
+  // The plotted metric is chosen in the Sound card's Customize, a different
+  // component. `plot` is the page's one subscription to it, passed in as a value,
+  // so the memo below depends on the choice itself: switching metric relabels the
+  // card AND this figure.
   const kpis = useMemo(
     () => {
-      // Read so the dependency is a real one and not "unnecessary" to the
-      // linter: the value is never used, the CHANGE is the whole point.
-      void metricsVersion;
-      const figures = serviceKpis(timeline, attendance, spl, live ? now : undefined);
+      const figures = serviceKpis(timeline, attendance, spl, plot, live ? now : undefined);
       if (spl) return figures;
       if (soundUnavailable) return markSoundUnavailable(figures);
       if (soundLoading) return markSoundLoading(figures);
       return figures;
     },
-    [timeline, attendance, spl, soundUnavailable, soundLoading, live, now, metricsVersion],
+    [timeline, attendance, spl, plot, soundUnavailable, soundLoading, live, now],
   );
 
   // Geometry: see useHeaderInset's own doc comment — 184px tall at 1280 and

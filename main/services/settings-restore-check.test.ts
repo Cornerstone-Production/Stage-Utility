@@ -90,8 +90,6 @@ const CASES: Record<string, Case> = {
   serviceTypeId: { bad: 123, says: "text or null" },
   serviceTypeName: { bad: true, says: "text or null" },
   showQr: { bad: "y", says: "true or false" },
-  splTrendMetric: { bad: 1, says: "text or null" },
-  splTrendShown: { bad: "y", says: "true or false" },
   splVisibleMetrics: { bad: "laeq", says: "list" },
   taperWindow: { in: { preMin: 30.4, postMin: 400, extra: 1 }, out: { preMin: 30, postMin: 240 } },
   timezone: { bad: "Mars/Olympus_Mons", says: "time zone" },
@@ -197,6 +195,12 @@ describe("settings.json restore check", () => {
 
   test("the retired actionButtonsMigrated flag in an older backup is dropped, not refused", async () => {
     const result = await settingsRestoreCheck({ showQr: true, actionButtonsMigrated: true });
+    assert.ok(result.ok, !result.ok ? result.reason : "");
+    assert.deepEqual(result.value, { showQr: true });
+  });
+
+  test("the retired splTrendShown and splTrendMetric in an older backup are dropped, not refused", async () => {
+    const result = await settingsRestoreCheck({ showQr: true, splTrendShown: true, splTrendMetric: "laeq" });
     assert.ok(result.ok, !result.ok ? result.reason : "");
     assert.deepEqual(result.value, { showQr: true });
   });

@@ -38,6 +38,17 @@ const { FakeObs } = await import("./obs-server-harness.js");
 const fake = new FakeObs();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Wait, bounded, for something the service does asynchronously after a push: how long OBS's
+ *  answer takes to arrive and be folded is the machine's load, not a number a case can guess. */
+async function until(ready: () => boolean, what: string, timeoutMs = 5000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (ready()) return;
+    await sleep(5);
+  }
+  assert.fail(`timed out waiting for ${what}`);
+}
+
 /** Every `obs:status` frame that went out, in order. */
 const frames: unknown[] = [];
 addBroadcastListener((channel, payload) => {
@@ -88,7 +99,8 @@ async function startRecording(durationMs: number): Promise<void> {
     outputDuration: durationMs,
   };
   fake.pushEvent("RecordStateChanged", { outputActive: true, outputState: "OBS_WEBSOCKET_OUTPUT_STARTED" });
-  await sleep(150);
+  // The GetRecordStatus that answers the event has landed: the anchor is OBS's own number.
+  await until(() => obsService.getLatest().recordAnchorMs === durationMs, "the start's record status to be folded");
 }
 
 before(async () => {
@@ -147,18 +159,34 @@ describe("a running recording", () => {
 
     const framesAtStart = frames.length;
     const readsAtStart = recordReads();
-    await sleep(1200);
-
+    const t0 = Date.now();
+    // Two re-anchors, waited for rather than a fixed 1200 ms hoped to hold them: a loaded
+    // machine delays the keepalive, it does not skip it.
+    await until(() => recordReads() - readsAtStart >= 2, "the keepalive to re-anchor twice at a 300ms cadence");
+    // Let the second answer's frame go out before counting frames against reads.
+    await until(() => frames.length - framesAtStart >= 2, "the second re-anchor to be published");
+    // A deliberate observation window for the ceiling below, which is an absence (nothing more
+    // often than asked); the ceiling is measured against the time actually elapsed, so a slow
+    // machine widens it rather than tripping it.
+    await sleep(600);
+    const elapsed = Date.now() - t0;
     const reads = recordReads() - readsAtStart;
+    // The ceiling is a rate: at most one read per cadence, plus the two a timer boundary can add.
     assert.ok(
-      reads >= 2,
-      `the keepalive re-anchored ${reads} time(s) in 1200ms at a 300ms cadence — the anchor cannot correct its drift from OBS`,
+      reads <= Math.floor(elapsed / 300) + 2,
+      `re-anchored ${reads} time(s) in ${elapsed}ms at a 300ms cadence — more often than the keepalive asked for`,
     );
-    assert.ok(
-      reads <= 6,
-      `re-anchored ${reads} time(s) in 1200ms at a 300ms cadence — more often than the keepalive asked for`,
-    );
-    assert.equal(frames.length - framesAtStart, reads, "a re-anchor that read a new duration must be published");
+    // Each read is counted when it ARRIVES at the stub and its frame goes out when the answer is
+    // folded, so a read still in flight at the count above has no frame yet: wait for it. Every
+    // read that read a new duration must end up published.
+    await until(() => frames.length - framesAtStart >= reads, `all ${reads} re-anchors to be published`);
+    // And no more than were asked for. A frame needs a read to have arrived, so at any instant
+    // frames <= reads; read both in the same synchronous step (a newer read may have landed since
+    // the count above, which is why this compares against the reads NOW, not `reads`). A re-anchor
+    // that published twice breaks it.
+    const published = frames.length - framesAtStart;
+    const readsNow = recordReads() - readsAtStart;
+    assert.ok(published <= readsNow, `${published} frame(s) for ${readsNow} read(s) — a re-anchor published more than once`);
   });
 
   test("asks OBS nothing at all while it is idle", async () => {
@@ -193,7 +221,10 @@ describe("a paused recording", () => {
 
     fake.recordStatus = { ...fake.recordStatus, outputPaused: true, outputDuration: 300_000 };
     fake.pushEvent("RecordStateChanged", { outputActive: true, outputState: "OBS_WEBSOCKET_OUTPUT_PAUSED" });
-    await sleep(150);
+    await until(
+      () => obsService.getLatest().recordPaused === true && obsService.getLatest().recordAnchorMs === 300_000,
+      "the pause to be published with OBS's own duration",
+    );
 
     const snap = obsService.getLatest();
     assert.equal(snap.recordPaused, true, "the pause was not published");
@@ -216,6 +247,12 @@ describe("a paused recording", () => {
     await startRecording(300_000);
     fake.recordStatus = { ...fake.recordStatus, outputPaused: true, outputDuration: 300_000 };
     fake.pushEvent("RecordStateChanged", { outputActive: true, outputState: "OBS_WEBSOCKET_OUTPUT_PAUSED" });
+    await until(
+      () => obsService.getLatest().recordPaused === true && obsService.getLatest().recordAnchorMs === 300_000,
+      "the pause to be published with OBS's own duration",
+    );
+    // The pause's own GetRecordStatus answer, and a keepalive after it, may still be out: a
+    // frame they cause is the pause settling, not a cost of it sitting there.
     await sleep(400);
 
     const framesAtStart = frames.length;
@@ -238,12 +275,15 @@ describe("a paused recording", () => {
     await startRecording(300_000);
     fake.recordStatus = { ...fake.recordStatus, outputPaused: true };
     fake.pushEvent("RecordStateChanged", { outputActive: true, outputState: "OBS_WEBSOCKET_OUTPUT_PAUSED" });
-    await sleep(150);
+    await until(
+      () => obsService.getLatest().recordPaused === true && obsService.getLatest().recordAnchorMs === 300_000,
+      "the pause to be published with OBS's own duration",
+    );
 
     // OBS recorded a further 500ms between the resume and its answer.
     fake.recordStatus = { ...fake.recordStatus, outputPaused: false, outputDuration: 300_500 };
     fake.pushEvent("RecordStateChanged", { outputActive: true, outputState: "OBS_WEBSOCKET_OUTPUT_RESUMED" });
-    await sleep(150);
+    await until(() => obsService.getLatest().recordAnchorMs === 300_500, "OBS's own resumed duration to be folded");
 
     const snap = obsService.getLatest();
     assert.equal(snap.recordPaused, false, "the resume was not published");
@@ -265,7 +305,7 @@ describe("a stopped recording", () => {
 
     fake.recordStatus = { ...fake.recordStatus, outputActive: false };
     fake.pushEvent("RecordStateChanged", { outputActive: false, outputState: "OBS_WEBSOCKET_OUTPUT_STOPPED" });
-    await sleep(150);
+    await until(() => obsService.getLatest().recordAnchorMs === null, "the stop to drop the anchor");
 
     assert.equal(obsService.getLatest().recordAnchorMs, null, "a stale anchor survived the stop");
     const readsAtStop = recordReads();
@@ -289,6 +329,9 @@ describe("a stopped recording", () => {
     fake.recordStatus = { ...fake.recordStatus, outputActive: false };
     fake.pushEvent("RecordStateChanged", { outputActive: false, outputState: "OBS_WEBSOCKET_OUTPUT_STOPPING" });
     fake.pushEvent("RecordStateChanged", { outputActive: false, outputState: "OBS_WEBSOCKET_OUTPUT_STOPPED" });
+    // The first frame has to land before "no second one" means anything; the 200 ms after it is
+    // the absence wait and stays.
+    await until(() => frames.length >= 1, "the stop's frame");
     await sleep(200);
 
     assert.equal(

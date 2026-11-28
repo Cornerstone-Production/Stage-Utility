@@ -2,6 +2,8 @@
 
 The public side of ServiceCue: a Cloudflare Worker that receives what a Stage Utility
 server publishes and serves it, with the built ServiceCue page, to anyone with the link.
+It also serves a venue's published stage plots at `/stageplots/<secret>`, with the built
+stage plots page, kept under that secret apart from everything else.
 Nothing here knows who deploys it: no account id, no address, no church.
 
 - **Set it up, what it costs, who can see it:** [ServiceCue on the web](../../docs/ops/servicecue-on-the-web.md).
@@ -20,7 +22,7 @@ Nothing here knows who deploys it: no account id, no address, no church.
 | `src/hub.ts` | the Durable Object: SQLite storage, and the viewers' sockets through the WebSocket Hibernation API |
 | `src/hub-api.ts` | what the handler needs from the object, so it can be run against an in-memory one |
 | `test/` | the Worker whole, in workerd |
-| `public/` | the built page. Gitignored: `npm run servicecue:build` at the repository root writes it |
+| `public/` | the built pages, `servicecue.html` and `stageplots.html`. Gitignored: `npm run servicecue:build` at the repository root writes it |
 
 ## Working on it
 

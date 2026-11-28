@@ -19,7 +19,7 @@ import { useCallback, useEffect, useState } from "react";
 
 interface RouterHandle {
   state: { location: { pathname: string; search: Record<string, unknown> } };
-  navigate: (opts: { to: string; search: Record<string, unknown>; replace?: boolean; hash?: true }) => unknown;
+  navigate: (opts: { to: string; search?: Record<string, unknown>; replace?: boolean; hash?: true; state?: Record<string, unknown> }) => unknown;
   subscribe: (event: "onResolved", fn: () => void) => () => void;
 }
 
@@ -43,6 +43,38 @@ function readParam(router: RouterHandle | null, name: string): string | null {
 
 export function useRouterHandle(): RouterHandle | null {
   return useRouter({ warn: false }) as unknown as RouterHandle | null;
+}
+
+/** The parts of a click an in-app link looks at. */
+interface LinkClick {
+  button: number;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+  preventDefault: () => void;
+}
+
+/**
+ * For an `<a href>` that is also a route of this app: a plain left click goes
+ * there with the router, no page load; Cmd, Ctrl, Shift or Alt click, a middle
+ * click, and any click with no router above (a test rendering a page alone) fall
+ * through to the browser's own handling of the `href`. Call the returned function
+ * from `onClick`, with where the router should go:
+ *
+ *     const go = useInAppLink();
+ *     <a href="/stageplots" onClick={(e) => go(e, { to: "/stageplots" })}>
+ */
+export function useInAppLink(): (e: LinkClick, to: { to: string; search?: Record<string, unknown>; state?: Record<string, unknown> }) => void {
+  const router = useRouterHandle();
+  return useCallback(
+    (e, to) => {
+      if (!router || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+      e.preventDefault();
+      void router.navigate(to);
+    },
+    [router],
+  );
 }
 
 export function useSearchParam(name: string): [string | null, (value: string | null, opts?: { replace?: boolean }) => void] {

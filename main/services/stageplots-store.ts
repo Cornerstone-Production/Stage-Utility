@@ -1,0 +1,605 @@
+// stageplots-store.ts — venues, backgrounds and plots, in one config store
+// (stageplots.json). The images a background names live in the image folders
+// (stageplots-files.ts); this file holds only their hashes.
+//
+// The rules here are the ones the routes apply on a save, and a restore is held
+// to the same ones through checkStagePlotsDoc. Every id a document names
+// resolves: a plot's venue and background exist, a venue lists exactly its own
+// plots, and its default is one of them.
+
+import { STAGEPLOTS_HASH, STAGEPLOTS_ID, isStagePlotsSecret } from "../types/servicecue-publish.js";
+import {
+  PENDING_REASONS,
+  STAGEPLOT_LIMITS,
+  type Background,
+  type BackgroundOriginalMime,
+  type BackgroundSourceExt,
+  type Plot,
+  type PlotItem,
+  type PendingReason,
+  type PendingRemoval,
+  type PlotOverride,
+  type StagePlotsDoc,
+  type Venue,
+  type VenueKind,
+  type VenuePublish,
+} from "../types/stageplots.js";
+import { DataStore } from "./data-store.js";
+import { firstFree } from "./first-free.js";
+import { errorMessage } from "./errors.js";
+import { isRecord } from "../types/is-record.js";
+import { asArray, asObject, checked, refuse, required, textList, uniqueIds } from "./restore-check.js";
+import { scrub } from "./scrub.js";
+import { fitToHeight, plotHeight, sortPending } from "./stageplots-doc.js";
+import { checkId, checkItems, text } from "./stageplot-items.js";
+
+export { checkItems, validateItems } from "./stageplot-items.js";
+
+const EMPTY: StagePlotsDoc = { venues: [], backgrounds: [], plots: [], overrides: [], pendingRemovals: [] };
+
+/** Ids the server mints and routes put in a URL: letters, digits, `-` and `_`. The
+ *  publish contract's, so a plot id is always one the public page can carry. */
+export const STAGEPLOT_ID = STAGEPLOTS_ID;
+/** A content name's hash: the first 16 hex of a SHA-256 (image-files.ts). */
+export const STAGEPLOT_HASH = STAGEPLOTS_HASH;
+
+const KINDS: readonly VenueKind[] = ["home", "offsite"];
+const ORIGINAL_MIMES: readonly BackgroundOriginalMime[] = ["image/png", "image/jpeg", "application/pdf"];
+const SOURCE_EXTS: readonly BackgroundSourceExt[] = ["png", "jpg"];
+
+/** A Planning Center plan id as an override names it: what STAGEPLOT_ID allows. */
+function planIdProblem(v: unknown): string | null {
+  return typeof v === "string" && STAGEPLOT_ID.test(v) ? null : "the plan id must be 1 to 80 letters, digits, - or _";
+}
+
+/** The longest plan date taken, in characters: an ISO instant with an offset is 29. */
+const PLAN_DATE_CHARS = 40;
+
+/** An ISO date with a time on it. A bare date would be read as midnight UTC,
+ *  which is the evening before across the Americas. */
+const PLAN_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+
+/** A plan date as stored: null, or the ISO instant `v` names (isoInstant). */
+function planDateOf(v: unknown): string | null {
+  return v === null || v === undefined ? null : isoInstant(v, "the plan date", ", or null");
+}
+
+/** Why `v` is not a usable name for `what` ("the venue"), or null. */
+export function nameProblem(v: unknown, what: string): string | null {
+  if (typeof v !== "string" || v.trim() === "") return `${what} needs a name`;
+  if (v.trim().length > STAGEPLOT_LIMITS.nameChars) return `${what}'s name is longer than ${STAGEPLOT_LIMITS.nameChars} characters`;
+  return null;
+}
+
+function notesProblem(v: unknown, what: string): string | null {
+  if (typeof v !== "string") return `${what}'s notes must be text`;
+  if (v.length > STAGEPLOT_LIMITS.notesChars) return `${what}'s notes are longer than ${STAGEPLOT_LIMITS.notesChars} characters`;
+  return null;
+}
+
+function fadeProblem(v: unknown, what: string): string | null {
+  if (typeof v !== "number" || !Number.isFinite(v) || v < 0 || v > 1) return `${what}'s background fade must be a number from 0 to 1`;
+  return null;
+}
+
+/**
+ * Why a venue body cannot be saved, or null. `partial` is a PATCH: only the
+ * fields present are checked, and none is required.
+ */
+export function validateVenueInput(body: unknown, { partial }: { partial: boolean }): string | null {
+  if (!isRecord(body)) return "the venue must be an object";
+  if (!partial || body.name !== undefined) {
+    const p = nameProblem(body.name, "the venue");
+    if (p) return p;
+  }
+  if ((!partial || body.kind !== undefined) && !KINDS.includes(body.kind as VenueKind)) return "the venue's kind must be home or offsite";
+  if (body.notes !== undefined) {
+    const p = notesProblem(body.notes, "the venue");
+    if (p) return p;
+  }
+  return null;
+}
+
+/** Why a plot body cannot be saved, or null. A background id is checked
+ *  against the document by the route; here only its type. */
+export function validatePlotInput(body: unknown, { partial }: { partial: boolean }): string | null {
+  if (!isRecord(body)) return "the plot must be an object";
+  if (!partial || body.name !== undefined) {
+    const p = nameProblem(body.name, "the plot");
+    if (p) return p;
+  }
+  if (body.bgFade !== undefined) {
+    const p = fadeProblem(body.bgFade, "the plot");
+    if (p) return p;
+  }
+  if (body.backgroundId !== undefined && body.backgroundId !== null && typeof body.backgroundId !== "string") {
+    return "the plot's background must be a background id or null";
+  }
+  return null;
+}
+
+// ── Addresses ────────────────────────────────────────────────────────────
+
+/** A venue address: lower-case letters and digits in runs joined by single hyphens. */
+const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+/** The shape of the ids this server mints for venues (`v-` and 12 hex): an address is never one. */
+const VENUE_ID_SHAPE = /^v-[0-9a-f]{12}$/;
+/** /stageplots/edit is the editor's own address, and /stageplots/manage the app's own page. */
+const RESERVED_SLUGS = new Map([
+  ["edit", "That address is the editor's own"],
+  ["manage", "That address is the app's own Stage plots page"],
+]);
+
+/** Why `v` cannot be a venue's address, as a sentence, or null. Says nothing about other venues: see addressOwners. */
+export function venueSlugProblem(v: unknown): string | null {
+  if (typeof v !== "string" || v.length === 0 || v.length > STAGEPLOT_LIMITS.slugChars || !SLUG.test(v)) {
+    return `An address is lower-case letters, digits and single hyphens, 1 to ${STAGEPLOT_LIMITS.slugChars} characters`;
+  }
+  const reserved = RESERVED_SLUGS.get(v);
+  if (reserved) return reserved;
+  if (VENUE_ID_SHAPE.test(v)) return "An address shaped like a venue id is kept for venue ids";
+  return null;
+}
+
+/**
+ * Every address a venue answers to (its id, its address and its old ones), mapped to the venue
+ * that owns it. A Map, because the key comes from a request. Throws when two venues claim one.
+ */
+export function addressOwners(venues: readonly Venue[]): Map<string, Venue> {
+  const owners = new Map<string, Venue>();
+  for (const v of venues) {
+    for (const address of new Set([v.id, ...(v.slug === null ? [] : [v.slug]), ...v.oldSlugs])) {
+      const other = owners.get(address);
+      if (other && other.id !== v.id) refuse(`venues "${other.id}" and "${v.id}" both answer to the address "${address}"`);
+      owners.set(address, v);
+    }
+  }
+  return owners;
+}
+
+/**
+ * The address a new venue named `name` takes: the name lower-cased, accents dropped, anything
+ * else a hyphen, at most 60 characters ("venue" when nothing is left), with -2, -3… added
+ * while `taken` says another venue answers to it.
+ */
+export function slugFromName(name: string, taken: (slug: string) => boolean): string {
+  const base =
+    name
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, STAGEPLOT_LIMITS.slugChars)
+      .replace(/-+$/, "") || "venue";
+  const usable = (s: string) => venueSlugProblem(s) === null && !taken(s);
+  return firstFree(base, (s) => !usable(s), (b, n) => {
+    const suffix = `-${n}`;
+    return `${b.slice(0, STAGEPLOT_LIMITS.slugChars - suffix.length).replace(/-+$/, "")}${suffix}`;
+  });
+}
+
+/** What each limit says when it is reached, for a save and a restore alike. */
+const LIMIT_SAYS = {
+  venue: `there can be at most ${STAGEPLOT_LIMITS.venues} venues`,
+  background: `there can be at most ${STAGEPLOT_LIMITS.backgrounds} backgrounds`,
+  plot: `a venue can have at most ${STAGEPLOT_LIMITS.plotsPerVenue} plots`,
+  override: `there can be at most ${STAGEPLOT_LIMITS.overrides} overrides`,
+} as const;
+
+/** Why one more of `kind` cannot be added to `doc`, or null. */
+export function limitProblem(doc: StagePlotsDoc, kind: "venue" | "plot" | "background", venueId?: string): string | null {
+  const count =
+    kind === "venue" ? doc.venues.length : kind === "background" ? doc.backgrounds.length : doc.plots.filter((p) => p.venueId === venueId).length;
+  const max = kind === "venue" ? STAGEPLOT_LIMITS.venues : kind === "background" ? STAGEPLOT_LIMITS.backgrounds : STAGEPLOT_LIMITS.plotsPerVenue;
+  return count >= max ? LIMIT_SAYS[kind] : null;
+}
+
+function orRefuse(problem: string | null): void {
+  if (problem) refuse(problem);
+}
+
+function checkHash(v: unknown, what: string): string {
+  if (typeof v !== "string" || !STAGEPLOT_HASH.test(v)) refuse(`${what}'s hash must be 16 lower-case hex characters`);
+  return v;
+}
+
+function checkCount(v: unknown, what: string): number {
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 0) refuse(`${what} must be a whole number`);
+  return v;
+}
+
+function pageOrNull(v: unknown, what: string): number | null {
+  if (v === null) return null;
+  if (typeof v !== "number" || !Number.isInteger(v) || v < 1) refuse(`${what} must be a page number or null`);
+  return v;
+}
+
+/** The longest last-error sentence kept. */
+const PUBLISH_ERROR_CHARS = 600;
+
+/**
+ * The ISO instant `v` names, in toISOString's one spelling, so the same instant always compares
+ * equal. A string over 40 characters, without a time, or one Date cannot read, is a refusal
+ * (thrown): "<what> must be an ISO date and time<or>".
+ */
+export function isoInstant(v: unknown, what: string, or = ""): string {
+  const at = typeof v === "string" && v.length <= PLAN_DATE_CHARS && PLAN_DATE_TIME.test(v) ? Date.parse(v) : NaN;
+  if (!Number.isFinite(at)) refuse(`${what} must be an ISO date and time${or}`);
+  return new Date(at).toISOString();
+}
+
+/** A list of `what`, each passing `ok`, at most `max`, sorted and without repeats. */
+function sortedSet(v: unknown, max: number, ok: (x: unknown) => boolean, what: string): string[] {
+  const list = asArray(v, what);
+  if (list.length > max) refuse(`${what} has more than ${max} entries`);
+  if (!list.every(ok)) refuse(`${what} has an entry of the wrong shape`);
+  return [...new Set(list as string[])].sort();
+}
+
+/** `v` when it is an http or https origin written as URL writes one, else null. */
+export function httpOrigin(v: unknown): string | null {
+  if (typeof v !== "string" || v.length > 200 || !URL.canParse(v)) return null;
+  const u = new URL(v);
+  return (u.protocol === "https:" || u.protocol === "http:") && u.origin === v ? u.origin : null;
+}
+
+/**
+ * A venue's publish state, rebuilt field by field so the same state always comes out the
+ * same. The secret is the publish contract's shape and nothing else; the origin is an http
+ * or https origin, as the page address is saved.
+ */
+function checkPublish(raw: unknown, what: string): VenuePublish {
+  const p = asObject(raw, `${what}'s publish state`);
+  if (!isStagePlotsSecret(p.secret)) refuse(`${what}'s publish secret is not one this server makes`);
+  const origin = httpOrigin(p.origin);
+  if (origin === null) refuse(`${what}'s publish origin must be an http or https origin`);
+  let lastError: VenuePublish["lastError"] = null;
+  if (p.lastError !== null) {
+    const e = asObject(p.lastError, `${what}'s last publish error`);
+    lastError = { at: isoInstant(e.at, `${what}'s last publish error time`), message: text(e.message, PUBLISH_ERROR_CHARS, `${what}'s last publish error`) };
+  }
+  const isHash = (x: unknown) => typeof x === "string" && STAGEPLOT_HASH.test(x);
+  return {
+    secret: p.secret,
+    origin,
+    publishedAt: isoInstant(p.publishedAt, `${what}'s publish time`),
+    linkAt: p.linkAt === undefined ? isoInstant(p.publishedAt, `${what}'s publish time`) : isoInstant(p.linkAt, `${what}'s link time`),
+    lastError,
+    publishedImages: sortedSet(p.publishedImages, STAGEPLOT_LIMITS.backgrounds, isHash, `${what}'s published backgrounds`),
+    unpublishedImages: sortedSet(p.unpublishedImages, STAGEPLOT_LIMITS.backgrounds, isHash, `${what}'s backgrounds not yet published`),
+    // Saved before the landing page existed: not listed, so nothing becomes public that was not.
+    listed: listedOf(p.listed, what),
+  };
+}
+
+function listedOf(v: unknown, what: string): boolean {
+  if (v === undefined) return false;
+  if (typeof v !== "boolean") refuse(`${what}'s landing page listing must be true or false`);
+  return v;
+}
+
+function checkPending(raw: unknown, i: number): PendingRemoval {
+  const e = asObject(raw, `pending removal ${i + 1}`);
+  const what = `pending removal ${i + 1}`;
+  if (!isStagePlotsSecret(e.secret)) refuse(`${what}'s secret is not one this server makes`);
+  const origin = httpOrigin(e.origin);
+  if (origin === null) refuse(`${what}'s origin must be an http or https origin`);
+  if (!PENDING_REASONS.includes(e.reason as PendingReason)) refuse(`${what}'s reason must be one of ${PENDING_REASONS.join(", ")}`);
+  return { secret: e.secret, origin, since: isoInstant(e.since, `${what}'s time`), reason: e.reason as PendingReason };
+}
+
+function checkVenue(raw: unknown, i: number): Venue {
+  const v = asObject(raw, `venue ${i + 1}`);
+  const id = checkId(v.id, `venue ${i + 1}`);
+  const what = `venue "${id}"`;
+  orRefuse(nameProblem(v.name, what));
+  if (!KINDS.includes(v.kind as VenueKind)) refuse(`${what}'s kind must be home or offsite`);
+  orRefuse(notesProblem(v.notes, what));
+  const plotIds = textList(v.plotIds, `${what}'s plots`);
+  if (v.defaultPlotId !== null && typeof v.defaultPlotId !== "string") refuse(`${what}'s default plot must be a plot id or null`);
+  // A venue saved before addresses existed has neither: no address yet, and no old ones.
+  const rawSlug = v.slug === undefined ? null : v.slug;
+  if (rawSlug !== null) {
+    const p = venueSlugProblem(rawSlug);
+    if (p) refuse(`${what}'s address: ${p}`);
+  }
+  const slug = rawSlug as string | null;
+  const oldSlugs = v.oldSlugs === undefined ? [] : textList(v.oldSlugs, `${what}'s old addresses`);
+  if (oldSlugs.length > STAGEPLOT_LIMITS.oldSlugs) refuse(`${what} has more than ${STAGEPLOT_LIMITS.oldSlugs} old addresses`);
+  for (const old of oldSlugs) {
+    const p = venueSlugProblem(old);
+    if (p) refuse(`${what}'s old address "${old}": ${p}`);
+  }
+  if (new Set(oldSlugs).size !== oldSlugs.length || (slug !== null && oldSlugs.includes(slug))) refuse(`${what} lists an address more than once`);
+  const venue: Venue = {
+    id,
+    name: v.name as string,
+    slug: slug as string | null,
+    oldSlugs,
+    kind: v.kind as VenueKind,
+    notes: v.notes as string,
+    plotIds,
+    defaultPlotId: v.defaultPlotId as string | null,
+  };
+  if (v.publish !== undefined) venue.publish = checkPublish(v.publish, what);
+  return venue;
+}
+
+function checkBackground(raw: unknown, i: number): Background {
+  const b = asObject(raw, `background ${i + 1}`);
+  const id = checkId(b.id, `background ${i + 1}`);
+  const what = `background "${id}"`;
+  orRefuse(nameProblem(b.name, what));
+  const original = asObject(b.original, `${what}'s original`);
+  if (!ORIGINAL_MIMES.includes(original.mime as BackgroundOriginalMime)) refuse(`${what}'s original must be a PNG, JPEG or PDF`);
+  const source = asObject(b.source, `${what}'s source`);
+  if (!SOURCE_EXTS.includes(source.ext as BackgroundSourceExt)) refuse(`${what}'s source must be a png or jpg`);
+  const converted = asObject(b.converted, `${what}'s converted image`);
+  required(b.cleanup, "boolean", `${what}'s clean-up`);
+  return {
+    id,
+    name: b.name as string,
+    original: {
+      hash: checkHash(original.hash, `${what}'s original`),
+      mime: original.mime as BackgroundOriginalMime,
+      bytes: checkCount(original.bytes, `${what}'s original size`),
+    },
+    source: { hash: checkHash(source.hash, `${what}'s source`), ext: source.ext as BackgroundSourceExt },
+    converted: {
+      hash: checkHash(converted.hash, `${what}'s converted image`),
+      width: checkCount(converted.width, `${what}'s width`),
+      height: checkCount(converted.height, `${what}'s height`),
+      bytes: checkCount(converted.bytes, `${what}'s converted size`),
+    },
+    cleanup: b.cleanup as boolean,
+    pdfPage: pageOrNull(b.pdfPage, `${what}'s PDF page`),
+    pdfPages: pageOrNull(b.pdfPages, `${what}'s PDF page count`),
+  };
+}
+
+// ── Items ────────────────────────────────────────────────────────────────
+// stageplot-items.ts: pure, so the editor's clipboard holds a copy to the same check.
+
+
+/**
+ * `items` fitted to a plot `height` units high (fitToHeight, which the editor
+ * uses too), with how many moved; the list itself when none did. Used when a
+ * plot switches to a background that makes it shorter.
+ */
+export function itemsWithin(items: readonly PlotItem[], height: number): { items: PlotItem[]; moved: number } {
+  let moved = 0;
+  const next = items.map((it) => {
+    const fitted = fitToHeight(it, height);
+    if (fitted !== it) moved++;
+    return fitted;
+  });
+  return moved === 0 ? { items: items as PlotItem[], moved } : { items: next, moved };
+}
+
+function checkPlot(raw: unknown, i: number, heightOf: (backgroundId: string | null) => number): Plot {
+  const p = asObject(raw, `plot ${i + 1}`);
+  const id = checkId(p.id, `plot ${i + 1}`);
+  const what = `plot "${id}"`;
+  required(p.venueId, "string", `${what}'s venue`);
+  orRefuse(nameProblem(p.name, what));
+  if (p.backgroundId !== null && typeof p.backgroundId !== "string") refuse(`${what}'s background must be a background id or null`);
+  orRefuse(fadeProblem(p.bgFade, what));
+  return {
+    id,
+    venueId: p.venueId as string,
+    name: p.name as string,
+    backgroundId: p.backgroundId as string | null,
+    bgFade: p.bgFade as number,
+    items: checkItems(p.items, heightOf(p.backgroundId as string | null), what),
+    version: checkCount(p.version, `${what}'s version`),
+  };
+}
+
+function checkOverride(raw: unknown, i: number): PlotOverride {
+  const o = asObject(raw, `override ${i + 1}`);
+  const what = typeof o.planId === "string" ? `the override for plan "${o.planId}"` : `override ${i + 1}`;
+  const planProblem = planIdProblem(o.planId);
+  if (planProblem) refuse(`${what}: ${planProblem}`);
+  const venueId = checkId(o.venueId, `${what}'s venue`);
+  const plotId = checkId(o.plotId, `${what}'s plot`);
+  let planDate: string | null;
+  try {
+    planDate = planDateOf(o.planDate);
+  } catch (err) {
+    refuse(`${what}: ${errorMessage(err)}`);
+  }
+  return { planId: o.planId as string, venueId, plotId, planDate };
+}
+
+/** Overrides in their one order: by plan, then venue. */
+function sortOverrides(list: PlotOverride[]): PlotOverride[] {
+  return [...list].sort((a, b) => a.planId.localeCompare(b.planId) || a.venueId.localeCompare(b.venueId));
+}
+
+/**
+ * A whole document, every field shaped as a save would leave it and every id
+ * it names resolved — or a throw naming the first that is not. The restore
+ * check, and the rule the routes' writes keep. A document with no `overrides`
+ * (saved before they existed) reads as [].
+ */
+export function checkStagePlotsDoc(raw: unknown): StagePlotsDoc {
+  const d = asObject(raw, "the stage plots");
+  const venues = asArray(d.venues, "the venues").map(checkVenue);
+  const backgrounds = asArray(d.backgrounds, "the backgrounds").map(checkBackground);
+  // A plot naming a background that does not exist is refused below; until
+  // then its items are measured on the grid's height.
+  const backgroundById = new Map(backgrounds.map((b) => [b.id, b]));
+  const heightOf = (id: string | null) => plotHeight(id === null ? null : backgroundById.get(id));
+  const plots = asArray(d.plots, "the plots").map((p, i) => checkPlot(p, i, heightOf));
+  const overrides = d.overrides === undefined ? [] : asArray(d.overrides, "the overrides").map(checkOverride);
+  const pendingRemovals = d.pendingRemovals === undefined ? [] : asArray(d.pendingRemovals, "the pending removals").map(checkPending);
+  if (pendingRemovals.length > STAGEPLOT_LIMITS.pendingRemovals) refuse(`there can be at most ${STAGEPLOT_LIMITS.pendingRemovals} pending removals`);
+  for (const [what, list] of [["the venues", venues], ["the backgrounds", backgrounds], ["the plots", plots]] as const) {
+    uniqueIds(list.map((e) => ({ id: e.id })), what);
+  }
+  if (venues.length > STAGEPLOT_LIMITS.venues) refuse(LIMIT_SAYS.venue);
+  // No two venues answer to one address, an id included: /stageplots/<x> opens one venue.
+  addressOwners(venues);
+  if (backgrounds.length > STAGEPLOT_LIMITS.backgrounds) refuse(LIMIT_SAYS.background);
+
+  const venueById = new Map(venues.map((v) => [v.id, v]));
+  const backgroundIds = new Set(backgrounds.map((b) => b.id));
+  const plotById = new Map(plots.map((p) => [p.id, p]));
+  for (const p of plots) {
+    const venue = venueById.get(p.venueId);
+    if (!venue) refuse(`plot "${p.id}" names a venue that does not exist`);
+    if (!venue.plotIds.includes(p.id)) refuse(`plot "${p.id}" is not listed by its venue "${venue.id}"`);
+    if (p.backgroundId !== null && !backgroundIds.has(p.backgroundId)) refuse(`plot "${p.id}" names a background that does not exist`);
+  }
+  for (const v of venues) {
+    if (new Set(v.plotIds).size !== v.plotIds.length) refuse(`venue "${v.id}" lists a plot more than once`);
+    if (v.plotIds.length > STAGEPLOT_LIMITS.plotsPerVenue) refuse(LIMIT_SAYS.plot);
+    for (const plotId of v.plotIds) {
+      if (plotById.get(plotId)?.venueId !== v.id) refuse(`venue "${v.id}" lists plot "${plotId}", which is not one of its plots`);
+    }
+    if (v.plotIds.length > 0 ? v.defaultPlotId === null || !v.plotIds.includes(v.defaultPlotId) : v.defaultPlotId !== null) {
+      refuse(`venue "${v.id}"'s default plot must be one of its plots`);
+    }
+  }
+  if (overrides.length > STAGEPLOT_LIMITS.overrides) refuse(LIMIT_SAYS.override);
+  const seenOverride = new Set<string>();
+  for (const o of overrides) {
+    const venue = venueById.get(o.venueId);
+    if (!venue) refuse(`the override for plan "${o.planId}" names a venue that does not exist`);
+    if (!venue.plotIds.includes(o.plotId)) refuse(`the override for plan "${o.planId}" names a plot that is not one of venue "${venue.id}"'s`);
+    const key = JSON.stringify([o.planId, o.venueId]);
+    if (seenOverride.has(key)) refuse(`plan "${o.planId}" has more than one override for venue "${o.venueId}"`);
+    seenOverride.add(key);
+  }
+  return { venues, backgrounds, plots, overrides: sortOverrides(overrides), pendingRemovals: sortPending(pendingRemovals) };
+}
+
+// ── Overrides ────────────────────────────────────────────────────────────
+
+/** A PUT /api/stageplots/overrides body: plotId null removes the override. */
+export interface OverrideChange {
+  planId: string;
+  venueId: string;
+  plotId: string | null;
+  planDate: string | null;
+}
+
+/** The change a PUT /api/stageplots/overrides body asks for, or why it cannot be one. */
+export function readOverrideChange(body: unknown): OverrideChange | { problem: string } {
+  if (!isRecord(body)) return { problem: "the override must be an object" };
+  const planProblem = planIdProblem(body.planId);
+  if (planProblem) return { problem: planProblem };
+  if (typeof body.venueId !== "string" || body.venueId === "") return { problem: "venueId must be a venue id" };
+  if (body.plotId !== null && typeof body.plotId !== "string") return { problem: "plotId must be one of the venue's plots, or null to use the default" };
+  try {
+    return { planId: body.planId as string, venueId: body.venueId, plotId: body.plotId, planDate: planDateOf(body.planDate) };
+  } catch (err) {
+    return { problem: errorMessage(err) };
+  }
+}
+
+/**
+ * `change` applied: the new document, or `doc` itself when it changes nothing
+ * (the same plot again, or removing an override that is not there), with the
+ * venue's name and the plot's (null when handed back to the default) for the
+ * log; or a refusal, with the status to answer it with. A change that does not
+ * know the plan's date keeps the date already stored. The routes and the
+ * editor's tests apply overrides through this one function.
+ */
+export function applyOverride(
+  doc: StagePlotsDoc,
+  change: OverrideChange,
+): { doc: StagePlotsDoc; venueName: string; plotName: string | null } | { status: 400 | 404; problem: string } {
+  const venue = doc.venues.find((v) => v.id === change.venueId);
+  if (!venue) return { status: 404, problem: "no such venue" };
+  const done = (next: StagePlotsDoc) => ({
+    doc: next,
+    venueName: venue.name,
+    plotName: change.plotId === null ? null : (doc.plots.find((p) => p.id === change.plotId)?.name ?? change.plotId),
+  });
+  const at = doc.overrides.findIndex((o) => o.planId === change.planId && o.venueId === change.venueId);
+  const current = at >= 0 ? doc.overrides[at] : null;
+  if (change.plotId === null) {
+    return done(current ? { ...doc, overrides: doc.overrides.filter((_, i) => i !== at) } : doc);
+  }
+  if (!venue.plotIds.includes(change.plotId)) return { status: 400, problem: "plotId must be one of the venue's plots, or null to use the default" };
+  const next: PlotOverride = { planId: change.planId, venueId: venue.id, plotId: change.plotId, planDate: change.planDate ?? current?.planDate ?? null };
+  if (current && current.plotId === next.plotId && current.planDate === next.planDate) return done(doc);
+  if (!current && doc.overrides.length >= STAGEPLOT_LIMITS.overrides) return { status: 400, problem: LIMIT_SAYS.override };
+  return done({ ...doc, overrides: current ? doc.overrides.map((o, i) => (i === at ? next : o)) : sortOverrides([...doc.overrides, next]) });
+}
+
+/**
+ * A document as read from disk, with `overrides` as a list: a file saved
+ * before overrides existed has no key for them and reads as []. One whose
+ * `overrides` is there but not a list reads as [] too, and says so on
+ * [stageplots], since the next save will write the empty list over it.
+ */
+export function normalizeStagePlots(doc: StagePlotsDoc): StagePlotsDoc {
+  if (!isRecord(doc)) return doc;
+  let out = doc;
+  if (!Array.isArray(out.overrides)) {
+    if ((out as { overrides?: unknown }).overrides !== undefined) {
+      console.warn("[stageplots] stageplots.json's plan overrides are not a list; read as none, and the next save replaces them");
+    }
+    out = { ...out, overrides: [] };
+  }
+  // A venue saved before addresses existed reads with none: it answers at its id until one is set.
+  if (Array.isArray(out.venues) && out.venues.some((v) => isRecord(v) && (v.slug === undefined || v.oldSlugs === undefined))) {
+    out = { ...out, venues: out.venues.map((v) => (isRecord(v) ? { ...v, slug: v.slug ?? null, oldSlugs: v.oldSlugs ?? [] } : v)) };
+  }
+  // An address the app has since taken for a page of its own (`manage` became /stageplots/manage)
+  // cannot stay a venue's: kept, every save would be refused for it. The venue answers at its id
+  // until a new address is set, and the log says so once per venue.
+  const isReserved = (s: unknown) => typeof s === "string" && RESERVED_SLUGS.has(s);
+  if (Array.isArray(out.venues) && out.venues.some((v) => isRecord(v) && (isReserved(v.slug) || (Array.isArray(v.oldSlugs) && v.oldSlugs.some(isReserved))))) {
+    out = {
+      ...out,
+      venues: out.venues.map((v) => {
+        if (!isRecord(v)) return v;
+        const taken = [v.slug, ...(Array.isArray(v.oldSlugs) ? v.oldSlugs : [])].filter(isReserved);
+        if (taken.length === 0) return v;
+        console.warn(
+          `[stageplots] venue ${scrub(String(v.id))}: the address ${scrub(taken.join(", "))} is the app's own page now and no longer opens it; set a new address in the editor`,
+        );
+        return { ...v, slug: isReserved(v.slug) ? null : v.slug, oldSlugs: Array.isArray(v.oldSlugs) ? v.oldSlugs.filter((s) => !isReserved(s)) : v.oldSlugs };
+      }),
+    };
+  }
+  const pending = (out as { pendingRemovals?: unknown }).pendingRemovals;
+  if (pending === undefined) out = { ...out, pendingRemovals: [] };
+  // Never read as none: each may be a link still live on a page, and forgetting it would leave
+  // nothing that could take it down. Left as it is, so every save is refused until it is fixed.
+  else if (!Array.isArray(pending)) console.warn("[stageplots] stageplots.json's pending removals are not a list; left as they are, and saves are refused until the file is fixed");
+  return out;
+}
+
+const store = new DataStore<StagePlotsDoc>("stageplots.json", EMPTY, "config", {
+  // Normalized first, as a load is, so a backup from before an address was reserved restores.
+  restoreCheck: checked((raw) => checkStagePlotsDoc(normalizeStagePlots(raw as StagePlotsDoc))),
+  normalize: normalizeStagePlots,
+});
+
+export const stageplotsStore = {
+  /** The document. Throws a StoreReadError (503) when the file cannot be read,
+   *  rather than answering with no venues. */
+  get(): Promise<StagePlotsDoc> {
+    return store.loadStrict();
+  },
+  /** Whether the document is the empty one a damaged stageplots.json was replaced with. */
+  get loadedFromCorrupt(): boolean {
+    return store.loadedFromCorrupt;
+  },
+  /**
+   * Read-modify-write, serialized against every other write. The result is
+   * held to checkStagePlotsDoc before it is saved, so no route can leave a
+   * dangling id; a mutator that returns its input writes nothing.
+   */
+  update(fn: (doc: StagePlotsDoc) => StagePlotsDoc): Promise<StagePlotsDoc> {
+    return store.update((doc) => {
+      const next = fn(doc);
+      return next === doc ? doc : checkStagePlotsDoc(next);
+    });
+  },
+};

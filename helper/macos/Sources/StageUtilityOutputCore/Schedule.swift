@@ -23,6 +23,10 @@ public enum Backoff {
 }
 
 public enum ProbeSchedule {
+  /// Seconds between probes once the server has answered, after ten unanswered
+  /// ones, or when there is no socket.
+  public static let slowInterval: TimeInterval = 30
+
   /// Seconds until the next probe.
   ///
   /// Every 2 s until the server answers, as the shell agent does; backing off to
@@ -36,8 +40,8 @@ public enum ProbeSchedule {
   /// With no socket to probe from there is nothing to answer, so the slow rate: it
   /// is the rate at which a socket that failed to open is tried again.
   public static func interval(unanswered: Int, answered: Bool, socketOpen: Bool = true) -> TimeInterval {
-    if !socketOpen || answered { return 30 }
-    return unanswered < 10 ? 2 : 30
+    if !socketOpen || answered { return slowInterval }
+    return unanswered < 10 ? 2 : slowInterval
   }
 
   /// Probes sent unanswered, to a server this output is bound to, before the probe

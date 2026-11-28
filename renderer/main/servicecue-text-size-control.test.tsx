@@ -62,14 +62,19 @@ test("it opens at the size it was given", () => {
   assert.equal(shown(), "150%");
 });
 
-test("A+ and A- step by ten, and an off-grid size lands on the next multiple of ten", async () => {
+test("A+ and A- step by five, and an off-grid size lands on the next multiple of five", async () => {
   const committed = mount(137);
   await act(async () => void fireEvent.click(screen.getByLabelText("Larger text")));
   assert.deepEqual(committed, [140]);
   await act(async () => void fireEvent.click(screen.getByLabelText("Smaller text")));
   await act(async () => void fireEvent.click(screen.getByLabelText("Smaller text")));
-  assert.deepEqual(committed, [140, 130, 120]);
-  assert.equal(shown(), "120%");
+  assert.deepEqual(committed, [140, 135, 130]);
+  assert.equal(shown(), "130%");
+});
+
+test("it says the size is this browser's only, because a screen's own is kept on the server", () => {
+  mount(100);
+  assert.equal(!!screen.queryByText("This browser only"), true);
 });
 
 test("the steppers stop being pressable at 50 and 300", () => {

@@ -15,9 +15,12 @@ import { fileURLToPath } from "node:url";
 import { ATTENTION_SOURCES } from "./sources/index.js";
 
 const EXPECTED = [
+  "duplicate-server",
   "integration-down",
+  "note-categories",
   "readiness",
   "recorder-idle",
+  "rollover-held",
   "screen-offline",
   "wireless-battery",
   "wireless-offline",
@@ -47,11 +50,14 @@ describe("attention sources", () => {
   it("the registry lists them in the order the docs table does", () => {
     assert.deepEqual(ATTENTION_SOURCES.map((s) => s.id), [
       "readiness",
+      "rollover-held",
       "wireless-battery",
       "wireless-offline",
+      "duplicate-server",
       "screen-offline",
       "recorder-idle",
       "integration-down",
+      "note-categories",
     ]);
   });
 });

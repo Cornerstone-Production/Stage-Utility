@@ -20,6 +20,9 @@ const React = await import("react");
 const { VideoFeedsRoute } = await import("./video-feeds-route.js");
 const { exportHref, groupLabel } = await import("./feed-transfer-panels.js");
 const { __resetReplayCacheForTests } = await import("../../lib/api.js");
+const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
+const { serverZoneApartFromBrowser } = await import("../../test-fixtures/zones.js");
+const { zonedDateKey } = await import("@main/services/app-timezone");
 const { createMemoryHistory, createRootRoute, createRouter, RouterProvider } = await import("@tanstack/react-router");
 
 type VideoState = import("@main/types/video").VideoState;
@@ -86,6 +89,9 @@ const EXPECT = { box: "a".repeat(32), gym: "", resi: "b".repeat(32), odd: "" };
 
 interface Call { method: string; url: string; body?: unknown }
 
+/** What GET /api/state answers: the app's zone and the server clock's. */
+let stageState: { timezone: string | null; hostTimezone: string } | Record<string, never> = {};
+
 function stub(
   report: unknown = { added: ["GYM"], addedIds: ["gym"], replaced: ["BOX"], kept: [], same: ["Resi"], skipped: [{ name: "Odd", reason: "This build does not offer teleport." }], newPushPasswords: ["OBS"], passwordsCleared: ["BOX"], passwordsWritten: 0, portsApplied: false },
   /** Holds the review's answer until it settles, for a test that needs it in flight. */
@@ -102,6 +108,7 @@ function stub(
     const url = String(input);
     calls.push({ method, url, body: typeof init?.body === "string" ? JSON.parse(init.body) : undefined });
     if (url.endsWith("/api/video/state")) return ok(STATE);
+    if (url.endsWith("/api/state")) return ok(stageState);
     if (url.endsWith("/api/video/probe")) return ok({ feeds: {} });
     if (url.endsWith("/api/integrations")) return ok({ descriptors: [], states: [] });
     if (url.endsWith("/usage")) return ok({ layouts: [] });
@@ -140,6 +147,8 @@ async function pageReady(): Promise<void> {
 beforeEach(() => {
   cleanup();
   __resetReplayCacheForTests();
+  resetStageState();
+  stageState = {};
 });
 afterEach(() => cleanup());
 
@@ -377,6 +386,25 @@ test("selecting a feed or Add feed returns to the editor", async () => {
     await settle();
     assert.equal(screen.queryByRole("complementary", { name: "Export video feeds" }), null);
     assert.ok(screen.getByRole("complementary", { name: "Feed settings" }));
+  } finally {
+    g.restore();
+  }
+});
+
+// The server names the download by the app's date, which with no zone set is its
+// own clock's. The name the panel shows has to be that one, not the browser's.
+test("Export names the file by the server's date when no app time zone is set", async () => {
+  const host = serverZoneApartFromBrowser(Date.now());
+  stageState = { timezone: null, hostTimezone: host };
+  const g = stub();
+  try {
+    mount();
+    await pageReady();
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: /Export/ }));
+    await settle();
+    const want = `stage-utility-video-feeds-${zonedDateKey(Date.now(), host)}.json`;
+    assert.ok(screen.queryByText(want), `the panel did not show ${want}: ${screen.queryByText(/stage-utility-video-feeds-/)?.textContent ?? "no name at all"}`);
   } finally {
     g.restore();
   }

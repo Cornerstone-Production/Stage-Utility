@@ -30,7 +30,9 @@ import { JSDOM } from "jsdom";
 import { build } from "vite";
 
 import {
+  LANDING_HTML,
   PUBLIC_STATIC_FILES,
+  STAGEPLOTS_HTML,
   STATIC_ASSET_PREFIX,
   VIEWER_BUILD_META,
   VIEWER_HTML,
@@ -52,7 +54,10 @@ const built = await build({
   logLevel: "silent",
   build: { outDir: OUT, emptyOutDir: true },
 });
-const chunks = (Array.isArray(built) ? built[0]! : built).output.flatMap((o) => (o.type === "chunk" ? [o] : []));
+const result = Array.isArray(built) ? built[0]! : built;
+// A one-shot build returns its output; only a watch build returns a watcher.
+if (!("output" in result)) throw new Error("the ServiceCue build returned a watcher, not its output");
+const chunks = result.output.flatMap((o) => (o.type === "chunk" ? [o] : []));
 
 /** Every file the build left in its folder, by path from it. */
 function filesUnder(dir: string, base = ""): string[] {
@@ -81,8 +86,8 @@ function runWorkerFirst(): string[] {
 describe("what the build writes", () => {
   test("is the page, its headers file, the files the Worker names beside it, and hashed files under assets/", () => {
     const files = [...emitted].filter((f) => !f.startsWith("assets/")).sort();
-    assert.deepEqual(files, [VIEWER_HTML.slice(1), STATIC_HEADERS_FILE, ...PUBLIC_STATIC_FILES.map((f) => f.slice(1))].sort());
-    for (const file of emitted) assert.ok(file === "servicecue.html" || !file.endsWith(".html"), `a second document: ${file}`);
+    assert.deepEqual(files, [VIEWER_HTML.slice(1), STAGEPLOTS_HTML.slice(1), LANDING_HTML.slice(1), STATIC_HEADERS_FILE, ...PUBLIC_STATIC_FILES.map((f) => f.slice(1))].sort());
+    for (const file of emitted) assert.ok(file === "servicecue.html" || file === "stageplots.html" || file === "landing.html" || !file.endsWith(".html"), `a fourth document: ${file}`);
   });
 
   test("has every file the asset service answers by itself named in wrangler.jsonc, and names no other", () => {
@@ -130,19 +135,23 @@ describe("what is in the bundle", () => {
     assert.deepEqual(within("renderer/app"), ["renderer/app/servicecue-routes.tsx"]);
   });
 
-  test("of renderer/settings, only the plan switcher the ServiceCue page is built on", () => {
+  test("of renderer/settings, only the plan switcher the ServiceCue page is built on, and the plan date stage plots name a plan by", () => {
     assert.deepEqual(within("renderer/settings"), [
       "renderer/settings/sections/editing-target.ts",
+      "renderer/settings/sections/plan-date-label.ts",
       "renderer/settings/sections/plan-switcher-step.ts",
       "renderer/settings/sections/plan-switcher.tsx",
-      "renderer/settings/sections/slots-target-pill.tsx",
     ]);
   });
 
-  test("of renderer/public, the viewer's own three", () => {
+  test("of renderer/public, the viewer's own three, the stage plots page's two and the landing page's two", () => {
     assert.deepEqual(within("renderer/public"), [
+      "renderer/public/landing-public-page.tsx",
+      "renderer/public/landing-public.tsx",
       "renderer/public/public-router.tsx",
       "renderer/public/servicecue-public.tsx",
+      "renderer/public/stageplots-public-page.tsx",
+      "renderer/public/stageplots-public.tsx",
       "renderer/public/stale-notice.tsx",
     ]);
   });
@@ -150,6 +159,7 @@ describe("what is in the bundle", () => {
   test("of renderer/lib, exactly these: a shared helper joins the public page only on purpose", () => {
     assert.deepEqual(within("renderer/lib"), [
       "renderer/lib/api.ts",
+      "renderer/lib/app-zone.ts",
       "renderer/lib/apply-accent.ts",
       "renderer/lib/apply-device-telemetry.ts",
       "renderer/lib/apply-favicon.ts",
@@ -159,6 +169,8 @@ describe("what is in the bundle", () => {
       "renderer/lib/cn.ts",
       "renderer/lib/drawer-drag.ts",
       "renderer/lib/icon-ink.ts",
+      // The one inline-link style the launcher's empty messages share with the layouts page.
+      "renderer/lib/link-classes.ts",
       "renderer/lib/live-refresh.ts",
       "renderer/lib/public-build.ts",
       "renderer/lib/public-live.ts",
@@ -168,7 +180,11 @@ describe("what is in the bundle", () => {
       "renderer/lib/sse-channels.ts",
       "renderer/lib/subscribe-reporter.ts",
       "renderer/lib/uid.ts",
+      // The stage plots page's plot width, which its labels are sized by.
+      "renderer/lib/use-element-size.ts",
       "renderer/lib/use-failed-reads.ts",
+      // The stage plots page's pan and zoom.
+      "renderer/lib/use-latest-ref.ts",
       "renderer/lib/use-media-query.ts",
       "renderer/lib/use-resync-on.ts",
       "renderer/lib/use-search-param.ts",
@@ -176,7 +192,7 @@ describe("what is in the bundle", () => {
     ]);
   });
 
-  test("of renderer/main, exactly the ServiceCue pages and the state they read", () => {
+  test("of renderer/main, exactly the ServiceCue pages and the state they read, and the read-only stage plots", () => {
     assert.deepEqual(within("renderer/main"), [
       "renderer/main/category-color.ts",
       "renderer/main/item-color.ts",
@@ -192,6 +208,18 @@ describe("what is in the bundle", () => {
       "renderer/main/servicecue-plan-view.tsx",
       "renderer/main/servicecue-text-size-control.tsx",
       "renderer/main/servicecue-text-size.ts",
+      // The read-only plot the published stage plots page shares with /stageplots.
+      "renderer/main/stageplots/doc-helpers.ts",
+      "renderer/main/stageplots/draw-layer.ts",
+      "renderer/main/stageplots/item-details.tsx",
+      "renderer/main/stageplots/legend.ts",
+      "renderer/main/stageplots/mono.tsx",
+      "renderer/main/stageplots/plot-items.tsx",
+      "renderer/main/stageplots/plot-legend.tsx",
+      "renderer/main/stageplots/plot-svg.tsx",
+      "renderer/main/stageplots/symbols.tsx",
+      "renderer/main/stageplots/use-pan-zoom.ts",
+      "renderer/main/stageplots/venue-plots.tsx",
       "renderer/main/use-dashboard-state.ts",
       "renderer/main/use-servicecue-text-size.ts",
       "renderer/main/use-spl-state.ts",
@@ -208,12 +236,24 @@ describe("what is in the bundle", () => {
 
   test("of main, only what the renderer already shares with it", () => {
     assert.deepEqual(within("main"), [
+      // The browser's own zone, the last answer the page's plan dates fall back to:
+      // Intl and nothing else.
+      "main/services/app-timezone.ts",
       "main/services/clamp.ts",
       "main/services/errors.ts",
+      // The address a layout is found under, shared with the server that assigns it.
+      "main/services/servicecue-slug.ts",
+      // A plot's height and which plot a plan shows: pure, and imports only types.
+      "main/services/stageplots-doc.ts",
       // renderer/lib/api.ts gives Update the page now its timeout from here: two
       // numbers, and types the build erases.
       "main/types/servicecue-deploy.ts",
       "main/types/servicecue-publish.ts",
+      // The event stream's heartbeat name and silence deadline, which api.ts's own
+      // stream reads: three constants.
+      "main/types/sse.ts",
+      // The stage plots and published documents' types, and the drawing limits.
+      "main/types/stageplots.ts",
       "main/types/text-size.ts",
     ]);
   });
@@ -228,6 +268,49 @@ describe("what is in the bundle", () => {
       "renderer/lib/public-mode.ts",
     ]) {
       assert.ok(modules.includes(needed), `${needed} is not in the public bundle`);
+    }
+  });
+});
+
+describe("the landing document", () => {
+  const html = read(LANDING_HTML.slice(1));
+  const doc = new JSDOM(html).window.document;
+
+  test("is not the ServiceCue page, keeps out of search engines and sends no referrer", () => {
+    assert.equal(doc.documentElement.hasAttribute("data-servicecue-public"), false);
+    assert.equal(doc.querySelector('meta[name="robots"]')?.getAttribute("content"), "noindex");
+    assert.equal(doc.querySelector('meta[name="referrer"]')?.getAttribute("content"), "no-referrer");
+    assert.equal(doc.title, "Welcome");
+  });
+
+  test("has no inline script, and loads only files the build wrote, from its own origin", () => {
+    assert.deepEqual([...doc.querySelectorAll("script:not([src])")].map((s) => s.textContent), []);
+    const refs = [...doc.querySelectorAll("script[src], link[href]")].map((el) => el.getAttribute("src") ?? el.getAttribute("href")!);
+    assert.ok(refs.length >= 3, refs.join(", "));
+    for (const ref of refs) {
+      assert.match(ref, /^\/[^/]/, `${ref} is not an address on this origin`);
+      assert.ok(emitted.has(ref.slice(1)), `${ref} is not a file the build wrote`);
+    }
+  });
+});
+
+describe("the stage plots document", () => {
+  const html = read(STAGEPLOTS_HTML.slice(1));
+  const doc = new JSDOM(html).window.document;
+
+  test("is not the ServiceCue page: the shared code does not behave as it there", () => {
+    assert.equal(doc.documentElement.hasAttribute("data-servicecue-public"), false);
+    assert.equal(doc.querySelector('meta[name="robots"]')?.getAttribute("content"), "noindex");
+    assert.equal(doc.querySelector('meta[name="referrer"]')?.getAttribute("content"), "no-referrer");
+  });
+
+  test("has no inline script, and loads only files the build wrote, from its own origin", () => {
+    assert.deepEqual([...doc.querySelectorAll("script:not([src])")].map((s) => s.textContent), []);
+    const refs = [...doc.querySelectorAll("script[src], link[href]")].map((el) => el.getAttribute("src") ?? el.getAttribute("href")!);
+    assert.ok(refs.length >= 3, refs.join(", "));
+    for (const ref of refs) {
+      assert.match(ref, /^\/[^/]/, `${ref} is not an address on this origin`);
+      assert.ok(emitted.has(ref.slice(1)), `${ref} is not a file the build wrote`);
     }
   });
 });
@@ -271,7 +354,15 @@ describe("the document", () => {
     assert.equal(doc.querySelectorAll(`meta[name="${VIEWER_BUILD_META}"]`).length, 1);
     const before = html.replace(viewerBuildTag(stamped), "");
     assert.ok(!before.includes(VIEWER_BUILD_META), "the stamp is not the one tag the document was given");
-    assert.equal(stamped, createHash("sha256").update(before).digest("hex").slice(0, 12), "the id is not the hash of the document it stamps");
+    // All three documents: a change to the stage plots page or the landing page alone is a new
+    // build too, so the server that keeps the page up to date redeploys for it.
+    const plots = read(STAGEPLOTS_HTML.slice(1));
+    const landing = read(LANDING_HTML.slice(1));
+    assert.equal(
+      stamped,
+      createHash("sha256").update(before).update("\0").update(plots).update("\0").update(landing).digest("hex").slice(0, 12),
+      "the id is not the hash of the documents it stamps",
+    );
   });
 
   test("gives the Worker and the page one id: what the Worker reads out of this document is what the page reads", async () => {

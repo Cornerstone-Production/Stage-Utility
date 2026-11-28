@@ -44,6 +44,9 @@ class FakeUpstreamEventSource {
   addEventListener(name: string, fn: (e: { data: string }) => void): void {
     this.listeners.set(name, fn);
   }
+  close(): void {
+    this.readyState = FakeUpstreamEventSource.CLOSED;
+  }
   push(channel: string, payload: unknown): void {
     this.listeners.get(channel)?.({ data: JSON.stringify(payload) });
   }
@@ -53,13 +56,19 @@ class FakeUpstreamEventSource {
 
 /** One tab's half of the MessageChannel `ctx.onconnect` receives. */
 function fakePort() {
+  // Channel frames only; the stream's own up/down notes are `all`, read by the
+  // test that is about them.
   const posted: Record<string, unknown>[] = [];
+  const all: Record<string, unknown>[] = [];
   const port = {
-    postMessage: (m: Record<string, unknown>) => posted.push(m),
+    postMessage: (m: Record<string, unknown>) => {
+      all.push(m);
+      if (m.type !== "stream") posted.push(m);
+    },
     start: () => {},
     onmessage: null as null | ((e: { data: unknown }) => void),
   };
-  return { port, posted };
+  return { port, posted, all };
 }
 
 test("a live push carries no replay flag; a late subscriber's replay does", async () => {
@@ -192,4 +201,63 @@ test("the worker's subscribe report can time out", async () => {
   } finally {
     (globalThis as unknown as { fetch: unknown }).fetch = realFetch;
   }
+});
+
+// Whether the shared stream is delivering, told to every tab: a Screens-card
+// preview draws *Not live* from it, so a frozen frame does not pass for live
+// (preview-messages.ts). Each tab hears the state as it connects and on every
+// change, and a stream that goes quiet past SSE_SILENCE_MS is not delivering.
+test("every tab hears the shared stream open, go quiet, come back and drop, a new tab hears where it stands, and a stall is reopened once", async (t) => {
+  const { SSE_HEARTBEAT_EVENT, SSE_SILENCE_MS } = await import("../../main/types/sse.js");
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const onconnect = (globalThis as unknown as { self: { onconnect: (e: { ports: unknown[] }) => void } }).self
+    .onconnect;
+  const es = FakeUpstreamEventSource.instances.at(-1) as unknown as {
+    onopen: () => void;
+    onerror: () => void;
+    listeners: Map<string, (e: { data: string }) => void>;
+  };
+  const beat = () => es.listeners.get(SSE_HEARTBEAT_EVENT)?.({ data: "{}" });
+  const streamMessages = (posted: Record<string, unknown>[]) => posted.filter((m) => m.type === "stream");
+  const a = fakePort();
+  onconnect({ ports: [a.port] });
+  es.onerror();
+  es.onopen();
+  assert.deepEqual(streamMessages(a.all).at(-1), { type: "stream", delivering: true }, "the stream opened and the tab was not told");
+
+  // Quiet, but the heartbeat keeps it delivering.
+  t.mock.timers.tick(SSE_SILENCE_MS - 1);
+  beat();
+  t.mock.timers.tick(SSE_SILENCE_MS - 1);
+  assert.deepEqual(streamMessages(a.all).at(-1), { type: "stream", delivering: true }, "a heartbeat did not re-arm the silence deadline");
+  // Then nothing at all, the heartbeat included: a frozen server.
+  t.mock.timers.tick(1);
+  assert.deepEqual(streamMessages(a.all).at(-1), { type: "stream", delivering: false }, "a silent stream still read as delivering");
+  beat();
+  assert.deepEqual(streamMessages(a.all).at(-1), { type: "stream", delivering: true }, "a heartbeat after the silence did not bring it back");
+
+  es.onerror();
+  assert.deepEqual(streamMessages(a.all).at(-1), { type: "stream", delivering: false }, "the stream dropped and the tab was not told");
+  const b = fakePort();
+  onconnect({ ports: [b.port] });
+  assert.deepEqual(streamMessages(b.all), [{ type: "stream", delivering: false }], "a tab joining a dropped stream was not told");
+  es.onopen();
+  assert.deepEqual(streamMessages(b.all).at(-1), { type: "stream", delivering: true });
+
+  // A connection that dies without a reset never errors, so the deadline also
+  // reopens it: once per stall, never on a timer of its own.
+  const before = FakeUpstreamEventSource.instances.length;
+  const stalled = FakeUpstreamEventSource.instances.at(-1) as unknown as typeof es & { readyState: number };
+  stalled.onopen();
+  t.mock.timers.tick(SSE_SILENCE_MS);
+  assert.equal(stalled.readyState, FakeUpstreamEventSource.CLOSED, "the silent stream was left open");
+  assert.equal(FakeUpstreamEventSource.instances.length, before + 1, "the silent stream was not replaced");
+  // The replacement never opens: the server is unreachable.
+  t.mock.timers.tick(SSE_SILENCE_MS * 3);
+  assert.equal(FakeUpstreamEventSource.instances.length, before + 1, "a stream that never opened was reopened again and again");
+  const fresh = FakeUpstreamEventSource.instances.at(-1) as unknown as typeof es;
+  fresh.onopen();
+  fresh.listeners.get(SSE_HEARTBEAT_EVENT)?.({ data: "{}" });
+  t.mock.timers.tick(SSE_SILENCE_MS);
+  assert.equal(FakeUpstreamEventSource.instances.length, before + 2, "a second stall was not reopened");
 });

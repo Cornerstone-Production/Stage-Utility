@@ -565,7 +565,9 @@ and average are building-only — the zone endpoint does not report them. See
 | **Transcription** | Live captions of what is being said | The transcription service |
 
 **Mode** picks **Latest**, one line that replaces itself as new words arrive, or
-**Rolling**, a scrolling multi-line feed like the Captions display. In Rolling,
+**Rolling**, a multi-line feed like the Captions display: the newest line sits at
+the bottom, and older lines are cut off at the top once the widget is full. It has
+no scrollbar; the Captions display is the place to scroll back. In Rolling,
 **Lines** caps how many show, 1 to 10; left blank it reads **Fit** and shows as
 many as the widget holds. **Channels shown** hides any channel from this widget, and lists
 the channels once captions have arrived.
@@ -652,7 +654,7 @@ screens that have a Button for the command, Home included.
 A Companion or App action pick saves a command of its own for the Button, at once,
 before the layout is saved. It is a **Called by name** rule named `btn_<label>`
 (the picked button's or action's name when the label is blank), a `lower_snake_case`
-name made unique against every command name and former name; one ending `_on` or
+name (accents folded to their letter, at most 60 characters) made unique against every command name and former name; one ending `_on` or
 `_off` gets `_cue` added, because a lone one would read as half of an ON/OFF pair
 and never appear in the list. It is enabled, hidden from Home Assistant, allowed
 during a service, with no conditions and no cooldown, and it belongs to that

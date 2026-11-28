@@ -44,11 +44,21 @@ export const CALL_TRIGGER_ID = "call.by-name";
 export const MAX_ALIASES = 5;
 
 /**
+ * A cue name as the engine compares it: trimmed and lower-cased, "" for anything
+ * that is not a string or a number. THE one key, for a rule's name, a former name,
+ * a Button's `cue` and the cue-usage lookup, so they cannot disagree about what
+ * "the same cue" is.
+ */
+export function cueKey(name: unknown): string {
+  return typeof name === "string" || typeof name === "number" ? String(name).trim().toLowerCase() : "";
+}
+
+/**
  * The cue name a rule answers to, normalised the way the engine compares it, or ""
  * when the rule is not a cue.
  */
 export function calledCueName(trigger: { id: string; params: Record<string, string | number> }): string {
-  return trigger.id === CALL_TRIGGER_ID ? String(trigger.params?.name ?? "").trim().toLowerCase() : "";
+  return trigger.id === CALL_TRIGGER_ID ? cueKey(trigger.params?.name) : "";
 }
 
 /**
@@ -59,7 +69,7 @@ export function takenCueNames(
   rules: readonly { trigger: { id: string; params: Record<string, string | number> } }[],
   reserved: Iterable<string> = [],
 ): Set<string> {
-  const taken = new Set([...reserved].map((n) => n.toLowerCase()));
+  const taken = new Set([...reserved].map(cueKey));
   for (const r of rules) {
     const name = calledCueName(r.trigger);
     if (name) taken.add(name);
@@ -74,7 +84,7 @@ export function takenCueNames(
 export function parseAliases(params: Record<string, string | number> | undefined): string[] {
   const seen = new Set<string>();
   for (const part of String(params?.aliases ?? "").split(",")) {
-    const name = part.trim().toLowerCase();
+    const name = cueKey(part);
     if (name) seen.add(name);
   }
   return [...seen];

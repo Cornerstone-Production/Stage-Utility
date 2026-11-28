@@ -13,14 +13,14 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, test } from "node:test";
 
-import { eventually, installRenderDom } from "../../test-dom.js";
+import { eventually, installRenderDom, mountInAct } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
 const { render, screen, cleanup, fireEvent, act, within } = await import("@testing-library/react");
 const React = await import("react");
 const { AttendanceDetail } = await import("./attendance-history-section.js");
-const { SplDetail } = await import("./spl-history-section.js");
+const { SplDetailOnPage } = await import("../../test-fixtures/spl-detail.js");
 
 const T0 = Date.parse("2026-09-17T20:15:00.000Z");
 const MIN = 60_000;
@@ -210,8 +210,8 @@ after(async () => {
   teardown();
 });
 
-test("the attendance section is the chart module, not a chip row", () => {
-  render(attendance());
+test("the attendance section is the chart module, not a chip row", async () => {
+  await mountInAct(render, attendance());
   assert.ok(screen.getByLabelText(/Attendance and in-room occupancy/), "no chart");
   assert.ok(screen.getByLabelText("Customize attendance"), "no Customize control");
   // The chip rows' group captions are gone from the page body.
@@ -220,11 +220,11 @@ test("the attendance section is the chart module, not a chip row", () => {
   assert.equal(document.querySelectorAll("[data-lane-segment]").length, 2);
 });
 
-test("the average is the SERVICE's average, not the whole recording's", () => {
+test("the average is the SERVICE's average, not the whole recording's", async () => {
   // Peak and Lowest have always been in-service. Averaging the arrival ramp and
   // the emptying-room taper in put Average BELOW Lowest on a real record —
   // peak 1,196, lowest 933, "average" 781 — which reads as a broken figure.
-  render(attendance());
+  await mountInAct(render, attendance());
   // Read the figures from the DOM, not from innerText: jsdom does not implement
   // innerText's layout-aware line breaking, so labels and values run together
   // into one string and every regex over it is a guess.
@@ -243,8 +243,8 @@ test("the average is the SERVICE's average, not the whole recording's", () => {
   assert.ok(avg <= figure("Peak"), `average ${avg} is above the peak ${figure("Peak")}`);
 });
 
-test("the at-rest strip shows the default figures", () => {
-  render(attendance());
+test("the at-rest strip shows the default figures", async () => {
+  await mountInAct(render, attendance());
   const strip = document.querySelector("[data-history-strip]") as HTMLElement;
   for (const label of ["Peak", "Lowest", "Average", "Samples"]) {
     assert.ok(strip.textContent?.includes(label), `${label} missing from the strip`);
@@ -267,18 +267,18 @@ test("unticking a figure in Customize survives a reload", async () => {
   await flushReact();
 
   // A fresh mount, reading the store again — this is the reload.
-  render(attendance());
+  await mountInAct(render, attendance());
   const strip = document.querySelector("[data-history-strip]") as HTMLElement;
   assert.ok(!strip.textContent?.includes("Samples"), `Samples came back: ${strip.textContent}`);
   assert.ok(strip.textContent?.includes("Peak"), "the other figures were lost too");
 });
 
-test("the sound section draws the chart and offers its Smaart metrics in Customize", async () => {
+test("the sound section draws the chart and offers Plot and Table columns in Customize", async () => {
   const realFetch = globalThis.fetch;
   globalThis.fetch = splFetch({ series: false });
   try {
-    render(
-      React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+    await mountInAct(render, 
+      React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
         detail: SPL,
         timeline: TIMELINE,
       }),
@@ -295,8 +295,11 @@ test("the sound section draws the chart and offers its Smaart metrics in Customi
 
     fireEvent.click(screen.getByLabelText("Customize sound"));
     const popover = within(screen.getByLabelText("Customize sound", { selector: "[role='dialog']" }));
-    assert.ok(popover.getByText("Smaart metrics"), "no Smaart metrics group");
-    assert.ok(popover.getByText("LCeq"), "a recorded metric is missing from the picker");
+    assert.ok(popover.getByText("Plot"), "no Plot group");
+    assert.ok(popover.getByText("Table columns"), "no Table columns group");
+    assert.equal(popover.queryAllByText("Smaart metrics").length, 0, "the old group name is still there");
+    // Every recorded metric is offered twice: once to plot, once as a column.
+    assert.equal(popover.getAllByText("LCeq").length, 2, "a recorded metric is missing from a picker");
     cleanup();
     await flushReact();
   } finally {
@@ -308,8 +311,8 @@ test("the sound chart plots the real sample series when the route has one", asyn
   const realFetch = globalThis.fetch;
   globalThis.fetch = splFetch({ series: true });
   try {
-    render(
-      React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+    await mountInAct(render, 
+      React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
         detail: SPL,
         timeline: TIMELINE,
       }),
@@ -345,8 +348,8 @@ test("the item peak is a triangle at the loudest bucket, named in the legend, an
   const realFetch = globalThis.fetch;
   globalThis.fetch = splFetch({ series: true });
   try {
-    render(
-      React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+    await mountInAct(render, 
+      React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
         detail: SPL,
         timeline: TIMELINE,
       }),
@@ -398,8 +401,8 @@ test("the dashed sound series is named Leq, never Average", async () => {
   const realFetch = globalThis.fetch;
   globalThis.fetch = splFetch({ series: true });
   try {
-    render(
-      React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+    await mountInAct(render, 
+      React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
         detail: SPL,
         timeline: TIMELINE,
       }),
@@ -424,8 +427,8 @@ test("a 404 falls back to the per-item step, one run per item", async () => {
   const realFetch = globalThis.fetch;
   globalThis.fetch = splFetch({ series: false });
   try {
-    render(
-      React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+    await mountInAct(render, 
+      React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
         detail: SPL_TWO_ITEMS,
         timeline: TIMELINE,
       }),
@@ -499,7 +502,7 @@ test("a record that is only arriving has no average at all", async () => {
     minOccupancy: null,
     samples: (ATTENDANCE as unknown as { samples: { phase?: string }[] }).samples.filter((s) => s.phase === "pre"),
   } as unknown as ServiceAttendance;
-  render(
+  await mountInAct(render, 
     React.createElement(AttendanceDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
       detail: arriving,
       timeline: null,
@@ -526,8 +529,8 @@ test("the SOUND chart hatches its ramp and taper, from the window attendance use
   const realFetch = globalThis.fetch;
   globalThis.fetch = splFetch({ series: false });
   try {
-    render(
-      React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+    await mountInAct(render, 
+      React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
         detail: SPL_TWO_ITEMS,
         timeline: {
           items: [
@@ -561,7 +564,7 @@ test("the SOUND chart hatches its ramp and taper, from the window attendance use
   }
 });
 
-test("the chart's colours come through the app's tokens, not raw Radix vars", () => {
+test("the chart's colours come through the app's tokens, not raw Radix vars", async () => {
   // The commit that switched these claimed a guard that did not exist.
   //
   // `--green-9` is Radix's own variable and it resolves — so the chart LOOKS
@@ -573,7 +576,7 @@ test("the chart's colours come through the app's tokens, not raw Radix vars", ()
   // Asserted on what the component PUT in the DOM, not on the source text: the
   // stroke is an inline style and a colour written anywhere else in the file
   // cannot satisfy it.
-  render(attendance());
+  await mountInAct(render, attendance());
   const colours = [
     ...[...document.querySelectorAll("[data-series-line]")].map((e) => e.getAttribute("stroke") ?? ""),
     ...[...document.querySelectorAll("[data-series-toggle] span")].map(

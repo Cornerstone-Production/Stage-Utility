@@ -84,7 +84,6 @@ const { makeRenderCtx } = await import("./test-render-ctx.js");
 
 const settle = () => new Promise((r) => setTimeout(r, 0));
 before(() => {
-  (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
 after(async () => { await settle(); teardown(); });
 beforeEach(() => cleanup());

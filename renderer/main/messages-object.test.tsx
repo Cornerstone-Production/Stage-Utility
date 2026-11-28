@@ -12,7 +12,6 @@ import { eventually, installDom } from "../test-dom.js";
 import { EVERYONE, type MessagesState, type StageMessage } from "@main/types/messages";
 
 const teardown = installDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 /** Every request the widget makes, and how the reply route should answer. */
 const requests: { url: string; method: string; body: unknown }[] = [];

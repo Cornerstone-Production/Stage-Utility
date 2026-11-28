@@ -23,7 +23,7 @@ export function rundownHeaderKind(title: string): "start" | "end" | null {
 
 // Department → accent hue for row tinting. Keyword-matched (categories are named
 // freely per org) with a NEUTRAL fallback, drawn from the same palette the patch
-// sheet offers (patch-device-manager PATCH_COLORS) so departments and devices read
+// sheet offers (PATCH_COLORS in main/types/patch.ts) so departments and devices read
 // as one system. Hues are spread amber/green/blue/teal/red for separation at the
 // 12%-alpha tint these are used at; no purple or magenta, per the palette rule.
 // Must stay 6-digit hex — callers concatenate an alpha suffix (`${color}1f`).
@@ -195,6 +195,7 @@ export function RundownTable({
   roles,
   footer,
   autoScroll = true,
+  everyColumn = false,
   textSizeClass = "text-[clamp(0.8rem,1.6vmin,1.1rem)]",
   textScale = 1,
 }: {
@@ -213,6 +214,10 @@ export function RundownTable({
   /** Optional sticky bottom band (e.g. total time), spanning all columns. */
   footer?: import("react").ReactNode;
   autoScroll?: boolean;
+  /** Draw every column at any width, Clock included. The layouts editor's preview
+   *  shows exactly what the layout's chips say; everywhere else a narrow table
+   *  drops the Clock first. */
+  everyColumn?: boolean;
   textSizeClass?: string;
   /**
    * The operator's text size as a multiplier (1.5 = 150%), on top of
@@ -259,7 +264,7 @@ export function RundownTable({
   const zoomStyle = textScale === 1 ? undefined : { zoom: textScale };
   // Compact drops the clock (a projected time, the least load-bearing column) before
   // it touches anything an operator reads off the page.
-  const shownColumns = shape === "full" ? columns : columns.filter((c) => c.key !== "clock");
+  const shownColumns = shape === "full" || everyColumn ? columns : columns.filter((c) => c.key !== "clock");
 
   const source = rowColor ?? "pco";
   /** The color for one row, from whichever source this layout selected. */

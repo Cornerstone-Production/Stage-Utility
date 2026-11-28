@@ -32,8 +32,8 @@ App pages are 1440x900 in the light theme; screens are 1920x1080 as they render.
 | `patch-sheet.png` | The volunteer patch sheet at `/patch`: this week, what changed and a rack list in a row above a table per rack, each input with its signal path. |
 | `plan-selection.png` | The Plan page: manual plan selection, active service types and the plan switcher mode. |
 | `screens-overview.png` | Screens: a card per screen with a live preview and its message groups, the found-devices banner and the sidebar's count of screens not set up. |
-| `servicecue-picker.png` | The ServiceCue landing page: a service type and a column preset to open its rundown. |
-| `servicecue-rundown.png` | The ServiceCue page in the app for the Weekend plan with the Audio preset, the live item highlighted. |
+| `servicecue-picker.png` | The ServiceCue landing page: a service type and a layout to open its rundown. |
+| `servicecue-rundown.png` | The ServiceCue page in the app for the Weekend plan with the Audio layout, the live item highlighted. |
 | `slots-editor.png` | The Mic slots page: a board's preview, the inspector for the selected slot, and the plan switcher. |
 | `video-feeds.png` | Video feeds: pulled cameras and pushed encoders, with the editor for one feed. |
 | `wall-lobby.png` | A lobby screen built in the layout editor: clock and countdown. |

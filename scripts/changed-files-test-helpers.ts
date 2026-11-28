@@ -26,7 +26,7 @@ interface ActionStep {
 }
 export const changedFilesAction = parse(fs.readFileSync(CHANGED_FILES_ACTION, "utf8")) as {
   inputs: Record<string, unknown>;
-  outputs: Record<string, { value: string }>;
+  outputs: Record<string, { description: string; value: string }>;
   runs: { using: string; steps: ActionStep[] };
 };
 export const listStep = changedFilesAction.runs.steps.find((s) => s.id === "list");

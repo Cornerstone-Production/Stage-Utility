@@ -4,7 +4,7 @@
 // event, which a right-click fires and a touch never does. iPad Safari synthesizes
 // nothing in its place: the platform's own "long-press to select text" is a
 // different gesture aimed at a different target, and it does not reach a
-// `contextmenu` handler at all. So every menu — the context bar's configurator,
+// `contextmenu` handler at all. So every menu — the context bar's editor,
 // the Home card pickers, the History chart's menu — was unreachable on a touch
 // device, full stop.
 //
@@ -18,6 +18,7 @@
 // must be free to win the gesture instead.
 
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -26,6 +27,28 @@ import {
   type PointerEvent as ReactPointerEvent,
   type SyntheticEvent,
 } from "react";
+
+import type { ContextMenuItem } from "./context-menu";
+
+/**
+ * Where a context menu is open and what it lists, for the component that renders the
+ * `<ContextMenu>`: `open` from a trigger's callback with the items as they are at that
+ * moment, `close` for the menu's `onClose`. `menu` is null while it is closed.
+ *
+ *     const { menu, open, close } = useContextMenuState();
+ *     const trigger = useContextMenuTrigger((at) => open(at, itemsFor(thing)));
+ *     {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={close} />}
+ */
+export function useContextMenuState(): {
+  menu: { x: number; y: number; items: ContextMenuItem[] } | null;
+  open: (at: { x: number; y: number }, items: ContextMenuItem[]) => void;
+  close: () => void;
+} {
+  const [menu, setMenu] = useState<{ x: number; y: number; items: ContextMenuItem[] } | null>(null);
+  const open = useCallback((at: { x: number; y: number }, items: ContextMenuItem[]) => setMenu({ x: at.x, y: at.y, items }), []);
+  const close = useCallback(() => setMenu(null), []);
+  return { menu, open, close };
+}
 
 /** How long a touch or pen must be held before it counts as a long press. */
 export const LONG_PRESS_MS = 500;
@@ -50,6 +73,18 @@ const CONTROL_SELECTOR = "button, a, select, input, textarea, [role='combobox'],
  * click, however much later it landed.
  */
 const CLICK_SUPPRESS_MS = 700;
+
+/**
+ * Presses and right-clicks a trigger has taken as its own, so a trigger around it
+ * leaves them alone: a row's menu inside the rail's, a glyph's inside the row's.
+ * Each trigger sees the event as it bubbles, innermost first, and the first to
+ * act claims it.
+ *
+ * A mark on the event, NOT `stopPropagation`. Stopping a touch's pointerdown also
+ * stops it reaching `document`, where an open popover listens for a press outside
+ * it to close: a tap on the rail then left the popover open.
+ */
+const claimed = new WeakSet<Event>();
 
 export interface ContextMenuTriggerProps {
   onContextMenu: (e: ReactMouseEvent<HTMLElement>) => void;
@@ -158,17 +193,24 @@ export function useContextMenuTrigger(
     setPressing(false);
   }
 
+  /** A press on a control INSIDE the trigger. The trigger itself may be a control (a
+   *  tab, a list row that is a button): that is the thing the menu is for. */
   function withinControl(e: ReactPointerEvent<HTMLElement>): boolean {
-    return e.target instanceof HTMLElement && e.target.closest(CONTROL_SELECTOR) != null;
+    if (!(e.target instanceof HTMLElement)) return false;
+    const control = e.target.closest(CONTROL_SELECTOR);
+    return control != null && control !== e.currentTarget;
   }
 
   function onPointerDown(e: ReactPointerEvent<HTMLElement>) {
     if (e.pointerType === "mouse") return;
+    // A trigger inside this one has the press: see `claimed`.
+    if (claimed.has(e.nativeEvent)) return;
     // A hold on a control inside the trigger — a Switch, a button, anything
     // with its own press behaviour — must not ALSO start timing a long press
     // that opens a menu on top of it 500ms later. Reproduced: a 500ms hold on
     // an inner `<button>` opened the menu before this guard existed.
     if (withinControl(e)) return;
+    claimed.add(e.nativeEvent);
     // A second finger while one is already being timed cancels the first
     // rather than racing it — two fingers down is a different gesture (pinch,
     // scroll), never "open the menu twice."
@@ -224,6 +266,8 @@ export function useContextMenuTrigger(
   }
 
   function onContextMenu(e: ReactMouseEvent<HTMLElement>) {
+    if (claimed.has(e.nativeEvent)) return;
+    claimed.add(e.nativeEvent);
     e.preventDefault();
     open({ x: e.clientX, y: e.clientY });
   }

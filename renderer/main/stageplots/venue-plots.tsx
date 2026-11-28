@@ -1,0 +1,438 @@
+// venue-plots.tsx — one venue's plots, read-only: its heading and plan badge, its plots as
+// tabs, the plot with pinch zoom and pan and a tap for an item's details, its legend and
+// its notes. Drawn from data alone, so /stageplots and the published page
+// (renderer/public/stageplots-public.tsx) mount the same component and cannot drift.
+// Each page brings what only it has (a back link, a print control) as `before` and
+// `actions`; nothing here reads the API, the stage state or the router.
+//
+// Full window: the button under the zoom controls lays the plot over the whole
+// window, on paper, with no app chrome (venue and plot top left; zoom, fit and exit
+// top right), and asks the browser for real fullscreen where it allows it (a desktop
+// or Android browser; iPhone Safari keeps its own bars). Esc, the exit button or the
+// browser leaving fullscreen closes it. Pinch, pan and a tap for details still work.
+
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { ChevronLeftIcon, Maximize2Icon, Minimize2Icon, MinusIcon, PlusIcon, ScanIcon } from "lucide-react";
+
+import { PLOT_UNITS_WIDE, type PatchChannels, type Plot, type PlotBackground } from "@main/types/stageplots";
+import { plotHeight, type PlotReason } from "@main/services/stageplots-doc";
+
+import { EmptyState } from "../../components/ui/empty-state";
+import { cn } from "../../lib/cn";
+import { useLatestRef } from "../../lib/use-latest-ref";
+import { useResyncOn } from "../../lib/use-resync-on";
+import { selectedPlot, tabClass } from "./doc-helpers";
+import { ItemDetails, detailsPosition } from "./item-details";
+import { Mono } from "./mono";
+import { PlotLegend } from "./plot-legend";
+import { PlotSvg } from "./plot-svg";
+import { usePanZoom } from "./use-pan-zoom";
+
+const zoomButton =
+  "touch-target inline-grid size-6 place-items-center rounded-md text-fg-muted transition-colors hover:bg-fill hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus [&_svg]:size-3.5";
+
+/** How far, in screen pixels, a press may move and still be a tap rather than a pan. */
+const TAP_SLOP_PX = 6;
+
+/** A linked point's patch channels on a plot, or null to list its inputs. */
+export type ChannelsOf = (plot: Plot, itemId: string) => PatchChannels | null;
+
+/** What the full-window view names in its corner: the venue, the plot, and its badge. */
+export interface FrameTitle {
+  venue: string;
+  plot: string;
+  /** "Default", "For this plan · Sun 16 Nov", or null. */
+  badge: string | null;
+}
+
+/**
+ * Ask for the browser's own fullscreen, where it has one. True once it is entered.
+ * False when the browser has none (iPhone Safari, a locked-down kiosk) or refuses:
+ * the full-window overlay is the feature and stands without it, so a caller that
+ * gets false leaves the overlay up. Called straight from the click, as a browser
+ * grants fullscreen only to a gesture.
+ */
+async function enterFullscreen(): Promise<boolean> {
+  if (!document.documentElement.requestFullscreen) return false;
+  try {
+    await document.documentElement.requestFullscreen();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Leave the browser's fullscreen. True once it is left; false when there was none to leave or the browser refuses. */
+async function leaveFullscreen(): Promise<boolean> {
+  if (!document.fullscreenElement) return false;
+  try {
+    await document.exitFullscreen();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function PlotFrame({
+  plot,
+  background,
+  channelsOf,
+  title,
+  full = false,
+  onFull,
+}: {
+  plot: Plot;
+  background: PlotBackground | null;
+  channelsOf?: ChannelsOf;
+  /** Names the plot in the full-window view; without it there is no Full window button. */
+  title?: FrameTitle;
+  /** Drawn as the full-window view. */
+  full?: boolean;
+  /** Open (true, from the button that asked) or close (false) the full-window view. */
+  onFull?: (open: boolean, from?: HTMLElement) => void;
+}) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const frameRef = useRef<HTMLDivElement>(null);
+  const exitRef = useRef<HTMLButtonElement>(null);
+  // Opening the full-window view moves focus into it, onto the way out.
+  useEffect(() => {
+    if (full) exitRef.current?.focus();
+  }, [full]);
+  const pz = usePanZoom(svgRef, PLOT_UNITS_WIDE, plotHeight(background));
+  // A tap is decided from the press and the release, not from click: after the
+  // plot captures the pointer, a click names the plot, not the item under it.
+  const press = useRef<{ id: string | null; pointerId: number; x: number; y: number } | null>(null);
+  const [tap, setTap] = useState<{ id: string; at: { left: number; top: number } | null } | null>(null);
+  // Panning or zooming moves the item from under its popover: close it.
+  useResyncOn([plot.id, pz.viewBox], () => setTap(null));
+  // Escape, or a press anywhere off the plot and off the details, closes them:
+  // on a phone the sheet covers the page's foot, and the legend is under it.
+  useEffect(() => {
+    if (!tap) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setTap(null);
+    const onDown = (e: Event) => {
+      const t = e.target as Element | null;
+      if (!t?.closest?.("[data-item-details]") && !svgRef.current?.contains(t)) setTap(null);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("pointerdown", onDown);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("pointerdown", onDown);
+    };
+  }, [tap]);
+  const tapped = tap ? (plot.items.find((it) => it.id === tap.id) ?? null) : null;
+
+  const gestures = {
+    ...pz.handlers,
+    onPointerDown: (e: PointerEvent<SVGSVGElement>) => {
+      const hit = (e.target as Element).closest?.("[data-id]");
+      // Text is read where it stands; it has nothing more to show.
+      const id = hit && hit.getAttribute("data-type") !== "text" ? hit.getAttribute("data-id") : null;
+      // A second finger is a pinch, never a tap.
+      press.current = press.current ? null : { id, pointerId: e.pointerId, x: e.clientX, y: e.clientY };
+      pz.handlers.onPointerDown(e);
+    },
+    // A cancelled press (the browser took the touch for a scroll) is no tap,
+    // and must not leave the next press looking like a second finger.
+    onPointerCancel: (e: PointerEvent<SVGSVGElement>) => {
+      press.current = null;
+      pz.handlers.onPointerCancel(e);
+    },
+    onPointerUp: (e: PointerEvent<SVGSVGElement>) => {
+      const p = press.current;
+      press.current = null;
+      pz.handlers.onPointerUp(e);
+      if (!p || p.pointerId !== e.pointerId || Math.hypot(e.clientX - p.x, e.clientY - p.y) > TAP_SLOP_PX) return;
+      if (!p.id) return setTap(null);
+      const el = svgRef.current?.querySelector(`[data-id="${p.id}"]`);
+      const frame = frameRef.current?.getBoundingClientRect();
+      setTap({ id: p.id, at: el && frame && frame.width > 0 ? detailsPosition(el.getBoundingClientRect(), frame) : null });
+    },
+  };
+
+  const zoomControls = (
+    <>
+      <button type="button" className={zoomButton} onClick={pz.zoomIn} aria-label="Zoom in" title="Zoom in">
+        <PlusIcon />
+      </button>
+      <button type="button" className={zoomButton} onClick={pz.zoomOut} aria-label="Zoom out" title="Zoom out">
+        <MinusIcon />
+      </button>
+      <button type="button" className={cn(zoomButton, !full && "max-sm:hidden")} onClick={pz.fit} aria-label="Fit" title="Fit the whole plot">
+        <ScanIcon />
+      </button>
+    </>
+  );
+  const svg = (
+    <PlotSvg
+      svgRef={svgRef}
+      plot={plot}
+      background={background}
+      fade={plot.bgFade}
+      view={pz.view}
+      gestures={gestures}
+      tappedId={tapped?.id ?? null}
+      className={cn(
+        "w-full touch-none [&_[data-id]:not([data-type=text])]:cursor-pointer",
+        !full && "rounded-[10px] border border-line sm:rounded-[0.875rem]",
+      )}
+    />
+  );
+  const details = tapped && <ItemDetails item={tapped} at={tap?.at ?? null} onClose={() => setTap(null)} channels={channelsOf?.(plot, tapped.id) ?? null} />;
+
+  if (full && title) {
+    const floating = "absolute flex items-center rounded-[10px] border border-line-strong bg-popover text-fg shadow-[var(--su-shadow-2)]";
+    return (
+      <div role="dialog" aria-modal="true" aria-label={`${title.venue}, ${title.plot}, full window`} className="fixed inset-0 z-[200] bg-[var(--su-plot-paper)]" data-testid="full-window">
+        {/* The plot as large as the window holds it, at its own shape. */}
+        <div className="grid h-full w-full place-items-center px-3 pt-14 pb-3">
+          <div className="relative w-[min(100%,calc((100svh_-_4.25rem)*var(--plot-aspect)))]" ref={frameRef} style={{ "--plot-aspect": PLOT_UNITS_WIDE / plotHeight(background) } as CSSProperties}>
+            {svg}
+            {details}
+          </div>
+        </div>
+        <div className={cn(floating, "top-[max(12px,env(safe-area-inset-top))] left-[max(12px,env(safe-area-inset-left))] max-w-[calc(100%-11rem)] gap-2 py-[5px] pr-1.5 pl-3 text-footnote")}>
+          <b className="truncate font-semibold">{title.venue}</b>
+          <span className="text-fg-subtle">·</span>
+          <span className="truncate">{title.plot}</span>
+          {title.badge && (
+            <span className="ml-0.5 inline-flex h-5 shrink-0 items-center rounded-full bg-fill px-2 text-[11px] font-medium text-fg-muted">
+              <Mono text={title.badge} />
+            </span>
+          )}
+        </div>
+        <div className={cn(floating, "top-[max(12px,env(safe-area-inset-top))] right-[max(12px,env(safe-area-inset-right))] gap-0.5 p-[3px] [&_button]:size-[30px] [&_svg]:!size-4")}>
+          {zoomControls}
+          <span aria-hidden className="mx-0.5 h-[18px] w-px bg-line-strong" />
+          <button ref={exitRef} type="button" className={zoomButton} onClick={() => onFull?.(false)} aria-label="Exit full window" title="Exit full window (Esc)" data-testid="exit-full-window">
+            <Minimize2Icon />
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative" ref={frameRef}>
+      {svg}
+      <div className="absolute top-2 right-2 flex flex-col gap-0.5 rounded-lg border border-line-strong bg-popover p-0.5 shadow-[var(--su-shadow-1)]">
+        {zoomControls}
+        {title && onFull && (
+          <>
+            <span aria-hidden className="mx-[3px] my-px h-px bg-line" />
+            <button
+              type="button"
+              className={zoomButton}
+              onClick={(e) => {
+                // In the click itself: a browser grants fullscreen only to a gesture. A refusal
+                // (false) leaves the full-window overlay standing, which is the feature.
+                void enterFullscreen();
+                onFull(true, e.currentTarget);
+              }}
+              aria-label="Full window"
+              title="Full window"
+            >
+              <Maximize2Icon />
+            </button>
+          </>
+        )}
+      </div>
+      {details}
+    </div>
+  );
+}
+
+/**
+ * The plot over the whole window, in a portal so nothing of the page shows. Esc or
+ * the browser leaving fullscreen closes it; the page behind does not scroll while it
+ * is open.
+ */
+function FullWindow({ onClose, children }: { onClose: () => void; children: ReactNode }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      // An item's details close first, as they do on the page.
+      if (e.key === "Escape" && !document.querySelector("[data-item-details]")) onClose();
+    };
+    // Esc in real fullscreen never reaches the page: the browser leaves fullscreen, and that closes this.
+    let wasFull = !!document.fullscreenElement;
+    const onFullscreen = () => {
+      if (document.fullscreenElement) wasFull = true;
+      else if (wasFull) onClose();
+    };
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("fullscreenchange", onFullscreen);
+    return () => {
+      document.body.style.overflow = overflow;
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("fullscreenchange", onFullscreen);
+      void leaveFullscreen();
+    };
+  }, [onClose]);
+  return createPortal(children, document.body);
+}
+
+const badge = "inline-flex h-[22px] items-center gap-1.5 rounded-full px-[9px] text-[11px] leading-[13px] font-medium whitespace-nowrap";
+
+/** The back link above a venue: to the venue list. */
+export function BackLink({ onClick, label = "Stage plots" }: { onClick: () => void; label?: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="-ml-1 inline-flex items-center gap-0.5 self-start rounded-md px-1 py-0.5 text-caption1 text-fg-muted hover:text-fg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+    >
+      <ChevronLeftIcon className="size-3.5" />
+      {label}
+    </button>
+  );
+}
+
+/** What a page hands its print control: the plot on screen and how it is labelled. */
+export interface ShownPlot {
+  plot: Plot;
+  background: PlotBackground | null;
+  /** "For this plan · Sun 16 Nov", "Default plot", or null. */
+  planLine: string | null;
+}
+
+export interface VenuePlotsProps {
+  /** The venue's id: a tab picked in one venue is never applied to another. */
+  id: string;
+  name: string;
+  notes: string;
+  /** In tab order. */
+  plots: readonly Plot[];
+  defaultPlotId: string | null;
+  /** The plot the followed plan shows here, and why. */
+  resolved: { plot: Plot | null; reason: PlotReason };
+  /** The plan's day ("Sun 16 Nov") when the resolved plot is the plan's, else null. */
+  planDay: string | null;
+  backgroundOf: (plot: Plot) => PlotBackground | null;
+  /** Above the heading: the app's back link. */
+  before?: ReactNode;
+  /** At the end of the heading row: the app's print control, for the plot on screen. */
+  actions?: (shown: ShownPlot) => ReactNode;
+  /** Whether a plot's data is current, an older copy kept after a failed read, or not had at all (the published page). Current when absent. */
+  plotState?: (plot: Plot) => "ok" | "stale" | "failed";
+  /** What a tap on a linked connection point lists: resolved here on /stageplots, read from the published plot on the public page. */
+  channelsOf?: ChannelsOf;
+  /** What a venue with no plots offers: /stageplots links to the editor. Absent on the published page, which has no editor. */
+  emptyAction?: ReactNode;
+  /** Told the plot on screen whenever it changes (a tab picked, the plan moving): the app bar's Edit opens the editor on it. */
+  onShown?: (plotId: string | null) => void;
+}
+
+export function VenuePlots({ id, name, notes, plots, defaultPlotId, resolved, planDay, backgroundOf, before, actions, plotState, channelsOf, emptyAction, onShown }: VenuePlotsProps) {
+  // A tab picked by hand holds only while the plan's plot is the one it was
+  // picked over: when the plan moves on (or Planning Center drops), the new
+  // plan's plot is selected again rather than hidden behind an old pick.
+  const [picked, setPicked] = useState<{ venueId: string; plotId: string; over: string | null } | null>(null);
+  const pick = picked && picked.over === (resolved.plot?.id ?? null) ? picked : null;
+  const selected = selectedPlot({ id, defaultPlotId } as Parameters<typeof selectedPlot>[0], plots, pick, resolved.plot?.id);
+  const background = selected ? backgroundOf(selected) : null;
+  const told = useLatestRef(onShown);
+  const shownId = selected?.id ?? null;
+  useEffect(() => {
+    told.current?.(shownId);
+  }, [told, shownId]);
+  const forPlan = !!selected && resolved.reason === "plan" && selected.id === resolved.plot?.id;
+  const isDefault = !!selected && resolved.reason === "default" && selected.id === defaultPlotId;
+  const planLabel = planDay && forPlan ? `For this plan · ${planDay}` : "For this plan";
+  const [full, setFull] = useState(false);
+  const closeFull = useCallback(() => setFull(false), []);
+  // The button that opened the full-window view: focus goes back to it when the view closes.
+  const opener = useRef<HTMLElement | null>(null);
+  const setFullWindow = (open: boolean, from?: HTMLElement) => {
+    if (open) opener.current = from ?? null;
+    setFull(open);
+  };
+  useEffect(() => {
+    if (!full) return;
+    return () => opener.current?.focus();
+  }, [full]);
+  const title: FrameTitle | undefined = selected ? { venue: name, plot: selected.name, badge: forPlan ? planLabel : isDefault ? "Default" : null } : undefined;
+  // With no plot to show (the last one deleted, the venue emptied) an open full-window view
+  // closes, and stays closed: a plot arriving later must not open it again.
+  useResyncOn([!!title], () => {
+    if (!title) setFull(false);
+  });
+  return (
+    <div className="flex flex-col">
+      {before}
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+        <h1 className="text-title3 font-semibold text-fg">{name}</h1>
+        {forPlan && (
+          <span className={cn(badge, "bg-accent-soft text-fg")} data-testid="plan-badge">
+            <span className="size-1.5 rounded-full bg-accent" aria-hidden />
+            {/* One flex item: Mono splits the label into runs, and the gap would part them. */}
+            <span>
+              <Mono text={planLabel} />
+            </span>
+          </span>
+        )}
+        {isDefault && (
+          <span className={cn(badge, "bg-fill text-fg-muted")} data-testid="plan-badge">
+            Default
+          </span>
+        )}
+        {selected && actions?.({ plot: selected, background, planLine: forPlan ? planLabel : selected.id === defaultPlotId ? "Default plot" : null })}
+      </div>
+      {plots.length === 0 || !selected ? (
+        <EmptyState className="mt-3 py-12" title="No plots yet" {...(emptyAction ? { hint: "Add a plot to draw this stage.", action: emptyAction } : {})} />
+      ) : (
+        <>
+          <div role="tablist" aria-label={`Plots in ${name}`} className="mt-2.5 mb-3 flex gap-0.5 overflow-x-auto border-b border-line">
+            {plots.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                role="tab"
+                aria-selected={p.id === selected.id}
+                onClick={() => setPicked({ venueId: id, plotId: p.id, over: resolved.plot?.id ?? null })}
+                className={tabClass(p.id === selected.id)}
+              >
+                {p.name}
+                {p.id === defaultPlotId && (
+                  <span className="rounded border border-line-strong px-1 text-[10px] leading-[14px] font-medium text-fg-subtle">Default</span>
+                )}
+              </button>
+            ))}
+          </div>
+          {plotState?.(selected) === "failed" ? (
+            <p role="alert" className="rounded-[10px] border border-line px-3 py-6 text-center text-footnote text-fg-muted">
+              This plot could not be loaded. Try again in a moment.
+            </p>
+          ) : (
+            <>
+              {plotState?.(selected) === "stale" && (
+                <p role="status" className="mb-2 text-caption1 text-warn-11">
+                  Could not refresh this plot; showing the last copy.
+                </p>
+              )}
+              {/* Never taller than the screen: on a desk the width is capped to what the viewport height holds at this plot's shape, never below 24rem so a short landscape phone keeps a usable plot.
+                  Not unit-tested (jsdom has no layout); driven in a browser. */}
+              <div
+                className="mx-auto w-full sm:max-w-[max(24rem,calc((100svh_-_15rem)*var(--plot-aspect)))]"
+                style={{ "--plot-aspect": PLOT_UNITS_WIDE / plotHeight(background) } as CSSProperties}
+              >
+                <PlotFrame key={selected.id} plot={selected} background={background} {...(channelsOf ? { channelsOf } : {})} {...(title ? { title } : {})} onFull={setFullWindow} />
+              </div>
+              {full && title && (
+                <FullWindow onClose={closeFull}>
+                  <PlotFrame key={`full-${selected.id}`} plot={selected} background={background} {...(channelsOf ? { channelsOf } : {})} title={title} full onFull={setFullWindow} />
+                </FullWindow>
+              )}
+              <p className="mt-2.5 text-caption1 text-fg-subtle sm:hidden">Pinch to zoom, drag to pan. Tap an item for its details.</p>
+              <PlotLegend items={selected.items} className="su-card mt-3 px-3.5 py-2.5" />
+            </>
+          )}
+        </>
+      )}
+      {notes && <p className="mt-2.5 text-caption1 whitespace-pre-line text-fg-muted">{notes}</p>}
+    </div>
+  );
+}

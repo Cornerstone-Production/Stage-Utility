@@ -1,5 +1,5 @@
-// view-detail-columns.test.tsx — a ServiceCue view's Columns picker, when the
-// column sets fail to load.
+// view-detail-columns.test.tsx — a ServiceCue view's Layout picker, when the
+// ServiceCue layouts fail to load.
 //
 // The read used to `.catch(() => setServiceCueLayouts([]))`. The picker then
 // offered only "All columns", and labelled the view's own saved set
@@ -23,6 +23,7 @@ const teardown = installRenderDom();
 const { render, screen, cleanup, act } = await import("@testing-library/react");
 const React = await import("react");
 const { ViewDetail } = await import("./view-detail.js");
+const { VIEW_LAYOUT_FLASH_ID } = await import("../../app/flash.js");
 const { TooltipProvider } = await import("../../components/ui/index.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
@@ -79,16 +80,16 @@ test("a failed column-set read says so in the picker's place, and reaches the lo
   const f = stubFetch(true);
   try {
     await mount();
-    assert.match(alerts(), /Couldn't load the saved column sets/i);
+    assert.match(alerts(), /Couldn't load the ServiceCue layouts/i);
     assert.equal(
-      !!screen.queryByRole("combobox", { name: "Columns" }),
+      !!screen.queryByRole("combobox", { name: "Layout" }),
       false,
       "no picker to switch to All columns while the list is missing",
     );
     assert.equal(!!screen.queryByText(/not found/i), false, "the view's column set was not deleted — the read failed");
     assert.ok(
-      f.logs.some((l) => l.tag === "servicecue" && /column sets/i.test(l.message)),
-      `expected a [servicecue] line naming the column sets — got ${JSON.stringify(f.logs)}`,
+      f.logs.some((l) => l.tag === "servicecue" && /the ServiceCue layouts for a view/.test(l.message)),
+      `expected a [servicecue] line naming the layouts — got ${JSON.stringify(f.logs)}`,
     );
   } finally {
     f.restore();
@@ -119,14 +120,14 @@ test("a slow failure from before a kind change does not replace the picker", asy
     await act(async () => failFirst(new TypeError("fetch failed")));
     await settle();
     assert.equal(alerts(), "", "the first read no longer applies; its failure must not land");
-    assert.equal(!!screen.queryByRole("combobox", { name: "Columns" }), true);
+    assert.equal(!!screen.queryByRole("combobox", { name: "Layout" }), true);
   } finally {
     f.restore();
   }
 });
 
 test("a read that works after a failed one brings the picker back", async () => {
-  // Script fails; Stage, then Script again, reads the column sets.
+  // Script fails; Stage, then Script again, reads the layouts.
   let reads = 0;
   const f = stubFetchWithLog((url) => {
     if (!url.includes("/api/servicecue/layouts")) return ok({});
@@ -139,27 +140,60 @@ test("a read that works after a failed one brings the picker back", async () => 
     const view = render(el("script"));
     await settle();
     await settle();
-    assert.match(alerts(), /Couldn't load the saved column sets/i);
+    assert.match(alerts(), /Couldn't load the ServiceCue layouts/i);
     view.rerender(el("stage"));
     await settle();
     view.rerender(el("script"));
     await settle();
     await settle();
-    assert.equal(alerts(), "", "the column sets loaded; the note must go with the failure");
-    assert.equal(!!screen.queryByRole("combobox", { name: "Columns" }), true);
+    assert.equal(alerts(), "", "the layouts loaded; the note must go with the failure");
+    assert.equal(!!screen.queryByRole("combobox", { name: "Layout" }), true);
   } finally {
     f.restore();
   }
 });
 
-test("control: the column sets load, the picker offers them, nothing alerts", async () => {
+test("control: the layouts load, the picker offers them, nothing alerts", async () => {
   const f = stubFetch(false);
   try {
     await mount();
-    assert.equal(!!screen.queryByRole("combobox", { name: "Columns" }), true);
+    assert.equal(!!screen.queryByRole("combobox", { name: "Layout" }), true);
     assert.equal(!!screen.queryByRole("option", { name: "Audio" }), true);
     assert.equal(alerts(), "");
     assert.deepEqual(f.logs, []);
+  } finally {
+    f.restore();
+  }
+});
+
+// ── Finding 1: one name, Layout, above the preview ──────────────────────────
+
+test("the view's layout is called Layout, and its picker sits above the preview", async () => {
+  // The picker was below a ~675px preview, off the screen at 900px, and called Columns.
+  const f = stubFetch(false);
+  try {
+    await mount();
+    const picker = screen.getByRole("combobox", { name: "Layout" });
+    const shape = screen.getByText("Preview shape");
+    // Document order, read as a boolean: DOCUMENT_POSITION_FOLLOWING is set when the
+    // shape control comes after the picker.
+    assert.equal((picker.compareDocumentPosition(shape) & 4) !== 0, true, "the Layout picker is below the preview");
+    assert.equal(!!screen.queryByRole("combobox", { name: "Columns" }), false, "still called Columns");
+    assert.equal(!!screen.queryByText("Columns"), false);
+    assert.equal(!!screen.queryByText("Layout", { selector: "span" }), true);
+    // The Embedded view inspector's Change link flashes this select (see embedded-view-rows).
+    assert.equal(picker.getAttribute("data-flash-id"), VIEW_LAYOUT_FLASH_ID);
+  } finally {
+    f.restore();
+  }
+});
+
+test("the load-failure note says layout, not columns", async () => {
+  const f = stubFetch(true);
+  try {
+    await mount();
+    assert.match(alerts(), /so this view's layout can't be changed right now/);
+    assert.doesNotMatch(alerts(), /view's columns/);
   } finally {
     f.restore();
   }

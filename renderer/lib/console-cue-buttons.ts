@@ -15,6 +15,7 @@
 // this runs, and it is not rolled back because a console refused: the caller gets
 // one result per console and says which failed. See addCueButtonToConsoles.
 
+import { cueKey } from "@main/services/cue-aliases";
 import { errorMessage } from "@main/services/errors";
 import { screensListViews } from "@main/services/home-view";
 import { viewIsConsole, type LayoutDTO, type LayoutObject, type View } from "@main/types/views";
@@ -234,8 +235,6 @@ export async function addCueButtonToConsoles(
 /** One view's outcome. `count` is the Buttons that were repointed in it. */
 export type RepointResult = ConsoleResult & { count: number };
 
-const norm = (a: unknown): string => (typeof a === "string" ? a.trim().toLowerCase() : "");
-
 /**
  * `layout` with every cue Button in `objectIds` that names any of `from` pointed at
  * `to`, and how many that was. Immutable: a layout that changes nothing comes back
@@ -247,7 +246,7 @@ export function withCueRepointed(
   from: readonly string[],
   to: string,
 ): { layout: LayoutDTO; count: number } {
-  const names = new Set(from.map(norm));
+  const names = new Set(from.map(cueKey));
   let count = 0;
   const walk = (objects: readonly LayoutObject[]): LayoutObject[] =>
     objects.map((o) => {
@@ -256,7 +255,7 @@ export function withCueRepointed(
       const hit =
         objectIds.has(o.id) &&
         (o.config as { type?: string }).type === "cue-button" &&
-        names.has(norm((o.config as { cue?: unknown }).cue));
+        names.has(cueKey((o.config as { cue?: unknown }).cue));
       if (hit) count++;
       if (!hit && count === before) return o;
       return { ...o, ...(children ? { children } : {}), ...(hit ? { config: { ...o.config, cue: to } } : {}) };

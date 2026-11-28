@@ -248,7 +248,7 @@ describe("a placed widget still gets its source", () => {
     // on names a plan it has already seen, and only the mount read goes out. A
     // gated listener comes back knowing no plan and reads a second time.
     const { rerender } = await mount(useViewData, PLAIN());
-    FakeEventSource.last!.push("stage:state-changed", { ...STATE, planId: "p1" });
+    act(() => { FakeEventSource.last!.push("stage:state-changed", { ...STATE, planId: "p1" }); });
     await settle();
     assert.equal(count("/api/pco/plan-items"), 0, "a plan change read the rundown with nothing drawing it");
     await rerender(layoutOf("clock", "service-order"));

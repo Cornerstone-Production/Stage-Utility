@@ -28,14 +28,20 @@ import {
   SelectValue,
   toast,
   confirm,
+  confirmWith,
 } from "../../components/ui";
 import { DownloadIcon as DlIcon, UploadIcon, SaveIcon, RotateCcwIcon, Trash2Icon } from "lucide-react";
+import { configServerId, restoreQuestion } from "../../lib/restore-server-id";
+import { logReadFailure } from "../../lib/client-log";
 import { DataArchivePanel } from "./data-archive-panel";
+import { SERVER_ID_FLASH, ServerIdStatus } from "./server-id-field";
 import { HostNamesCard } from "./host-names-card";
 import { HistoryMilestonesPanel } from "./history-milestones-panel";
+import { WhatsNewButton } from "./whats-new";
+import { PublicLinkPanel } from "./servicecue-public-link";
 import { VideoRelayFfmpegPanel } from "./video-relay-ffmpeg";
 import { VideoRelayPortsPanel, VIDEO_PORTS_FLASH_ID } from "./video-relay-ports";
-import { BarConfigurator } from "../../app/bar-configurator";
+import { useCustomize } from "../../app/customize-mode";
 import { clockOptions, formatClock } from "../../lib/clock-format";
 import type { BackupSchedule } from "../../../main/services/backup-scheduler";
 import type { SectionProps } from "../types";
@@ -472,11 +478,14 @@ export function UpdatesPanel({
             <Field orientation="vertical" data-setting-id="update-status">
               <FieldContent>
                 <FieldLabel>{settingText("update-status").name}</FieldLabel>
-                <FieldDescription>
-                  {s.updateBlockedReason ??
-                    "In-app updates aren't available for this install. Update from the command line on the server (see INSTALL.md)."}{" "}
-                  Current version: v{s.version}.
-                </FieldDescription>
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <FieldDescription className="mt-0">
+                    {s.updateBlockedReason ??
+                      "In-app updates aren't available for this install. Update from the command line on the server (see INSTALL.md)."}{" "}
+                    Current version: <span className="font-mono">v{s.version}</span>.
+                  </FieldDescription>
+                  <WhatsNewButton version={s.version} />
+                </div>
               </FieldContent>
             </Field>
           )}
@@ -497,39 +506,47 @@ export function UpdatesPanel({
                   ? "Checking for updates…"
                   : available > 0
                     ? s.tagBased && s.targetTag
-                      ? `${s.targetTag} available`
+                      ? <><span className="font-mono">{s.targetTag}</span> available</>
                       : `${plural(available, "update")} available`
                     : "Up to date"}
               </FieldLabel>
-              <FieldDescription>
-                {s ? (
-                  <>
-                    Running {s.currentTag ?? `v${s.version}`}
-                    {s.currentSha ? ` · ${s.currentSha}` : ""}
-                    {s.currentDate ? ` · ${new Date(s.currentDate).toLocaleDateString()}` : ""}
+              {s ? (
+                // The status line, and What's new at its end: the notes of the
+                // release this line names. It wraps under the line on a narrow card.
+                <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <FieldDescription className="mt-0">
+                    Running <span className="font-mono">{s.currentTag ?? `v${s.version}`}</span>
+                    {s.currentSha ? <> · <span className="font-mono">{s.currentSha}</span></> : null}
+                    {s.currentDate ? <> · <span className="font-mono">{new Date(s.currentDate).toLocaleDateString()}</span></> : null}
                     {s.branch ? ` (${s.branch})` : ""}.
                     {available > 1 ? ` ${available} releases behind.` : ""}
-                    {s.lastCheckedAt ? ` Last checked ${new Date(s.lastCheckedAt).toLocaleString()}.` : ""}
+                    {s.lastCheckedAt ? <> Last checked <span className="font-mono">{new Date(s.lastCheckedAt).toLocaleString()}</span>.</> : null}
                     {/* Said plainly rather than hidden. The banner stays quiet because
                         nothing pending changes what the app does, but Update still
                         works if you want the version number to line up. */}
                     {!s.tagBased && behindNews === 0 && behind > 0
                       ? ` A version bump is pending (${plural(behind, "commit")}) — nothing user-facing.`
                       : ""}
-                  </>
-                ) : (
-                  "Comparing this install against the latest release…"
-                )}
-              </FieldDescription>
+                  </FieldDescription>
+                  <WhatsNewButton version={s.version} />
+                </div>
+              ) : (
+                <FieldDescription>Comparing this install against the latest release…</FieldDescription>
+              )}
 
               {/* Live progress while applying (survives until the page auto-reloads). */}
               {updating ? <UpdateProgress step={s?.step ?? null} /> : null}
 
-              {/* Changelog of pending commits */}
+              {/* Changelog of pending commits. Named for the release it is coming
+                  in, not "What's new": that is the running release's button above. */}
               {!updating && available > 0 && s?.changelog?.length ? (
                 <div className="mt-2 rounded-md border border-gray-a4 bg-gray-a2">
                   <p className="border-b border-gray-a4 px-2.5 py-1.5 text-caption2 font-medium text-gray-11">
-                    What's new
+                    {s.tagBased && s.targetTag ? (
+                      <>Coming in <span className="font-mono">{s.targetTag}</span></>
+                    ) : (
+                      "Coming in the next update"
+                    )}
                   </p>
                   <ul className="flex max-h-44 flex-col gap-1 overflow-y-auto p-2.5 text-caption2 text-gray-11">
                     {s.changelog.map((line, i) => (
@@ -750,6 +767,28 @@ interface SnapshotMeta {
   createdAt: string;
   appVersion: string;
   fileCount: number;
+  /** The server it was saved on. Absent from a server older than the field. */
+  serverId?: string | null;
+  /** Whether it brings screens and screen bindings. Absent from an older server:
+   *  then both are assumed, so a release is said rather than missed. */
+  carriesScreens?: boolean;
+  carriesBindings?: boolean;
+}
+
+/**
+ * How many screens are set up on this server, read when a restore dialog opens:
+ * the dialog says when a restore will release them. Null when the read fails,
+ * which goes to /log (the restore itself still logs every release on
+ * [config-snapshot]); the dialog then says the line rather than promise silence.
+ */
+async function boundScreens(): Promise<number | null> {
+  try {
+    const devices = await invoke<{ bound?: unknown[] }>("devices:list");
+    return Array.isArray(devices?.bound) ? devices.bound.length : null;
+  } catch (e) {
+    logReadFailure("config-snapshot", "the screens set up on this server, for the restore dialog", e);
+    return null;
+  }
 }
 
 // Backup / restore the whole config (secrets excluded). Download/upload a file,
@@ -892,7 +931,7 @@ function AutoBackupPanel() {
   );
 }
 
-function ConfigSnapshotPanel() {
+function ConfigSnapshotPanel({ ownServerId }: { ownServerId: string | null }) {
   const queryClient = useQueryClient();
   // Read here rather than threaded down: the warning belongs beside the button
   // that causes it, and this is the same query the update panel already polls.
@@ -935,14 +974,26 @@ function ConfigSnapshotPanel() {
     }
   }
 
-  async function recall(id: string, label: string) {
-    if (!(await confirm({
-      title: `Recall "${label}"?`,
+  async function recall(s: SnapshotMeta) {
+    // Asked only when the snapshot was saved under another id, and the release
+    // line only when it will happen: see restore-server-id.ts.
+    const facts = {
+      configId: s.serverId,
+      ownId: ownServerId,
+      carriesScreens: s.carriesScreens ?? true,
+      carriesBindings: s.carriesBindings ?? true,
+      ownBindings: await boundScreens(),
+    };
+    const id = s.id;
+    const answer = await confirmWith({
+      title: `Recall "${s.name}"?`,
       message: `This overwrites the current config (views, integrations, branding, etc.). ${restartConsequence(selfRecovers)} Secrets (API keys/passwords) are kept as-is.`,
       confirmLabel: "Recall",
-    }))) return;
+      ...restoreQuestion(facts, "Recall as replacement"),
+    });
+    if (!answer.ok) return;
     try {
-      toastRestored(await invoke<RestartAnswer>("config:recallSnapshot", { id }));
+      toastRestored(await invoke<RestartAnswer>("config:recallSnapshot", { id, replacesOriginal: answer.checked }));
     } catch (e) {
       toast.error(`Recall failed: ${errorMessage(e)}`);
     }
@@ -962,13 +1013,24 @@ function ConfigSnapshotPanel() {
     const file = e.target.files?.[0];
     if (!file) return;
     try {
-      const bundle = JSON.parse(await file.text());
-      if (await confirm({
+      const bundle: unknown = JSON.parse(await file.text());
+      const files = (bundle as { files?: unknown } | null)?.files;
+      const carries = (name: string) => !!files && typeof files === "object" && Object.hasOwn(files, name);
+      const facts = {
+        configId: configServerId(bundle),
+        ownId: ownServerId,
+        carriesScreens: carries("settings.json"),
+        carriesBindings: carries("kiosk-devices.json"),
+        ownBindings: await boundScreens(),
+      };
+      const answer = await confirmWith({
         title: `Restore from "${file.name}"?`,
         message: `This overwrites the current config. ${restartConsequence(selfRecovers)} Secrets aren't included — you'll re-enter API keys/passwords after.`,
         confirmLabel: "Restore",
-      })) {
-        toastRestored(await invoke<RestartAnswer>("config:import", { bundle }));
+        ...restoreQuestion(facts, "Restore as replacement"),
+      });
+      if (answer.ok) {
+        toastRestored(await invoke<RestartAnswer>("config:import", { bundle, replacesOriginal: answer.checked }));
       }
     } catch (err) {
       toast.error(`Import failed: ${errorMessage(err)}`);
@@ -1025,7 +1087,7 @@ function ConfigSnapshotPanel() {
                       {new Date(s.createdAt).toLocaleString()} · v{s.appVersion} · {plural(s.fileCount, "file")}
                     </p>
                   </div>
-                  <Button variant="filled" size="small" onClick={() => recall(s.id, s.name)}>
+                  <Button variant="filled" size="small" onClick={() => void recall(s)}>
                     <RotateCcwIcon className="size-3.5 text-gray-9" /> Recall
                   </Button>
                   <Button variant="transparent" size="small" iconOnly onClick={() => remove(s.id)} aria-label="Delete snapshot">
@@ -1167,6 +1229,7 @@ const SAMPLE_EVENING = new Date(2026, 0, 1, 20, 45, 30).getTime();
 /** Flash targets on this page, and the tab each one sits on. */
 const FLASH_TABS: Readonly<Record<string, AdvancedTabId>> = {
   [VIDEO_PORTS_FLASH_ID]: "video",
+  [SERVER_ID_FLASH]: "network",
 };
 
 /** The `data-flash-id` a card carries, when something elsewhere in the app points at it. */
@@ -1289,7 +1352,7 @@ export function AdvancedSection({
 }) {
   // Local field state so typing doesn't fight the live store; commit on blur.
   const [publicUrl, setPublicUrl] = useState(stageState.publicUrl ?? "");
-  const [configuringBar, setConfiguringBar] = useState(false);
+  const customize = useCustomize();
   // Bulky and rarely needed — collapsed by default, expanded with a plain
   // inline text button rather than a Collapsible.
   const [showCommands, setShowCommands] = useState(false);
@@ -1322,7 +1385,7 @@ export function AdvancedSection({
   const tw = stageState.taperWindow ?? { preMin: 60, postMin: 60 };
   const autoUpdate = stageState.autoUpdate ?? DEFAULT_AUTO_UPDATE;
 
-  const signals = useAdvancedSignals();
+  const signals = useAdvancedSignals(stageState);
   const available = availableCount(updateStatus);
   const updatesBadge = !updateStatus
     ? undefined
@@ -1346,14 +1409,31 @@ export function AdvancedSection({
         {show("clock-format") && (
           <HourCycleField hourCycle={stageState.hourCycle ?? "24h"} onChange={handlers.handleSetHourCycle} />
         )}
+      </FieldCard>
+    ),
+
+    // How the app's chrome is arranged: the sidebar and the bar above every page.
+    "general/Layout": (show, title) => (
+      <FieldCard title={title}>
+        {show("sidebar") && (
+          <Field orientation="horizontal" data-setting-id="sidebar">
+            <FieldContent>
+              <FieldLabel>{settingText("sidebar").name}</FieldLabel>
+              <FieldDescription>{settingText("sidebar").description}</FieldDescription>
+            </FieldContent>
+            <Button variant="filled" size="small" onClick={() => customize.open("sidebar")}>
+              Customize…
+            </Button>
+          </Field>
+        )}
         {show("context-bar") && (
           <Field orientation="horizontal" data-setting-id="context-bar">
             <FieldContent>
               <FieldLabel>{settingText("context-bar").name}</FieldLabel>
               <FieldDescription>{settingText("context-bar").description}</FieldDescription>
             </FieldContent>
-            <Button variant="filled" size="small" onClick={() => setConfiguringBar(true)}>
-              Configure…
+            <Button variant="filled" size="small" onClick={() => customize.open("bar")}>
+              Customize…
             </Button>
           </Field>
         )}
@@ -1521,6 +1601,15 @@ export function AdvancedSection({
             />
           </Field>
         )}
+        {show("server-id") && (
+          <Field orientation="vertical" data-setting-id="server-id" data-flash-id={SERVER_ID_FLASH}>
+            <FieldContent>
+              <FieldLabel>{settingText("server-id").name}</FieldLabel>
+              <FieldDescription>{settingText("server-id").description}</FieldDescription>
+            </FieldContent>
+            <ServerIdStatus identity={stageState.serverIdentity} timeZone={stageState.timezone} />
+          </Field>
+        )}
         {show("kiosk-setup") && (
           <Field orientation="vertical" data-setting-id="kiosk-setup">
             <FieldContent>
@@ -1563,7 +1652,7 @@ export function AdvancedSection({
     "data/Backups": (show, title) => (
       <CardFrame title={title}>
         {show("auto-backups") && <AutoBackupPanel />}
-        {show("config-snapshot") && <ConfigSnapshotPanel />}
+        {show("config-snapshot") && <ConfigSnapshotPanel ownServerId={stageState.serverIdentity?.id ?? null} />}
       </CardFrame>
     ),
 
@@ -1571,6 +1660,16 @@ export function AdvancedSection({
       <CardFrame title={title}>
         {show("data-archive") && <DataArchivePanel />}
         {show("history-milestones") && <HistoryMilestonesPanel />}
+      </CardFrame>
+    ),
+
+    "public-link/Public link": (show, title) => (
+      <CardFrame title={title}>
+        {show("public-link") && (
+          <div className="p-4" data-setting-id="public-link">
+            <PublicLinkPanel />
+          </div>
+        )}
       </CardFrame>
     ),
 
@@ -1697,7 +1796,6 @@ export function AdvancedSection({
         {panel}
       </div>
 
-      <BarConfigurator open={configuringBar} onOpenChange={setConfiguringBar} />
     </div>
   );
 }

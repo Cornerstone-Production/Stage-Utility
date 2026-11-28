@@ -138,6 +138,7 @@ const REQUEST_FACING = [
   // Every line names a file it serves (an allowlisted name) and what the release
   // host or the disk said back, which is text from outside.
   "output-helper-download.ts",
+  "patch-store.ts",
   // Names a tag value and a tag-group error typed into Planning Center and read
   // back over HTTP, and a person id off a response body; scrubbed at the logger.
   "pco-prep-tags.ts",
@@ -209,6 +210,9 @@ const REQUEST_FACING = [
   // hands them to servicecue-publisher.ts, whose lines are below.
   "routes/servicecue-publish-routes.ts",
   "routes/servicecue-routes.ts",
+  // Its lines name a background's name, which arrives on the upload's query
+  // string, and ids off the path; every one is scrubbed.
+  "routes/stageplots-routes.ts",
   "routes/state-routes.ts",
   "routes/status-routes.ts",
   "routes/system-routes.ts",
@@ -240,8 +244,20 @@ const REQUEST_FACING = [
   // Names the settings.json keys a restore dropped, out of a bundle anyone on the
   // LAN can post to POST /api/config/import.
   "settings-restore-check.ts",
+  // Its one line names why a saved arrangement was refused, and the reason
+  // quotes ids and headings a config restore put in the file.
+  "sidebar-config-store.ts",
   "spl-recorder.ts",
   "stage-controller.ts",
+  // The tidy runs after DELETE /api/stageplots/backgrounds/:id and a clean-up
+  // PATCH; its lines name files on disk and error text, all scrubbed.
+  "stageplots-files.ts",
+  // Run by POST /api/stageplots/venues/:id/publish and the rest: its lines name a venue's
+  // name, the page's host and whatever the page or the network said back. Never the secret.
+  "stageplots-publish.ts",
+  // Its change line names a metric typed into POST /api/history/trends-prefs;
+  // scrubbed, and the value must also match a fixed shape.
+  "trends-prefs.ts",
   // The ffmpeg path is typed into PATCH /api/video/ffmpeg and reaches its
   // "not found at" and "found at" log lines.
   "video/ffmpeg-system.ts",
@@ -336,7 +352,11 @@ const NOT_SCANNED = new Map<string, string>([
   ["data-store.ts", UNAUDITED],
   ["device-manager.ts", DEVICE],
   ["encryption.ts", UNAUDITED],
+  // Writes the integrations' outage lines; the text is the subclass's, built
+  // from what its device answered, under the same threat model as theirs.
+  ["integration-base.ts", DEVICE],
   ["keyed-record-store.ts", UNAUDITED],
+  ["kiosk-duplicate-check.ts", DEVICE],
   ["kiosk-responder.ts", DEVICE],
   ["layout-image-store.ts", UNAUDITED],
   ["layout-library.ts", UNAUDITED],
@@ -373,6 +393,11 @@ const NOT_SCANNED = new Map<string, string>([
   ["slots-store.ts", UNAUDITED],
   ["smaart-service.ts", DEVICE],
   [
+    "stageplots-store.ts",
+    "logs one fixed sentence when stageplots.json's overrides are not a list, naming nothing the file " +
+      "or a request carries. Audited, not just excused.",
+  ],
+  [
     "store-file-adoption.ts",
     "logs two fixed sentences about file names that are literals in the store " +
       "declarations, never anything an HTTP request carries, plus an OS error message " +
@@ -381,6 +406,12 @@ const NOT_SCANNED = new Map<string, string>([
   ["stream-start-store.ts", UNAUDITED],
   ["tsl-service.ts", DEVICE],
   ["update/relaunch.ts", UNAUDITED],
+  [
+    "update/running-notes.ts",
+    "reached by GET /api/update/release-notes, whose request carries nothing it reads: its two " +
+      "lines name the running tag, from package.json, and what GitHub, the network or the disk " +
+      "said back. Audited, not just excused.",
+  ],
   ["updater.ts", UNAUDITED],
   // acquire.ts logs nothing about a download or a checksum — relay-lifecycle.ts
   // (below) owns that, once per outage. It logs only when it clears an earlier
@@ -529,6 +560,9 @@ function requestFacingFiles(): string[] {
     // Every line names a file it serves (an allowlisted name) and what the release
     // host or the disk said back, which is text from outside.
     path.join(HERE, "output-helper-download.ts"),
+    // Each value it leaves out of patch.json is named with the sheet's and variant's names and
+    // the override's key, which arrive in the body of POST /api/patch.
+    path.join(HERE, "patch-store.ts"),
     // Names a tag value, an error and a person id read from Planning Center.
     path.join(HERE, "pco-prep-tags.ts"),
     path.join(HERE, "pco-service.ts"),
@@ -572,8 +606,17 @@ function requestFacingFiles(): string[] {
     // Its one line names the settings.json keys it dropped, which arrive in a
     // bundle POST /api/config/import takes from anyone on the LAN.
     path.join(HERE, "settings-restore-check.ts"),
+    // Its one line says why a saved arrangement was refused, quoting ids and
+    // headings a config restore put in the file.
+    path.join(HERE, "sidebar-config-store.ts"),
     path.join(HERE, "spl-recorder.ts"),
     path.join(HERE, "stage-controller.ts"),
+    // Run by the stage-plot delete and clean-up routes; logs file names and errors.
+    path.join(HERE, "stageplots-files.ts"),
+    // Its lines name a venue typed into the editor and what the page said back; see REQUEST_FACING.
+    path.join(HERE, "stageplots-publish.ts"),
+    // Its change line names a metric typed into POST /api/history/trends-prefs.
+    path.join(HERE, "trends-prefs.ts"),
     // A feed NAME is typed into POST/PATCH /api/video/feeds and reaches this
     // file's own "is live"/"went offline"/B-frames log lines on a transition.
     path.join(HERE, "video/video-service.ts"),
@@ -724,7 +767,6 @@ const FORMAT_STRING_ALLOWED = new Map<string, string>([
   ["app-paths.ts", "two paths built from constants"],
   ["branding-image-store.ts", "`key`, iterated out of the constant BRANDING_IMAGE_KEYS"],
   ["broadcaster.ts", "`channel`, a member of the fixed channel union"],
-  ["config-snapshot.ts", "`what`, an internal label for the thing being quieted"],
   ["data-store.ts", "`this.filename`, the store's own constant"],
   ["live-poller.ts", "`who`, the internal name of the caller that ticked"],
   ["osc-manager.ts", "a port number"],

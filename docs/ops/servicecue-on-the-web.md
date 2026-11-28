@@ -103,8 +103,8 @@ the LAN.
    `"protocol":1` with your token, and a 401 without it, mean the Worker is running
    and the secret is set.
 
-6. **Turn it on in Stage Utility.** Open the ServiceCue presets page
-   (`/servicecue/presets`), find **Public link**, and enter the Worker's address and the
+6. **Turn it on in Stage Utility.** Open **Settings → Advanced → Public link**
+   (`/settings/advanced/public-link`) and enter the Worker's address and the
    token from step 4. Switch it on: Stage Utility asks the Worker first, so a wrong
    address or token is said on the card and nothing is switched on. The card then shows
    the link to give out (with **Copy** and a **QR code**) and how long ago the Worker last
@@ -115,13 +115,39 @@ the LAN.
 
 | | |
 |---|---|
-| `/servicecue` | the landing page, as a stage tablet sees it, without the **Edit column presets** link |
+| `/servicecue` | the ServiceCue index, as a stage tablet sees it, without the **Edit layouts** link |
 | `/servicecue/<service type>/<layout>` | a rundown. The same links as the app's: `weekend/audio`, a layout by id, `all-columns`, `?plan=`, `?text=` |
-| `/` | sends the visitor on to `/servicecue` |
+| `/` | the [landing page](#the-landing-page) while a stage plots venue is listed on it; otherwise sends the visitor on to `/servicecue` |
 | anything else | `404`. There is no `/servicecue/presets` and no settings of any kind |
 
 Give people the `/servicecue` link; every rundown they open from it works like the
 app's own, and its back arrow returns to it.
+
+## The landing page
+
+Once at least one [published stage plots venue](../features/stageplots.md#publishing) is
+listed on it, the page's own address (`https://<page>/`) is a landing page: a
+**ServiceCue** card that opens `/servicecue`, and a **Stage plots** card naming each listed
+venue with how many plots it has. A venue opens through its own secret link, so it reads
+exactly as it does for a crew member who was sent the link. Listing a venue puts that link
+in front of anyone who finds the page.
+
+- Turn it on per venue with **Show on the landing page** on the editor's Publish card,
+  while the venue is published. Every venue starts off it.
+- The page holds one small list: each listed venue's name, plot count and link, never its
+  notes, plots or patch. Stage Utility sends it again whenever it changes: a venue listed or
+  taken off, renamed, given a plot or losing one, its link regenerated, unpublished,
+  deleted, or moved to a new page address (the old page is sent an empty list with its
+  old token; if it will not take it, the Publish card says so, and the old page keeps its
+  list until it is set up here again or its Worker is taken down).
+- With no venue listed, `/` goes straight on to `/servicecue`, as it always has.
+- The page follows the visitor's light or dark setting.
+
+The landing page needs a Worker from this release or later. An older one keeps sending
+`/` on to `/servicecue`; the listing is still saved, and the Publish card says "*host*
+needs updating before it can show a landing page: deploy the Worker." Update the page as
+below; the list is sent again on the next change, and tried again on its own every few
+minutes.
 
 ## Your own domain
 
@@ -139,8 +165,10 @@ A domain whose DNS is on Cloudflare, in the same account, can stand in for the
    ```
 
    `workersDev: false` turns the `workers.dev` address off; leave it out to keep both.
-3. In the Public link card, change the page address and enter the publishing token
+3. In **Settings → Advanced → Public link**, change the page address and enter the publishing token
    again in the same save: a token is kept only for the address it was saved with.
+   Emptying the address field clears it with no token: the saved token goes too and publishing
+   switches off.
 4. Harden the zone, in the domain's own settings:
    - **SSL/TLS → Edge Certificates**: **Always Use HTTPS** on, **HSTS** on (6 months,
      subdomains included, preload off), **Minimum TLS Version** 1.2. The Worker
@@ -159,6 +187,14 @@ publishes to it updates it once it has a Cloudflare API token
 ([Keeping it up to date](#keeping-it-up-to-date)), or you run `npm run servicecue:deploy`
 again. The docs and rundowns the page shows are not part of a deploy: they come from
 what Stage Utility sends.
+
+The same Worker serves [published stage plots](../features/stageplots.md#publishing) at
+`/stageplots/<secret>`. A Worker deployed from a release before StagePlots does not know
+those addresses: publishing a venue is refused with "*host* needs updating before it can show
+stage plots: deploy the Worker", and nothing else changes; the plots still save and show on
+`/stageplots` on the local network. Update the page either way above and
+publish again. The same goes for the [landing page](#the-landing-page), which a Worker
+from before it does not have.
 
 ### Keeping it up to date
 
@@ -185,8 +221,8 @@ Cloudflare dashboard (`dash.cloudflare.com/<account id>/...`), and on the **Work
 Pages** overview, on the right.
 
 **Give them to the server.** The credentials are saved for the page's address, so the address has
-to be set first. On the ServiceCue presets page (`/servicecue/presets`), open **Cloudflare
-connection** on the **Public link** card (it shows once the card has been switched on, as in the
+to be set first. In **Settings → Advanced → Public link**, open **Cloudflare
+connection** on the card (it shows once the card has been switched on, as in the
 steps above) and find **Keep the page up to date**:
 
 1. Paste the account ID into **Cloudflare account ID**.
@@ -278,10 +314,18 @@ a successful "Update the page now".
 **If an update fails.** The page keeps what it had: Cloudflare swaps a Worker's version
 all at once. The server records Cloudflare's error code and words, and tries again after
 a minute, then two, doubling to at most once an hour. A `401` or `403` is not tried again
-until the token changes. The status line says what failed, in Cloudflare's own
-words, that the page is unchanged, and when it tries again; for a refused token it says to
-make a new one and paste it. The same status is the `deploy` the `GET
-/api/servicecue/publish` answer carries ([API](../reference/api.md)).
+until the token changes. The status line says what failed, in Cloudflare's own words,
+that the page is unchanged (or, when that cannot be read, that whether the page took it
+is not known), and when it tries again; for a refused token it says to make a new one and
+paste it. The same status is the `deploy` the `GET /api/servicecue/publish` answer
+carries ([API](../reference/api.md)).
+
+**If the answer is lost.** The upload that swaps the Worker can go through and its
+answer never arrive, or come back a 5xx. The server then asks Cloudflare what the Worker
+holds: if it holds this build at this version, the update went through and is said as
+one. If that cannot be read either, the status line says whether the page took it is not
+known, rather than that the page is unchanged. A failure at any earlier step cannot have
+changed the page and is not asked about.
 
 **The status line** on the card says one of (a failed update, or a build with no copy of the page, opens **Cloudflare connection** by itself):
 
@@ -293,6 +337,7 @@ make a new one and paste it. The same status is the `deploy` the `GET
 | Waiting for the service window to close at *time*, then updating to build X (version) | the window around a service is open; the time is in the app's time zone, and Update the page now goes ahead |
 | Waiting to hear whether a service is live, then updating | the live state is not known yet (the server has just started, or Planning Center cannot be reached); Update the page now goes ahead when the state is merely unknown, never through a live service |
 | Couldn't update the page: *reason*. The page is unchanged. | the last attempt, or a read of what is deployed, failed |
+| Couldn't update the page: *reason*. Whether the page took it is not known. | the last attempt got no answer, and what Cloudflare holds could not be read to see whether it went through |
 | The page runs build X (version), newer than this server's Y | the page is left alone (no-downgrade rule) |
 | The page runs build X of this server's own version, deployed by another server | the page is left alone |
 | This server's build has no copy of the page | the reason is in the log |
@@ -426,6 +471,9 @@ A leaked token lets someone, from anywhere:
 - fill the Worker's storage with docs and images until it is full;
 - host images, up to 2 MB each, at `https://servicecue.<your-subdomain>.workers.dev/branding-images/<name>`,
   on an address that has your name on it;
+- publish stage plots, and delete a venue's published plots if they know its link (the
+  secret is in the link, not something the token reveals: nothing on the Worker lists
+  secrets);
 - read the Stage Utility version your server is running, which the status answer reports.
 
 It reaches no part of your network, your Planning Center account or your settings.

@@ -51,7 +51,7 @@ import * as net from "node:net";
 
 import { listenPathName } from "../main/services/video/audio-listen.js";
 import { FEED_ID_PATTERN, isReservedFeedId } from "../main/services/video/feed-id.js";
-import { isMain } from "./is-main.mjs";
+import { isMain } from "./is-main.ts";
 
 // ── Pure: arguments ──────────────────────────────────────────────────────────
 

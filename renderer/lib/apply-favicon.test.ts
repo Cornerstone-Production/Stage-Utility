@@ -5,8 +5,8 @@
 // the href it settles on, the recolouring, and the one fact it cannot check at
 // runtime: that STOCK_FAVICON is what the documents actually ship.
 //
-// jsdom has no canvas, so the DEFAULT rasterizer can only be driven down its
-// failure path here, and that is tested as it is. The success path takes an
+// jsdom draws nothing a tab icon could use, so the DEFAULT rasterizer can only be
+// driven down its failure path here, and that is tested as it is. The success path takes an
 // injected rasterizer (__resetForTests(fn)); what a real canvas produces is
 // checked by driving Chrome, not by a test that would only be reading a stub.
 
@@ -349,13 +349,25 @@ describe("when the logo cannot be recolored", () => {
   }
 
   test("the real rasterizer, with no canvas, warns and shows the logo as uploaded", async () => {
-    // jsdom has no 2D context, so this is the real default code path.
-    const seen = await warnings(async () => {
-      applyFavicon(LOGO, true);
-      await tick();
-      applyFavicon(LOGO, true); // the failure is remembered, not retried per broadcast
-      await tick();
-    });
+    // The real default code path, with the one thing a browser without a canvas
+    // lacks taken away. jsdom 31 draws through @napi-rs/canvas when that package
+    // is installed (pdfjs-dist brings it in as an optional dependency, and it only
+    // installs where a prebuilt binary exists), so whether getContext answers
+    // depends on the machine; null here makes it the same everywhere.
+    const proto = window.HTMLCanvasElement.prototype as { getContext: unknown };
+    const realGetContext = proto.getContext;
+    proto.getContext = () => null;
+    let seen: string[];
+    try {
+      seen = await warnings(async () => {
+        applyFavicon(LOGO, true);
+        await tick();
+        applyFavicon(LOGO, true); // the failure is remembered, not retried per broadcast
+        await tick();
+      });
+    } finally {
+      proto.getContext = realGetContext;
+    }
     assert.equal(href(), LOGO);
     assert.equal(links()[0]?.hasAttribute("type"), false);
     assert.equal(seen.length, 1, `expected one warning, got ${seen.length}`);

@@ -13,7 +13,7 @@
 // sidebar sat expanded on a phone with no way to dismiss it.
 
 import { useMemo } from "react";
-import { Outlet, useRouterState } from "@tanstack/react-router";
+import { useRouterState } from "@tanstack/react-router";
 import { SplitView } from "../components/ui/split-view";
 import { PAGE_SCROLLER_ID, useRouteResetKey } from "./route-reset";
 import { Rail } from "./rail";
@@ -33,8 +33,21 @@ import { useStageStateQuery } from "./queries";
 import { useSidebarCollapsed } from "../lib/use-sidebar-collapsed";
 import { useSidebarWidth, RAIL_WIDTH } from "../lib/use-sidebar-width";
 import { cn } from "../lib/cn";
+import { ShellOutlet } from "./screens/kept-screens";
+import { CustomizeProvider, useCustomize } from "./customize-mode";
+import { CustomizeTray } from "./sidebar-tray";
+import { useIsMobile } from "../lib/use-media-query";
 
+/** The shell, inside the provider Customize mode lives in. */
 export function Shell() {
+  return (
+    <CustomizeProvider>
+      <ShellFrame />
+    </CustomizeProvider>
+  );
+}
+
+function ShellFrame() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   // The LIVE state, the same source the rail reads. A console's name is the
   // operator's to change, and the rail entry and the page title must not be able
@@ -84,6 +97,10 @@ export function Shell() {
   // rather than a reuse of `chromeless` above, which covers both.
   const isSharedChromelessPage = isSharedChromelessPath(pathname);
   const { collapsed, toggle } = useSidebarCollapsed();
+  // Customize mode opens a collapsed rail out, without touching the saved
+  // preference, and it folds back on Done.
+  const { customizing, tab } = useCustomize();
+  const isMobile = useIsMobile();
   const resetKey = useRouteResetKey();
   // Mounted HERE, not on a route: these subscriptions must outlive any single
   // page. On a route they would unsubscribe the moment you navigated away, and
@@ -147,13 +164,16 @@ export function Shell() {
         // for both the console it was written for and the shared page it
         // was not.
         !fullBleed && "sm:pt-4",
+        // The page stays in view, dimmed and out of reach, while the sidebar
+        // beside it is being arranged.
+        customizing && "pointer-events-none opacity-45 saturate-[0.6]",
       )}
     >
-      {/* Keyed so re-selecting the active rail item remounts the route,
-          returning it to its top view. */}
-      <div key={resetKey} className="contents">
-        <Outlet />
-      </div>
+      {/* The route, and beside it the Screens page, which is drawn here rather
+          than by its route so that leaving it hides the page instead of unmounting
+          it, and its live previews survive the trip away and back. See
+          kept-screens.tsx. */}
+      <ShellOutlet pathname={pathname} resetKey={resetKey} />
     </main>
   );
 
@@ -194,7 +214,10 @@ export function Shell() {
       <UpdateNotices />
       <PageActionsProvider>
       <SplitView
-        collapsed={collapsed}
+        collapsed={collapsed && !customizing}
+        // A phone pins the sidebar beside the tray only while the sidebar is
+        // what is being arranged; the bar is edited at the top of the page.
+        pinned={customizing && tab === "sidebar"}
         expandedWidth={width}
         railWidth={RAIL_WIDTH}
         resizing={dragging}
@@ -223,6 +246,7 @@ export function Shell() {
                 padding themselves individually and the ones added recently did not,
                 so the editor and Screens sat flush against the right edge. */}
           {content}
+          {customizing && <CustomizeTray isMobile={isMobile} barOnPage={!chromeless} />}
         </div>
       </SplitView>
       </PageActionsProvider>

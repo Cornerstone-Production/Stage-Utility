@@ -22,3 +22,8 @@
 export function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
+
+/** `v` to one decimal place: stage plot geometry is kept to a tenth of a unit. */
+export function round1(v: number): number {
+  return Math.round(v * 10) / 10;
+}

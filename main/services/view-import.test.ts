@@ -11,6 +11,7 @@ process.env.STAGE_UTILITY_DATA = dir;
 const { viewsStore } = await import("./views-store.js");
 const { oscStore } = await import("./osc-store.js");
 const { applyViewBundle } = await import("./view-import.js");
+const { addBroadcastListener } = await import("./broadcaster.js");
 
 const bundle = (over: Record<string, unknown> = {}) => ({
   kind: "stage-utility-view", version: 1, appVersion: "1.0.0",
@@ -245,6 +246,29 @@ describe("a bundle carrying two ServiceCue presets with one id", () => {
     const dupes = saved.filter((l: { id: string }) => l.id === "dup");
     assert.equal(dupes.length, 1, `"dup" landed ${dupes.length} times: ${JSON.stringify(saved)}`);
     assert.equal(dupes[0].name, "First", "the first one wins, like a target does");
+  });
+
+  test("tells the operator in the word they read, layout, never preset", async () => {
+    // The import report reaches the operator as written (import-layout.tsx). "Preset" is
+    // the code's old name for a ServiceCue layout.
+    const { serviceCueLayoutsStore } = await import("./servicecue-layouts-store.js");
+    await serviceCueLayoutsStore.save([{ id: "here", name: "Here", order: 0 }] as never);
+    const report = await applyViewBundle(bundle({
+      sideData: {
+        slots: {}, notes: {},
+        serviceCueLayouts: [
+          { name: "no id" },
+          { id: "here", name: "Here" },
+          { id: "other", name: "here" },
+        ],
+      },
+    }));
+    const said = report.skipped.filter((k) => /ServiceCue/.test(k));
+    assert.equal(said.length >= 3, true, JSON.stringify(report.skipped));
+    for (const k of said) assert.equal(/preset/i.test(k), false, k);
+    assert.equal(said.some((k) => k.startsWith("a ServiceCue layout with no id or name")), true);
+    assert.equal(said.some((k) => k.includes('ServiceCue layout "Here" — kept the one already here')), true);
+    assert.equal(said.some((k) => /imported as .*that name was taken here/.test(k)), true, JSON.stringify(said));
   });
 });
 
@@ -551,6 +575,19 @@ describe("patch variants", () => {
 
   beforeEach(async () => { await viewsStore.save([] as never); });
 
+  // Guard: /patch, the patch editor and the stage plots publisher follow the patch on
+  // patch:updated. An import that saved variants without it left all three on the old patch.
+  test("a variant import broadcasts the saved patch on patch:updated", async () => {
+    await blankPatch();
+    const heard: unknown[] = [];
+    addBroadcastListener((channel, payload) => {
+      if (channel === "patch:updated") heard.push(payload);
+    });
+    await applyViewBundle(withVariant());
+    const last = heard.at(-1) as { sheets: { variants: { id: string }[] }[] } | undefined;
+    assert.deepEqual(last?.sheets[0]?.variants.map((v) => v.id), ["var-1"]);
+  });
+
   test("a variant that is not here is added and the type assigned to it", async () => {
     await blankPatch();
     const report = await applyViewBundle(withVariant());
@@ -679,6 +716,24 @@ describe("patch variants", () => {
       );
     } finally {
       store.save = real;
+    }
+  });
+
+  test("a patch saved while the stage plot points could not follow it keeps its outcomes, and says so", async () => {
+    await blankPatch();
+    const { PatchLinksNotUpdated } = await import("./patch-store.js");
+    const store = patchStore as unknown as { save: unknown };
+    const real = store.save;
+    store.save = async () => { throw new PatchLinksNotUpdated(new Error("stageplots.json is damaged")); };
+    const quiet = console.error;
+    console.error = () => undefined;
+    try {
+      const report = await applyViewBundle(withVariant());
+      assert.ok(report.skipped.some((k) => k.startsWith("patch variants — saved, but the stage plot connection points")), JSON.stringify(report.skipped));
+      assert.ok(report.patchVariants.some((p) => p.outcome === "added"), "a saved variant was dropped from the report");
+    } finally {
+      store.save = real;
+      console.error = quiet;
     }
   });
 

@@ -38,11 +38,6 @@ import { eventually, installDom, isPlumbing, readLedger, settle, unmountAndTeard
 import type { UpdateStatus } from "@main/types/state";
 
 const teardown = installDom();
-// React only act-wraps a render, and only warns when an update escapes one,
-// once it is told it is in a test environment. Without this the file reads
-// as clean while 75 updates land outside act — which is why it was
-// cleared the first time round.
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // jsdom ships no EventSource, and this panel subscribes to four channels on
 // mount so the lock indicator stays fresh while a service starts or ends.
@@ -64,7 +59,7 @@ const reads = readLedger();
 (globalThis as unknown as { fetch: unknown }).fetch = async (url: string) => {
   // The live-update subscription is nobody's read; see isPlumbing.
   if (isPlumbing(url)) return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
-  reads.begin();
+  reads.begin(url);
   const payload = url.includes("/api/update/lock") ? lockReply : {};
   return reads.answer({ ok: true, status: 200, json: async () => payload, text: async () => JSON.stringify(payload) });
 };

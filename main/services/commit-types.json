@@ -1,5 +1,5 @@
 {
-  "_comment": "The conventional-commit types and what each releases. minor: a new capability. patch: a fix, a speed-up, or a user-visible refinement that adds no capability. invisible: nothing an operator can tell, so it releases nothing and is left out of the notes. legacy: carried by old history, refused by the lint, hidden like invisible. revert: accepted, releases nothing, and takes no `!`. Read by scripts/check-commit-subjects.mjs, scripts/check-beta-only.mjs, scripts/release-notes.mjs, scripts/release-level.sh and main/services/changelog.ts, so the five cannot drift.",
+  "_comment": "The conventional-commit types and what each releases. minor: a new capability. patch: a fix, a speed-up, or a user-visible refinement that adds no capability. invisible: nothing an operator can tell, so it releases nothing and is left out of the notes. legacy: carried by old history, refused by the lint, hidden like invisible. revert: accepted, releases nothing, and takes no `!`. Read by scripts/check-commit-subjects.ts, scripts/check-beta-only.ts, scripts/release-notes.ts, scripts/release-level.sh and main/services/changelog.ts, so the five cannot drift.",
   "minor": [
     "feat"
   ],

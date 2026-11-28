@@ -26,6 +26,7 @@ const { MOVED_PAGE_ROUTE_PATTERNS, MOVED_ROUTES } = await import("./redirects.js
 const { consoleHidesChrome, consolePageFor, consolePages, hidesChrome, resolvePage } =
   await import("./active-page.js");
 const { PageTitle } = await import("./page-title.js");
+const { ALL_DESTINATIONS } = await import("./destinations.js");
 const { PageActionsProvider } = await import("./page-actions.js");
 
 after(() => {
@@ -54,6 +55,7 @@ const PARAMS: Record<string, string> = {
   $serviceType: "weekend-gathering",
   $layout: "audio",
   $tab: "network",
+  $venueId: "v-abc",
 };
 
 function fill(pattern: string): string {
@@ -92,7 +94,7 @@ describe("the route table", () => {
     assert.deepEqual([...REDIRECTS].sort(), ["/displays", "/scriptview", "/scriptview/$", "/settings", "/views"]);
   });
 
-  test("there are exactly five dynamic routes", () => {
+  test("there are exactly seven dynamic routes", () => {
     // Named so the count is a decision. A fourth arriving without a title is
     // what this file exists to catch.
     // A redirect's splat is not a page and has no title to resolve.
@@ -103,6 +105,8 @@ describe("the route table", () => {
       "/screens/$viewId/edit",
       "/servicecue/$serviceType/$layout",
       "/settings/advanced/$tab",
+      "/stageplots/$venueId",
+      "/stageplots/manage/$venueId",
     ]);
   });
 });
@@ -160,6 +164,11 @@ describe("every registered route resolves a title", () => {
         "/settings/branding",
         "/settings/integrations",
         "/settings/messages",
+        "/stageplots",
+        "/stageplots/$venueId",
+        "/stageplots/edit",
+        "/stageplots/manage",
+        "/stageplots/manage/$venueId",
         "/video-feeds",
         "/views",
       ],
@@ -196,6 +205,11 @@ describe("every registered route resolves a title", () => {
         "/settings/branding",
         "/settings/integrations",
         "/settings/messages",
+        "/stageplots",
+        "/stageplots/$venueId",
+        "/stageplots/edit",
+        "/stageplots/manage",
+        "/stageplots/manage/$venueId",
         "/video-feeds",
       ],
       "a route's title status changed; update this list deliberately",
@@ -228,6 +242,32 @@ describe("a console is named after its View", () => {
   });
 });
 
+describe("/stageplots/<venue id>", () => {
+  // The router, not the chrome resolver: the static editor route must win the
+  // parameter, or the editor would open as a venue called "edit".
+  const matched = (path: string) => (router.matchRoutes(path) as unknown as { routeId: string }[]).map((m) => m.routeId).pop();
+
+  test("a venue id matches the venue route and /stageplots/edit still matches the editor", () => {
+    assert.equal(matched("/stageplots/v-abc"), "/stageplots/$venueId");
+    assert.equal(matched("/stageplots/edit"), "/stageplots/edit");
+    assert.equal(matched("/stageplots"), "/stageplots");
+  });
+
+  test("/stageplots/manage is the app's own page, never a venue called manage", () => {
+    assert.equal(matched("/stageplots/manage"), "/stageplots/manage");
+    assert.equal(matched("/stageplots/manage/main-room"), "/stageplots/manage/$venueId");
+  });
+
+  test("the crew's pages hide the chrome; the app's own and the editor keep it", () => {
+    for (const p of ["/stageplots", "/stageplots/", "/stageplots/main-room", "/stageplots/v-0123456789ab"]) {
+      assert.equal(hidesChrome(p, VIEWS), true, `${p} should be chromeless`);
+    }
+    for (const p of ["/stageplots/manage", "/stageplots/manage/main-room", "/stageplots/edit"]) {
+      assert.equal(hidesChrome(p, VIEWS), false, `${p} should keep the shell`);
+    }
+  });
+});
+
 describe("exact versus prefix", () => {
   test("a child route takes the section's name but not its heading", () => {
     // The layout editor and a ServiceCue plan each draw their own heading, so
@@ -239,6 +279,7 @@ describe("exact versus prefix", () => {
       ["/patch/edit", "Patch"],
       ["/settings/advanced/$tab", "Advanced"],
       ["/automation/$tab", "Automation"],
+      ["/stageplots/manage/$venueId", "Stage plots"],
     ] as const) {
       const active = resolvePage(fill(pattern), CONSOLES);
       assert.equal(active?.page.label, section, `${pattern} lost its section name`);
@@ -254,11 +295,59 @@ describe("exact versus prefix", () => {
     assert.equal(resolvePage("/history/manage", CONSOLES)?.page.path, "/history/manage");
   });
 
+  test("the crew's stage plots is its own page, not a child of the operator's", () => {
+    const active = resolvePage("/stageplots", CONSOLES);
+    assert.equal(active?.page.label, "Stage plots");
+    assert.equal(active?.exact, true);
+    assert.equal(resolvePage("/stageplots/manage", CONSOLES)?.page.path, "/stageplots/manage");
+  });
+
   test("the tablet's ServiceCue is its own page, not a child of the operator's", () => {
     const active = resolvePage("/servicecue", CONSOLES);
     assert.equal(active?.page.label, "ServiceCue");
     assert.equal(active?.exact, true);
     assert.equal(resolvePage("/servicecue/manage", CONSOLES)?.page.path, "/servicecue/manage");
+  });
+
+  test("every page that shows the rail lights a row in it", () => {
+    // The layouts editor is /servicecue/presets and ServiceCue's rail row is
+    // /servicecue/manage, so a prefix match landed on the tablet's /servicecue,
+    // which has no row, and nothing in the rail was lit while editing layouts.
+    // Every registered route that shows the chrome, paired with the row it lights.
+    const rail = new Set([...ALL_DESTINATIONS.map((d) => d.path), ...CONSOLES.map((c) => c.path)]);
+    const lit = REGISTERED.filter((p) => !REDIRECTS.has(p) && !hidesChrome(fill(p), VIEWS))
+      .map((p) => {
+        const path = resolvePage(fill(p), CONSOLES)?.page.path ?? "nothing";
+        return `${p} -> ${rail.has(path) ? path : `${path} (no rail row)`}`;
+      })
+      .sort();
+    assert.deepEqual(lit, [
+      "/ -> /",
+      "/automation -> /automation",
+      "/automation/$tab -> /automation",
+      "/baptism -> /baptism",
+      `/consoles/$viewId -> /consoles/${CONSOLE_ID}`,
+      "/history/manage -> /history/manage",
+      "/mic-slots -> /mic-slots",
+      "/patch -> /patch",
+      "/patch/edit -> /patch",
+      "/plan -> /plan",
+      "/screens -> /screens",
+      "/screens/$viewId/edit -> /screens",
+      "/servicecue/manage -> /servicecue/manage",
+      "/servicecue/presets -> /servicecue/manage",
+      "/settings/advanced -> /settings/advanced",
+      "/settings/advanced/$tab -> /settings/advanced",
+      "/settings/branding -> /settings/branding",
+      "/settings/integrations -> /settings/integrations",
+      "/settings/messages -> /settings/messages",
+      "/stageplots/edit -> /stageplots/manage",
+      "/stageplots/manage -> /stageplots/manage",
+      "/stageplots/manage/$venueId -> /stageplots/manage",
+      "/video-feeds -> /video-feeds",
+    ]);
+    // A child, not the page itself: the editor draws its own heading.
+    assert.equal(resolvePage("/servicecue/presets", CONSOLES)?.exact, false);
   });
 
   test("an unrouted URL claims nothing, so Home does not swallow a 404", () => {

@@ -21,7 +21,6 @@ import { after, before, beforeEach, describe, test } from "node:test";
 import { eventually, installDom, settle, unmountAndTeardown } from "../../test-dom.js";
 
 const teardown = installDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 /** api.ts opens an SSE stream on first use; nothing here needs to push on it. */
 class FakeEventSource {
@@ -94,7 +93,6 @@ function installFetch(calls: Call[], rebuild: () => { ok: boolean; body: unknown
     if (url === "/api/service-timeline") return ok([timeline()]);
     if (url === "/api/attendance/history?summary=1") return ok([]);
     if (url === "/api/spl/summary") return ok([]);
-    if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
     if (url === "/api/baptism/sessions") return ok([]);
     if (url.match(/^\/api\/service-timeline\/[^/]+$/)) return ok(timeline());
     if (url.match(/^\/api\/attendance\/history\/[^/]+$/)) return ok(null);

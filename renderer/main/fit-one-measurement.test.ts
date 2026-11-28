@@ -126,11 +126,17 @@ describe("one fit-to-box measurement", () => {
     const found = sources(RENDERER).flatMap(measurements).sort();
     assert.deepEqual(found, [
       "app/bar-fit.ts:useBarFit",
+      // Not a fit: the Customize tray publishes its own height, for the pinned
+      // sidebar and the toasts to sit above it.
+      "app/sidebar-tray.tsx:CustomizeTray",
       "lib/use-element-width.ts:useElementTier",
       "main/layout-renderer.tsx:ServiceOrderObject",
       "main/pvp-object.tsx:useClippedRows",
       "main/readout.tsx:useBoxSize",
       "main/readout.tsx:useShrinkToWidth",
+      // Not a fit: the Transcription page's feed scrolls to its newest line when
+      // a line wraps taller, reading scrollHeight for where the bottom is.
+      "main/transcript-feed.tsx:useFollowNewest",
       "settings/brand-header.tsx:BrandHeader",
     ]);
   });

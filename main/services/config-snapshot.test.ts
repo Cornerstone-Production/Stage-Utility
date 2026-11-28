@@ -127,7 +127,15 @@ const EXPECTED_CONFIG = [
   "servicecue-publish.json",
   "servicecue-roles.json",
   "settings.json",
+  // The operator's sidebar: its sections, their order and the pages hidden.
+  "sidebar-config.json",
   "slots.json",
+  // The stage plot editor's unsaved drafts, one per plot: the operator's work.
+  "stageplot-drafts.json",
+  // Venues, their stage plots, and the backgrounds those plots draw on.
+  "stageplots.json",
+  // Which Smaart metric the History Trends card plots under Sound.
+  "trends-prefs.json",
   "video-feeds.json",
   "views.json",
   "wireless-connections.json",

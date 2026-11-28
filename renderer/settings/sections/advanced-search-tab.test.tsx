@@ -122,7 +122,7 @@ describe("tabs", () => {
       await settle();
       assert.deepEqual(
         screen.getAllByRole("tab").map(text),
-        ["General", "Updates", "Schedule", "Network", "Data", "Video relay", "Search"],
+        ["General", "Updates", "Schedule", "Network", "Public link", "Data", "Video relay", "Search"],
       );
     } finally {
       f.restore();
@@ -375,6 +375,7 @@ describe("the tab strip's keyboard", () => {
         ["Updates", -1],
         ["Schedule", -1],
         ["Network", 0],
+        ["Public link", -1],
         ["Data", -1],
         ["Video relay", -1],
         ["Search", -1],

@@ -62,11 +62,15 @@ jobs:
       - name: Select Xcode
         if: ${{ inputs.build-mode == 'manual' }}
         uses: $/.github/actions/select-xcode
-      - uses: github/codeql-action/init@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           languages: ${{ inputs.language }}
           build-mode: ${{ inputs.build-mode }}
           config-file: ./.github/codeql/codeql-config.yml
+          # Added to the configuration's queries, not substituted for them (the plus).
+          # A JavaScript query, so only the JavaScript run asks for it: the
+          # configuration drops the stock query it replaces for every language.
+          queries: ${{ inputs.language == 'javascript-typescript' && '+./.github/codeql/queries' || '' }}
       # What the tracer watches. The Swift leg builds the whole package, which also
       # compiles the DeckLink shim; the C/C++ leg builds only the shim and the vendored
       # SDK dispatch it links, so it does not repeat the Swift build on a second macOS
@@ -79,7 +83,7 @@ jobs:
         if: ${{ inputs.build-mode == 'manual' && inputs.language == 'c-cpp' }}
         working-directory: helper/macos
         run: swift build --target DeckLinkShim
-      - uses: github/codeql-action/analyze@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         env:
           # The model pack targets codeql/javascript-all, so only the JavaScript run
           # loads it. A second --additional-packs is added to whatever the action
@@ -103,7 +107,7 @@ jobs:
           cat >empty.sarif <<'SARIF'
           {"version":"2.1.0","$schema":"https://json.schemastore.org/sarif-2.1.0.json","runs":[{"tool":{"driver":{"name":"CodeQL","informationUri":"https://codeql.github.com/"}},"results":[]}]}
           SARIF
-      - uses: github/codeql-action/upload-sarif@9b3254085494b55a0f7c4c2b3d2d52cc712ce370 # v4.39.1
+      - uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           sarif_file: empty.sarif
           category: "/language:${{ inputs.language }}"

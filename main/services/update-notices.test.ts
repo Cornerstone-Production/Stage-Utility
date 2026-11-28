@@ -69,6 +69,7 @@ describe("what an update leaves behind for the operator", () => {
         fromVersion: "1.11.0",
         notes: [{ section: "Breaking", lines: ["displays without a slug redirect"], omitted: 0 }],
         lines: [],
+        intro: null,
         at: "2026-08-18T00:00:00.000Z",
       },
     }));
@@ -96,7 +97,7 @@ describe("what an update leaves behind for the operator", () => {
     await updateNoticesStore.update((cur) => ({ ...cur, announcedTag: "v1.13.0" }));
     await updateNoticesStore.update((cur) => ({
       ...cur,
-      justUpdated: { version: "v1.12.0", fromVersion: null, notes: [], lines: [], at: "x" },
+      justUpdated: { version: "v1.12.0", fromVersion: null, notes: [], lines: [], intro: null, at: "x" },
     }));
     const s = await updateNoticesStore.load();
     assert.equal(s.announcedTag, "v1.13.0");

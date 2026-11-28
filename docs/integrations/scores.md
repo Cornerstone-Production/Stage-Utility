@@ -60,7 +60,7 @@ refreshed whenever the team list is read.
 | Home | The **Scores** card — a quieter reading for your own page. |
 
 The context-bar item is opt-in: right-click the bar (or tap and hold it),
-**Configure bar…**, and drag **Live scores** in. The panel expands under the
+**Customize bar…**, and drag **Live scores** in. The panel expands under the
 bar and folds away on its own a few seconds after a score; tapping the
 capsule, pressing anywhere else, or Escape all close it, and any of those
 cancels the countdown so a dismissal is never undone.

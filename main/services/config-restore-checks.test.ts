@@ -67,6 +67,8 @@ const GOOD: Record<string, unknown> = {
   "servicecue-publish.json": { enabled: false, url: "https://cue.example.org" },
   "servicecue-roles.json": [{ id: "role-audio", name: "Audio", members: ["Audio"] }],
   "settings.json": {
+    // The id of the server the backup was made on: its screen bindings are to it.
+    serverId: "5e0c1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b",
     appName: "Stage Utility",
     accentColor: "#2e6691",
     planMode: "auto",
@@ -85,7 +87,36 @@ const GOOD: Record<string, unknown> = {
     captionChannelColors: { Pastor: "#ffcc00" },
     wirelessMeterRateMs: 250,
   },
+  "sidebar-config.json": {
+    sections: [
+      { id: "top", label: "", kind: "top", members: ["home", "patch"] },
+      { id: "consoles", label: "Consoles", kind: "consoles", members: ["console:view-1"] },
+      { id: "content", label: "Show", kind: "pages", members: ["servicecue"] },
+    ],
+    hidden: ["baptisms"],
+  },
   "slots.json": { version: 3, defaults: { v1: { "123": [{ id: "s1" }] } }, overrides: {} },
+  "stageplot-drafts.json": {
+    drafts: [
+      {
+        plotId: "p-1",
+        baseVersion: 0,
+        items: [{ id: "i-1", type: "box", x: 10, y: 10, w: 100, h: 50, rotation: 0, label: "Riser", color: null, notes: "", inputs: [] }],
+        savedAt: "2026-11-14T14:32:00.000Z",
+      },
+    ],
+  },
+  "stageplots.json": {
+    venues: [{ id: "v-1", name: "Main room", slug: "main-room", oldSlugs: ["main-hall"], kind: "home", notes: "", plotIds: ["p-1", "p-2"], defaultPlotId: "p-1" }],
+    backgrounds: [],
+    plots: [
+      { id: "p-1", venueId: "v-1", name: "Standard", backgroundId: null, bgFade: 0.4, items: [], version: 0 },
+      { id: "p-2", venueId: "v-1", name: "Baptism", backgroundId: null, bgFade: 0.4, items: [], version: 0 },
+    ],
+    overrides: [{ planId: "101", venueId: "v-1", plotId: "p-2", planDate: "2026-11-16T15:00:00.000Z" }],
+    pendingRemovals: [],
+  },
+  "trends-prefs.json": { soundMetric: "LAeq 2" },
   "video-feeds.json": {
     feeds: [{ id: "cam-1", name: "Camera 1", source: { kind: "pull", url: "rtsp://192.0.2.10/stream", username: "" } }],
     ports: DEFAULT_VIDEO_PORTS,
@@ -122,7 +153,20 @@ const BAD: Record<string, { value: unknown; says: string }> = {
   "servicecue-publish.json": { value: { enabled: true, url: "http://cue.example.org" }, says: "https" },
   "servicecue-roles.json": { value: { roles: [] }, says: "list" },
   "settings.json": { value: { ...(GOOD["settings.json"] as object), accentColor: "red" }, says: "accentColor" },
+  "sidebar-config.json": {
+    value: { sections: [{ id: "consoles", label: "Consoles", kind: "consoles", members: ["patch"] }], hidden: [] },
+    says: "consoles only",
+  },
   "slots.json": { value: { version: 3, defaults: { v1: { "123": "s1" } }, overrides: {} }, says: "slots" },
+  "stageplot-drafts.json": {
+    value: { drafts: [{ plotId: "p-1", baseVersion: 0, items: [{ id: "i-1", type: "box" }], savedAt: "2026-11-14T14:32:00.000Z" }] },
+    says: "item",
+  },
+  "stageplots.json": {
+    value: { venues: [], backgrounds: [], plots: [{ id: "p-1", venueId: "v-gone", name: "Standard", backgroundId: null, bgFade: 0, items: [], version: 0 }] },
+    says: "venue",
+  },
+  "trends-prefs.json": { value: { soundMetric: "LAeq 2\nforged" }, says: "soundMetric" },
   "video-feeds.json": {
     value: { feeds: [{ id: "cam-1", name: "Camera 1", source: { kind: "pull", url: "file:/etc/passwd", username: "" } }] },
     says: "protocol",
@@ -203,9 +247,10 @@ describe("config restore checks", () => {
   test("a backup this app made restores unchanged", async () => {
     const bundle = await configSnapshot.build();
     assert.deepEqual(Object.keys(bundle.files).sort(), configFiles().slice().sort(), "build() should carry every fixture");
-    // Restored onto an empty box, so what lands is the bundle's alone.
+    // Restored onto an empty box, so what lands is the bundle's alone: the box
+    // that replaces the one the backup came from, so its id and bindings come too.
     for (const name of configFiles()) await fs.rm(path.join(TMP, name), { force: true });
-    const applied = await configSnapshot.apply(JSON.parse(JSON.stringify(bundle)));
+    const applied = await configSnapshot.apply(JSON.parse(JSON.stringify(bundle)), { replacesOriginal: true });
     assert.deepEqual(applied.slice().sort(), configFiles().slice().sort());
     for (const name of configFiles()) {
       const onDisk = (await readOnDisk(name)) as Record<string, unknown>;
@@ -217,6 +262,9 @@ describe("config restore checks", () => {
 
   test("a restore cannot write the secrets file or the key, nor a credential into a config file", async () => {
     await fs.writeFile(path.join(TMP, "secrets.bin"), "sealed", "utf8");
+    // No bindings on this box, so the restore has none to release (see
+    // config-snapshot-server-id.test.ts) and writes only what this test is about.
+    await fs.rm(path.join(TMP, "kiosk-devices.json"), { force: true });
     const applied = await configSnapshot.apply(
       bundleOf({
         "secrets.bin": { forged: true },
@@ -251,6 +299,24 @@ describe("config restore checks", () => {
     assert.deepEqual(applied.slice().sort(), configFiles().slice().sort());
     assert.deepEqual(await readOnDisk("presets.json"), presets);
     await assert.rejects(() => fs.stat(path.join(TMP, "newer-store-0.json")), { code: "ENOENT" });
+  });
+
+  test("a backup from a build that kept photo themes restores, ignoring the file and the image folder, and leaves an operator's own copy on disk", async () => {
+    // Photo themes were held out of a release after backups carried them. Neither the file nor the
+    // folder is this build's to restore, and neither is this build's to delete.
+    const mine = { version: 1, themes: [{ id: "th-0123456789ab", name: "Mine" }], plans: [] };
+    await fs.writeFile(path.join(TMP, "photo-themes.json"), JSON.stringify(mine), "utf8");
+    await fs.mkdir(path.join(TMP, "photo-theme-images"), { recursive: true });
+    await fs.writeFile(path.join(TMP, "photo-theme-images", "0123456789abcdef.webp"), "kept", "utf8");
+    const bundle = {
+      ...bundleOf({ ...GOOD, "photo-themes.json": { version: 1, themes: [], plans: [] } }),
+      images: { "photo-theme-images/fedcba9876543210.webp": Buffer.from("theirs").toString("base64") },
+    };
+    const applied = await configSnapshot.apply(bundle);
+    assert.deepEqual(applied.slice().sort(), configFiles().slice().sort());
+    assert.deepEqual(await readOnDisk("photo-themes.json"), mine, "the operator's theme file was rewritten");
+    assert.equal(await fs.readFile(path.join(TMP, "photo-theme-images", "0123456789abcdef.webp"), "utf8"), "kept");
+    await assert.rejects(() => fs.stat(path.join(TMP, "photo-theme-images", "fedcba9876543210.webp")), { code: "ENOENT" });
   });
 
   test("the start-up check names a file on disk a save would refuse, and leaves it", async () => {
@@ -309,6 +375,17 @@ describe("config restore checks", () => {
     assert.deepEqual(await readOnDisk("automation-rules.json"), [noParams]);
   });
 
+  test("refuses a condition that is not a step, naming it, and keeps one with no params", async () => {
+    const rule = (GOOD["automation-rules.json"] as Record<string, unknown>[])[0];
+    const refused = (conditions: unknown[]) => configSnapshot.apply(bundleOf({ "automation-rules.json": [{ ...rule, conditions }] }));
+    await assert.rejects(() => refused([null]), /rule "Lights off"'s condition 1 must be an object/);
+    await assert.rejects(() => refused([{ params: {} }]), /rule "Lights off"'s condition 1 id/);
+    await assert.rejects(() => refused([{ id: "service.live", params: "x" }]), /rule "Lights off"'s condition 1 params must be an object/);
+    const ok = { ...rule, conditions: [{ id: "service.live" }] };
+    await configSnapshot.apply(bundleOf({ "automation-rules.json": [ok] }));
+    assert.deepEqual(await readOnDisk("automation-rules.json"), [ok]);
+  });
+
   test("refuses ids that would reach the prototype, and a binding to no screen", async () => {
     const rule = (GOOD["automation-rules.json"] as object[])[0];
     const view = (GOOD["views.json"] as object[])[0];
@@ -324,7 +401,11 @@ describe("config restore checks", () => {
   });
 
   test("a bound device restored without its MAC list gets an empty one", async () => {
-    await configSnapshot.apply(bundleOf({ "kiosk-devices.json": [{ id: "dev-1", token: "x", outputId: "1" }] }));
+    // With the id of the server the bindings are to, taken: bindings are written only then.
+    await configSnapshot.apply(
+      bundleOf({ "settings.json": { serverId: "5e0c1a2b-3c4d-4e5f-8a9b-0c1d2e3f4a5b" }, "kiosk-devices.json": [{ id: "dev-1", token: "x", outputId: "1" }] }),
+      { replacesOriginal: true },
+    );
     assert.deepEqual(await readOnDisk("kiosk-devices.json"), [{ id: "dev-1", outputId: "1", macs: [], token: "" }]);
   });
 
@@ -384,17 +465,13 @@ describe("config restore checks", () => {
   });
 
   describe("a refused restore touches nothing", () => {
-    const poller = livePoller as unknown as { running: boolean; timer: ReturnType<typeof setTimeout> | null };
-
     test("the background writers keep running", async () => {
-      poller.running = true;
+      livePoller["running"] = true;
       try {
         await assert.rejects(() => configSnapshot.apply(bundleOf({ "views.json": BAD["views.json"].value })), RestoreRefusedError);
-        assert.equal(poller.running, true, "a refused restore stopped the live poller");
+        assert.equal(livePoller["running"], true, "a refused restore stopped the live poller");
       } finally {
-        poller.running = false;
-        if (poller.timer) clearTimeout(poller.timer);
-        poller.timer = null;
+        livePoller.stop();
       }
     });
 

@@ -19,7 +19,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, settle, unmountAndTeardown, mountInAct } from "../test-dom.js";
 import { baptismState } from "../test-fixtures/baptism-state.js";
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 import { ok } from "../test-fixtures/fetch-log.js";
@@ -119,7 +119,7 @@ test("a rebuild reloads this page's own sessions, whether started here or pushed
     return ok({});
   }) as unknown as typeof fetch;
   try {
-    render(React.createElement(TooltipProvider, null, React.createElement(BaptismOperator)));
+    await mountInAct(render, React.createElement(TooltipProvider, null, React.createElement(BaptismOperator)));
     await settle();
     await eventually(() => assert.ok(sessionCalls >= 1, "sanity: mounting fetches sessions at least once"));
     await settle();
@@ -128,7 +128,7 @@ test("a rebuild reloads this page's own sessions, whether started here or pushed
     // A rebuild the server broadcasts as having actually restored something
     // — the shape a rebuild started from History (never touching this
     // page's own onRebuilt props) produces.
-    FakeEventSource.last!.push("baptism:rebuilt", { serviceKey: "st1:plan-1:9am", ids: ["bap-1"] });
+    act(() => { FakeEventSource.last!.push("baptism:rebuilt", { serviceKey: "st1:plan-1:9am", ids: ["bap-1"] }); });
     await act(async () => {
       await settle();
     });
@@ -162,7 +162,7 @@ test("confirming the header's own Rebuild reloads this page's own sessions", asy
   };
   let sessionCalls = 0;
   const realFetch = globalThis.fetch;
-  globalThis.fetch = (async (input: string, init?: RequestInit) => {
+  globalThis.fetch = (async (input: string) => {
     const url = String(input);
     if (url.endsWith("/api/baptism")) return ok(IDLE_NO_KEY);
     if (url.endsWith("/api/baptism/sessions")) {
@@ -171,7 +171,6 @@ test("confirming the header's own Rebuild reloads this page's own sessions", asy
     }
     if (url.includes("/api/history/live")) return ok({ live: false });
     if (url.includes("/api/baptism/rebuild")) {
-      void init;
       return ok({ rows: 3, sessions: 1, updated: 0, added: 1, unchanged: 0, newer: 0, disagreeing: 0, invalid: 0, kept: 0, full: 0, restoredIds: ["bap-past-1"] });
     }
     return ok({});
@@ -258,7 +257,7 @@ test("a Finish pushed from elsewhere (Companion, a second tab, the display) relo
     // The server finalizes (a Companion key bound to baptism.advance on the
     // last person, say) and broadcasts the finished state. Nothing on THIS
     // page pressed Finish.
-    FakeEventSource.last!.push("baptism:state", FINISHED);
+    act(() => { FakeEventSource.last!.push("baptism:state", FINISHED); });
     await act(async () => {
       await settle();
     });

@@ -7,7 +7,25 @@
 
 
 // ── Stage patch sheet (see docs/patch-sheet/DESIGN.md) ───────────────────────
+
+/** The ten swatches a patch device can be tinted with: a curated, dark-legible
+ *  palette. Stage plot items take their colour from the same list, so a plot
+ *  and the patch read in the same colours. Data, not theme: set per device. */
+export const PATCH_COLORS = ["#e5484d", "#f76b15", "#ffb224", "#46a758", "#12a594", "#0091ff", "#3e63dd", "#8e4ec6", "#e93d82", "#8b8d98"] as const;
+/** What each swatch is called, in PATCH_COLORS order. */
+export const PATCH_COLOR_NAMES = ["Red", "Orange", "Amber", "Green", "Teal", "Blue", "Indigo", "Purple", "Pink", "Grey"] as const;
 export type PatchDeviceKind = "rack" | "snake" | "drop-snake" | "pocket" | "wireless" | "array" | "other";
+/** What each kind is called, in the order the device editor offers them. The stage plots
+ *  patch device picker names devices with the same words. */
+export const PATCH_KIND_LABELS: Record<PatchDeviceKind, string> = {
+  rack: "Input Rack",
+  snake: "Snake",
+  "drop-snake": "Drop snake",
+  pocket: "Floor pocket",
+  wireless: "Wireless / RF",
+  array: "Array",
+  other: "Other",
+};
 
 /** A physical device that carries channels (SD rack, snake, pocket, RF bank, …). */
 export interface PatchDevice {

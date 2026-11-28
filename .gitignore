@@ -98,5 +98,5 @@ scripts/survival/.survival-*.log
 resi-capture.json
 *-capture.json
 
-# Local list for scripts/check-public-hygiene.mjs (see docs/contributing.md)
+# Local list for scripts/check-public-hygiene.ts (see docs/contributing.md)
 .private-terms

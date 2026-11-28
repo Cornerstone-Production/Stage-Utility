@@ -202,9 +202,30 @@ async function mountScreensOpen() {
   await click(toggle());
 }
 
+/** Whether the kept page (kept-screens.tsx) is shown; flipped by `keep()` below. */
+let keptMode: "visible" | "hidden" = "visible";
+const keptListeners = new Set<() => void>();
+const setKeptMode = (mode: "visible" | "hidden") => {
+  keptMode = mode;
+  for (const cb of keptListeners) cb();
+};
+
+/** The route as the shell draws it: inside an <Activity> the test can hide and show. */
+function KeptScreensRoute() {
+  const mode = React.useSyncExternalStore(
+    (cb: () => void) => {
+      keptListeners.add(cb);
+      return () => keptListeners.delete(cb);
+    },
+    () => keptMode,
+  );
+  return React.createElement(React.Activity, { mode, children: React.createElement(ScreensRoute) });
+}
+
 async function mountScreens() {
+  keptMode = "visible";
   const root = createRootRoute({ component: () => React.createElement(Outlet) });
-  const screens = createRoute({ getParentRoute: () => root, path: "/screens", component: ScreensRoute });
+  const screens = createRoute({ getParentRoute: () => root, path: "/screens", component: KeptScreensRoute });
   const editor = createRoute({ getParentRoute: () => root, path: "/screens/$viewId/edit", component: () => React.createElement("p", null, "The layout editor") });
   const messages = createRoute({
     getParentRoute: () => root,
@@ -325,6 +346,21 @@ describe("the panel and its Settings button", () => {
     await mountScreens();
     assert.equal(panelIsOpen(), false, "an open panel was remembered into the next visit");
     assert.equal(localStorage.length, 0, "the panel wrote its state to the browser");
+  });
+
+  test("kept while the operator is away, the page still comes back with the panel closed and no draft", async () => {
+    // Screens is kept mounted, hidden, for ten minutes after you leave
+    // (kept-screens.tsx), so its state outlives the trip. Only the previews are
+    // meant to: the panel starts closed on every visit, a new screen half filled
+    // in included.
+    await mountScreens();
+    await click(addTile());
+    assert.ok(panelIsOpen(), "Add a screen did not open the panel");
+    await act(async () => setKeptMode("hidden"));
+    await act(async () => setKeptMode("visible"));
+    assert.equal(toggle().getAttribute("aria-pressed"), "false", "the kept page came back with its panel open");
+    await click(toggle());
+    assert.ok(panel().getByText("Nothing selected"), "the kept page came back on the new screen it was left on");
   });
 
   test("closing slides it shut: inert and hidden at once, still drawn through the slide, gone after it", async () => {

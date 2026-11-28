@@ -72,11 +72,10 @@ describe("Ticker", () => {
   it("does not arm while the owner does not want it", async () => {
     // "Stopped" is a property of the OWNER, asked on every arm — not something a
     // tick body has to remember to return.
-    const { ticker, armed } = harness({ tick: async () => "done", wanted: () => false });
+    const { ticker } = harness({ tick: async () => "done", wanted: () => false });
     ticker.arm = Ticker.prototype.arm.bind(ticker);
     ticker.arm(5);
     assert.equal(ticker.armed, false, "a stopped ticker armed a timer");
-    void armed;
   });
 
   it("does not arm behind a reconfigure that landed mid-tick", async () => {

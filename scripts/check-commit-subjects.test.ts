@@ -20,7 +20,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import COMMIT_TYPE_FILE from "../main/services/commit-types.json" with { type: "json" };
-import { subjectIsValid } from "./check-commit-subjects.mjs";
+import { subjectIsValid } from "./check-commit-subjects.ts";
 
 // The types are main/services/commit-types.json's: the tests below loop over what
 // it says, so a type added there is covered the day it is added.
@@ -99,7 +99,7 @@ describe("what the lint tells an author whose subject it rejects", () => {
       git("tag", "base");
       git("commit", "-q", "--allow-empty", "-m", "wip: half a thing");
 
-      const script = fileURLToPath(new URL("./check-commit-subjects.mjs", import.meta.url));
+      const script = fileURLToPath(new URL("./check-commit-subjects.ts", import.meta.url));
       const r = spawnSync("node", [script, "base"], { cwd: dir, encoding: "utf8" });
       assert.equal(r.status, 1, r.stdout);
       const offered = /type must be one of:\n\s+(.+)\n/.exec(r.stderr)?.[1].split(" ");

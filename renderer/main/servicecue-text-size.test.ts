@@ -15,25 +15,33 @@ import {
   parseTextSize,
   readStoredSize,
   stepTextSize,
+  TEXT_SIZE_STEP,
   textSizeFromSearch,
   writeStoredSize,
 } from "./servicecue-text-size.js";
 
 describe("stepping", () => {
-  test("A+ and A- move by ten from a multiple of ten", () => {
-    assert.equal(stepTextSize(100, 1), 110);
-    assert.equal(stepTextSize(100, -1), 90);
-    assert.equal(stepTextSize(50, 1), 60);
-    assert.equal(stepTextSize(300, -1), 290);
+  test("A+ and A- move by five from a multiple of five, the step a screen's Text size takes too", () => {
+    assert.equal(TEXT_SIZE_STEP, 5);
+    assert.equal(stepTextSize(100, 1), 105);
+    assert.equal(stepTextSize(100, -1), 95);
+    assert.equal(stepTextSize(50, 1), 55);
+    assert.equal(stepTextSize(300, -1), 295);
   });
 
-  test("from an off-grid value they land on the next multiple of ten, not ten away", () => {
+  test("from an off-grid value they land on the next multiple of five, not five away", () => {
     assert.equal(stepTextSize(137, 1), 140);
-    assert.equal(stepTextSize(137, -1), 130);
-    assert.equal(stepTextSize(101, 1), 110);
+    assert.equal(stepTextSize(137, -1), 135);
+    assert.equal(stepTextSize(101, 1), 105);
     assert.equal(stepTextSize(101, -1), 100);
     assert.equal(stepTextSize(99, 1), 100);
-    assert.equal(stepTextSize(99, -1), 90);
+    assert.equal(stepTextSize(99, -1), 95);
+  });
+
+  test("a size remembered on the old step of ten is still a size, and steps from where it is", () => {
+    assert.equal(stepTextSize(110, 1), 115);
+    assert.equal(stepTextSize(110, -1), 105);
+    assert.equal(stepTextSize(90, 1), 95);
   });
 
   test("they stop at 50 and 300", () => {
@@ -41,6 +49,7 @@ describe("stepping", () => {
     assert.equal(stepTextSize(52, -1), 50);
     assert.equal(stepTextSize(300, 1), 300);
     assert.equal(stepTextSize(297, 1), 300);
+    assert.equal(stepTextSize(298, -1), 295);
   });
 });
 

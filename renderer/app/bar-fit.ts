@@ -35,7 +35,7 @@
 // to do SOMETHING, and of the four things it could do — ellipsise, wrap, scroll,
 // or clip — only ellipsising keeps one row, keeps every number, and tells the
 // reader that a word was cut. It is not meant to be reached: the phone has its
-// own item set precisely so prose can be curated off it, and the configurator
+// own item set precisely so prose can be curated off it, and the bar editor
 // says so while you are choosing. A bar with no prose item on it can never land
 // here.
 //
@@ -91,8 +91,8 @@ export function chooseFitLevel(current: number, fitsAt: (level: number) => boole
  * Returns the ref to put on the strip. THE RUNG DOES NOT COME BACK OUT: it is
  * written to `data-fit` on the element itself and the ladder is expressed in CSS
  * keyed off that attribute, so nothing in React has to know it. It used to be
- * returned as well, on the strength of the configurator showing the operator
- * which rung they had landed on — the configurator shows `over` and the list of
+ * returned as well, on the strength of the bar editor showing the operator
+ * which rung they had landed on — the bar editor shows `over` and the list of
  * prose that got cut, and no call site ever destructured it. The cost was a
  * useState written on every fit, which is one extra render pass per rung change
  * on a strip that already re-renders once a second.
@@ -114,7 +114,7 @@ export function useBarFit<T extends HTMLElement>(): {
    * it — all numbers and marks — has nothing left to give and can still be too
    * long. `overflow: hidden` keeps that from printing over the page, but a
    * silently clipped reading is the one failure this bar must not have quietly,
-   * so the number comes out here and the configurator says it out loud.
+   * so the number comes out here and the bar editor says it out loud.
    */
   over: number;
 } {

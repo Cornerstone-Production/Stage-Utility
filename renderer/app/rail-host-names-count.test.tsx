@@ -12,7 +12,6 @@ import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 
 const teardown = installDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
   observe(): void {}
@@ -42,6 +41,8 @@ let waiting: ReturnType<typeof waitingName>[];
 let malformed: unknown;
 /** What the server answers the update status read with. */
 let updateStatus: unknown;
+/** The serverIdentity the state carries; undefined is a server older than the field. */
+let serverIdentity: unknown;
 let routerSeen: { state: { location: { pathname: string } } } | null;
 let fetchStub: ReturnType<typeof stubFetchWithLog>;
 
@@ -49,10 +50,11 @@ beforeEach(() => {
   waiting = [];
   malformed = null;
   updateStatus = {};
+  serverIdentity = undefined;
   routerSeen = null;
   resetHostNamesLog();
   fetchStub = stubFetchWithLog((url) => {
-    if (url.includes("/api/state")) return ok({ views: [], outputs: [], appName: APP });
+    if (url.includes("/api/state")) return ok({ views: [], outputs: [], appName: APP, serverIdentity });
     if (url.startsWith("/api/update/status")) return ok(updateStatus);
     if (url.startsWith("/api/security/host-names")) {
       return ok(malformed ?? { enforce: false, automatic: [], accepted: [], waiting, dismissed: [] });
@@ -188,6 +190,17 @@ describe("the Advanced row leads to the tab its mark is about", () => {
     const c = await renderRail();
     await eventually(() => assert.equal(advancedRow(c).getAttribute("aria-label"), "Advanced, update available, 1 host name waiting"));
     assert.equal(await clickAdvanced(c), "/settings/advanced/updates");
+  });
+
+  test("another server with this server's id: a red mark, said first, and the Network tab over an update", async () => {
+    updateStatus = UPDATE_WAITING;
+    serverIdentity = { id: "srv", check: { state: "ok", at: 1 }, duplicates: [{ address: "192.0.2.60", since: 1 }] };
+    const c = await renderRail();
+    await eventually(() =>
+      assert.equal(advancedRow(c).getAttribute("aria-label"), "Advanced, another server is using this server's id, update available"),
+    );
+    assert.ok(advancedRow(c).querySelector(".bg-danger-9"), "the row carries no red mark");
+    assert.equal(await clickAdvanced(c), "/settings/advanced/network");
   });
 
   test("with nothing to say it goes to the page's own address, which opens General", async () => {

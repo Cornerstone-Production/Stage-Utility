@@ -222,6 +222,11 @@
   --color-accent-hover:   var(--su-accent-hover);
   --color-accent-active:  var(--su-accent-active);
   --color-accent-text:    var(--su-accent-text);
+  --color-accent-soft:        var(--su-accent-soft);
+  --color-accent-soft-hover:  var(--su-accent-soft-hover);
+  --color-accent-soft-active: var(--su-accent-soft-active);
+  --color-accent-soft-line:   var(--su-accent-soft-line);
+  --color-accent-soft-fg:     var(--su-accent-soft-fg);
   --color-on-accent:      var(--su-on-accent);
   --color-focus:          var(--su-focus);
   --color-field:          var(--su-field);
@@ -290,6 +295,17 @@
      resolves HERE, so a kiosk preview inside the light app inherits this value
      rather than an undefined one. Never use it on a light ground. */
   --su-accent-text:    color-mix(in srgb, var(--brand-accent), white 45%);
+  /* The soft accent (Button variant="soft"): the accent at low strength, for a
+     control that has to be findable without competing with the one solid accent
+     action beside it — What's new beside Update now. A fill, an inset line and
+     accent text, all derived from --su-accent so they follow Branding. The text
+     is the accent itself on a light ground; .dark and .kiosk lift it to
+     --su-accent-text, since a deep picked hex does not read on near-black. */
+  --su-accent-soft:        color-mix(in srgb, var(--su-accent), transparent 86%);
+  --su-accent-soft-hover:  color-mix(in srgb, var(--su-accent), transparent 78%);
+  --su-accent-soft-active: color-mix(in srgb, var(--su-accent), transparent 70%);
+  --su-accent-soft-line:   color-mix(in srgb, var(--su-accent), transparent 70%);
+  --su-accent-soft-fg:     var(--su-accent);
   --su-on-accent:      #ffffff;
   --su-focus:          var(--brand-accent);   /* focus ring */
   --su-field:          var(--gray-a2);  /* input / control fill */
@@ -336,6 +352,7 @@
   /* On dark, accent states lighten (not darken). */
   --su-accent-hover:  color-mix(in srgb, var(--brand-accent), white 14%);
   --su-accent-active: color-mix(in srgb, var(--brand-accent), white 26%);
+  --su-accent-soft-fg: var(--su-accent-text);
   --su-shadow-1: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 4px 18px rgba(0, 0, 0, 0.40);
   --su-shadow-2: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 14px 44px rgba(0, 0, 0, 0.55);
 }
@@ -358,6 +375,7 @@
   --su-fg-soft:        rgba(255, 255, 255, 0.82);  /* rundown Clock and Time */
   --su-accent-hover:  color-mix(in srgb, var(--brand-accent), white 14%);
   --su-accent-active: color-mix(in srgb, var(--brand-accent), white 26%);
+  --su-accent-soft-fg: var(--su-accent-text);
   --su-shadow-1: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 4px 18px rgba(0, 0, 0, 0.45);
   --su-shadow-2: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 16px 48px rgba(0, 0, 0, 0.6);
 }
@@ -762,11 +780,13 @@
     display: none !important;
   }
 
-  /* Only the sheet, and what holds it. */
-  :root:has(.patch-print-sheet) :not(:has(.patch-print-sheet)):not(.patch-print-sheet):not(.patch-print-sheet *) {
+  /* Only the sheet, and what holds it. A stage plot's print sheet
+     (.stageplots-print-sheet, below) is made the page the same way. */
+  :root:has(.patch-print-sheet, .stageplots-print-sheet)
+    :not(:has(.patch-print-sheet, .stageplots-print-sheet)):not(.patch-print-sheet, .stageplots-print-sheet):not(.patch-print-sheet *, .stageplots-print-sheet *) {
     display: none !important;
   }
-  :has(.patch-print-sheet) {
+  :has(.patch-print-sheet, .stageplots-print-sheet) {
     display: block !important;
     position: static !important;
     height: auto !important;
@@ -905,22 +925,30 @@ body {
   }
 }
 
-/* The configurator's editing strip, and NOTHING else.
-   The bar never scrolls; this is not the bar. It is the surface the operator
-   drags rows on, and inside a dialog on a phone it is narrower than the bar it
-   speaks for — so an arrangement that fits the phone perfectly still runs past
-   the edge in here, and `overflow: hidden` would leave the last rows unreachable
-   and un-removable.
-   Horizontal only, and the row geometry is untouched: the drop maths reads the
-   rows' midpoints in viewport coordinates, so it survives a scroll but would not
-   survive a wrap. */
-.context-strip.bar-editor {
-  overflow-x: auto;
-  overflow-y: hidden;
-  scrollbar-width: none; /* Firefox */
+/* The bar editor's editing strip, and NOTHING else.
+   The bar never wraps; this is not the bar. It is the surface the operator drags
+   readings on, and an arrangement that fits the page's bar can still be wider
+   than this strip (a phone set held to a phone's width, a reading shown in full
+   rather than compacted), so it WRAPS rather than scrolling: a reading out of
+   sight is one you cannot take off, and a scrolled strip hid them. The gaps are
+   wide enough that a chip's corner × never reaches its neighbour or the next
+   line's. What a phone will actually do is the 320 px warning, measured by
+   NarrowProbe on the real, unwrapped strip, so wrapping here hides nothing. The
+   drop maths reads each row's box, line by line (gapFromBoxes in bar-drop.ts). */
+/* A reading longer than the whole strip (a long service type on a narrow phone)
+   is the one thing wrapping cannot place, so its prose gives way, here only. */
+.context-strip.bar-editor .bar-prose {
+  flex: 0 1 auto;
+  min-width: 0;
 }
-.context-strip.bar-editor::-webkit-scrollbar {
-  display: none;
+.context-strip.bar-editor {
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 42px;
+  column-gap: 18px;
+  row-gap: 14px;
+  padding-block: 12px;
+  overflow: visible;
 }
 
 /* The page's name, at the head of the strip on a desktop. NOT an item: it is the
@@ -1024,7 +1052,7 @@ body {
    title — gives up its width and ellipsises.
 
    It is not meant to be reached. A phone has its own item set (see
-   bar-items.ts) so prose can be curated off it, and the configurator says which
+   bar-items.ts) so prose can be curated off it, and the bar editor says which
    arrangements land here while you are still arranging them. A bar carrying no
    prose item cannot land here at all.
 
@@ -2070,4 +2098,71 @@ button.score-capsule:focus-visible {
   --su-companion-key-fg: #fff;
   /* The dark plate under a key's small labels (ref, imported). */
   --su-companion-plate: #000;
+}
+
+/* A stage plot printed: white paper and dark ink in either theme, mounted only
+   while printing (stageplots-print.tsx) and never shown on screen. In print,
+   the patch block above drops everything that does not hold it; here it gets a
+   landscape page of its own (a named @page, so the patch sheet keeps its
+   portrait one) and keeps its swatch colours. */
+:root {
+  --su-print-paper: #ffffff;
+  --su-print-ink: #161616;
+  --su-print-muted: #5e5e5e;
+  --su-print-line: #dcdcdc;
+}
+.stageplots-paper {
+  --su-plot-paper: var(--su-print-paper);
+  --su-plot-grid: #ededed;
+  --su-plot-ink: #3b3b3b;
+  --su-plot-label: var(--su-print-ink);
+  --legend-ink: var(--su-print-muted);
+  --legend-on: var(--su-print-paper);
+  --su-surface-raised: var(--su-print-paper);
+  --su-fg-soft: var(--su-print-ink);
+  --su-fg-subtle: var(--su-print-muted);
+  background: var(--su-print-paper);
+  color: var(--su-print-ink);
+  color-scheme: light;
+}
+.stageplots-print-sheet {
+  display: none;
+}
+@page stageplot {
+  size: landscape;
+  margin: 12mm;
+}
+@media print {
+  .stageplots-print-sheet {
+    display: block !important;
+    page: stageplot;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+  .stageplots-print-page {
+    height: calc(100vh - 1px);
+    break-inside: avoid;
+  }
+  .stageplots-print-next {
+    break-before: page;
+  }
+}
+
+/* Stage plots: the paper a plot is drawn on, its grid, the ink of an item with no
+   colour of its own and the ink of its label. A converted background is a light
+   raster, so a plot sits on paper in both themes: dimmed in dark rather than
+   inverted, since inverting would turn a colour photo into a negative. A printed
+   plot is white paper in either theme (.stageplots-paper). Strictly neutral
+   (R=G=B). An item's own colour is data: one of the patch sheet's swatches. */
+:root {
+  --su-plot-paper: #ffffff;
+  --su-plot-grid: #ededed;
+  --su-plot-ink: #3b3b3b;
+  --su-plot-label: #1c1c1c;
+}
+.dark {
+  --su-plot-paper: #d9d9d9;
+  --su-plot-grid: #cacaca;
+  --su-plot-ink: #303030;
+  --su-plot-label: #141414;
 }

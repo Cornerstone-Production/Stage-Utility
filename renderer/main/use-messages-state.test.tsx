@@ -12,7 +12,6 @@ import { eventually, installDom, readLedger, settle, unmountAndTeardown } from "
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 
 const teardown = installDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
 let answer: () => Promise<unknown> = async () => ({});
@@ -26,7 +25,7 @@ const reads = readLedger();
   if (url.startsWith("/api/log/client")) return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
   if (!url.startsWith("/api/messages")) throw new Error(`unexpected fetch: ${url}`);
   inits.push(init);
-  reads.begin();
+  reads.begin(url);
   const body = await answer().catch((err: unknown) => {
     reads.failed();
     throw err;

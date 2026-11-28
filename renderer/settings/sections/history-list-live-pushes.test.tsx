@@ -23,7 +23,6 @@ import { eventually, installDom, settle, unmountAndTeardown } from "../../test-d
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 
 const teardown = installDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 (globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
@@ -123,7 +122,6 @@ function installFetch(): void {
     if (url === "/api/service-timeline") return ok([timeline()]);
     if (url === "/api/attendance/history?summary=1") return ok([attendance()]);
     if (url === "/api/spl/summary") return ok([]);
-    if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
     if (url === "/api/baptism/sessions") return ok([]);
     if (url.startsWith("/api/baptism/lane")) return ok({ spans: [] });
     if (url === `/api/service-timeline/${encodeURIComponent(KEY)}`) return ok(timeline());
@@ -188,10 +186,10 @@ describe("a live push updates a row already on screen", () => {
     // Before the push: the month fetch answered null, so the row has nothing.
     assert.equal(figuresOf(row).level.caption, "no sound recorded", "expected the row to start with no sound recorded");
 
-    FakeEventSource.last!.push("spl:history", splRecording());
+    act(() => { FakeEventSource.last!.push("spl:history", splRecording()); });
     await settle();
 
-    const kpis = new Map(serviceKpis(timeline(), attendance(), splRecording()).map((k) => [k.key, k]));
+    const kpis = new Map(serviceKpis(timeline(), attendance(), splRecording(), { trends: null, chosen: null }).map((k) => [k.key, k]));
     await eventually(() => {
       const drawn = figuresOf(view.container.querySelector(`[data-history-row="${KEY}"]`)!);
       assert.equal(
@@ -215,7 +213,7 @@ describe("a live push updates a row already on screen", () => {
 
     const closed: ServiceTimeline = { ...timeline(), endedAt: iso("21:45:00") };
     closed.items = closed.items.map((it) => ({ ...it, endedAt: it.endedAt ?? iso("21:45:00") }));
-    FakeEventSource.last!.push("service-timeline:history", closed);
+    act(() => { FakeEventSource.last!.push("service-timeline:history", closed); });
     await settle();
 
     await eventually(() => {

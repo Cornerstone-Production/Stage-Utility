@@ -37,10 +37,6 @@ import { fileURLToPath } from "node:url";
 import { installDom, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
-// React only act-wraps a render, and only warns when an update escapes one,
-// once it is told it is in a test environment. Without this the file reads
-// as clean while 2 updates land outside act.
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { render, cleanup, act } = await import("@testing-library/react");
 const { createScoreActivity, SCORE_HOLD_MS, scoreActivity } =
@@ -674,7 +670,7 @@ describe("a card names its game once, not twice", () => {
 
   test("and the capsule still names the game, with its own suffix", () => {
     // NOT preview: a preview chip renders an inert <span> with no label at all
-    // (it is the configurator's dead sample), so asserting on it asserts nothing.
+    // (it is the bar editor's dead sample), so asserting on it asserts nothing.
     const { container } = render(<ScoreCapsule game={game()} scored={null} />);
     const el = container.querySelector("[aria-label]");
     const label = el?.getAttribute("aria-label") ?? "";

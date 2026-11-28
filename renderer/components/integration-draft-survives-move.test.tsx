@@ -19,10 +19,6 @@ import { after, beforeEach, describe, test } from "node:test";
 import { eventually, installDom, settle, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
-// React only act-wraps a render, and only warns when an update escapes one,
-// once it is told it is in a test environment. Without this the file reads
-// as clean while 155 updates land outside act.
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const { installFakeServer, withQueryClient, assertAbsent, integrationCard, actIdle } = await import(

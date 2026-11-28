@@ -1,8 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 
-// @ts-expect-error — plain .mjs helper shared with the shell update scripts.
-import { compareRevs } from "./manifest-changed.mjs";
+import { compareRevs } from "./manifest-changed.ts";
 
 /** A fake `git show` over a map of rev -> { file: contents }. */
 const reader = (revs: Record<string, Record<string, string>>) =>

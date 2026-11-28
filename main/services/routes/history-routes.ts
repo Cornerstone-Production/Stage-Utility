@@ -6,7 +6,7 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
-import { type RouteCtx, json, error, readBody, readBodyOrEmpty, pcoReadFailed } from "./context.js";
+import { type RouteCtx, json, error, readBodyOrEmpty, pcoReadFailed, readJsonObject } from "./context.js";
 import { errorMessage } from "../errors.js";
 import { baptismTriggersStore } from "../baptism-triggers-store.js";
 import { stageController } from "../stage-controller.js";
@@ -30,6 +30,7 @@ import {
 } from "../history-edit.js";
 import { broadcastTimeline, overlaidTimeline } from "../history-item-times.js";
 import { historyMilestonesStore } from "../history-milestones-store.js";
+import { trendsPrefs, TrendsPrefsRefused } from "../trends-prefs.js";
 import { sampleArchive } from "../archive/sample-archive.js";
 import { readBaptismRows } from "../archive/rebuild-baptism.js";
 import { baptismLaneSpans, type BaptismSpan } from "../archive/baptism-lane.js";
@@ -151,6 +152,9 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       await editServiceWindow(body.serviceKey, {
         startedAt: typeof body.startedAt === "string" ? body.startedAt : undefined,
         endedAt: typeof body.endedAt === "string" ? body.endedAt : undefined,
+        // Only a literal true: a window that would delete recorded data is
+        // refused (409 trims-data) unless the caller says that is meant.
+        trim: body.trim === true,
       });
       json(res, { ok: true });
       return;
@@ -229,6 +233,23 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
       // indistinguishable from a complete one.
       const outcome = await mergeServiceRecords(body.sourceKey, body.targetKey);
       json(res, { ok: true, ...outcome });
+      return;
+    }
+    // ── Trends settings: which Smaart metric the Sound measure plots ──
+    if (method === "GET" && pathname === "/api/history/trends-prefs") {
+      json(res, trendsPrefs.state());
+      return;
+    }
+    if (method === "POST" && pathname === "/api/history/trends-prefs") {
+      const body = await readBodyOrEmpty(req);
+      try {
+        json(res, await trendsPrefs.setSoundMetric(body.soundMetric));
+      } catch (err) {
+        // A write that failed is left to the server's handler (500): a choice
+        // that did not save must not read as one that did.
+        if (!(err instanceof TrendsPrefsRefused)) throw err;
+        error(res, err.message);
+      }
       return;
     }
     // ── Milestones: the operator's own dates marked under the Trends chart ──
@@ -390,7 +411,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
         return;
       }
       if (method === "POST") {
-        const body = (await readBody(req)) as Record<string, unknown>;
+        const body = await readJsonObject(req);
         const id = typeof body.planId === "string" ? body.planId : planId;
         if (!id) {
           json(res, { error: "planId required" }, 400);
@@ -423,7 +444,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
         case "reset": json(res, baptismTimerService.reset()); return;
         case "dismiss-save-error": json(res, baptismTimerService.dismissSaveError()); return;
         case "mode": {
-          const body = (await readBody(req)) as Record<string, unknown>;
+          const body = await readJsonObject(req);
           json(res, baptismTimerService.setMode(body.mode === "grouped" ? "grouped" : "per-person"));
           return;
         }
@@ -513,7 +534,7 @@ export async function historyRoutes(c: RouteCtx): Promise<void> {
     // Awaited before the response: a tick that looked saved and was not is how
     // somebody skips a job on Sunday believing it was done.
     if (method === "POST" && pathname === "/api/pco/checklist/tick") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (typeof body.key !== "string" || typeof body.done !== "boolean") {
         error(res, "body.key (string) and body.done (boolean) required");
         return;

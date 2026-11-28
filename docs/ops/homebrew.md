@@ -147,7 +147,7 @@ formulae at once is not an option, since they collide on the same binary name.
 ## The tap
 
 The formula is generated from each release by
-`scripts/update-homebrew-formula.mjs` and published to
+`scripts/update-homebrew-formula.ts` and published to
 [`Cornerstone-Production/homebrew-stage-utility`](https://github.com/Cornerstone-Production/homebrew-stage-utility).
 It is not in `homebrew-core`, which requires a level of general notability this
 project does not have.

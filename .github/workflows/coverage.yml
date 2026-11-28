@@ -49,9 +49,9 @@ jobs:
           # exceeded", and the suite exited with no report. RUNNER_TEMP is real disk.
           export TMPDIR="$RUNNER_TEMP"
           df -h /tmp "$TMPDIR"; findmnt -T /tmp
-          # The same file set as npm test (scripts/run-tests.mjs), not a copy of it.
+          # The same file set as npm test (scripts/run-tests.ts), not a copy of it.
           # A failing test does not stop the report; no report at all does.
-          node scripts/run-tests.mjs --experimental-test-coverage > "$TMPDIR/cov.txt" 2>&1 || true
+          node --no-warnings scripts/run-tests.ts --experimental-test-coverage > "$TMPDIR/cov.txt" 2>&1 || true
           if ! grep -q "all files" "$TMPDIR/cov.txt"; then
             echo "::error::the suite produced no coverage report"
             tail -50 "$TMPDIR/cov.txt"

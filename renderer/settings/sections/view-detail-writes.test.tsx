@@ -1,6 +1,6 @@
 // view-detail-writes.test.tsx — the two fire-and-forget writes ViewDetail
 // issues directly (not through handlers): the console chrome toggle
-// (views:setHideChrome) and the ServiceCue view Columns picker
+// (views:setHideChrome) and the ServiceCue view Layout picker
 // (views:setServiceCueLayout). Both used to be `void invoke(...)` with no
 // `.catch` — a rejected POST reached neither the screen nor /log, and the
 // control just silently did nothing (its value comes from the `view` prop,
@@ -108,7 +108,7 @@ test("a failed console-chrome toggle toasts, rather than doing nothing silently"
   }
 });
 
-test("a failed Columns save toasts, rather than doing nothing silently", async () => {
+test("a failed Layout save toasts, rather than doing nothing silently", async () => {
   const f = stubFetchWithLog((url, init) => {
     if (url.includes("/api/servicecue/layouts")) return ok([{ id: "svl-audio", name: "Audio", order: 0 }]);
     if (init?.method === "PATCH" && url.includes(`/api/views/${SERVICE_CUE_VIEW.id}`)) return reply(500, { error: "boom" });
@@ -120,13 +120,13 @@ test("a failed Columns save toasts, rather than doing nothing silently", async (
     // The layouts are a read behind the first paint; the option the test picks
     // is one of them.
     const columns = await eventually(() => {
-      const box = screen.getByRole("combobox", { name: "Columns" });
+      const box = screen.getByRole("combobox", { name: "Layout" });
       assert.ok([...(box as HTMLSelectElement).options].some((o) => o.value === "svl-audio"), "the layouts never loaded");
       return box;
     });
     fireEvent.change(columns, { target: { value: "svl-audio" } });
     await settle();
-    await eventually(() => assert.match(lastToast(), /Could not change this view's columns/i));
+    await eventually(() => assert.match(lastToast(), /Could not change this view's layout/i));
   } finally {
     f.restore();
   }

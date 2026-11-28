@@ -39,6 +39,7 @@ the operator app and a phone remote from one port.
 | [ServiceCue and Baptisms](docs/features/servicecue-and-baptisms.md) | two operator surfaces on the plan |
 | [ServiceCue on the web](docs/ops/servicecue-on-the-web.md) | a public address for ServiceCue on a free Cloudflare Worker, with no login |
 | [Patch sheet](docs/patch-sheet/README.md) | the stage patch sheet |
+| [StagePlots](docs/features/stageplots.md) | stage diagrams for every venue |
 | [Automation](docs/automation.md) | rules that fire on live events |
 | [Data archive](docs/data-archive.md) | raw sample retention, export and import |
 | [Reliability and data](docs/ops/reliability.md) | behaviour under load, where your data lives |
@@ -95,7 +96,7 @@ enabled independently.
 
 | | |
 |---|---|
-| **Operator app** | One address for everything an operator does: Home (a grid of live tiles), Screens, ServiceCue, Patch, Automation, Plan, History, Baptisms, Messages, Integrations, Branding and Advanced. A live service strip sits above every page, and it works on a phone. [The operator app](docs/features/operator-app.md), [The context bar](docs/features/context-bar.md) |
+| **Operator app** | One address for everything an operator does: Home (a grid of live tiles), Screens, ServiceCue, Patch, Stage plots, Automation, Plan, History, Baptisms, Messages, Integrations, Branding and Advanced. A live service strip sits above every page, and it works on a phone. [The operator app](docs/features/operator-app.md), [The context bar](docs/features/context-bar.md) |
 | **Screens** | A card for every physical screen with a live preview, the view it shows, and its own settings. A machine heard on the network that is not set up yet appears in a banner at the top of Screens, ready to claim. [Operator app](docs/features/operator-app.md#screens), [Kiosk devices](docs/kiosk-devices.md) |
 | **Views and layouts** | Mic slot grids, a tech dashboard, a stage screen, captions, a ServiceCue rundown, an SPL rundown, a Planning Center calendar, or a custom layout you draw on a canvas from the widget registry. A view marked as a console is a live control surface rather than a read-only wall. [Data model](docs/reference/data-model.md), [Layout editor](docs/reference/layout-editor.md), [Widgets](docs/reference/widgets.md) |
 | **Mic slots** | Positions and people from the plan matched to channels, with RF and battery beside the name. A default board per service type, and an override for one plan. [Slots](docs/slots.md), [Wireless](docs/integrations/wireless.md) |
@@ -105,6 +106,7 @@ enabled independently.
 | **ServiceCue and Baptisms** | The plan as a rundown with the note columns each department needs and a live countdown, and a timer for testimonies and baptisms. [ServiceCue and Baptisms](docs/features/servicecue-and-baptisms.md) |
 | **History and trends** | Every service is recorded: attendance, sound levels and item timing, with trends across weeks, a calendar, dated milestones and a spreadsheet export. The raw samples can be exported and imported. [History](docs/features/attendance-and-history.md), [Data archive](docs/data-archive.md) |
 | **Patch sheet** | A weekly stage patch with variants, read by volunteers at `/patch` and exported as CSV or Excel. [Patch sheet](docs/patch-sheet/README.md) |
+| **StagePlots** | Stage diagrams for every room and offsite venue: upload a PNG, JPEG or PDF once, converted into a quiet web image, with several plots per venue and a default. Read-only at `/stageplots` with pinch zoom on a phone. [StagePlots](docs/features/stageplots.md) |
 | **Automation** | Rules of the form "when something happens in Stage, do something to a device", and commands that Companion, Home Assistant or a console button call by name. Simulate mode is on by default. [Automation](docs/automation.md) |
 | **Companion and Home Assistant** | A Bitfocus Companion module drives and reads Stage; commands reach Home Assistant, and through it Apple Home, as switches that report what the gear is doing. [Companion](docs/integrations/companion.md) |
 | **Running it** | Install with one line, update from inside the app, take config snapshots and automatic backups, and read the server's log at `/log`. [Install and config](docs/ops/install-and-config.md), [Updates and logs](docs/ops/updates-and-logs.md) |

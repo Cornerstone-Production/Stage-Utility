@@ -1,4 +1,4 @@
-// servicecue-public-link.tsx — the "Public link" card on the ServiceCue presets page.
+// servicecue-public-link.tsx — the "Public link" card, on Settings > Advanced > Public link.
 //
 // ServiceCue on the web: the server sends what ServiceCue shows out to a page the
 // operator deployed, and volunteers open that page instead of the app. This card is
@@ -19,21 +19,28 @@ import { FORM_MASK, isMask } from "@main/services/mask";
 import { plural } from "@main/services/plural";
 import { parsePublishUrl } from "@main/services/servicecue-publish-rules";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState, type FocusEvent, type ReactNode } from "react";
+import { AlertCircleIcon } from "lucide-react";
+import { useEffect, useState, type FocusEvent, type ReactNode } from "react";
 
 import { AppLink } from "../../app/app-link";
+import { appZoneOf } from "../../lib/app-zone";
+import { pcoConnected, useStageState } from "../../main/use-stage-state";
 import { useUpdateStatus } from "../../app/queries";
 import { QrHint } from "../../components/qr-hint";
 import { Button, ErrorNote, Input, Switch, confirm } from "../../components/ui";
 import { SkeletonRows } from "../../components/ui/skeleton";
 import { invoke } from "../../lib/api";
-import { copyText } from "../../lib/clipboard";
+import { useCopyFeedback } from "../../lib/use-copy-feedback";
+import { useInAppLink } from "../../lib/use-search-param";
 import { docsPageUrl } from "../../lib/docs-url";
 import { cn } from "../../lib/cn";
 import { useFailedReads } from "../../lib/use-failed-reads";
 import { ConnectionField } from "./connection-field";
-import { selectMask, typedTokenOf } from "./servicecue-token";
+import { selectMask, tokenReason, typedTokenOf } from "./servicecue-token";
 import { KeepPageUpToDate, Note } from "./servicecue-deploy-section";
+import { advancedTabPath } from "./advanced-settings";
+import { byOrder } from "./servicecue-layouts-model";
+import type { ServiceCueConfig, ServiceCueLayout, ServiceTypeDTO } from "../../../main/types/pco.js";
 import type {
   PublishProblem,
   PublishSettingsDTO,
@@ -42,13 +49,14 @@ import type {
 
 /** How often the card asks how it is going while the page is open. */
 const POLL_MS = 5_000;
-/** How long "Copied" stays on the button. */
-const COPIED_MS = 1_500;
 
 const QUERY_KEY = ["servicecue:getPublish"] as const;
 
 /** Where Planning Center's credentials are set. */
 const INTEGRATIONS_ROUTE = "/settings/integrations";
+
+/** The line under the setup fields that says why the switch is off; the switch is described by it. */
+const TOKEN_LINE_ID = "pl-tokline";
 
 const ADDRESS_PLACEHOLDER = "https://servicecue.your-account.workers.dev";
 
@@ -183,25 +191,151 @@ function viewOf(dto: PublishSettingsDTO | undefined): View {
   return dto.status.sourceProblem ? "source" : "publishing";
 }
 
+/** The publishing settings and how it is going, read every `pollMs` while anything
+ *  that shows them is mounted. One cache entry, so the card and its row's summary make
+ *  one request between them. */
+function usePublishQuery(pollMs: number) {
+  return useQuery({
+    queryKey: QUERY_KEY,
+    queryFn: () => invoke<PublishSettingsDTO>("servicecue:getPublish"),
+    refetchInterval: pollMs,
+  });
+}
+
+/**
+ * The card's state in its pill's word, for a summary drawn while the card is shut.
+ * Polled like the card, so a shut row still says when publishing stops reaching the page.
+ */
+export function usePublishSummary(pollMs = POLL_MS): string {
+  const { data, error } = usePublishQuery(pollMs);
+  // Said on /log as the card says it (one line per streak), not only as "Couldn't load".
+  const { fail, clear } = useFailedReads<"publish">("servicecue");
+  useEffect(() => {
+    if (error) fail("publish", "the ServiceCue public link status", error);
+    else clear("publish");
+  }, [error, fail, clear]);
+  if (data) return pill[viewOf(data)].word;
+  return error ? "Couldn't load" : "Loading…";
+}
+
+/** Where the card lives. */
+export const PUBLIC_LINK_PATH = advancedTabPath("public-link");
+
+/**
+ * What the card says the public sees, read where the ServiceCue layouts page keeps it: the
+ * landing page's service types (named by Planning Center, so only once it is connected), the
+ * layouts, and the app's zone for the page's deploy time. A read that fails is logged under
+ * the card's tag and reported in `failed`, so the card says so instead of drawing an empty list.
+ */
+export function usePublishScope(): {
+  typeNames: string[];
+  layoutNames: string[];
+  timeZone: string | undefined;
+  failed: ScopeFailed;
+} {
+  const stage = useStageState();
+  const pcoConfigured = pcoConnected(stage.state, stage.error);
+  const { fail, clear } = useFailedReads<"layouts" | "config" | "types">("servicecue");
+  const layouts = useQuery({ queryKey: ["servicecue:listLayouts"], queryFn: () => invoke<ServiceCueLayout[]>("servicecue:listLayouts") });
+  const config = useQuery({ queryKey: ["servicecue:getConfig"], queryFn: () => invoke<ServiceCueConfig>("servicecue:getConfig") });
+  const types = useQuery({
+    queryKey: ["stage:listServiceTypes"],
+    queryFn: () => invoke<ServiceTypeDTO[]>("stage:listServiceTypes"),
+    enabled: pcoConfigured === true,
+  });
+  useEffect(() => {
+    if (layouts.error) fail("layouts", "the layouts the public link lists", layouts.error);
+    else clear("layouts");
+  }, [layouts.error, fail, clear]);
+  useEffect(() => {
+    if (config.error) fail("config", "the service types the public link lists", config.error);
+    else clear("config");
+  }, [config.error, fail, clear]);
+  useEffect(() => {
+    if (types.error) fail("types", "the service type names the public link lists", types.error);
+    else clear("types");
+  }, [types.error, fail, clear]);
+  const shown = new Set(config.data?.serviceTypeIds ?? []);
+  return {
+    typeNames: (types.data ?? []).filter((t) => shown.has(t.id)).map((t) => t.name),
+    layoutNames: byOrder(layouts.data ?? []).map((l) => l.name),
+    timeZone: appZoneOf(stage.state),
+    failed: { layouts: !!layouts.error, types: !!config.error || !!types.error },
+  };
+}
+
+/** Which of the lists "what the public sees" draws could not be read. */
+export interface ScopeFailed {
+  layouts: boolean;
+  types: boolean;
+}
+
+/** The card as Settings > Advanced draws it, with what it publishes loaded alongside. */
+export function PublicLinkPanel() {
+  return <PublicLinkCard {...usePublishScope()} embedded />;
+}
+
+/**
+ * One line on the ServiceCue layouts page: the card's state, and the way to the card. A real
+ * link that opens in a new tab like any other; inside the app's router a plain click navigates
+ * without a reload (null outside a router, where the tests render the page bare).
+ */
+export function PublicLinkStatusRow() {
+  const word = usePublishSummary();
+  return (
+    <div className="flex min-h-11 items-center gap-2 rounded-[10px] border border-line bg-surface px-3 py-2 text-footnote">
+      <span className="whitespace-nowrap font-semibold text-fg">Public link</span>
+      <span className="min-w-0 flex-1 truncate text-fg-muted">· {word}</span>
+      <SettingsInAdvancedLink />
+    </div>
+  );
+}
+
+/** "Settings in Advanced": the way to the Public link tab, for whoever sends the operator there. */
+export function SettingsInAdvancedLink({ children = "Settings in Advanced" }: { children?: ReactNode }) {
+  const go = useInAppLink();
+  return (
+    <a
+      href={PUBLIC_LINK_PATH}
+      onClick={(e) => go(e, { to: PUBLIC_LINK_PATH })}
+      className="whitespace-nowrap rounded-sm text-accent underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+    >
+      {children}
+    </a>
+  );
+}
+
+/** The card on a page of its own, and inside a row that already frames and titles it. */
+const CARD_LOOK = {
+  failed: "mb-5",
+  card: "mb-5 flex flex-col gap-3 rounded-xl border border-line-strong bg-surface px-[18px] py-4",
+  title: "text-subheadline font-semibold text-fg",
+};
+const EMBEDDED_LOOK = { failed: undefined, card: "flex flex-col gap-3", title: "sr-only" };
+
 export function PublicLinkCard({
   typeNames,
   layoutNames,
   timeZone,
+  failed: scopeFailed,
   pollMs = POLL_MS,
+  embedded = false,
 }: {
   typeNames: string[];
   layoutNames: string[];
   /** The app's zone, which the page's deploy time is written in. The browser's own when the app's is not known yet. */
   timeZone?: string;
+  /** Lists that could not be read: the summary says so where it would have drawn them. */
+  failed?: ScopeFailed;
   /** How often it asks how it is going. A seam for the test that watches it change. */
   pollMs?: number;
+  /** Inside a row that already says "Public link" and draws the border: no card frame
+   *  and no visible title of its own. */
+  embedded?: boolean;
 }) {
   const queryClient = useQueryClient();
-  const { data: dto, error: readError, dataUpdatedAt } = useQuery({
-    queryKey: QUERY_KEY,
-    queryFn: () => invoke<PublishSettingsDTO>("servicecue:getPublish"),
-    refetchInterval: pollMs,
-  });
+  const { data: dto, error: readError, dataUpdatedAt } = usePublishQuery(pollMs);
+  const look = embedded ? EMBEDDED_LOOK : CARD_LOOK;
   const branch = useUpdateStatus().data?.branch ?? null;
   // The clock now. The age is read off the SERVER's stamps and the browser's own time
   // since the answer arrived, so a browser whose clock is wrong still says how long ago.
@@ -219,7 +353,6 @@ export function PublicLinkCard({
   const [qrOpen, setQrOpen] = useState(false);
   // null follows the problem: open when the fix is in these fields, shut otherwise.
   const [connOpen, setConnOpen] = useState<boolean | null>(null);
-  const [copied, setCopied] = useState(false);
   // Once the update has needed the operator the section stays in view: fixing it must not make the answer disappear.
   const [deployShown, setDeployShown] = useState(false);
   const { failed, fail, clear } = useFailedReads<"publish">("servicecue");
@@ -234,17 +367,12 @@ export function PublicLinkCard({
     return () => clearInterval(tick);
   }, []);
 
-  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(
-    () => () => {
-      if (copyTimer.current) clearTimeout(copyTimer.current);
-    },
-    [],
-  );
+  const { state: copyState, copy: copyLink } = useCopyFeedback();
+  const copied = copyState === "copied";
 
   if (failed.has("publish") && !dto) {
     return (
-      <section aria-labelledby="pub-title" className="mb-5">
+      <section aria-labelledby="pub-title" className={look.failed}>
         <h2 id="pub-title" className="sr-only">Public link</h2>
         <ErrorNote>Couldn't load the public link settings.</ErrorNote>
       </section>
@@ -257,7 +385,10 @@ export function PublicLinkCard({
   const addr = addrDraft ?? dto?.url ?? "";
   const tok = tokDraft ?? (tokenStored ? FORM_MASK : "");
   const typedToken = typedTokenOf(tokDraft);
-  const canEnable = addr.trim() !== "" && (typedToken !== null || (tokDraft === null && tokenStored));
+  // A token typed here is checked as it is typed, by the rule the server holds it to, so the switch
+  // never turns on for one the server refuses; a stored token (the mask) was checked when it was saved.
+  const reason = typedToken !== null ? tokenReason(typedToken) : null;
+  const canEnable = addr.trim() !== "" && ((typedToken !== null && reason === null) || (tokDraft === null && tokenStored));
   const link = dto?.url ? `${dto.url}/servicecue` : "";
   // `now` and `lastSentAt` are the server's; what has passed since the answer came is the browser's own.
   const ageMs = status?.lastSentAt != null ? status.now - status.lastSentAt + Math.max(0, clock - dataUpdatedAt) : null;
@@ -338,20 +469,46 @@ export function PublicLinkCard({
     if (!dto || working) return;
     const changed = originOf(addr) !== originOf(dto.url);
     if (!changed && typedToken === null) return;
-    if (changed && typedToken === null) {
+    // An emptied address needs no token: the server takes it as it is, and removes the saved token and switches publishing off with it.
+    const cleared = addr.trim() === "";
+    if (changed && typedToken === null && !cleared) {
       // The server would refuse it, and says so; this says it before anything is sent.
       setHint("A different address needs its token: paste it again.");
       return;
     }
     if (changed && !(await movingIsOk(addr))) return;
     await write(async () =>
-      adopt(await invoke<PublishSettingsDTO>("servicecue:setPublish", { ...(changed ? { url: addr.trim() } : {}), token: typedToken })),
+      adopt(await invoke<PublishSettingsDTO>("servicecue:setPublish", { ...(changed ? { url: addr.trim() } : {}), ...(typedToken !== null && !cleared ? { token: typedToken } : {}) })),
     );
   }
+
+  // Under the token field, where the eye is while typing; the switch points at it. Until both
+  // fields are filled it is the hint; then the token's own state, said before the flip. The
+  // setup guide stays beside it whichever is showing.
+  const tokenLine =
+    view === "off" ? (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        {addr.trim() !== "" && typedToken !== null ? (
+          <span id={TOKEN_LINE_ID} className={cn("text-caption1", reason ? "text-warn-11" : "text-ok-11")}>
+            {reason ?? "The token is long enough."}
+          </span>
+        ) : (
+          <span id={TOKEN_LINE_ID} className="text-caption1 text-fg-muted">
+            The switch turns on once both are filled in. Setting up the page takes one command; the guide walks through it.
+          </span>
+        )}
+        <Button asChild variant="transparent" size="small" className="px-1 text-accent">
+          <a href={docsPageUrl("ops/servicecue-on-the-web", branch)} target="_blank" rel="noreferrer">
+            Setup guide
+          </a>
+        </Button>
+      </div>
+    ) : null;
 
   const fields = (
     <ConnectionFields
       setup={view === "off"}
+      below={tokenLine}
       addr={addr}
       tok={tok}
       disabled={working}
@@ -368,19 +525,30 @@ export function PublicLinkCard({
     <section
       aria-labelledby="pub-title"
       data-state={dto ? view : "loading"}
-      className="mb-5 flex flex-col gap-3 rounded-xl border border-line-strong bg-surface px-[18px] py-4"
+      className={look.card}
     >
-      <div className="flex items-center gap-2.5">
-        <h2 id="pub-title" className="text-subheadline font-semibold text-fg">Public link</h2>
-        {dto && (
+      <h2 id="pub-title" className={look.title}>Public link</h2>
+
+      {/* Said before the switch, in every state: the risk does not end when it is on. The
+          docs carried it alone until now, and it is the one fact a church needs before a
+          pastoral note is in a plan. */}
+      <div className="flex items-start gap-2 rounded-lg border border-warn-11/35 bg-warn-11/10 px-3 py-[9px] text-[12.5px] leading-[17px] text-fg">
+        <AlertCircleIcon className="mt-px size-4 shrink-0 text-warn-11" aria-hidden="true" />
+        <span>Every note on these plans is public to anyone with the link.</span>
+      </div>
+
+      <div className="flex items-center justify-between gap-2.5">
+        {dto ? (
           <span className={cn("inline-flex items-center gap-1.5 rounded-full px-[9px] py-0.5 text-caption1 font-medium", pill[view].tone)}>
             <span aria-hidden="true" className="size-[7px] rounded-full bg-current" />
             {pill[view].word}
           </span>
+        ) : (
+          <span />
         )}
         <Switch
-          className="ml-auto"
           aria-label="Publish ServiceCue to the web"
+          aria-describedby={view === "off" ? TOKEN_LINE_ID : undefined}
           checked={view !== "off"}
           disabled={!dto || working || (view === "off" && !canEnable)}
           onCheckedChange={(on) => void (on ? turnOn() : turnOff())}
@@ -404,12 +572,7 @@ export function PublicLinkCard({
               variant="filled"
               size="small"
               className={RAISED_BUTTON}
-              onClick={async () => {
-                if (!(await copyText(link))) return;
-                setCopied(true);
-                if (copyTimer.current) clearTimeout(copyTimer.current);
-                copyTimer.current = setTimeout(() => setCopied(false), COPIED_MS);
-              }}
+              onClick={() => void copyLink(link)}
             >
               {copied ? "Copied" : "Copy"}
             </Button>
@@ -476,16 +639,6 @@ export function PublicLinkCard({
         <div className="flex flex-col gap-2.5">
           {notice && <Note>{notice}</Note>}
           {fields}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-            <span className="text-caption2 text-fg-subtle">
-              The switch turns on once both are filled in. Setting up the page takes one command; the guide walks through it.
-            </span>
-            <Button asChild variant="transparent" size="small" className="px-1 text-accent">
-              <a href={docsPageUrl("ops/servicecue-on-the-web", branch)} target="_blank" rel="noreferrer">
-                Setup guide
-              </a>
-            </Button>
-          </div>
         </div>
       )}
 
@@ -494,13 +647,21 @@ export function PublicLinkCard({
           {notice && <Note>{notice}</Note>}
           <div className="text-caption2 font-semibold uppercase tracking-wider text-fg-subtle">What the public sees</div>
           <ul className="flex list-disc flex-col gap-[3px] pl-[18px] text-footnote">
-            <li>
-              {typeNames.length > 0 ? typeNames.join(", ") : "No service types yet"}{" "}
-              <span className="text-fg-muted">· follows "Shown on the landing page" above</span>
-            </li>
-            <li>
-              {[...layoutNames, "All columns"].join(", ")} <span className="text-fg-muted">· every layout below</span>
-            </li>
+            {scopeFailed?.types ? (
+              <li className="list-none"><ErrorNote>Couldn't load the service types, so this list is incomplete.</ErrorNote></li>
+            ) : (
+              <li>
+                {typeNames.length > 0 ? typeNames.join(", ") : "No service types yet"}{" "}
+                <span className="text-fg-muted">· follows Landing page</span>
+              </li>
+            )}
+            {scopeFailed?.layouts ? (
+              <li className="list-none"><ErrorNote>Couldn't load the layouts, so this list is incomplete.</ErrorNote></li>
+            ) : (
+              <li>
+                {[...layoutNames, "All columns"].join(", ")} <span className="text-fg-muted">· every ServiceCue layout</span>
+              </li>
+            )}
             <li>
               The live item, countdown and clock <span className="text-fg-muted">· as they change</span>
             </li>
@@ -562,12 +723,15 @@ function ConnectionFields({
   tok,
   disabled,
   hint,
+  below,
   onAddr,
   onTok,
   onTokBlank,
   onLeave,
 }: {
   setup: boolean;
+  /** Under the token field, in its own column. */
+  below?: ReactNode;
   addr: string;
   tok: string;
   disabled: boolean;
@@ -603,21 +767,24 @@ function ConnectionFields({
         />
       </ConnectionField>
       <ConnectionField label="Publishing token" hint={setup ? "The same one set on the page" : undefined} id={setup ? "pl-tok" : "pl-tok2"}>
-        <Input
-          id={setup ? "pl-tok" : "pl-tok2"}
-          className="font-mono"
-          type="password"
-          placeholder="Paste the token"
-          value={tok}
-          disabled={disabled}
-          autoComplete="off"
-          onFocus={(e) => selectMask(e, tok)}
-          onChange={(e) => onTok(e.target.value)}
-          onBlur={(e) => {
-            if (tok.trim() === "") onTokBlank();
-            leave?.(e);
-          }}
-        />
+        <div className="flex min-w-0 flex-col gap-1.5">
+          <Input
+            id={setup ? "pl-tok" : "pl-tok2"}
+            className="font-mono"
+            type="password"
+            placeholder="Paste the token"
+            value={tok}
+            disabled={disabled}
+            autoComplete="off"
+            onFocus={(e) => selectMask(e, tok)}
+            onChange={(e) => onTok(e.target.value)}
+            onBlur={(e) => {
+              if (tok.trim() === "") onTokBlank();
+              leave?.(e);
+            }}
+          />
+          {below}
+        </div>
       </ConnectionField>
       {hint && !setup && <p className="text-caption2 text-warn-11">{hint}</p>}
     </div>

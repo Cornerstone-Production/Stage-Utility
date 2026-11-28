@@ -109,7 +109,8 @@ describe("sign-release-assets.sh", () => {
 
   it("fails loudly, and signs nothing, when the secret is not set", () => {
     const zip = payload("StageUtilityOutput-arm64.zip", "zip");
-    for (const env of [{}, { RELEASE_SIGNING_KEY: "" }]) {
+    const unset: Record<string, string>[] = [{}, { RELEASE_SIGNING_KEY: "" }];
+    for (const env of unset) {
       const r = sign(["sig-dist", zip], env);
       assert.equal(r.status, 1);
       assert.match(r.stderr, /^::error title=Release signing::the RELEASE_SIGNING_KEY secret is not set, so this release cannot be signed\./m);

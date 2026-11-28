@@ -443,7 +443,7 @@ name it. A pair shows whenever either half matches.
 |---|---|
 | **Command name** | `lower_snake_case`, unique across rules — and across every command's former names. This is the URL |
 | **Former names** | names this command still answers to, kept when its Companion button was relabelled and the command renamed to match. Up to five, oldest dropped first. Remove one and that URL stops resolving |
-| **Spoken as** | what you say to the assistant. Becomes the friendly name in the generated Home Assistant config |
+| **Spoken as** | what you say to the assistant. Becomes the friendly name in the generated Home Assistant config and the name the Home Assistant integration shows. Left blank, the command is called by its command name with capitals (`foyer_tvs` is *Foyer Tvs*), never by the rule's name. A trailing "on" is taken off, because Home Assistant supplies the verb |
 | **Room** | where the thing is. Recorded in the log; nothing routes on it |
 | **Home Assistant** | on by default for a command imported from Companion, and off for one made with [New command](#creating-a-command). Off keeps the command out of Home Assistant and Apple Home entirely, leaving it callable by voice and by HTTP. A pair's two halves share one setting, stored on the `_on` half |
 | **State variable** | in **This pair**, for an ON/OFF pair only, and required for a [toggle](integrations/companion.md#toggle-buttons) pair whose halves press one button. Saved on the `_on` rule. Either a Companion **custom variable** your own buttons set — `projectors_state`, or `custom:projectors_state` — or a **module variable** a connection publishes for itself, `<connection label>:<name>` as in `Booth-Overhead-Light:power_state`. The generated Home Assistant switch then reports what the device is doing rather than what it was asked to do, and a call asking for the state it is already in presses nothing. A button that drives a smart plug, television, projector or OBS has its module variable offered here already, marked `(inferred)`. Blank leaves the switch optimistic. See [Real state](integrations/companion.md#real-state) and [State from Stage Utility](#state-from-stage-utility) |
@@ -539,7 +539,7 @@ not move on until it is filled, by the same check the editor's
 A manual command is made with **Home Assistant off** and **Allowed during a service
 on**: it is voice-only and console-only until you switch Home Assistant on, and it
 carries no [service guard](#commands) unless you switch that off. The command name is
-derived from the name you type, `lower_snake_case`, and shown read-only on
+derived from the name you type, `lower_snake_case` with accents folded to their letter ("Café" is `cafe`) and at most 60 characters, and shown read-only on
 Review. It is never one that another command, a former name or a
 [built-in](#built-in-commands) holds — a clash gets `_2`, `_3` — and a name that would
 end in `_on` or `_off` gets `_cue` after it: "Projectors on" is `projectors_on_cue`.

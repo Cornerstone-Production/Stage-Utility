@@ -12,6 +12,7 @@
 import type { FunctionComponent, ReactNode } from "react";
 import {
   CableIcon,
+  MapIcon,
   HouseIcon,
   ClockIcon,
   CalendarIcon,
@@ -28,13 +29,15 @@ import {
 } from "lucide-react";
 
 import { PatchView } from "../main/patch-view";
+import { StagePlotsManagePage, StagePlotsManageVenueRoute, StagePlotsPage, StagePlotsVenueRoute } from "../main/stageplots-view";
 import { ServiceCueIndex } from "../main/servicecue-index-view";
 import { BaptismOperator } from "../main/baptism-operator";
 import { ServiceHistorySection } from "../settings/sections/service-history-section";
 import { IntegrationsSection } from "../settings/sections/integrations-section";
 import { PatchSection } from "../settings/sections/patch-section";
+import { StagePlotsEdit } from "../settings/sections/stageplots-edit";
 import { HomeRoute } from "./home/home-route";
-import { ScreensRoute } from "./screens/screens-route";
+import { ScreensRouteSlot } from "./screens/kept-screens";
 import { ConsoleRoute } from "./console-route";
 import { ViewEditorRoute } from "./screens/view-editor-route";
 import { VideoFeedsRoute } from "./video-feeds/video-feeds-route";
@@ -57,6 +60,14 @@ import {
 } from "./settings-routes";
 
 export interface Destination {
+  /**
+   * The sidebar's name for this page, saved in the operator's arrangement.
+   * STABLE, and nothing to do with the path: a route can be renamed, and an
+   * arrangement keyed by path would lose the page's place on that release. A
+   * console's is `console:<viewId>`. Never change one; the sidebar's default
+   * sections (main/services/sidebar-arrangement.ts) list these.
+   */
+  id: string;
   /** Route path. Nested routes use the top-level segment for rail grouping. */
   path: string;
   label: string;
@@ -69,8 +80,12 @@ export interface Destination {
 }
 
 /** Work surfaces — the rail proper. */
+/** Stage plots' name and description: the app's page in the rail, and the crew's /stageplots. */
+const STAGEPLOTS_PAGE = { label: "Stage plots", description: "Every venue's stage plots, read-only, for load-in and the desk." } as const;
+
 export const DESTINATIONS: readonly Destination[] = [
   {
+    id: "home",
     path: "/",
     label: "Home",
     description: "This week's service, and what still needs setting up.",
@@ -78,15 +93,18 @@ export const DESTINATIONS: readonly Destination[] = [
     Component: HomeRoute,
   },
   {
+    id: "screens",
     path: "/screens",
     label: "Screens",
     description: "Every physical screen, what it shows, and whether it is on.",
     icon: <MonitorIcon className="size-4" />,
-    Component: ScreensRoute,
+    // The shell draws the page itself, kept across navigation: kept-screens.tsx.
+    Component: ScreensRouteSlot,
   },
   {
     // Every mic slot board, edited together: the screens and widgets that show
     // them are listed on each board, and a slots screen's Edit comes here.
+    id: "mic-slots",
     path: "/mic-slots",
     label: "Mic slots",
     description: "The boards your screens show, who fills each slot and what mic it carries.",
@@ -94,6 +112,7 @@ export const DESTINATIONS: readonly Destination[] = [
     Component: MicSlotsPage,
   },
   {
+    id: "video-feeds",
     path: "/video-feeds",
     label: "Video feeds",
     description: "Camera and program feeds for layouts and Home.",
@@ -104,6 +123,7 @@ export const DESTINATIONS: readonly Destination[] = [
     // The OPERATOR's launcher, in the shell. The same page at /servicecue is
     // the one a stage tablet opens and renders with no chrome, the same split
     // /history and /history/manage make.
+    id: "servicecue",
     path: "/servicecue/manage",
     label: "ServiceCue",
     description: "Pick a service to open its rundown.",
@@ -111,6 +131,7 @@ export const DESTINATIONS: readonly Destination[] = [
     Component: ServiceCueIndex,
   },
   {
+    id: "patch",
     path: "/patch",
     label: "Patch",
     description: "This week's inputs and outputs — what's set, and what changed.",
@@ -120,6 +141,18 @@ export const DESTINATIONS: readonly Destination[] = [
     Component: PatchView,
   },
   {
+    id: "stageplots",
+    // The OPERATOR's page, in the shell, with Edit. The same page at /stageplots is the
+    // crew's: the link and QR code handed out, chromeless (active-page.ts), read-only.
+    // The split /servicecue and /history make.
+    path: "/stageplots/manage",
+    ...STAGEPLOTS_PAGE,
+    icon: <MapIcon className="size-4" />,
+    // The editor is /stageplots/edit, linked from here.
+    Component: StagePlotsManagePage,
+  },
+  {
+    id: "automation",
     path: "/automation",
     label: "Automation",
     description: "When something happens in Stage, do something to a device.",
@@ -127,6 +160,7 @@ export const DESTINATIONS: readonly Destination[] = [
     Component: AutomationRoute,
   },
   {
+    id: "plan",
     path: "/plan",
     label: "Plan",
     description: "Which service and plan this machine follows.",
@@ -142,6 +176,7 @@ export const DESTINATIONS: readonly Destination[] = [
     // was folded into the app, this page took that URL and the read-only page
     // that used to own it was deleted, so the shared link silently gained Edit
     // times, Merge and Delete. Two surfaces again, as before.
+    id: "history",
     path: "/history/manage",
     label: "History",
     description: "Every service you've run — timing and attendance.",
@@ -149,6 +184,7 @@ export const DESTINATIONS: readonly Destination[] = [
     Component: ServiceHistorySection,
   },
   {
+    id: "baptisms",
     path: "/baptism",
     label: "Baptisms",
     description: "Time testimonies and baptisms live. Splits, totals and averages can go on a display, with the “Baptism timer” layout object.",
@@ -166,6 +202,7 @@ export const DESTINATIONS: readonly Destination[] = [
  */
 export const SETTINGS_DESTINATIONS: readonly Destination[] = [
   {
+    id: "integrations",
     path: "/settings/integrations",
     label: "Integrations",
     description: "Connect the gear and services that run your service.",
@@ -173,6 +210,7 @@ export const SETTINGS_DESTINATIONS: readonly Destination[] = [
     Component: IntegrationsSection,
   },
   {
+    id: "messages",
     path: "/settings/messages",
     label: "Messages",
     description: "Groups of screens, and the messages and replies a console sends in one press.",
@@ -180,6 +218,7 @@ export const SETTINGS_DESTINATIONS: readonly Destination[] = [
     Component: MessagesRoute,
   },
   {
+    id: "branding",
     path: "/settings/branding",
     label: "Branding",
     description: "Your organization's name, logo, and accent color.",
@@ -187,6 +226,7 @@ export const SETTINGS_DESTINATIONS: readonly Destination[] = [
     Component: BrandingRoute,
   },
   {
+    id: "advanced",
     path: "/settings/advanced",
     label: "Advanced",
     description: "Updates, network address, capture windows, and full config.",
@@ -201,29 +241,17 @@ export const ALL_DESTINATIONS: readonly Destination[] = [
   ...SETTINGS_DESTINATIONS,
 ];
 
-/**
- * Nav clusters. Each group answers one question, which is what an earlier set of
- * labels did not: "Output" had collected anything screen-adjacent (Patch is a
- * document, Integrations are devices), and "Identity" had become the bucket for
- * whatever fit nowhere.
- *
- * Deferred in Phase 1a because six destinations needed no grouping. The rail
- * now carries twelve.
- */
-/** Home sits above the groups rather than inside one — it is the front door. */
-export const UNGROUPED_PATHS = ["/"];
+// Which section each destination sits in, and in what order, is
+// DEFAULT_SIDEBAR in main/services/sidebar-arrangement.ts, by each destination's
+// `id`: the server validates a saved sidebar against it, so it cannot live in
+// this file, which imports every page. routes.test.tsx holds the two lists to
+// each other.
 
-export const NAV_GROUPS: { label: string; paths: string[] }[] = [
-  // What is shown. Patch belongs here because volunteers READ it at /patch; the
-  // "output" in its description is XLR, not a display.
-  { label: "Content", paths: ["/servicecue/manage", "/patch"] },
-  // Where it shows.
-  { label: "Screens", paths: ["/screens", "/mic-slots", "/video-feeds"] },
-  // What it talks to. Automation rules act ON integrations.
-  { label: "Devices", paths: ["/automation"] },
-  // A service you ran — one live, one recorded.
-  { label: "Services", paths: ["/plan", "/history/manage", "/baptism"] },
-];
+/** Each destination by its sidebar id. The rail draws a saved arrangement through
+ *  this, so a destination whose path changes keeps its place. */
+export function destinationsById<D extends Pick<Destination, "id">>(list: readonly D[]): Map<string, D> {
+  return new Map(list.map((d) => [d.id, d]));
+}
 
 /**
  * Nested routes that are reachable but not listed in the rail.
@@ -286,6 +314,15 @@ export interface NestedRoute {
   label?: string;
   /** Subtitle under the desktop title. Only meaningful alongside a label. */
   description?: string;
+  /**
+   * The rail destination this page belongs to, when its path does not say so.
+   *
+   * The rail lights the destination whose path prefixes the URL. A page that
+   * sits under a different prefix (the layouts editor is `/servicecue/presets`,
+   * kept for bookmarks, while ServiceCue's rail entry is `/servicecue/manage`)
+   * names its destination here, or nothing in the rail is lit on it.
+   */
+  parent?: string;
 }
 
 export const NESTED_ROUTES: readonly NestedRoute[] = [
@@ -308,8 +345,21 @@ export const NESTED_ROUTES: readonly NestedRoute[] = [
     description: "Pick a service and a layout to open its rundown.",
   },
   { path: SERVICECUE_PLAN_PATH, Component: ServiceCuePlanRoute },
-  { path: "/servicecue/presets", Component: ServiceCueSection },
+  // The layouts editor. Untitled: it draws its own heading and a link back to
+  // ServiceCue, whose rail entry it lights.
+  { path: "/servicecue/presets", Component: ServiceCueSection, parent: "/servicecue/manage" },
   { path: "/patch/edit", Component: PatchSection },
+  // The crew's stage plots, chromeless (active-page.ts). Titled here because
+  // /stageplots/manage does not prefix-match it, as /history is.
+  { path: "/stageplots", Component: StagePlotsPage, ...STAGEPLOTS_PAGE },
+  // The stage plots editor, reached from /stageplots/manage. It draws its own heading and
+  // lights Stage plots in the rail.
+  { path: "/stageplots/edit", Component: StagePlotsEdit, parent: "/stageplots/manage" },
+  // A venue opened in the app. Untitled: the page draws the venue's own heading.
+  { path: "/stageplots/manage/$venueId", Component: StagePlotsManageVenueRoute },
+  // One venue on the crew's page: the address to copy or make a QR code of, chromeless.
+  // Static siblings (/stageplots/edit, /stageplots/manage) win over the parameter.
+  { path: "/stageplots/$venueId", Component: StagePlotsVenueRoute },
   // One tab of Advanced. Untitled and nested, so the rail keeps Advanced lit and the
   // page draws its own heading, as the other child routes do. The segment is read by
   // the page, which shows General for one it does not know.

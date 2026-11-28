@@ -11,7 +11,7 @@ rundowns under it render without the app's sidebar and header, for a stage
 tablet; the same launcher with the chrome is **ServiceCue** in the sidebar, at
 `/servicecue/manage`.
 
-![The ServiceCue landing page: each service type with its column preset, ready to open](../images/servicecue-picker.png)
+![The ServiceCue landing page: each service type with its layout, ready to open](../images/servicecue-picker.png)
 
 Pick a service type from the landing page and it opens at a readable, shareable
 URL (`/servicecue/weekend/audio`) you can pin in its own tab. The clock follows
@@ -24,8 +24,17 @@ layout or plan, and an address copied from the browser's bar carries it along. A
 rundown opened without `?from=` (a typed address, a QR code, a kiosk), or with
 any other page in it, goes to `/servicecue`.
 
-Configure it with **Edit column presets** on the ServiceCue page (`/servicecue/presets`), with a live
-preview. The layouts and category roles are this app's own and can be edited before Planning Center
+`?transport=poll` and `?text=` stay with a screen: the launcher's link to a rundown
+and the rundown's back arrow both carry them (and nothing else of the query). A panel
+whose browser buffers the live stream, opened as `/servicecue?transport=poll`, therefore
+keeps polling from the launcher to the rundown and back, and keeps its text size.
+
+An empty launcher says why and links to the fix: **Connect Planning Center** goes to
+Integrations, and with no service types enabled the message goes to the layouts page with
+Landing page open.
+
+Configure it on the **ServiceCue layouts** page (`/servicecue/presets`, **Edit layouts** on the
+launcher), with a live preview. The layouts and category roles are this app's own and can be edited before Planning Center
 is connected; the preview, which reads a plan, says to connect it. So do the
 landing page, a ServiceCue page and a ServiceCue display, which ask Planning Center
 for nothing until it is connected. A ServiceCue display with no service type
@@ -33,24 +42,32 @@ selected says that instead.
 
 ## Where the rundown can appear
 
-The same table renders in three places, from one implementation — so a column set
-you define once looks identical wherever it shows up:
+The same table renders in three places, from one implementation — so a layout you
+define once looks identical wherever it shows up:
 
 ![A ServiceCue rundown on a screen with the live item highlighted and Audio and Band note columns](../images/wall-servicecue.png)
 
-| | Follows | Columns from |
+| | Follows | Layout from |
 |---|---|---|
 | **The `/servicecue` pages** | the service type in the URL, on the plan the app follows unless `?plan=` says otherwise | the layout in the URL |
-| **A ServiceCue view** on a display | the app's active plan | its **Columns** setting |
+| **A ServiceCue view** on a display | the app's active plan | its **Layout** setting |
 | **An Embedded view object** inside a custom layout | the app's active plan | the ServiceCue view it points at |
 
 The third is how you put the rundown under your own objects on one screen instead
 of stacking two browser tabs. Add an **Embedded view** object to a custom layout
 and point it at a ServiceCue view.
 
+The picker names each view with its kind as New view does (`Stage left (ServiceCue)`) and
+never offers the view being edited. Under it, **Shows the Band layout · Change** names the
+layout the picked ServiceCue view uses, and **Change** opens that view's page at its
+**Layout** setting.
+
 The embed shows the rundown only — no back arrow and no layout switcher. Its
 header (plan title, countdown, clock) is off by default, since a layout usually
-has its own; turn it on per object.
+has its own; turn it on per object. **Show the view's header** and **Follow the live
+item** appear only when the picked view is a ServiceCue view, since they act on nothing
+else; their saved values wait if it is switched to another kind and apply again if it
+is switched back.
 
 **Follow the live item** (on by default) scrolls the rundown to keep Planning
 Center's live item on screen, so a plan longer than the box does not need anyone
@@ -59,10 +76,10 @@ the layout around it. Turn it off for a box deliberately parked on the top of th
 plan — a pre-service checklist, or one only tall enough for a row or two.
 
 **Font size** is the object's own, and starts at the size the ServiceCue page
-renders at so the two match. Reach for it when a dense column set needs more rows
+renders at so the two match. Reach for it when a dense layout needs more rows
 on screen: row height is driven mostly by how many columns are shown, because
-notes wrap inside narrow ones. Choosing a **Columns** preset on the ServiceCue view
-gains far more rows than shrinking the type does.
+notes wrap inside narrow ones. Choosing a smaller layout in the ServiceCue view's
+**Layout** gains far more rows than shrinking the type does.
 
 An **Embedded view** object can point at any view, including one holding a custom
 layout of its own — nested up to three deep, and a view cannot embed itself; a
@@ -77,13 +94,105 @@ view.
 A layout is a set of columns — Audio, Video, Lighting, and so on. Layouts are
 global: define one and it works across every service type.
 
-![The ServiceCue page for a Weekend plan with the Audio column preset](../images/servicecue-rundown.png)
+They are edited on the **ServiceCue layouts** page (`/servicecue/presets`), reached
+from **Edit layouts** on the launcher, with **ServiceCue** lit in the sidebar and a
+link back to it above the title. The page holds, in order: **Landing page**, a row
+saying what it holds (the service types it shows), open while no type is ticked and
+shut once one is; a notice when some category is in no role (see
+[Category roles](#category-roles)); **Layouts**; **Category roles**; and a line,
+**Public link**, saying whether the page is publishing, with a **Settings in Advanced**
+link to where it is set up. `/servicecue/presets#landing` opens the Landing page row,
+and keeps opening it on reload.
 
-Each has per-element toggles for the clock, item time, song key, BPM, time
-signature, arrangement, item notes and total time, all on until switched off, and
-**Max SPL**, off until switched on: a last column with each item's loudest reading
+**Landing page** opens to a tick box per service type (without Planning Center it says only
+to connect it, with a link to Integrations). Only the ticked types appear on
+the landing page, each with the layouts in the page's order, then All columns; the first
+layout is a type's default there. They are stored in Planning Center's order, whatever
+order they were ticked in.
+
+Each layout is a card, in the landing page's order. Shut, a card shows its name and
+every column it draws, in order (`Clock · Time · Item · Audio · Band · Max SPL`); one
+card is open at a time. Open, its header holds the name, **Duplicate**, **Delete** and a
+button to shut it, and under that:
+
+| Row | What it sets |
+|---|---|
+| **Columns** | Every column the layout draws, in rundown order: **Clock** and **Time**, pinned before Item; **Item**, always drawn and locked; the layout's roles; **Max SPL**, pinned last. Clock, Time, Max SPL and each role have an X, which moves the column to the row below |
+| **Not in this layout** | Every role the layout does not show, and Clock, Time and Max SPL when they are off. Click a chip to add it: a role goes on the end, a fixed column goes to its place. Or drag it to a spot in the row. A role with no categories yet is listed greyed, marked **No categories yet**, and cannot be clicked or dragged: a column for it would draw nothing |
+| **Under the title** | **Song key**, **BPM**, **Time signature**, **Arrangement** and **Item notes**, each a toggle saying whether it is on |
+| **Footer** | **Total time** |
+| **Row color** | See [Row colors](#row-colors) |
+
+Below them is a preview of the layout against the plan of the service type picked in
+**Preview with** (one choice for the whole page), at most 260px tall and scrolling inside.
+It redraws as the rows change. A role with no category in the previewed type draws no
+column there, and a line under the preview says which.
+
+The card ends in its **Address**, `/servicecue/<service type>/<layout>`, with a **Copy**
+button, and **Used by:** the ServiceCue views set to it, in the order Screens lists them
+(the Delete confirm names the same ones), or "no views yet". The address uses the
+service type in **Preview with**, and **Copy** puts this app's full address on the
+clipboard, falling back to a hidden text field on plain HTTP. Without Planning Center
+the address shows `<service type>` and **Copy** is off.
+
+Clock, Time, Max SPL and Item keep their places; only roles move. Role columns move by
+dragging their grip along the row; a role column dragged onto **Not in this layout**
+leaves the layout. Layout cards move the same way, by the grip on their header, and so
+do a role's categories (see below). Every drag works with a mouse, by touch, and from
+the keyboard: focus a grip, press Space, move with the arrow keys, and press Space to
+drop it there, or Escape to put it back. The keyboard redraws the list, the summary and
+the preview at each step and saves once, on the drop. A pointer drag shows an accent
+line where the item will land; Escape cancels it. Each move, add and delete is announced
+to a screen reader.
+
+**New layout** adds "Layout 1", "Layout 2" and so on (the first free number), open, with
+its name selected: Clock, Time and Item, no roles, and Max SPL off. **Duplicate** adds a
+copy right after the original, named "Audio copy" (then "Audio copy 2" and so on), with
+every column and setting of the original and an address of its own. With no layouts at
+all, the section says that every screen and the landing page show All columns until
+there is one, beside **New layout**.
+
+A layout's address is its **slug**, the last part of `/servicecue/weekend/audio`.
+The slug is taken from the name when the layout is created and kept through a rename,
+so a tablet or display pinned to the address keeps its page. A layout made with **New
+layout** or **Duplicate** keeps the name the page gave it until it is renamed, and its
+first rename moves its slug to the new name; after that the slug is fixed. An address
+pinned to such a layout before that first rename therefore stops finding it and shows
+the notice below.
+
+A layout saved before slugs existed, when the rundown looked layouts up by name, keeps
+the address that opened it then. Of two whose names give the same slug the first in
+order kept it, so it keeps the bare slug, and the other gets a suffix no address used
+(`audio-3`, when a layout called "Audio 2" holds `audio-2`). Two layouts never share a
+slug. A name with no ASCII letter or digit ("Звук") is addressed as `x`, then `x-2`
+and so on. An address that names no layout, because it was deleted or mistyped, shows
+`Layout "name" not found. Showing All columns.` above the All columns it falls back to.
+
+Layout names must differ, ignoring case and punctuation, in any script ("Звук" and
+"Свет" are two names). The server refuses a save that adds or changes a name another
+layout already has (and a blank name, and "All columns") with a 400 and the reason,
+which the editor shows under the name field, and the old name stays; the refusal is on
+a `[servicecue]` log line. An install that already holds two layouts with one name can
+still be edited until one of them is renamed. A layout arriving in a view or plan export
+whose name is taken here is imported as "Audio 2" (the first free number), and the
+import report says so; it keeps its slug from the file unless a layout here already uses
+it.
+
+A name is saved when you leave the field or press Enter, not on each keystroke; Escape
+puts the saved name back. Every other change saves when it is made. Saves go one at a
+time, each applied to the list as the last one left it, so a change made while another
+is still saving is not lost, and a refused change is dropped without undoing the ones
+after it. Deleting a layout asks first and names the views whose **Layout** setting uses
+it, which go back to All columns, or says no screen uses it. A tablet that opened the
+layout's address directly is not a view, so the confirm cannot name it; it says such a
+tablet shows All columns too.
+
+![The ServiceCue page for a Weekend plan with the Audio layout](../images/servicecue-rundown.png)
+
+**Max SPL** is off until it is added: a last column with each item's loudest reading
 from Smaart (`98 dB`, or a dash where none was recorded), which only means something
-while Smaart is connected.
+while Smaart is connected. Clock, Time and the toggles under the title and in the footer
+are on until switched off, so a layout saved before one of them existed shows it.
 
 The Item column reads, under the title, `Key E · 128 BPM · 4/4 · Main Arrangement`:
 the key chosen on the plan item, then the BPM, time signature and name of its song
@@ -128,14 +237,59 @@ priority, and you can reorder it.
 A role whose members a service type doesn't define is hidden rather than shown as
 an empty column.
 
-**Managing them:** ServiceCue → Edit column presets → Category roles. Rename, add or remove
-members, reorder. Two diagnostics flag problems you would otherwise notice only by
-absence — categories in no role (which can never appear as a column) and
-categories in more than one (ambiguous, since two columns would claim the note).
+**All columns** is every role, then one column for each note category of that service
+type that is in no role, named as Planning Center names it and in Planning Center's
+order. A department whose category was added this week therefore shows without anyone
+making a role first. No role is created for it; a named layout shows only the roles it
+chose, so the category stays out of those until it is in a role and the layout picks it.
+Until the roles have been read (or when they cannot be), nothing is appended, since no
+category can be said to be in no role. The rundown pages, ServiceCue displays and the
+public page all draw columns the same way. A rundown whose categories Planning Center
+cannot be asked for still answers with its items and the columns they use, in the order
+last read (after a restart, the order the items use them); the server says so once per
+outage as `[pco]`, and holds a failed read 30 seconds before asking again.
 
-Seeding creates one role per category, containing only itself. Merging is always
-your call — automatic keyword matching guesses badly, and a wrong merge hides a
-department's notes with no visible cause.
+**Managing them:** the **Category roles** section of the ServiceCue layouts page, which is
+there whether or not a layout exists. Each role shows its name (saved when you leave the
+field or press Enter), how many layouts use it, and its categories in priority order. Drag
+a category's grip to reorder them, as with layouts; its X takes it out of the role.
+A role with no categories carries a **Can't be added to a layout** tag until it has one. A
+role already in a layout stays there if it later loses its categories; it draws nothing
+until a category returns.
+**+ Add category** lists every service type's categories, grouped by type, and says when
+one is already in another role; the types off the landing page are read from Planning
+Center the first time such a list is opened, one at a time, and one that cannot be read
+is named. **+ New role** adds a role called "New role", with its name selected to
+type over. Deleting a role asks first, naming the layouts it is a column in, which lose
+that column, any that tint rows by it, which stop, and its categories, which go back to
+being in no role.
+
+Two diagnostics flag problems you would otherwise notice only by absence:
+
+- **Categories in no role** lists every category on the landing page's service types that
+  no role has, each with the types it comes from. No named layout can show one; All
+  columns does. Each has a **+** that makes a role for it alone, and **Make a role for
+  each** makes one for all of them. While any exist and at least one role does, a notice
+  at the top of the page names them and their service types, and offers the same action.
+  A landing-page type whose categories Planning Center cannot be asked for is named in a
+  line there instead, saying the page can't tell which categories are in no role; it is
+  never read as "none", and is logged as `[pco]` on the server and `[servicecue]` in the browser.
+- Categories in more than one role are named under the roles: which column shows the
+  note is ambiguous, since two would claim it.
+
+**Make a role for each** asks the server once per landing-page service type, one type at a
+time, to add a role for each of that type's categories that no role covers. Each new role
+is named after its category and contains only it; a type that fails is named on the page,
+and the others still go ahead. The server writes a `[servicecue]` log line for each type:
+the roles it made, or why it made none (every category already in a role, or Planning
+Center listing none for that type, which is what an install without Planning Center
+connected sees), or that Planning Center could not be read.
+
+On a first run, with no roles at all, the section lists the landing page's categories, each
+with its service types, and **Make a role for each** is its main action, beside **+ New
+role**. Merging is always your call — automatic keyword matching guesses badly, and a
+wrong merge hides a department's notes with no visible cause — so rename the new roles and
+move the categories that mean the same thing into one.
 
 ## Row colors
 
@@ -144,7 +298,7 @@ Each layout picks one source for its row color, under **Row color**:
 | | Rows tinted by |
 |---|---|
 | **From PCO** (default) | Planning Center's own item colors — song, header, media, custom types |
-| **By category** | a note category you choose, wherever it has a note on the item |
+| **By column** | a category role you choose, wherever it has a note on the item |
 | **None** | nothing |
 
 A running item always outranks the tint.
@@ -154,10 +308,11 @@ white table and would read as near-white on a dark panel, so each hue maps to a
 color chosen for a dark surface. Add a color in PCO and rows follow within
 fifteen minutes, including new custom item types.
 
-**By category** can use any category the service type defines, not just the columns
-this layout shows — "Lighting has a cue here" is useful to a stage manager without
-showing the cue text. Colors are assigned from the category name and are not
-configurable, since Planning Center has no color for a note category.
+**By column** picks from the category roles, not only the columns this layout
+shows — "Lighting has a cue here" is useful to a stage manager without showing the
+cue text. A role with no categories yet is listed but cannot be picked. Colors are
+assigned from the role's name and are not configurable, since Planning Center has
+no color for a note category.
 
 ## Plan switcher
 
@@ -203,9 +358,10 @@ absent.
 ## Text size
 
 The ServiceCue page's header carries **A−**, a percentage and **A+**. The buttons
-step the rundown's text in 10-point increments between 50% and 300%; from a size
-that is not a multiple of ten they land on the next one in the direction pressed
-(137% goes to 140% with A+ and 130% with A−). Click the percentage to type a size:
+step the rundown's text in 5-point increments between 50% and 300%, the same step as a
+screen's Text size; from a size that is not a multiple of five they land on the next one
+in the direction pressed (137% goes to 140% with A+ and 135% with A−). A caption under the
+control, **This browser only**, says where the size is kept. Click the percentage to type a size:
 Enter or leaving the field applies it, Escape puts the old one back, a decimal is
 rounded, a number outside 50–300 is held to the nearest end, and text that is not
 a number changes nothing.
@@ -215,8 +371,8 @@ header, which stays the size it is. A bigger size leaves the rundown less width 
 work with, so it picks its shape from that width, as it does for a narrower screen:
 a 1100px screen at 150% lays out as 733px and drops the Clock column, and at 200%
 it becomes stacked blocks. Above 100% the rundown also stops shrinking its type to
-fit a wide column set, since that would undo the size chosen; use fewer columns or
-a smaller size for a dense layout. Browsers without CSS `zoom` (Firefox before 126)
+fit a layout with many columns, since that would undo the size chosen; use fewer
+columns or a smaller size for a dense layout. Browsers without CSS `zoom` (Firefox before 126)
 ignore the setting.
 
 The page remembers its own size in that browser. A display's size is kept by the
@@ -224,7 +380,8 @@ server, per display, so a booth laptop at 100% does not resize a display across
 the room, the display's preview on the Screens page draws the same size the
 display does, and a replacement device shows the size without being set up again.
 
-A display has no control for it. Set its size from its link with `?text=<percent>`
+A display's size is set on the Screens page, as the screen's **Text size** (50–300%,
+in steps of 5), or from its link with `?text=<percent>`
 (`/display-1?text=150`, held to the same 50–300 range): the size applies at once
 and the server keeps it, so the link only has to be opened with it once, and a
 link opened with the size the server already holds changes nothing. A display the
@@ -245,14 +402,19 @@ network: the same pages and links, no login, on a free Cloudflare Workers addres
 [deploy yourself](../ops/servicecue-on-the-web.md). **Anyone with the link can read
 everything it shows, plan notes included,** and running it is
 [at your own risk](../ops/servicecue-on-the-web.md#at-your-own-risk). The page is ServiceCue with nothing to edit
-(no **Edit column presets** link), a bar saying **Not updating** when the church has sent
+(no **Edit layouts** link), a bar saying **Not updating** when the church has sent
 nothing for two minutes, and a reload, once, of a page left open when the public page is
 updated. Its link is the page's address with `/servicecue` on the end, and
 `/servicecue/weekend/audio`, `?plan=` and `?text=` work on it as they do here.
 
-The server sends; nothing on the internet connects to it. **Public link**, on the
-ServiceCue presets page (`/servicecue/presets`) under **Shown on the landing page**, is
-where it is switched on: the page's address, the publishing token set on it, and the link
+The public page runs the copy of ServiceCue it was deployed with. One deployed before
+layouts had stored slugs still finds a layout by its current name, so a renamed
+layout's old address shows All columns there, and its All columns does not add the
+categories in no role. Updating the page (**Keep the page up to date**, or a redeploy)
+brings it in line.
+
+The server sends; nothing on the internet connects to it. **Settings → Advanced → Public link**
+(`/settings/advanced/public-link`) is where it is switched on: the page's address, the publishing token set on it, and the link
 to hand out. Under **Cloudflare connection**, **Keep the page up to date** gives the server a
 Cloudflare account ID and API token so it updates the public page itself after each update
 ([how](../ops/servicecue-on-the-web.md#keeping-it-up-to-date)). The page holds copies of what is sent and nothing else: no Planning Center
@@ -260,18 +422,19 @@ access, no settings, no network addresses. The card's **Setup guide** link opens
 [deploy guide](../ops/servicecue-on-the-web.md); what the server and the page say to each
 other is in the [publishing protocol](../reference/servicecue-publishing.md).
 
-The card has four states:
+The card opens with one line, above the switch and in every state: **Every note on these
+plans is public to anyone with the link.** It has four states:
 
 | | |
 |---|---|
-| **Off** | The page address and the publishing token, and a switch that stays off until both are filled in. Switching it on asks the page first, so a wrong address or token is said on the card and nothing is switched on |
+| **Off** | The page address and the publishing token, and a switch that stays off until both are filled in and the token is one the server will take: at least 32 characters once trimmed, printable ASCII with no spaces. A line under the fields counts what is typed ("The token needs at least 32 characters (12 so far).") and turns to "The token is long enough." at 32. Switching it on asks the page first, so a wrong address or token is said on the card and nothing is switched on |
 | **Publishing** | The link, with **Copy** and a **QR code** to print (dark on white in either theme), how long ago the page last accepted something, how many service types, layouts and upcoming plans (those dated today or later; last week's are on the page but not counted) it holds, and what the public sees. **Cloudflare connection** opens the address and token to change them |
 | **Not reaching the page** | The same, and why. The card names the cause: the token was refused, a rule on the Cloudflare account blocked this server, the page is limiting requests, the page has no token of its own, another server error, an address that is not the ServiceCue page, a redirect (never followed), no answer, something on the network intercepting the connection (a firewall or web filter presenting its own certificate), or a page that speaks another protocol version. The connection fields open themselves when the fix is in them |
 | **Can't read Planning Center** | The page is reached, but a read of the service types, the plan list or a rundown failed, so the page gets no new rundowns and keeps what it last received. The card gives the reason the server logged and links to **Integrations**, where the credentials are. While the page is not reached either, the pill says that, and both notes show |
 
 What the public sees is what ServiceCue shows here:
 
-- the service types under **Shown on the landing page**, and no others, with every
+- the service types ticked under **Landing page**, and no others, with every
   layout and **All columns**
 - the rundown each of those types opens on, and every plan of theirs in the plan
   switcher, from the last 7 days through the next 60 days: last week's rundowns stay
@@ -284,19 +447,19 @@ What the public sees is what ServiceCue shows here:
   run in (the configured zone, or the server's own while none is set, so the page's
   clocks never fall back to the visitor's zone)
 
-Editing stays in the building: **Edit column presets** and the operator's landing
+Editing stays in the building: **Edit layouts** and the operator's landing
 page are not on the public page.
 
 ### How it sends
 
 | What | How often |
 |---|---|
-| The layouts, category roles and landing page settings | Every minute, and an edit is sent within a second or so. A document is sent only when its text changed |
+| The layouts, category roles and landing page settings | Every minute, and an edit is sent within a second or so. A document is sent only when its text changed, or when a send of it got no answer |
 | The service types, the plan list and the rundown each type opens on | Every minute from the app's own Planning Center cache while a [service window](../ops/reliability.md) is open or none is known; once an hour outside one, and at once after an edit to the landing page |
 | The other plans in the switcher | One at a time, 2 seconds apart, each read again at most every 15 minutes in a window and every 4 hours outside one |
 | The public state, the live position and the SPL peaks | As the app's own live updates happen, at most once a second each, and not again while only the clock moved. The page stores each as the document it belongs to, so none is sent twice |
 | A heartbeat | On first contact, then every 30 seconds, so the page can tell a quiet service from a server that has stopped sending |
-| What to keep | The server tells the page which documents and images it should hold, and the page deletes the rest: that is how a service type taken off the landing page, or a plan that has gone by, leaves the public page. It is sent once the landing page settings and the plan list have been read this run, and again only when the list changed or the page held something not on it. It also waits while a service type's plan list was read only in part and this run knows none of its plans (a restart during a partial Planning Center outage), so the plans the page holds for it stay |
+| What to keep | The server tells the page which documents and images it should hold, and the page deletes the rest: that is how a service type taken off the landing page, or a plan that has gone by, leaves the public page. It is sent once the landing page settings and the plan list have been read this run, and again only when the list changed, the last one got no answer, or the page holds, or may hold, something not on it. It also waits while a service type's plan list was read only in part and this run knows none of its plans (a restart during a partial Planning Center outage), so the plans the page holds for it stay |
 | What the page holds | Every 5 minutes the page is asked, and anything it lost (a redeploy that changed its storage) is sent again |
 
 Every Planning Center read goes through the same request gate and cache as the rest
@@ -311,6 +474,15 @@ to 5 minutes, counted for that request alone: a heartbeat that gets through in
 between does not reset it. The page keeps the last copy it was sent. The problem
 ends when the request that failed goes through, or a full pass finds nothing
 failing; the server then sends what changed meanwhile.
+
+A request that got no answer (a timeout, a dropped connection) or a 5xx may have
+been stored all the same, so the server takes it as neither sent nor not sent. A
+document or a live update goes again whatever it says, the text it had before
+included, and a rundown is read again at once rather than when it is next due; a
+document or image the page may hold and no longer should is a reason to send the
+list of what to keep; and a list of what to keep with no answer goes again, with
+whatever it may have removed sent again if it is still wanted. A page that took a
+change and lost its answer therefore never shows it after the source changes back.
 
 | The page answered | The card says | Then |
 |---|---|---|
@@ -346,6 +518,13 @@ Switching the card off, or moving it to another address, asks the page that was 
 to drop what this server sent it. If it cannot be asked, or this server has no token
 for it any more, the card says the page may still show the last rundown it was sent.
 Restarting the server leaves the page's copy alone.
+
+Published [stage plots](stageplots.md#publishing) are not part of that copy: they stay
+on the page, each under its venue's link, until the venue is unpublished in the stage
+plots editor, and switching the card off does not touch them. Moving the card to another
+address moves them too, each under a new link, and removes them from the old page with
+its token. Stage plots keep using the saved address and token whether or not the switch
+is on.
 
 Each of these is on [`/log`](../ops/updates-and-logs.md) as a `[publish]` line.
 

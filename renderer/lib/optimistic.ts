@@ -46,3 +46,30 @@ export async function writeOptimistic<T>(
     return null;
   }
 }
+
+/**
+ * Send a write and install what the server returns under `key`, with no
+ * optimistic step: the toast says why it failed, and `ok`, when given, confirms.
+ *
+ *  - `fail` set: the toast reads "<fail>: <err>".
+ *  - `fail` omitted: the server's own message, verbatim, for a refusal written
+ *    FOR the operator, which a prefix would bury.
+ *
+ * @returns What the server returned, or null if it refused.
+ */
+export async function writeTo<T>(
+  queryClient: QueryClient,
+  key: string[],
+  send: () => Promise<T>,
+  opts: { fail?: string; ok?: string } = {},
+): Promise<T | null> {
+  try {
+    const next = await send();
+    queryClient.setQueryData(key, next);
+    if (opts.ok) toast.success(opts.ok);
+    return next;
+  } catch (err) {
+    toast.error(opts.fail ? `${opts.fail}: ${errorMessage(err)}` : errorMessage(err));
+    return null;
+  }
+}

@@ -26,7 +26,7 @@ import { fileURLToPath } from "node:url";
 
 import { errorMessage } from "../main/services/errors.js";
 import { CLOUDFLARE_API_ORIGIN, CloudflareError, cloudflareOrigin, createCloudflare, readBundle, type DeployedPage } from "../main/services/servicecue-cloudflare.js";
-import { isMain } from "./is-main.mjs";
+import { isMain } from "./is-main.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 

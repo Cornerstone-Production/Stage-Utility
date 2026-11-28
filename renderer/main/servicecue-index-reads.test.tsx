@@ -74,7 +74,7 @@ test("Planning Center not connected says to connect it — no alert, no log, not
   const f = stubFetch({ pcoConfigured: false });
   try {
     await mount();
-    await eventually(() => assert.equal(!!screen.queryByText(/Connect Planning Center to use ServiceCue/i), true));
+    await eventually(() => assert.match(document.body.textContent ?? "", /Connect Planning Center to use ServiceCue/i));
     assert.equal(!!screen.queryByText(/PCO not configured/i), false, "not an error printed from the server");
     assert.equal(alerts(), "");
     assert.deepEqual(f.logs, []);

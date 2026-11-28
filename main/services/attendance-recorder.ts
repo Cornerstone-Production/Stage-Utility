@@ -14,7 +14,8 @@ import { sampleArchive } from "./archive/sample-archive.js";
 import { attendanceStore } from "./attendance-store.js";
 import { settingsStore, DEFAULT_TAPER_WINDOW } from "./settings-store.js";
 import { sensourceService } from "./sensource-service.js";
-import { classifyPhase, type Phase } from "./attendance-phase.js";
+import { classifyPhase, inTaper, type Phase } from "./attendance-phase.js";
+import { serviceRunning } from "./live-service-gate.js";
 import { ServiceRecorder, type NewRecordContext, type RecorderStore } from "./service-recorder.js";
 
 /** Minimum gap between recorded trend points (attendance changes slowly). */
@@ -32,6 +33,9 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
   private preMs = DEFAULT_TAPER_WINDOW.preMin * 60_000;
   private postMs = DEFAULT_TAPER_WINDOW.postMin * 60_000;
   private lastBroadcastAt = 0;
+  // Set by resumeRecord when the record it resumes had closed: ensureRecord
+  // clears that end before onLiveTick can see it. Read once per tick.
+  private resumedClosed = false;
 
   protected createRecord(ctx: NewRecordContext): ServiceAttendance {
     return {
@@ -49,9 +53,14 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
     };
   }
 
-  /** Told by ensureRecord's split — see publishClosed's doc on the base class. */
+  /** Told by ensureRecord's split and closeIfOpen — see publishClosed's doc on the base class. */
   protected override publishClosed(record: ServiceAttendance): void {
     broadcast("attendance:history", record);
+  }
+
+  protected override async resumeRecord(existing: ServiceAttendance): Promise<ServiceAttendance> {
+    this.resumedClosed = existing.endedAt != null;
+    return existing;
   }
 
   protected override onRecordEstablished(): void {
@@ -67,7 +76,7 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
   /** What (if anything) to sample this tick — see attendance-phase.ts. */
   private classify(live: PcoLiveDTO): Phase | null {
     return classifyPhase(live, {
-      hasOpenRecord: this.current != null && this.current.endedAt == null,
+      hasOpenRecord: this.getOpenRecord() != null,
       endedAt: this.current?.endedAt ?? null,
       heldServiceStartedAt: this.current?.serviceStartedAt ?? null,
       preMs: this.preMs,
@@ -85,9 +94,7 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
    */
   isSampling(): boolean {
     if (!this.current) return false;
-    if (!this.current.endedAt) return true;
-    const ended = Date.parse(this.current.endedAt);
-    return Number.isFinite(ended) && Date.now() - ended <= this.postMs;
+    return !this.current.endedAt || inTaper(this.current.endedAt, this.postMs);
   }
 
   /** Called by the live-poller after each pco:live broadcast. */
@@ -105,31 +112,44 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
         // Nothing to sample. Close any record left open (mode dropped with no end
         // header, before the cooldown branch can tag it) so it stops reading as live;
         // the next tick's cooldown check then resumes it as "post".
-        if (this.current && !this.current.endedAt) {
-          this.finalizeRecord();
-          await this.saveClosed(this.current);
-          broadcast("attendance:history", this.current);
-        }
+        await this.closeIfOpen();
         return;
       }
 
-      const gapSinceLive = this.lastLiveAt === 0 ? Infinity : Date.now() - this.lastLiveAt;
-      if (live.mode === "item") this.lastLiveAt = Date.now(); // gap is measured between live items
+      // Ticks of a RUNNING service, as the SPL and timeline recorders count
+      // them (see noteLiveTick). Counting the parked ticks past SERVICE END too
+      // made this recorder alone hold the finished service open when the next
+      // one began, and sample the next service into it. A "pre" tick in
+      // preservice mode, the arrival ramp, is not counted either.
+      const gapSinceLive = this.noteLiveTick(serviceRunning(live));
 
       // Establish the record for pre/service; "post" only ever samples into the
       // record we just ended (never spins up a new one for an emptying room).
+      this.resumedClosed = false;
       if (phase === "service" || phase === "pre") await this.ensureRecord(live, gapSinceLive);
       if (!this.current) return;
 
+      // A reopen or a close is published and saved on this tick, not with the next
+      // sample: with SenSource offline no sample comes, and History kept the old
+      // frame (and the file its end) until the next split.
+      let changed = this.resumedClosed; // reopened by ensureRecord's resume
       if (phase === "service") {
-        if (this.current.endedAt) this.current.endedAt = null; // resumed after a lull/cooldown
+        if (this.current.endedAt) {
+          this.current.endedAt = null; // resumed after a lull/cooldown
+          changed = true;
+        }
         if (!this.current.serviceStartedAt) this.current.serviceStartedAt = new Date().toISOString();
-      } else if (phase === "post") {
-        this.finalizeRecord(); // stamp the service-end boundary once (guarded)
+      } else if (phase === "post" && !this.current.endedAt) {
+        this.finalizeRecord(); // stamp the service-end boundary once
+        changed = true;
       }
+      if (changed) this.schedulePersist();
 
       const p = sensourceService.getLatest();
-      if (!p.connected || p.total.attendance == null || p.total.occupancy == null) return;
+      if (!p.connected || p.total.attendance == null || p.total.occupancy == null) {
+        if (changed) this.publish();
+        return;
+      }
       const rawA = p.total.attendance; // SenSource Σ-entries — a running DAILY total
       const o = p.total.occupancy;
       // Baseline on the first sample so attendance is PER-SERVICE: a second service
@@ -174,13 +194,17 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
       }
       // The full record is O(n) and the counts move slowly, so live-trend viewers
       // don't need it 1x/sec — push on a new sample, else at most every LIVE_BROADCAST_MS.
-      if (appended || now - this.lastBroadcastAt >= LIVE_BROADCAST_MS) {
-        this.lastBroadcastAt = now;
-        broadcast("attendance:history", this.current);
-      }
+      if (changed || appended || now - this.lastBroadcastAt >= LIVE_BROADCAST_MS) this.publish();
     } finally {
       this.busy = false;
     }
+  }
+
+  /** Push the live record to trend viewers. */
+  private publish(): void {
+    if (!this.current) return;
+    this.lastBroadcastAt = Date.now();
+    broadcast("attendance:history", this.current);
   }
 
 }

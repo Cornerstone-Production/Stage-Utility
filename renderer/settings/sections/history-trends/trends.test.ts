@@ -20,7 +20,6 @@ import { describe, test } from "node:test";
 import {
   MIN_PRIOR_DAYS,
   TREND_WINDOW,
-  appZoneOf,
   dailyValues,
   seriesChangeMilestones,
   trendMilestones,
@@ -667,29 +666,6 @@ describe("what day it is", () => {
     assert.equal(after.state, "finished", "the day never finished, even past its last service time");
   });
 
-  test("the zone comes off stage state in the SERVER's order, the browser last", () => {
-    // The near miss: `state.timezone ?? <this browser's zone>`. With nothing
-    // configured the server falls back to ITS host, not the viewer's, so a UTC
-    // box read from a laptop in Chicago had the page ending Sunday five hours
-    // before the server did. One case per line.
-    assert.deepEqual(
-      [
-        appZoneOf({ timezone: "America/Denver", hostTimezone: "UTC" }, "America/Chicago"),
-        appZoneOf({ timezone: null, hostTimezone: "UTC" }, "America/Chicago"),
-        appZoneOf({ timezone: null, hostTimezone: null }, "America/Chicago"),
-        appZoneOf(null, "America/Chicago"),
-        appZoneOf(undefined, "America/Chicago"),
-      ],
-      [
-        "America/Denver",
-        "UTC",
-        "America/Chicago",
-        "America/Chicago",
-        "America/Chicago",
-      ],
-    );
-  });
-
   test("a rehearsal is not a service still to come", () => {
     // A `time_type: "rehearsal"` at 8am would otherwise hold the tile in its
     // partial-day mode for the whole day.
@@ -855,6 +831,23 @@ describe("the sound measure", () => {
     assert.equal(tile.priorAverage, 94);
     assert.equal(tile.priorServiceCount, MIN_PRIOR_DAYS, "the relaxed floor applies to sound too");
     assert.equal(delta(tile), 6);
+  });
+
+  test("a level keeps the tenth it is printed at: 113.91 is 113.9, never 114", () => {
+    // The tile prints a decibel figure at one decimal. Rounding to a whole
+    // decibel first made 113.91 read "114.0 dB" and 111.73 read "112.0 dB".
+    const [tile] = typeTrends(
+      weekly("weekend", Array(4).fill(500), { db: [111.73, 111.73, 111.73, 113.91] }),
+      { measure: "sound" },
+    );
+    assert.equal(tile.latest, 113.9);
+    assert.equal(tile.priorAverage, 111.7);
+    assert.ok(tile.latestRaw != null && tile.priorAverageRaw != null, "still a comparison");
+  });
+
+  test("a head count is still whole people", () => {
+    const [tile] = typeTrends(weekly("weekend", [400, 400, 400, 412.6]), { measure: "attendance" });
+    assert.equal(tile.latest, 413);
   });
 
   test("A TILE'S LEVEL IS ONE RECORDING'S, whatever a day's traffic", () => {

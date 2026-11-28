@@ -13,10 +13,6 @@ import { after, beforeEach, describe, test } from "node:test";
 import { installDom, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
-// React only act-wraps a render, and only warns when an update escapes one,
-// once it is told it is in a test environment. Without this the file reads
-// as clean while 266 updates land outside act.
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
 const { installFakeServer, withQueryClient, assertAbsent, settleFor, actIdle } = await import(
@@ -148,5 +144,24 @@ describe("useRevealNonce is gone", () => {
     // caller, and its whole job was to re-key a collapsed section open.
     assert.equal("useRevealNonce" in flashModule, false);
     assert.equal(typeof flashModule.useRevealTarget, "function");
+  });
+});
+
+describe("Getting Started names ServiceCue", () => {
+  test("the Create a view step lists ServiceCue among what a view can be", () => {
+    // Read from the rendered card: a hint that dropped the name reads as a view kind
+    // that does not exist, and a first-run operator never finds ServiceCue.
+    const c = render(
+      withQueryClient(
+        <GettingStarted
+          stageState={{ pcoConfigured: false, views: [], outputs: [] } as unknown as StageState}
+          onNavigate={() => {}}
+          onDismiss={() => {}}
+        />,
+      ),
+    );
+    const step = [...c.container.querySelectorAll("button")].find((b) => b.textContent?.includes("Create a view"));
+    assert.ok(step, "the Create a view step is gone");
+    assert.match(step.textContent ?? "", /mic slots, a dashboard, ServiceCue, transcription, or a custom layout/);
   });
 });

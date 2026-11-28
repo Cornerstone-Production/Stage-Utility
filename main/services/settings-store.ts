@@ -81,8 +81,9 @@ export interface SettingsData extends AppIconSettings {
    *  UDP ports and a collision should be a settings change, not a rebuild. */
   kioskDiscoveryPort: number;
   /** Stable per install; a device uses it to tell two servers apart. Generated
-   *  on first use and never rewritten — every binding on every device refers to
-   *  it, so changing it would orphan the lot. */
+   *  on first use. Every binding on every device refers to it, so it changes only
+   *  when the operator says so: a restore that takes the config's id (this box
+   *  replaces that one), or New server id while another server answers with it. */
   serverId: string | null;
   /** Themeable brand accent as a #rrggbb hex, or null to use the built-in default. */
   accentColor: string | null;
@@ -143,12 +144,6 @@ export interface SettingsData extends AppIconSettings {
   oscFeedbackPort: number;
   /** Smaart metric keys to surface in the SPL History tab (empty = auto default). */
   splVisibleMetrics: string[];
-  /** Draw the service-level SPL line on History's attendance chart. Off by
-   *  default — an existing chart must not gain a second line unasked. */
-  splTrendShown: boolean;
-  /** Which Smaart metric that line plots. Null follows the preferred default,
-   *  which is what an operator who never opens the menu wants. */
-  splTrendMetric: string | null;
   /** Operator dismissed the first-run "Getting started" checklist (machine-wide). */
   onboardingDismissed: boolean;
   /**
@@ -245,8 +240,6 @@ export const DEFAULT_SETTINGS: SettingsData = {
   autoUpdate: { mode: "manual", dayOfWeek: null, hour: 3 },
   oscFeedbackPort: 9000,
   splVisibleMetrics: [],
-  splTrendShown: false,
-  splTrendMetric: null,
   onboardingDismissed: false,
   checklistNoteCategories: [],
   checklistNoteTeams: [],

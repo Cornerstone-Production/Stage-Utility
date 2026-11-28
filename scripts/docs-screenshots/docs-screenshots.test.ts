@@ -22,12 +22,9 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, before, describe, it } from "node:test";
 
-// @ts-expect-error plain ESM without declarations
-import { handlePco } from "./fakes/pco.mjs";
-// @ts-expect-error plain ESM without declarations
-import { seedHistoryFiles } from "./seed/history.mjs";
-// @ts-expect-error plain ESM without declarations
-import { LIVE_PLAN_ID, SERVICE_TYPES, WEEKEND_ROSTER, planFor, plansFor } from "./world.mjs";
+import { handlePco } from "./fakes/pco.ts";
+import { seedHistoryFiles } from "./seed/history.ts";
+import { LIVE_PLAN_ID, SERVICE_TYPES, WEEKEND_ROSTER, planFor, plansFor } from "./world.ts";
 
 // 18 Oct 2026 is a Sunday; the anchor is the Thursday before it.
 const NOW = new Date("2026-10-15T18:00:00Z");

@@ -6,11 +6,12 @@
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
 import { errorMessage } from "../errors.js";
-import { isStringList } from "../is-record.js";
+import { isStringList } from "../../types/is-record.js";
 import { type RouteCtx, json, error, readBody, readBodyOrEmpty, MAX_CONFIG_BODY_BYTES } from "./context.js";
 import { stageController } from "../stage-controller.js";
 import { updater } from "../updater.js";
 import { updateNoticesStore } from "../update-notices-store.js";
+import { dismissJustUpdated, runningReleaseNotes } from "../update/running-notes.js";
 import { exitForRestart, type RelaunchPrep } from "../update/relaunch.js";
 import { backupScheduler } from "../backup-scheduler.js";
 import { configSnapshot } from "../config-snapshot.js";
@@ -81,11 +82,21 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       return;
     }
 
-    // Dismissed. Nothing else clears it — not a reload, not navigating away —
-    // so a notice survives until somebody has actually seen it.
+    // Dismissed. Nothing else clears it — not a reload, not navigating away, not
+    // What's new — so a notice survives until somebody has actually seen it.
+    // The notes stay behind for What's new; only the acknowledgement goes.
     if (method === "POST" && pathname === "/api/update/notices/dismiss") {
-      await updateNoticesStore.update((cur) => ({ ...cur, justUpdated: null }));
+      await dismissJustUpdated();
       json(res, { ok: true });
+      return;
+    }
+
+    // What's new: the running release's notes, read-only. Fetched from GitHub
+    // only when nothing is kept, and only because somebody pressed the button.
+    // A failure is a 200 with ok:false, not an error status: the dialog has an
+    // answer to draw for it, and the line saying why is already in the log.
+    if (method === "GET" && pathname === "/api/update/release-notes") {
+      json(res, await runningReleaseNotes());
       return;
     }
 
@@ -236,10 +247,20 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
       if (refuseUnansweredHost(req, res)) return;
       // A snapshot carries every config file and every uploaded image, base64'd,
       // so the ordinary JSON ceiling would refuse a bundle this app exported.
-      const body = await readBody(req, MAX_CONFIG_BODY_BYTES) as Record<string, unknown>;
-      const bundle = "bundle" in body ? body.bundle : body;
+      const body = await readBody(req, MAX_CONFIG_BODY_BYTES) as Record<string, unknown> | null;
+      // `in` throws on a JSON null or a string: that was a 500 for a request that is
+      // simply wrong. The route takes an object, the bundle itself or {bundle}.
+      if (body === null || typeof body !== "object" || Array.isArray(body)) {
+        error(res, "Expected a config snapshot, or {bundle}, as a JSON object.");
+        return;
+      }
+      const wrapped = "bundle" in body;
+      const bundle = wrapped ? body.bundle : body;
+      // Read only from the wrapper, and only a literal true. A bare bundle is a
+      // config file, and a config file cannot choose to take its own server id.
+      const replacesOriginal = wrapped && body.replacesOriginal === true;
       try {
-        const applied = await configSnapshot.apply(bundle);
+        const applied = await configSnapshot.apply(bundle, { replacesOriginal });
         json(res, restartResponse(applied, scheduleRestart()));
       } catch (err) {
         error(res, errorMessage(err));
@@ -283,8 +304,10 @@ export async function systemRoutes(c: RouteCtx): Promise<void> {
     const snapRecallMatch = pathname.match(/^\/api\/config\/snapshots\/([^/]+)\/recall$/);
     if (method === "POST" && snapRecallMatch) {
       if (refuseUnansweredHost(req, res)) return;
+      // No body, as before this option existed, is not a replacement.
+      const replacesOriginal = (await readBodyOrEmpty(req)).replacesOriginal === true;
       try {
-        const applied = await configSnapshot.recall(snapRecallMatch[1]);
+        const applied = await configSnapshot.recall(snapRecallMatch[1], { replacesOriginal });
         json(res, restartResponse(applied, scheduleRestart()));
       } catch (err) {
         error(res, errorMessage(err));

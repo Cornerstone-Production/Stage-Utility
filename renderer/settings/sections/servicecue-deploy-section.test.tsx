@@ -292,6 +292,16 @@ describe("the status line, by state", () => {
     assert.ok(!sectionText().includes("Tries again"));
   });
 
+  test("failed with no answer and nothing read since: does not claim the page is unchanged", async () => {
+    await with_(
+      deployOf({
+        state: "failed",
+        error: { message: "other side closed", code: null, status: null, step: "upload the Worker", at: NOW - 1000, refused: false, retryAt: null, unsure: true },
+      }),
+    );
+    assert.equal(status(), "Couldn't update the page: other side closed (upload the Worker). Whether the page took it is not known.");
+  });
+
   test("failed, retrying: Cloudflare's code and words, and when it tries again, counted from the server's clock", async () => {
     await with_(
       deployOf({

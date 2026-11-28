@@ -17,7 +17,7 @@ import { parseReleaseSections } from "../main/services/update/release-notes.js";
 // operator's box silently stops updating.
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const SCRIPT = path.join(HERE, "release-notes.mjs");
+const SCRIPT = path.join(HERE, "release-notes.ts");
 
 /** The notices and overrides this repository actually ships. Read, never written. */
 const SHIPPED_NOTES_DIR = path.join(HERE, "..", "docs", "release-notes");
@@ -33,7 +33,7 @@ const SHIPPED_OVERRIDE_DIR = path.join(SHIPPED_NOTES_DIR, "overrides");
  * run, and the exact-list scan over the shipped overrides found a neighbour's
  * temp file and went red. Sixteen concurrent copies failed sixteen times.
  *
- * `STAGE_UTILITY_RELEASE_NOTES_DIR` (see release-notes.mjs) points the generator
+ * `STAGE_UTILITY_RELEASE_NOTES_DIR` (see release-notes.ts) points the generator
  * here, so nothing outside this process can see a fixture or be surprised by one.
  */
 const FIXTURE_NOTES_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "release-notes-docs-"));

@@ -62,6 +62,7 @@ const STATE = {
   timezone: null,
   barItems: [],
   barMobileItems: [],
+  sidebar: { sections: [], hidden: [] },
   views: [],
   outputs: [{ id: "out-1", name: "Left Display", viewId: null }],
   devices: [],
@@ -109,7 +110,7 @@ const readsOnTheirWay = () => reads.pending() - readsHeld;
   // The live-update subscription posts on its own schedule and lands whenever it
   // likes; it is neither a read the page waits on nor one of these counts.
   if (isPlumbing(String(url))) return { ok: true, status: 200, json: async () => ({}), text: async () => "{}" };
-  reads.begin();
+  reads.begin(String(url));
   const path = String(url).split("?")[0];
   if (path === "/api/state") {
     return reads.answer({ ok: true, status: 200, json: async () => STATE, text: async () => JSON.stringify(STATE) });

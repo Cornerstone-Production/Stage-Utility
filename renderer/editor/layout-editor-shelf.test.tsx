@@ -8,7 +8,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { installRenderDom, settle, unmountAndTeardown, mountInAct } from "../test-dom.js";
 import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 import { NoStream } from "../test-fixtures/no-stream.js";
 
@@ -62,7 +62,7 @@ async function mount(): Promise<ReturnType<typeof stubFetchWithLog>> {
     url.includes("/api/cues/manifest") ? ok(CUE_MANIFEST) : url.includes("/api/layout-groups") ? ok([]) : ok({}),
   );
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  render(
+  await mountInAct(render, 
     React.createElement(
       RouterContextProvider as unknown as React.FunctionComponent<Record<string, unknown>>,
       { router: testRouter },
@@ -97,7 +97,9 @@ const settleAct = async () => act(async () => settle());
 
 const keydown = (target: Element, init: KeyboardEventInit) => {
   const e = new window.KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
-  target.dispatchEvent(e);
+  act(() => {
+    target.dispatchEvent(e);
+  });
   return e;
 };
 const layerNames = () => screen.getAllByRole("button").filter((b) => b.getAttribute("draggable") === "true" && !b.getAttribute("aria-label")).map((b) => b.textContent);

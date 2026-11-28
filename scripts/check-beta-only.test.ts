@@ -1,4 +1,4 @@
-// check-beta-only.mjs needs a real tag and real commit history to test — file
+// check-beta-only.ts needs a real tag and real commit history to test — file
 // overlap between a fix and a feat commit is not something a pure-function
 // unit test can fake convincingly, so this builds throwaway git repos in a
 // tmp dir and drives the script's exported logic against them directly.
@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { after, describe, it } from "node:test";
 
 import COMMIT_TYPE_FILE from "../main/services/commit-types.json" with { type: "json" };
-import { findBetaOnlyCandidates } from "./check-beta-only.mjs";
+import { findBetaOnlyCandidates } from "./check-beta-only.ts";
 
 const repos: string[] = [];
 
@@ -149,7 +149,7 @@ describe("no stable tag", () => {
 
     const out = execFileSync(
       "node",
-      [join(process.cwd(), "scripts/check-beta-only.mjs"), "HEAD~1"],
+      [join(process.cwd(), "scripts/check-beta-only.ts"), "HEAD~1"],
       { cwd: dir, encoding: "utf8" },
     );
     assert.match(out, /No stable tag/);
@@ -166,7 +166,7 @@ describe("exit code", () => {
 
     const result = execFileSync(
       "node",
-      [join(process.cwd(), "scripts/check-beta-only.mjs"), "v1.0.0"],
+      [join(process.cwd(), "scripts/check-beta-only.ts"), "v1.0.0"],
       { cwd: dir, encoding: "utf8" },
     );
     assert.match(result, /fix\(thing\): a bug in the new thing/);

@@ -3,7 +3,7 @@
 // Every route must finish responding before it returns (see RouteCtx).
 
 import { type RouteCtx, json, error, readBody, queryFlag, MAX_CONFIG_BODY_BYTES } from "./context.js";
-import { datedExportFilename } from "../export-filename.js";
+import { attachmentDisposition, datedExportFilename } from "../export-filename.js";
 import { isCrossOrigin } from "../http-origin.js";
 import { scrub } from "../scrub.js";
 import { loadFfmpegPath } from "../video/ffmpeg-path-store.js";
@@ -57,7 +57,7 @@ export async function videoRoutes(c: RouteCtx): Promise<void> {
     console.log(`[video-export] ${scrub(summary)}`);
     res.writeHead(200, {
       "content-type": "application/json; charset=utf-8",
-      "content-disposition": `attachment; filename="${datedExportFilename("stage-utility-video-feeds", "", new Date())}"`,
+      "content-disposition": attachmentDisposition(datedExportFilename("stage-utility-video-feeds", "", new Date())),
       "cache-control": "no-store",
     });
     res.end(JSON.stringify(r.bundle, null, 2));

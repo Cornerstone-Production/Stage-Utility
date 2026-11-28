@@ -19,7 +19,6 @@ import { routerWithBaptismDestination } from "../../test-fixtures/router.js";
 import { fmtTime } from "./overview-data.js";
 
 const teardown = installDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // api.ts opens an SSE stream on first use — most tests here never push on
 // it, but a few drive a live channel through `FakeEventSource.last`.
@@ -132,7 +131,6 @@ function installFetch(opts: { baptisms?: boolean; timelineRecords?: unknown[] } 
     if (url === "/api/service-timeline") return ok(opts.timelineRecords ?? [timeline()]);
     if (url === "/api/attendance/history?summary=1") return ok([attendance()]);
     if (url === "/api/spl/summary") return ok([]);
-    if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
     if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
     if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
     // Null when the list is empty: that is the arrival-ramp state — attendance
@@ -333,7 +331,6 @@ describe("the History service page", () => {
       if (url === "/api/service-timeline") return ok([tl]);
       if (url === "/api/attendance/history?summary=1") return ok([attendance()]);
       if (url === "/api/spl/summary") return ok([]);
-      if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
       if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
       if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
       if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(tl);
@@ -425,7 +422,6 @@ describe("the History service page", () => {
       if (url === "/api/service-timeline") return ok([tl]);
       if (url === "/api/attendance/history?summary=1") return ok([attendance()]);
       if (url === "/api/spl/summary") return ok([]);
-      if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
       if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
       if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
       if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(tl);
@@ -490,7 +486,6 @@ describe("the History service page", () => {
       if (url === "/api/service-timeline") return ok([tl]);
       if (url === "/api/attendance/history?summary=1") return ok([attendance()]);
       if (url === "/api/spl/summary") return ok([]);
-      if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
       if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
       if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
       if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(tl);
@@ -540,7 +535,6 @@ describe("the History service page", () => {
       if (url === "/api/service-timeline") return ok([timeline()]);
       if (url === "/api/attendance/history?summary=1") return ok([attendance()]);
       if (url === "/api/spl/summary") return ok([]);
-      if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
       if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
       if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
       if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(timeline());
@@ -574,7 +568,6 @@ describe("the History service page", () => {
       if (url === "/api/service-timeline") return ok([timeline()]);
       if (url === "/api/attendance/history?summary=1") return ok([attendance()]);
       if (url === "/api/spl/summary") return ok([]);
-      if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
       if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
       if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
       if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(timeline());
@@ -608,7 +601,6 @@ describe("the History service page", () => {
       if (url === "/api/service-timeline") return ok([timeline()]);
       if (url === "/api/attendance/history?summary=1") return ok([attendance()]);
       if (url === "/api/spl/summary") return ok([]);
-      if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
       if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
       if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
       if (/^\/api\/service-timeline\/[^/]+$/.test(url)) return ok(timeline());
@@ -877,7 +869,6 @@ describe("the History service page", () => {
       // asked it again (matching the bug's own "until the page is reopened").
       if (url === "/api/attendance/history?summary=1") return ok([attendance(), sourceAttendance()]);
       if (url === "/api/spl/summary") return ok([]);
-      if (url === "/api/spl/trend") return ok({ shown: false, metric: null });
       if (url === "/api/spl/visible-metrics") return ok({ metrics: [] });
       if (/\/series\?/.test(url)) return ok({ metric: "SPL LAeq", bucketSec: 5, buckets: [] });
       if (url === `/api/service-timeline/${encodeURIComponent(SOURCE_KEY)}`) return ok(sourceTimeline());

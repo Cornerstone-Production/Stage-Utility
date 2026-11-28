@@ -26,8 +26,15 @@ const { attendanceRecorder } = await import("./attendance-recorder.js");
 const { splRecorder } = await import("./spl-recorder.js");
 const { serviceTimelineRecorder } = await import("./service-timeline-recorder.js");
 const { baptismStore } = await import("./baptism-store.js");
-const { deleteServiceRecords, editServiceWindow, mergeServiceRecords, recalcAttendance, ServiceIsLiveError } =
-  await import("./history-edit.js");
+const {
+  deleteServiceRecords,
+  editServiceWindow,
+  InvalidWindowError,
+  mergeServiceRecords,
+  recalcAttendance,
+  ServiceIsLiveError,
+  WindowTrimsDataError,
+} = await import("./history-edit.js");
 const { applyItemTimeEdits } = await import("./history-item-times.js");
 const { addBroadcastListener } = await import("./broadcaster.js");
 
@@ -333,9 +340,10 @@ describe("editServiceWindow and recalcAttendance", () => {
   });
 
   it("still drops a sample beyond the taper window entirely", async () => {
-    // Trimming a bad capture has to actually trim. 12:30 is 90 minutes past an
-    // 11:00 end, well outside the 60-minute taper.
-    await editServiceWindow(LIVE_KEY, { endedAt: "2026-07-26T11:00:00.000Z" });
+    // Trimming a bad capture has to actually trim. 12:30 is 85 minutes past an
+    // 11:05 end, well outside the 60-minute taper. Sent as a trim: it deletes.
+    // (Not 11:00: that is the start, and an empty window is refused.)
+    await editServiceWindow(LIVE_KEY, { endedAt: "2026-07-26T11:05:00.000Z", trim: true });
     assert.equal((await attendanceStore.get(LIVE_KEY))?.samples.length, 1, "a sample past the taper survived");
   });
 
@@ -354,7 +362,8 @@ describe("editServiceWindow and recalcAttendance", () => {
       itemTimeEdits: [{ itemId: "a", sequence: 0, endedAt: "2026-07-26T12:30:00.000Z", editedAt: "2026-07-26T13:00:00.000Z" }],
     } as never);
 
-    await editServiceWindow(LIVE_KEY, { endedAt: "2026-07-26T11:15:00.000Z" });
+    // A trim: the 12:30 sample is 75 minutes past the new end.
+    await editServiceWindow(LIVE_KEY, { endedAt: "2026-07-26T11:15:00.000Z", trim: true });
 
     const tl = (await serviceTimelineStore.get(LIVE_KEY))!;
     assert.equal(
@@ -384,7 +393,7 @@ describe("editServiceWindow and recalcAttendance", () => {
     const warn = console.warn;
     console.warn = (...a: unknown[]) => void warnings.push(a.map(String).join(" "));
     try {
-      await editServiceWindow(LIVE_KEY, { endedAt: "2026-07-26T11:15:00.000Z" });
+      await editServiceWindow(LIVE_KEY, { endedAt: "2026-07-26T11:15:00.000Z", trim: true });
     } finally {
       console.warn = warn;
     }
@@ -577,6 +586,149 @@ describe("merging when only one side has a record in a store", () => {
       false,
       "no baptism session moved, so baptism:rebuilt must not fire",
     );
+  });
+});
+
+// The bug this exists for: History's Edit times read and wrote its fields in the
+// BROWSER's zone, anchored on the service date. An evening service in Chicago
+// viewed from a UTC browser sits on the next UTC day, so the stamps Save sent back
+// — both of them, changed or not — were a day early. The window moved a day, and
+// everything recorded in the real one fell outside it and was deleted: every
+// item, every SPL item, every attendance sample, from pressing Save on an
+// untouched form. Attendance re-derives from these stored samples, so Rebuild
+// from raw does not bring them back.
+describe("a window edit that would delete recorded data", () => {
+  const KEY = "st1:plan-eve:6pm";
+  // 18:00-19:30 in Chicago on 22 Nov 2026 — 00:00-01:30 UTC on the 23rd.
+  const START = "2026-11-23T00:00:00.000Z";
+  const END = "2026-11-23T01:30:00.000Z";
+  const DAY_MS = 86_400_000;
+  const shift = (iso: string, ms: number) => new Date(Date.parse(iso) + ms).toISOString();
+  const eve = {
+    serviceTypeId: "st1", planId: "plan-eve", planTitle: null, seriesTitle: null,
+    serviceDate: "2026-11-22", serviceTimeId: "6pm", serviceTimeStartsAt: START,
+    startedAt: START, endedAt: END,
+  };
+  const item = (itemId: string, sequence: number, startMin: number, endMin: number) => ({
+    itemId, title: itemId, sequence, plannedLengthSec: null,
+    startedAt: shift(START, startMin * 60_000), endedAt: shift(START, endMin * 60_000),
+    actualDurationSec: (endMin - startMin) * 60,
+  });
+  const splItem = (itemId: string, sequence: number, startMin: number, endMin: number) => ({
+    itemId, title: itemId, sequence, metrics: {}, maxSpl: 90, sampleCount: 10,
+    startedAt: shift(START, startMin * 60_000), endedAt: shift(START, endMin * 60_000),
+  });
+
+  async function seed(): Promise<void> {
+    await serviceTimelineStore.upsert({
+      ...eve, serviceKey: KEY,
+      items: [item("welcome", 0, 0, 10), item("worship", 1, 10, 40), item("message", 2, 40, 85)],
+    } as never);
+    await splHistoryStore.upsert({
+      ...eve, serviceKey: KEY, meterId: null, metricKey: null,
+      items: [splItem("welcome", 0, 0, 10), splItem("worship", 1, 10, 40), splItem("message", 2, 40, 85)],
+    } as never);
+    await attendanceStore.upsert({
+      ...eve, serviceKey: KEY, serviceStartedAt: START,
+      attendanceBaseline: 0, totalAttendance: 0, peakAttendance: 0, peakOccupancy: 0,
+      minOccupancy: null, lastAttendance: 0, lastOccupancy: 0,
+      samples: [5, 20, 45, 70].map((min) => ({ t: shift(START, min * 60_000), attendance: 100, occupancy: 100 })),
+    } as never);
+  }
+
+  /** What each store answers now — read through `get`, which hands back the
+   *  live in-memory record, so a refusal that trimmed in place shows here. */
+  async function held() {
+    const tl = (await serviceTimelineStore.get(KEY))!;
+    const att = (await attendanceStore.get(KEY))!;
+    const spl = (await splHistoryStore.get(KEY))!;
+    return {
+      window: [tl.startedAt, tl.endedAt, att.startedAt, att.endedAt, spl.startedAt, spl.endedAt],
+      items: tl.items.length,
+      samples: att.samples.length,
+      splItems: spl.items.length,
+    };
+  }
+
+  beforeEach(async () => {
+    idle();
+    await seed();
+  });
+
+  it("refuses the window a UTC browser sent back a day early, and changes nothing", async () => {
+    const before = await held();
+    const warnings: string[] = [];
+    const warn = console.warn;
+    console.warn = (...a: unknown[]) => void warnings.push(a.map(String).join(" "));
+    try {
+      await assert.rejects(
+        () => editServiceWindow(KEY, { startedAt: shift(START, -DAY_MS), endedAt: shift(END, -DAY_MS) }),
+        (err: Error & { code?: string; status?: number }) => {
+          assert.ok(err instanceof WindowTrimsDataError, `not the trim refusal: ${err.message}`);
+          assert.equal(err.status, 409);
+          assert.equal(err.code, "trims-data");
+          assert.match(err.message, /3 timeline items, 4 attendance samples and 3 SPL items/);
+          return true;
+        },
+      );
+    } finally {
+      console.warn = warn;
+    }
+    assert.deepEqual(await held(), before, "a refused window edit changed a record");
+    assert.equal(
+      warnings.filter((l) => l.includes("[history]") && l.includes("refused")).length,
+      1,
+      `the refusal was not logged: ${JSON.stringify(warnings)}`,
+    );
+  });
+
+  it("applies the same edit when it is sent as a trim, and logs what it dropped", async () => {
+    const warnings: string[] = [];
+    const warn = console.warn;
+    console.warn = (...a: unknown[]) => void warnings.push(a.map(String).join(" "));
+    let trimmed;
+    try {
+      trimmed = await editServiceWindow(KEY, { endedAt: shift(START, 30 * 60_000), trim: true });
+    } finally {
+      console.warn = warn;
+    }
+    // The end moved to 18:30: the message (18:40) goes, and with the 60-minute
+    // taper every sample stays, re-tagged.
+    assert.deepEqual(trimmed, { items: 1, itemTimeEdits: 0, samples: 0, splItems: 1 });
+    const after = await held();
+    assert.equal(after.items, 2);
+    assert.equal(after.splItems, 2);
+    assert.equal(
+      warnings.filter((l) => l.includes("[history]") && l.includes("trimmed 1 timeline item and 1 SPL item")).length,
+      1,
+      `the trim was not logged: ${JSON.stringify(warnings)}`,
+    );
+  });
+
+  it("applies an edit that deletes nothing without asking", async () => {
+    await editServiceWindow(KEY, { endedAt: shift(END, 5 * 60_000) });
+    assert.equal((await held()).window[1], shift(END, 5 * 60_000));
+  });
+
+  it("refuses an end that is not after the start, and changes nothing", async () => {
+    // A service past midnight whose end was put on the start's date: the end
+    // lands before the start. Nothing about that is a window.
+    const before = await held();
+    await assert.rejects(
+      () => editServiceWindow(KEY, { endedAt: shift(START, -60 * 60_000), trim: true }),
+      (err: Error & { status?: number }) => err instanceof InvalidWindowError && err.status === 400,
+    );
+    assert.deepEqual(await held(), before);
+  });
+
+  it("refuses a stamp that is not a time, and changes nothing", async () => {
+    // Date.parse of this is NaN, and a NaN end once filtered out every item.
+    const before = await held();
+    await assert.rejects(
+      () => editServiceWindow(KEY, { endedAt: "19:30", trim: true }),
+      (err: Error & { status?: number }) => err instanceof InvalidWindowError && err.status === 400,
+    );
+    assert.deepEqual(await held(), before);
   });
 });
 

@@ -3,7 +3,7 @@ import { useLatestRef } from "@renderer/lib/use-latest-ref";
 import { UploadIcon, PlusIcon, Trash2Icon, PrinterIcon } from "lucide-react";
 
 import { errorMessage } from "@main/services/errors";
-import { invoke, onNotification } from "../../lib/api";
+import { invoke, onNotification, type ApiError } from "../../lib/api";
 import { useFailedReads } from "../../lib/use-failed-reads";
 import { Button, ErrorNote, Input, SkeletonRows, toast, confirm , UnsavedBanner, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { mergeOverrides, diffEndpoints } from "../../lib/patch-resolve";
@@ -99,7 +99,20 @@ export function PatchSection() {
       setDraft(result);
       toast.success("Patch saved");
     } catch (e) {
-      toast.error(`Couldn't save the patch: ${errorMessage(e)}`);
+      if ((e as ApiError).code === "plot-links-not-updated") {
+        // The patch WAS saved (and announced); what failed is the stage plot points following it.
+        // The answer carries no file, so read what is stored: the page must not show it as unsaved.
+        toast.error(errorMessage(e));
+        try {
+          const stored = await invoke<PatchFile>("patch:get");
+          setSaved(stored);
+          setDraft(stored);
+        } catch (readErr) {
+          fail("patch", "the patch after a save", readErr);
+        }
+      } else {
+        toast.error(`Couldn't save the patch: ${errorMessage(e)}`);
+      }
     } finally {
       setSaving(false);
     }

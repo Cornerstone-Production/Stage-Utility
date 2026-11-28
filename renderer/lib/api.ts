@@ -13,6 +13,7 @@ import { startPublicLive, type PublicLiveDeps } from "./public-live";
 import { readStored } from "./safe-storage";
 import { monotonicNow, serverClock } from "./server-clock";
 import { HYDRATED_CHANNELS, HYDRATED_SET } from "./sse-channels";
+import { SSE_HEARTBEAT_EVENT, SSE_SILENCE_MS } from "@main/types/sse";
 import { createSubscribeReporter } from "./subscribe-reporter";
 import { uid } from "./uid";
 
@@ -302,8 +303,8 @@ async function sendAsAsked<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-function sendJson<T>(method: "POST" | "PATCH" | "PUT", path: string, body: unknown): Promise<T> {
-  return apiFetch<T>(path, { method, body: body !== undefined ? JSON.stringify(body) : undefined });
+function sendJson<T>(method: "POST" | "PATCH" | "PUT", path: string, body: unknown, keepalive?: boolean): Promise<T> {
+  return apiFetch<T>(path, { method, body: body !== undefined ? JSON.stringify(body) : undefined, ...(keepalive ? { keepalive } : {}) });
 }
 
 function post<T>(path: string, body?: unknown): Promise<T> {
@@ -314,12 +315,30 @@ function patch<T>(path: string, body?: unknown): Promise<T> {
   return sendJson<T>("PATCH", path, body);
 }
 
-function put<T>(path: string, body?: unknown): Promise<T> {
-  return sendJson<T>("PUT", path, body);
+/** `keepalive`: the request is still sent once the page has gone (a page closing). */
+function put<T>(path: string, body?: unknown, { keepalive }: { keepalive?: boolean } = {}): Promise<T> {
+  return sendJson<T>("PUT", path, body, keepalive);
 }
+
+/** A stage plot's kept draft. */
+const draftPath = (p: Record<string, unknown>) => `/api/stageplots/plots/${encodeURIComponent(p.id as string)}/draft`;
 
 function del<T>(path: string): Promise<T> {
   return apiFetch<T>(path, { method: "DELETE" });
+}
+
+/** How long an upload may take: a 25 MB PDF over a slow LAN, or a 12 MP photo a
+ *  Raspberry Pi converts, takes longer than an ordinary request. */
+const UPLOAD_TIMEOUT_MS = 120_000;
+
+/** A POST whose body is the bytes of a file, not JSON. */
+function rawUpload<T>(path: string, bytes: Blob): Promise<T> {
+  return apiFetch<T>(path, {
+    method: "POST",
+    body: bytes,
+    headers: { "Content-Type": bytes.type || "application/octet-stream" },
+    signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS),
+  });
 }
 
 /** A DELETE that carries a body: deleting a board says what its screens show next. */
@@ -456,6 +475,8 @@ export type IpcChannel =
   | "history:editWindow"
   | "history:live"
   | "history:listMilestones"
+  | "history:getTrendsPrefs"
+  | "history:setTrendsPrefs"
   | "history:merge"
   | "history:rebuild"
   | "history:recalcAttendance"
@@ -558,6 +579,7 @@ export type IpcChannel =
   | "servicecue:rundown"
   | "servicecue:saveLayouts"
   | "servicecue:saveRoles"
+  | "servicecue:seedRoles"
   | "servicecue:setConfig"
   | "servicecue:setDeployCredentials"
   | "servicecue:setPublish"
@@ -575,16 +597,15 @@ export type IpcChannel =
   | "settings:setReconnectSchedule"
   | "settings:setTaperWindow"
   | "settings:setTimezone"
+  | "sidebar:set"
   | "spl:deleteHistory"
   | "spl:getHistory"
   | "spl:getHistoryCurrent"
   | "spl:getMetrics"
   | "spl:getSummary"
-  | "spl:getTrendPrefs"
   | "spl:getVisibleMetrics"
   | "spl:listHistory"
   | "spl:series"
-  | "spl:setTrendPrefs"
   | "spl:setVisibleMetrics"
   | "stage:getBrandingSource"
   | "stage:getRemoteUrl"
@@ -593,6 +614,7 @@ export type IpcChannel =
   | "stage:listPlans"
   | "stage:listServiceTypes"
   | "stage:listTeamPositions"
+  | "stage:newServerId"
   | "stage:refresh"
   | "stage:selectNextPlan"
   | "stage:setAllowedServiceTypes"
@@ -607,11 +629,39 @@ export type IpcChannel =
   | "stage:setPublicUrl"
   | "stage:setServiceType"
   | "stage:setShowQr"
+  | "stageplots:createPlot"
+  | "stageplots:createVenue"
+  | "stageplots:deleteBackground"
+  | "stageplots:deletePlot"
+  | "stageplots:deleteVenue"
+  | "stageplots:discardDraft"
+  | "stageplots:drafts"
+  | "stageplots:duplicatePlot"
+  | "stageplots:get"
+  | "stageplots:keepDraft"
+  | "stageplots:keepDraftOnLeave"
+  | "stageplots:link"
+  | "stageplots:patch"
+  | "stageplots:publish"
+  | "stageplots:publishNow"
+  | "stageplots:regenerate"
+  | "stageplots:removePending"
+  | "stageplots:saveItems"
+  | "stageplots:setDefault"
+  | "stageplots:setListed"
+  | "stageplots:setOverride"
+  | "stageplots:unpublish"
+  | "stageplots:updateBackground"
+  | "stageplots:updatePlot"
+  | "stageplots:updateVenue"
+  | "stageplots:uploadImage"
+  | "stageplots:uploadPdf"
   | "update:apply"
   | "update:check"
   | "update:dismissNotice"
   | "update:lock"
   | "update:notices"
+  | "update:releaseNotes"
   | "update:restart"
   | "update:setAuto"
   | "update:setTrack"
@@ -738,7 +788,10 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return post<T>("/api/servicecue/roles", { roles: p.roles });
 
     // Adds a role for any category this service type defines that no role covers.
-    // Only ever adds — never merges, never removes.
+    // Only ever adds — never merges, never removes. Answers with every role.
+    case "servicecue:seedRoles":
+      return post<T>("/api/servicecue/roles/seed", { serviceTypeId: p.serviceTypeId });
+
     case "servicecue:noteCategories": {
       const id = p.serviceTypeId as string;
       return apiFetch<T>(`/api/servicecue/note-categories?serviceTypeId=${encodeURIComponent(id)}`);
@@ -753,6 +806,105 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "patch:parseXlsx":
       return post<T>("/api/patch/parse-xlsx", { xlsx: p.xlsx });
+
+    // ── Stage plots ─────────────────────────────────────────────────────
+    case "stageplots:get":
+      return apiFetch<T>("/api/stageplots");
+
+    case "stageplots:patch":
+      return apiFetch<T>("/api/stageplots/patch");
+
+    case "stageplots:createVenue":
+      return post<T>("/api/stageplots/venues", p.venue);
+
+    case "stageplots:updateVenue":
+      return patch<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}`, p.changes);
+
+    case "stageplots:deleteVenue":
+      return del<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}`);
+
+    case "stageplots:setDefault":
+      return post<T>(`/api/stageplots/venues/${encodeURIComponent(p.venueId as string)}/default`, { plotId: p.plotId });
+
+    case "stageplots:setOverride":
+      return put<T>("/api/stageplots/overrides", { planId: p.planId, venueId: p.venueId, plotId: p.plotId, planDate: p.planDate });
+
+    case "stageplots:uploadImage": {
+      // The bytes are the body. A page rendered from a PDF names that PDF, kept
+      // by stageplots:uploadPdf, and which of its pages this is.
+      const q = new URLSearchParams({ name: String(p.name) });
+      if (p.original !== undefined) {
+        q.set("original", String(p.original));
+        q.set("page", String(p.page));
+        q.set("pages", String(p.pages));
+      }
+      return rawUpload<T>(`/api/stageplots/backgrounds?${q}`, p.bytes as Blob);
+    }
+
+    case "stageplots:uploadPdf":
+      return rawUpload<T>(`/api/stageplots/backgrounds/pdf?${new URLSearchParams({ name: String(p.name) })}`, p.bytes as Blob);
+
+    case "stageplots:updateBackground":
+      return patch<T>(`/api/stageplots/backgrounds/${encodeURIComponent(p.id as string)}`, p.changes);
+
+    case "stageplots:deleteBackground":
+      return del<T>(`/api/stageplots/backgrounds/${encodeURIComponent(p.id as string)}`);
+
+    case "stageplots:createPlot":
+      return post<T>("/api/stageplots/plots", p.plot);
+
+    case "stageplots:duplicatePlot":
+      return post<T>(`/api/stageplots/plots/${encodeURIComponent(p.id as string)}/duplicate`);
+
+    case "stageplots:updatePlot":
+      return patch<T>(`/api/stageplots/plots/${encodeURIComponent(p.id as string)}`, p.changes);
+
+    case "stageplots:deletePlot":
+      return del<T>(`/api/stageplots/plots/${encodeURIComponent(p.id as string)}`);
+
+    // The whole item list, against the version it was loaded at: 409 when the
+    // plot changed since (the error carries status 409 and the current version).
+    case "stageplots:drafts":
+      return apiFetch<T>("/api/stageplots/drafts");
+
+    case "stageplots:keepDraft":
+      return put<T>(draftPath(p), { baseVersion: p.baseVersion, items: p.items });
+
+    // The page is going: a keepalive request is still sent once it has. Browsers cap its body
+    // at 64 KB, so a very large draft is refused here, and the leave guard has already asked.
+    case "stageplots:keepDraftOnLeave":
+      return put<T>(draftPath(p), { baseVersion: p.baseVersion, items: p.items }, { keepalive: true });
+
+    case "stageplots:discardDraft":
+      return del<T>(draftPath(p));
+
+    case "stageplots:saveItems":
+      return put<T>(`/api/stageplots/plots/${encodeURIComponent(p.id as string)}/items`, { version: p.version, items: p.items });
+
+    // Publishing a venue behind a secret link. Each answers the venue as it now is, or rejects
+    // with the sentence the card shows (409, 502, or 400 for a plot too large to publish).
+    case "stageplots:publish":
+      return post<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}/publish`);
+
+    // The venue's public link (VenueLink): the one stage plots read that carries a secret.
+    case "stageplots:link":
+      return apiFetch<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}/link`);
+
+    case "stageplots:regenerate":
+      return post<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}/regenerate`);
+
+    case "stageplots:setListed":
+      return post<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}/listed`, { listed: p.listed });
+
+    case "stageplots:unpublish":
+      return post<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}/unpublish`);
+
+    case "stageplots:publishNow":
+      return post<T>(`/api/stageplots/venues/${encodeURIComponent(p.id as string)}/publish-now`);
+
+    // Remove now: drop every old link queued against the page set up.
+    case "stageplots:removePending":
+      return post<T>("/api/stageplots/pending/remove");
 
     case "servicecue:rundown": {
       const id = p.serviceTypeId as string;
@@ -854,11 +1006,6 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "spl:getSummary":
       return apiFetch<T>("/api/spl/summary");
 
-    case "spl:getTrendPrefs":
-      return apiFetch<T>("/api/spl/trend");
-    case "spl:setTrendPrefs":
-      return post<T>("/api/spl/trend", p);
-
     case "people:getCount":
       return apiFetch<T>("/api/people/count");
 
@@ -916,6 +1063,10 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "history:live":
       return apiFetch<T>(`/api/history/live?serviceKey=${encodeURIComponent(String(p.serviceKey ?? ""))}`);
 
+    case "history:getTrendsPrefs":
+      return apiFetch<T>("/api/history/trends-prefs", { cache: "no-store" });
+    case "history:setTrendsPrefs":
+      return post<T>("/api/history/trends-prefs", { soundMetric: p.soundMetric });
     case "history:listMilestones":
       return apiFetch<T>("/api/history/milestones");
     case "history:saveMilestone":
@@ -1071,7 +1222,7 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     case "config:recallSnapshot": {
       const id = p.id as string;
-      return post<T>(`/api/config/snapshots/${encodeURIComponent(id)}/recall`);
+      return post<T>(`/api/config/snapshots/${encodeURIComponent(id)}/recall`, { replacesOriginal: p.replacesOriginal === true });
     }
 
     case "config:deleteSnapshot": {
@@ -1080,7 +1231,7 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     }
 
     case "config:import":
-      return post<T>("/api/config/import", { bundle: p.bundle });
+      return post<T>("/api/config/import", { bundle: p.bundle, replacesOriginal: p.replacesOriginal === true });
 
     case "displays:refresh":
       return post<T>("/api/displays/refresh", p);
@@ -1094,6 +1245,9 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     // ── Kiosk devices ─────────────────────────────────────────────────────
     case "stage:setKioskDiscovery":
       return post<T>("/api/kiosk-discovery", p);
+
+    case "stage:newServerId":
+      return post<T>("/api/server-id/new", {});
 
     case "devices:list":
       return apiFetch<T>("/api/devices");
@@ -1310,6 +1464,10 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return apiFetch<T>("/api/update/notices");
     case "update:dismissNotice":
       return post<T>("/api/update/notices/dismiss", p);
+    // What's new: the running release's notes, read-only. Read on a button
+    // press only, never on load; a failure is an answer ({ok: false}), not an error.
+    case "update:releaseNotes":
+      return apiFetch<T>("/api/update/release-notes");
 
     // The bundle IS the payload — a view export file, posted verbatim — unless
     // the caller also names a service type or a clash choice, which only a plan
@@ -1640,6 +1798,9 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "barItems:set":
       return post<T>("/api/bar-items", p);
 
+    case "sidebar:set":
+      return post<T>("/api/sidebar", p);
+
     case "savedColors:set":
       return post<T>("/api/saved-colors", p);
 
@@ -1935,13 +2096,128 @@ function reportChannels(): void {
 //
 //   Opt out: localStorage.setItem("stage:sharedSse", "0")  (then reload)
 const SHARED_SSE_KEY = "stage:sharedSse";
-let sharedSse = (() => {
+
+// ── Is the event stream delivering? ─────────────────────────────────────────
+// Whichever transport this page is on (the shared worker's stream, its own
+// EventSource, or the poll transport), whether events are reaching it right now.
+// A Screens-card preview reports it to the card (stage-view.tsx), so a picture
+// whose stream has gone quiet is drawn as *Not live* instead of passing for live.
+
+/** `up`: events are arriving. `downSince`: when they stopped, null if never up. */
+export interface StreamStatus {
+  up: boolean;
+  downSince: number | null;
+}
+let streamStatus: StreamStatus = { up: false, downSince: null };
+const streamStatusListeners = new Set<() => void>();
+
+function noteStream(up: boolean): void {
+  if (streamStatus.up === up) return;
+  streamStatus = up ? { up: true, downSince: null } : { up: false, downSince: Date.now() };
+  for (const cb of streamStatusListeners) cb();
+}
+
+// This page's own EventSource is delivering while something has arrived within
+// SSE_SILENCE_MS (the poll transport says so with every answer instead). The server's
+// heartbeat is an event (main/types/sse.ts), so a stream that is open but has gone
+// quiet, a frozen server or a connection that died without closing, reads as down
+// rather than live for good. Re-armed by each arrival: there is no timer while
+// nothing is connected. On the shared worker's stream the worker keeps this clock
+// and says so (sse-shared-worker.ts).
+//
+// Reaching the deadline also reopens the stream, once: a connection that died
+// without a reset (the server lost power, a switch dropped it) never errors, so
+// nothing else would ever replace it. The new stream arms the deadline again only
+// when it opens or hears something, so a server that stays unreachable costs one
+// reopen, not one every 50 s; the browser's own retry takes it from there.
+let silenceTimer: ReturnType<typeof setTimeout> | null = null;
+
+function heardFromStream(): void {
+  noteStream(true);
+  stopSilenceClock();
+  silenceTimer = setTimeout(() => {
+    silenceTimer = null;
+    noteStream(false);
+    reopenStalledStream();
+  }, SSE_SILENCE_MS);
+}
+
+function stopSilenceClock(): void {
+  if (silenceTimer) clearTimeout(silenceTimer);
+  silenceTimer = null;
+}
+
+function lostStream(): void {
+  stopSilenceClock();
+  noteStream(false);
+}
+
+/** Replace this page's own stream after it went silent. See the deadline above. */
+function reopenStalledStream(): void {
+  if (!eventSource) return;
+  eventSource.close();
+  eventSource = null;
+  // Logs its own "(re)connecting" line, as every reconnect does.
+  ensureEventSource();
+}
+
+/** The stream's state now. The same object until it changes, for useSyncExternalStore. */
+export function getStreamStatus(): StreamStatus {
+  return streamStatus;
+}
+
+/** Call `cb` whenever `getStreamStatus()` changes. */
+export function onStreamStatusChange(cb: () => void): () => void {
+  streamStatusListeners.add(cb);
+  return () => {
+    streamStatusListeners.delete(cb);
+  };
+}
+/** Why this page is not on the shared stream, or null while it is. */
+let sharedSseOffReason: string | null = (() => {
   // The worker exists to SHARE one EventSource across tabs. On the polling
   // transport there is no stream to share, so it would open one nobody reads, and
   // the public page's transport is public-live.ts.
-  if (POLL_TRANSPORT || isPublicMode()) return false;
-  return typeof SharedWorker !== "undefined" && readStored(SHARED_SSE_KEY, (raw) => raw !== "0", false);
+  if (POLL_TRANSPORT) return "poll transport";
+  if (isPublicMode()) return "public page";
+  if (typeof SharedWorker === "undefined") return "no SharedWorker in this browser";
+  return readStored(SHARED_SSE_KEY, (raw) => raw !== "0", false) ? null : "turned off on this browser";
 })();
+let sharedSse = sharedSseOffReason === null;
+const sharedSseListeners = new Set<() => void>();
+
+/** Move this page on or off the shared stream, and tell whoever is watching. */
+function setSharedSse(on: boolean, offReason: string | null = null): void {
+  const reason = on ? null : (offReason ?? sharedSseOffReason ?? "unknown");
+  if (sharedSse === on && sharedSseOffReason === reason) return;
+  sharedSse = on;
+  sharedSseOffReason = reason;
+  for (const cb of sharedSseListeners) cb();
+}
+
+/**
+ * Whether this page's events arrive through the shared worker right now.
+ *
+ * The kept Screens page (kept-screens.tsx) reads it: a hidden preview costs no
+ * connection while every page shares one stream, and one EventSource each when
+ * they do not, which is the starvation lazy-preview.tsx exists to prevent.
+ */
+export function sharedStreamInUse(): boolean {
+  return sharedSse;
+}
+
+/** Why the shared stream is not in use, or null while it is. */
+export function sharedStreamOffReason(): string | null {
+  return sharedSseOffReason;
+}
+
+/** Call `cb` whenever `sharedStreamInUse()` changes: an abandoned worker, or one recovered. */
+export function onSharedStreamChange(cb: () => void): () => void {
+  sharedSseListeners.add(cb);
+  return () => {
+    sharedSseListeners.delete(cb);
+  };
+}
 
 /** Wrappers added to the direct stream while the worker is unavailable, so a
  *  recovery can remove exactly these and leave real direct listeners alone. */
@@ -1956,7 +2232,12 @@ export const __sseFallback = {
   /** Re-enter the "worker is live" state, as a retry does just before it calls
    *  ensureWorker(). Without this a test cannot reach the failed-retry path,
    *  because abandonWorker early-returns once already abandoned. */
-  simulateRetryStart: () => { sharedSse = true; },
+  simulateRetryStart: () => { setSharedSse(true); },
+  /** Put this page on or off the shared stream, as a worker starting, failing or
+   *  being abandoned does, and tell whoever is watching. */
+  setShared: (on: boolean, offReason?: string) => setSharedSse(on, offReason ?? null),
+  /** Say the stream opened or dropped, as each transport does. */
+  noteStream: (up: boolean) => noteStream(up),
   /** Put a callback in the worker registry, as a tab running ON the worker
    *  would have. jsdom has no SharedWorker, so without this the registry is
    *  empty, no wrappers are ever built, and every assertion about them passes
@@ -1991,7 +2272,12 @@ function ensureWorker(): boolean {
   try {
     sseWorker = new SharedWorker(new URL("./sse-shared-worker.ts", import.meta.url), { type: "module" });
     sseWorker.port.onmessage = (ev: MessageEvent) => {
-      const msg = ev.data as { type?: string; streamOpen?: boolean; channel?: string; data?: unknown };
+      const msg = ev.data as { type?: string; streamOpen?: boolean; delivering?: boolean; channel?: string; data?: unknown };
+      if (msg.type === "stream") {
+        // Whether the worker's stream is delivering: what every tab on it sees.
+        noteStream(msg.delivering === true);
+        return;
+      }
       if (msg.type === "pong") {
         // Answered: the worker is alive. Whether its STREAM is alive is a
         // separate question, and a worker with a dead stream is the failure
@@ -2015,7 +2301,7 @@ function ensureWorker(): boolean {
   } catch (err) {
     console.warn("[api] SharedWorker SSE unavailable — falling back to direct EventSource", err);
     sseWorker = null;
-    sharedSse = false; // permanent fallback for this session
+    setSharedSse(false, "the shared worker could not start"); // permanent fallback for this session
     return false;
   }
 }
@@ -2036,7 +2322,7 @@ function abandonWorker(why: string): void {
   scheduleWorkerRetry();
   try { sseWorker?.port.postMessage({ type: "bye" }); } catch { /* it may already be gone */ }
   sseWorker = null;
-  sharedSse = false; // until a retry succeeds — see scheduleWorkerRetry
+  setSharedSse(false, `worker abandoned: ${why}`); // until a retry succeeds — see scheduleWorkerRetry
   // Re-establish everything the worker was carrying, directly.
   //
   // Only build the fallback wrappers once. A failed RETRY re-enters here while
@@ -2068,8 +2354,12 @@ function abandonWorker(why: string): void {
           console.error(`[api] SSE parse error for "${channel}":`, err);
         }
       };
-      fallbackWrappers.push({ channel, handler });
-      sseListeners.push({ channel, handler });
+      // ONE object in both lists: recovery finds its wrappers in sseListeners by
+      // identity, and two copies left every one behind there, so the list never
+      // emptied and this tab's own stream was never closed.
+      const wrapper = { channel, handler };
+      fallbackWrappers.push(wrapper);
+      sseListeners.push(wrapper);
     }
   }
   ensureEventSource();
@@ -2104,7 +2394,7 @@ function scheduleWorkerRetry(): void {
     if (typeof SharedWorker === "undefined") return; // nothing to go back to
     // Storage unavailable reads as not opted out: keep trying.
     if (!readStored(SHARED_SSE_KEY, (raw) => raw !== "0", true)) return;
-    sharedSse = true;
+    setSharedSse(true);
     if (!ensureWorker()) return; // ensureWorker already fell back and rescheduled
     console.log("[api] shared SSE worker recovered — moving this tab back onto it");
     // Unhook only the wrappers this fallback added. Anything else on the direct
@@ -2119,8 +2409,13 @@ function scheduleWorkerRetry(): void {
     // what it was carrying before.
     workerReport();
     // Close this tab's own stream, so the connection is actually returned rather
-    // than left open and idle — which would defeat the point of going back.
+    // than left open and idle — which would defeat the point of going back. Its
+    // silence clock goes with it: left running, it would mark the worker's healthy
+    // stream down 50 s later, and the worker says only what changes. Whether the
+    // stream is delivering is the worker's word from here on, sent as the new port
+    // connects.
     if (eventSource && sseListeners.length === 0) {
+      stopSilenceClock();
       eventSource.close();
       eventSource = null;
     }
@@ -2180,6 +2475,9 @@ function ensureEventSource(): EventSource {
     });
   }
 
+  // The server's heartbeat: proof the stream is still delivering on a quiet day.
+  eventSource.addEventListener(SSE_HEARTBEAT_EVENT, heardFromStream);
+
   // Re-attach all registered listeners on reconnect.
   for (const entry of sseListeners) {
     eventSource.addEventListener(entry.channel, entry.handler);
@@ -2189,10 +2487,13 @@ function ensureEventSource(): EventSource {
   // when a stream closes, so a transparent reconnect needs a fresh report.
   eventSource.onopen = () => {
     sseReconnectDelayMs = SSE_RECONNECT_MIN_MS;
+    heardFromStream();
     reportChannels();
   };
 
   eventSource.onerror = (e) => {
+    // Retrying or given up, nothing is arriving either way.
+    lostStream();
     // CONNECTING means the browser is retrying on its own — leave it alone.
     // CLOSED means it has GIVEN UP, and nothing else would ever reopen the
     // stream: the page goes on rendering its last snapshot, silently receiving
@@ -2287,6 +2588,9 @@ async function pollOnce(): Promise<void> {
       pollFailures = 0;
     }
     pollDelayMs = POLL_INTERVAL_MS;
+    // Each answer is the proof, and a poll that hangs fails on its own timeout, so
+    // this transport needs no silence deadline.
+    noteStream(true);
     if (body.resync) {
       // A resync means the server handed us a fresh snapshot instead of a
       // continuation, so drop our position and ask for one again rather than
@@ -2303,6 +2607,7 @@ async function pollOnce(): Promise<void> {
     for (const frame of body.frames) dispatch(frame.channel, frame.data, false);
   } catch (err) {
     pollFailures++;
+    lostStream();
     // Once per streak: a display left running against a stopped server would
     // otherwise write a line every two seconds for as long as it is down.
     if (pollFailures === 1) console.warn("[api] event poll failed — backing off", err);

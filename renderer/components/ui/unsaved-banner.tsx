@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import { Button } from "./button";
 import { cn } from "../../lib/cn";
 
@@ -21,15 +23,23 @@ export function UnsavedBanner({
   onDiscard,
   className,
   compact = false,
+  actions,
+  marker,
 }: {
-  message?: string;
+  message?: ReactNode;
   saving?: boolean;
-  onSave: () => void;
-  onDiscard: () => void;
+  /** Required unless `actions` replaces the Save and Discard buttons. */
+  onSave?: () => void;
+  onDiscard?: () => void;
   className?: string;
   /** Compact pill form (icon + "Unsaved" + Save/Discard) for floating as an
    *  overlay so it doesn't reserve layout space / shift content. */
   compact?: boolean;
+  /** Buttons in place of Discard and Save, for a state that offers something
+   *  else (a save refused because the work changed elsewhere offers Reload). */
+  actions?: ReactNode;
+  /** Drawn before the message: the plot editor's dot, amber while unsaved and red when its draft could not be kept. */
+  marker?: ReactNode;
 }) {
   if (compact) {
     return (
@@ -56,13 +66,18 @@ export function UnsavedBanner({
         className,
       )}
     >
+      {marker}
       <span className="flex-1 min-w-0 text-caption1 text-fg-muted">{message}</span>
-      <Button variant="transparent" size="small" onClick={onDiscard} disabled={saving}>
-        Discard
-      </Button>
-      <Button variant="accent" size="small" onClick={onSave} disabled={saving}>
-        {saving ? "Saving…" : "Save"}
-      </Button>
+      {actions ?? (
+        <>
+          <Button variant="transparent" size="small" onClick={onDiscard} disabled={saving}>
+            Discard
+          </Button>
+          <Button variant="accent" size="small" onClick={onSave} disabled={saving}>
+            {saving ? "Saving…" : "Save"}
+          </Button>
+        </>
+      )}
     </div>
   );
 }

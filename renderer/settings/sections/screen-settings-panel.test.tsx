@@ -27,7 +27,6 @@ import { eventually, installDom } from "../../test-dom.js";
 import { KIND_DRAWS_TOP_BAR, type ViewKind } from "@main/types/views";
 
 const teardown = installDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 class StubEventSource {
   static readonly CONNECTING = 0;
@@ -357,6 +356,14 @@ describe("text size", () => {
     assert.deepEqual(calls, [], "a keystroke was written to the screen");
     await act(async () => { fireEvent.blur(field()); await settle(); });
     assert.deepEqual(calls, [["textSize", "display-1", 150]]);
+  });
+
+  test("a stepper press moves it by five, the same as the ServiceCue page's A+ and A-", async () => {
+    const { calls } = mount({ outputs: [{ ...MINE, textSize: 100 }] });
+    const plus = screen.getAllByLabelText("Increase").find((b) => field().parentElement?.contains(b))!;
+    await act(async () => { fireEvent.pointerDown(plus, { pointerId: 1, isPrimary: true }); await settle(); });
+    await act(async () => { fireEvent.pointerUp(plus, { pointerId: 1, isPrimary: true }); await settle(); });
+    assert.deepEqual(calls, [["textSize", "display-1", 105]]);
   });
 
   test("is held between 50 and 300", async () => {

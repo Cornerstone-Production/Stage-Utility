@@ -85,6 +85,21 @@ export default [
             " CallExpression[callee.name='String'][arguments.length=1][arguments.0.type='Identifier']",
           message: "Use errorMessage(err) from @main/services/errors in a toast, not String(err): it keeps the \"Error: \" prefix.",
         },
+        {
+          // `void x` (a statement, `() => void x`, `(void x, y)`) inside a useCallback/useMemo
+          // to "depend" on x. The React
+          // Compiler drops a dependency that is only a dead read, hoists the
+          // callback to module level, and nothing downstream ever sees it change:
+          // use-wireless-telemetry.ts stopped re-subscribing, and the History
+          // metricsVersion reads were the same shape. Only a bare identifier
+          // operand matches; `void el.offsetWidth` and `void somePromise()` stay legal,
+          // as do the exhaustiveness checks, which are named below.
+          selector:
+            "UnaryExpression[operator='void'][argument.type='Identifier']" +
+            ":not([argument.name=/^(_.*|never|exhaustive|unhandled)$/])",
+          message:
+            "A bare `void x` is not a dependency: the React Compiler drops it. Pass the value as a real input, the way useStatusChannel takes resubscribeKey.",
+        },
       ],
     },
   },

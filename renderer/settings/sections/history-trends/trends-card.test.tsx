@@ -14,7 +14,6 @@ import { after, afterEach, describe, test } from "node:test";
 import { eventually, installRenderDom } from "../../../test-dom.js";
 
 const teardown = installRenderDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // jsdom's getBoundingClientRect is all zeros, and the chart REFUSES to map a
 // pointer against a zero-width box — it would map every x to NaN. Give every
@@ -241,6 +240,24 @@ describe("a day with three services", () => {
       dated,
       new Date("2026-02-01T00:00:00").toLocaleDateString(undefined, { month: "short", day: "numeric" }),
       "the tile is dated some other day than the one its figure came from",
+    );
+    view.unmount();
+  });
+
+  test("a level prints the tenth it has: 113.91 reads 113.9 dB, not 114.0 dB", async () => {
+    const recs = threeServicesADay().map((r, i, all) => ({
+      ...r,
+      // The last Sunday's loudest service is 113.91; the earlier four peak at 111.73.
+      peakDb: i >= all.length - 3 ? [96, 99, 113.91][i - (all.length - 3)] : [96, 99, 111.73][i % 3],
+    }));
+    const view = await renderCard(recs);
+    await act(async () => {
+      view.container.querySelector<HTMLButtonElement>('[data-trend-measure="sound"]')!.click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    assert.equal(
+      view.container.querySelector('[data-trend-tile="weekend"] [data-trend-latest]')?.textContent,
+      "113.9 dB",
     );
     view.unmount();
   });
@@ -1058,7 +1075,7 @@ describe("while the page's history is still arriving", () => {
 
   test("once it has arrived, an empty history still says so", async () => {
     const view = await renderCard([], { loading: false });
-    assert.equal(view.container.querySelector("[data-trends-loading]"), null);
+    assert.ok(view.container.querySelector("[data-trends-loading]") === null, "still loading");
     assert.match(view.container.textContent ?? "", EMPTY);
   });
 });
@@ -1089,7 +1106,7 @@ describe("when the milestone list will not load", () => {
 
   test("a list that loads fine says nothing", async () => {
     const view = await renderCard(alternating());
-    assert.equal(view.container.querySelector("[data-milestones-failed]"), null);
+    assert.ok(view.container.querySelector("[data-milestones-failed]") === null, "milestones reported failed");
   });
 });
 

@@ -167,7 +167,7 @@ test("a transient layouts/roles failure recovers the same way", async () => {
   });
   try {
     await mount();
-    await eventually(() => assert.match(alerts(), /Couldn't load the column layouts, so all columns are shown/i));
+    await eventually(() => assert.match(alerts(), /Couldn't load the layouts, so all columns are shown/i));
     await act(async () => { for (const fn of [...intervals]) fn(); });
     await settle();
     await eventually(() => assert.equal(alerts(), "", "the layouts failure cleared once the retry succeeded"));
@@ -182,7 +182,7 @@ test("a failed layout read says the page fell back to all columns", async () => 
   const f = stubFetch("layouts");
   try {
     await mount();
-    await eventually(() => assert.match(alerts(), /Couldn't load the column layouts, so all columns are shown/i));
+    await eventually(() => assert.match(alerts(), /Couldn't load the layouts, so all columns are shown/i));
     await eventually(() => assert.ok(logged(f.logs, /layouts/i), `expected a [servicecue] line — got ${JSON.stringify(f.logs)}`));
   } finally {
     f.restore();

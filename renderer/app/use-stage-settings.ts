@@ -18,12 +18,10 @@
 import { useState } from "react";
 import { screenName, type CreateScreenInput, type ViewSurface } from "@main/types/views";
 import type { Rotation } from "@main/types/output-format";
-import type { AppIconInput } from "@main/services/app-icon";
-import { MouseSensor, TouchSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { useQueryClient } from "@tanstack/react-query";
 import { invoke as ipc, type ApiError, type IpcChannel } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
-import { writeOptimistic } from "../lib/optimistic";
+import { writeOptimistic, writeTo as writeToKey } from "../lib/optimistic";
 import { toast, confirm } from "../components/ui";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { changeViewRole } from "../settings/view-role-change";
@@ -40,6 +38,9 @@ import {
   QUERY_KEYS,
 } from "./queries";
 import { markUpdatePending } from "./update-lifecycle";
+import { setBranding, type BrandingPatch } from "./set-branding";
+import { setViewShowInSidebar } from "./set-view-show-in-sidebar";
+import { usePointerSensors } from "./drag-parts";
 import { screensListViews } from "@main/services/home-view";
 import { plural } from "@main/services/plural";
 
@@ -120,15 +121,7 @@ export function useStageSettings(pinnedViewId?: string) {
     payload?: Record<string, unknown>,
     opts: { fail?: string; ok?: string } = {},
   ): Promise<T | null> {
-    try {
-      const next = await ipc<T>(channel, payload);
-      queryClient.setQueryData(key, next);
-      if (opts.ok) toast.success(opts.ok);
-      return next;
-    } catch (err) {
-      toast.error(opts.fail ? `${opts.fail}: ${errorMessage(err)}` : errorMessage(err));
-      return null;
-    }
+    return writeToKey<T>(queryClient, key, () => ipc<T>(channel, payload), opts);
   }
 
   /** The StageState as it stands right now, from the cache every write updates.
@@ -192,22 +185,9 @@ export function useStageSettings(pinnedViewId?: string) {
 
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // DnD sensors for the Screens page's card reorder -- mouse and touch
-  // deliberately separate.
-  //
-  // A single PointerSensor treats them identically: it claims the gesture on
-  // touch-down and waits to see whether you move far enough to be dragging,
-  // which is exactly the window in which the page cannot scroll. On a phone
-  // that made the Displays and Views lists unscrollable, because every swipe
-  // that began on a card started as a maybe-drag.
-  //
-  // Distance works for a mouse, where a click is a distinct act from a drag.
-  // Touch needs TIME instead: hold briefly to drag, swipe to scroll. 200ms is
-  // short enough to feel deliberate and long enough that a flick never trips it.
-  const sensors = useSensors(
-    useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
-  );
+  // DnD sensors for the Screens page's card reorder: mouse and touch separately,
+  // so a swipe on a phone still scrolls (see usePointerSensors).
+  const sensors = usePointerSensors();
 
   async function handleServiceTypeChange(id: string) {
     if (await writeState("stage:setServiceType", { id }, { fail: "Failed to set service type" })) {
@@ -328,27 +308,9 @@ export function useStageSettings(pinnedViewId?: string) {
     await writeState("stage:setPlanSwitcherMode", { mode }, { fail: "Failed to change how the plan switcher steps" });
   }
 
-  async function handleSetBranding(partial: {
-    name?: string;
-    accentColor?: string | null;
-    logo?: string | null;
-    monochrome?: boolean;
-    logoOriginal?: string | null;
-    logoCrop?: { scale: number; x: number; y: number } | null;
-    emptyLogo?: string | null;
-    emptyLogoOriginal?: string | null;
-    emptyLogoCrop?: { scale: number; x: number; y: number } | null;
-    avatar?: string | null;
-    avatarOriginal?: string | null;
-    avatarCrop?: { scale: number; x: number; y: number } | null;
-    icon?: AppIconInput | null;
-  }): Promise<boolean> {
-    // The write's result goes back to the caller: a dialog that closes on success
-    // must not close on a refusal, and the toast alone says nothing to the dialog.
-    return writeState("stage:setBranding", partial, {
-      fail: "Failed to update branding",
-      ok: "Branding updated.",
-    });
+  async function handleSetBranding(partial: BrandingPatch): Promise<boolean> {
+    // Shared with the sidebar's name field and logo menu: one handler, one setting.
+    return setBranding(queryClient, partial);
   }
 
   // ── Views (content) ──────────────────────────────────────────────────
@@ -584,12 +546,8 @@ export function useStageSettings(pinnedViewId?: string) {
    *  the server refuses only an id that does not exist, and the switch has to
    *  follow the operator's finger. */
   async function handleSetViewShowInSidebar(id: string, showInSidebar: boolean) {
-    await optimistic<StageState>(
-      ["stage:getState"],
-      (cur) => ({ ...cur, views: cur.views.map((v) => (v.id === id ? { ...v, showInSidebar } : v)) }),
-      () => ipc<StageState>("views:setShowInSidebar", { id, showInSidebar }),
-      "Failed to change whether the console is listed in the sidebar",
-    );
+    // Shared with the sidebar's Hide and tray: one switch for both.
+    await setViewShowInSidebar(queryClient, id, showInSidebar);
   }
 
   /** Keep the ServiceCue text size a display shows; the server refuses a value

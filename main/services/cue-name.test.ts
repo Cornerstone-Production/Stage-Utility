@@ -7,6 +7,7 @@ import { deriveCueName, MAX_CUE_NAME } from "./cue-name.js";
 import { isValidCueName } from "./automation-triggers.js";
 import { isPairHalfName } from "./cue-pairs.js";
 import { reservedCueNames } from "./builtin-cues.js";
+import { BUTTON_CUE } from "./cue-naming.js";
 
 const none: string[] = [];
 
@@ -69,5 +70,69 @@ describe("deriveCueName", () => {
       assert.equal(isValidCueName(name), true, `"${text}" made "${name}"`);
       assert.equal(isPairHalfName(name), false, `"${text}" made "${name}", which reads as half of a pair`);
     }
+  });
+});
+
+// A Button's own command and a New cue are two paths to one deriver. They were two
+// functions once, and "Café lights" was `caf_lights` from one and `btn_cafe_lights`
+// from the other, and a Button's name had no length cap at all.
+describe("deriveCueName: every path gives the same name for the same words", () => {
+  for (const text of ["Café lights", "Niño on", "Zoë / Ångström", "Foyer TVs", "Reset the stage", "!!!"]) {
+    test(`"${text}": a Button's command is the New cue name behind btn_`, () => {
+      const dialog = deriveCueName(text, none);
+      const button = deriveCueName(text, none, BUTTON_CUE);
+      // Only the prefix and the word for empty text may differ.
+      assert.equal(button, dialog === "cue" ? "btn_button" : `btn_${dialog}`);
+    });
+  }
+
+  test("an accent is folded, not dropped: Café lights is cafe_lights", () => {
+    assert.equal(deriveCueName("Café lights", none), "cafe_lights");
+  });
+
+  test("a Button's name obeys the same cap, prefix and suffixes included", () => {
+    const text = "x".repeat(200);
+    const first = deriveCueName(text, none, BUTTON_CUE);
+    const second = deriveCueName(text, [first], BUTTON_CUE);
+    for (const name of [first, second]) assert.ok(name.length <= MAX_CUE_NAME, `${name.length} characters: ${name}`);
+    assert.notEqual(first, second);
+  });
+
+  test("the pair-half check sees the prefix: a Button labelled On or Off is not half of a pair", () => {
+    // btn_on would be an orphan half; the check must read the whole name, prefix included.
+    assert.equal(deriveCueName("On", none, BUTTON_CUE), "btn_on_cue");
+    assert.equal(deriveCueName("Off", none, BUTTON_CUE), "btn_off_cue");
+  });
+
+  test("an _on that lands on the cut is still taken out of the pair shape, and a clash stays under the cap", () => {
+    const text = "a".repeat(40) + " on";
+    const first = deriveCueName(text, none, BUTTON_CUE);
+    assert.equal(first, `btn_${"a".repeat(40)}_on_cue`);
+    const wide = "a".repeat(49) + " on";
+    const a = deriveCueName(wide, none, BUTTON_CUE);
+    const b = deriveCueName(wide, [a], BUTTON_CUE);
+    for (const name of [a, b]) {
+      assert.equal(isPairHalfName(name), false, name);
+      assert.ok(name.length <= MAX_CUE_NAME, `${name.length} characters: ${name}`);
+    }
+  });
+
+  test("a label with no usable characters is called the fallback, and a clash numbers it", () => {
+    assert.equal(deriveCueName("!!!", none, BUTTON_CUE), "btn_button");
+    assert.equal(deriveCueName("!!!", ["btn_button"], BUTTON_CUE), "btn_button_2");
+  });
+
+  test("a taken name gets the next free number, behind the prefix too", () => {
+    assert.equal(deriveCueName("Walk now", ["btn_walk_now"], BUTTON_CUE), "btn_walk_now_2");
+  });
+});
+
+describe("cueKey: the one way a cue name is compared", () => {
+  test("trims, lower-cases, and is empty for what is not a name", async () => {
+    const { cueKey } = await import("./cue-aliases.js");
+    assert.equal(cueKey("  Foyer_TVs "), "foyer_tvs");
+    assert.equal(cueKey(undefined), "");
+    assert.equal(cueKey({}), "");
+    assert.equal(cueKey(5), "5");
   });
 });

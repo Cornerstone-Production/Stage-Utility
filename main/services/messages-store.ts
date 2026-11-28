@@ -19,6 +19,7 @@ import {
 } from "../types/messages.js";
 import { DataStore } from "./data-store.js";
 import { scrub } from "./scrub.js";
+import { isRecord } from "../types/is-record.js";
 
 export interface MessagesFile {
   /**
@@ -65,7 +66,7 @@ function readMessage(raw: unknown): StageMessage | null {
 }
 
 function readFile(parsed: unknown): MessagesFile {
-  const raw = (parsed !== null && typeof parsed === "object" ? parsed : {}) as Partial<MessagesFile>;
+  const raw = (isRecord(parsed) ? parsed : {}) as Partial<MessagesFile>;
   const rows = Array.isArray(raw.messages) ? raw.messages : [];
   const messages = rows.map(readMessage).filter((m): m is StageMessage => m !== null);
   if (messages.length !== rows.length) {

@@ -18,7 +18,7 @@ const teardown = installRenderDom();
 const { render, cleanup, act, fireEvent, screen, within } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { RouterProvider, createMemoryHistory, createRootRoute, createRoute, createRouter, Link } = await import("@tanstack/react-router");
-const { LeaveGuard } = await import("./mic-slots-page.js");
+const { MicSlotsLeaveGuard: LeaveGuard } = await import("./mic-slots-page.js");
 const { ConfirmHost } = await import("../../components/ui/confirm-dialog.js");
 const { TooltipProvider } = await import("../../components/ui/tooltip-provider.js");
 

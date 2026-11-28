@@ -35,8 +35,42 @@ export class PcoAuthError extends Error {
     this.name = "PcoAuthError";
   }
 }
+
 import { scrub } from "./scrub.js";
+import { backoffMs } from "./timers.js";
 import { PCO_BASE, PcoUrlRefused, isPcoId, pcoAttachmentId, pcoId, pcoSegment, pcoUrl, pcoUrlOf, type PcoUrl } from "./pco-path.js";
+
+/** Longest reason PCO's answer may add to the message an operator reads. */
+const MAX_REASON = 120;
+/** How much of a refused answer's body the log keeps: enough for PCO's errors, not a gateway's whole HTML page. */
+const MAX_LOGGED_BODY = 2000;
+
+/** The short reason in a refused PCO answer: the first JSON:API error's title (else
+ *  detail), otherwise the status text. The raw body can be a page of JSON and belongs in
+ *  the log, not in the toast built from this message. */
+function refusalReason(statusText: string, body: string): string {
+  let reason = "";
+  try {
+    const first = (JSON.parse(body) as { errors?: { title?: unknown; detail?: unknown }[] }).errors?.[0];
+    for (const field of [first?.title, first?.detail]) {
+      if (typeof field === "string" && field.trim()) {
+        reason = field.trim();
+        break;
+      }
+    }
+  } catch {
+    // Not JSON (a gateway's HTML page, say): the status text says it.
+  }
+  reason ||= statusText || "no reason given";
+  return reason.length > MAX_REASON ? `${reason.slice(0, MAX_REASON)}…` : reason;
+}
+
+/** A refused PCO answer's operator-facing reason, with the whole body on a tagged log
+ *  line, so the message stays readable and the evidence stays in /log. */
+function refusal(url: PcoUrl, response: Response, body: string): string {
+  console.warn(`[pco] ${scrub(response.status)} from ${scrub(url)}: ${scrub((body || response.statusText).slice(0, MAX_LOGGED_BODY))}`);
+  return refusalReason(response.statusText, body);
+}
 
 /**
  * Every version Planning Center SERVICES publishes, newest first.
@@ -636,6 +670,9 @@ class PcoService {
    * not 3,600 times an hour.
    */
   private readonly rundownErrors = new RepeatLog("[pco] plan rundown unavailable:");
+  /** The live reading's plan times: without them the service time (the countdown
+   *  target, and which of the day's services a recorder files under) is unknown. */
+  private readonly liveTimesErrors = new RepeatLog("[pco] plan times unavailable to the live reading; the service time is unknown until they read:");
   /**
    * What PCO last said about our quota. Read from the three rate headers on
    * EVERY response, including failures — see pco-rate-limit.ts for why a constant
@@ -671,6 +708,33 @@ class PcoService {
       if (firstKey !== undefined) this.cache.delete(firstKey);
     }
     this.cache.set(key, { value, writtenAt: Date.now(), ttl });
+  }
+
+  /**
+   * A read whose answer is cached for `ttl` and whose FAILURE is held for
+   * TTL_FAILED_MS: inside that, the same error is thrown again without asking.
+   *
+   * For a read that throws its failure to the caller rather than parsing it to an
+   * empty answer. Caching nothing on a failure is the other half of the mistake
+   * TTL_FAILED_MS describes: a page polling every minute, on every screen, through
+   * a 429 episode keeps the episode going. The failure is held under its own key,
+   * so a held failure can never be read back as data.
+   */
+  private async heldRead<T>(cacheKey: string, ttl: number | (() => number), read: () => Promise<T>): Promise<T> {
+    // Wrapped, so an answer that IS null (an organization with no time zone set) is
+    // held like any other rather than read back as a miss and asked for every time.
+    const cached = this.cacheGet<{ value: T }>(cacheKey);
+    if (cached) return cached.value;
+    const held = this.cacheGet<{ error: unknown }>(`failed:${cacheKey}`);
+    if (held) throw held.error;
+    try {
+      const value = await read();
+      this.cacheSet(cacheKey, { value }, ttl);
+      return value;
+    } catch (err) {
+      this.cacheSet(`failed:${cacheKey}`, { error: err }, TTL_FAILED_MS);
+      throw err;
+    }
   }
 
   /** Invalidate every cache entry scoped to one plan (its items, team, service
@@ -819,7 +883,7 @@ class PcoService {
   private backoffMs(attempt: number, retryAfter: string | null): number {
     const ra = retryAfter ? parseInt(retryAfter, 10) : NaN;
     if (Number.isFinite(ra) && ra > 0) return Math.min(ra * 1000, 15_000);
-    return Math.min(1000 * 2 ** attempt, 8000) + Math.floor(Math.random() * 250);
+    return backoffMs(attempt + 1, 1000, 8000) + Math.floor(Math.random() * 250);
   }
 
   private async request<T extends PcoNode = PcoNode>(
@@ -966,8 +1030,8 @@ class PcoService {
       }
       if (!response.ok) {
         const body = await response.text().catch(() => "");
-        const message = `PCO API error ${response.status}: ${body || response.statusText}`;
-        throw response.status === 404 ? new PcoNotFoundError(message) : new Error(message);
+        if (response.status === 404) throw new PcoNotFoundError(`PCO API error 404: ${refusalReason(response.statusText, body)}`);
+        throw new Error(`PCO API error ${response.status}: ${refusal(url, response, body)}`);
       }
 
       const json = await response.json() as PcoResponse<T>;
@@ -993,7 +1057,7 @@ class PcoService {
     }
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw new Error(`PCO live control failed (${response.status}). ${response.statusText || body}`);
+      throw new Error(`PCO live control failed (${response.status}). ${refusal(url, response, body)}`);
     }
   }
 
@@ -1070,7 +1134,7 @@ class PcoService {
     }
     if (!response.ok) {
       const body = await response.text().catch(() => "");
-      throw new Error(`PCO API error ${response.status}: ${body || response.statusText}`);
+      throw new Error(`PCO API error ${response.status}: ${refusal(url, response, body)}`);
     }
     return (await response.json()) as PcoResponse<T>;
   }
@@ -1194,27 +1258,23 @@ class PcoService {
   }
 
   async listServiceTypes(appId: string, secret: string): Promise<ServiceTypeDTO[]> {
-    const cacheKey = `service-types:${appId}`;
-    const cached = this.cacheGet<ServiceTypeDTO[]>(cacheKey);
-    if (cached) return cached;
-
     const url = pcoUrl`/service_types?per_page=100`;
-    const json = await this.request(url, appId, secret);
-    const items = Array.isArray(json.data) ? json.data : [json.data];
-
-    const result: ServiceTypeDTO[] = items.map((item) => ({
-      id: item.id,
-      name: String(item.attributes.name ?? "Unknown"),
-      // Free: this resource already carries the colors, we just stopped throwing
-      // them away. `index` is PCO's palette slot and is not useful to us.
-      itemTypeColors: [
-        ...toItemColors(item.attributes.standard_item_types, false),
-        ...toItemColors(item.attributes.custom_item_types, true),
-      ],
-    }));
-
-    this.cacheSet(cacheKey, result, TTL_LONG_MS);
-    return result;
+    // A failure held like the other long reads (heldRead): every rundown, the plan scan
+    // and the reconnect windows read this, and a 429 episode must not be asked again by each.
+    return this.heldRead(`service-types:${appId}`, TTL_LONG_MS, async () => {
+      const json = await this.request(url, appId, secret);
+      const items = Array.isArray(json.data) ? json.data : [json.data];
+      return items.map((item) => ({
+        id: item.id,
+        name: String(item.attributes.name ?? "Unknown"),
+        // Free: this resource already carries the colors, we just stopped throwing
+        // them away. `index` is PCO's palette slot and is not useful to us.
+        itemTypeColors: [
+          ...toItemColors(item.attributes.standard_item_types, false),
+          ...toItemColors(item.attributes.custom_item_types, true),
+        ],
+      }));
+    });
   }
 
   async listUpcomingPlans(
@@ -1287,7 +1347,7 @@ class PcoService {
    * different endpoints returning the same shape. Written once because this
    * repository's most expensive recurring mistake is fixing one copy of a thing
    * that exists in several — the pagination, the sequence sort and the
-   * do-not-cache-a-failure rule would all have had to be got right twice.
+   * held-failure rule would all have had to be got right twice.
    */
   private async noteCategoryNames(
     appId: string,
@@ -1295,26 +1355,22 @@ class PcoService {
     serviceTypeId: string,
     collection: "item_note_categories" | "plan_note_categories",
   ): Promise<string[]> {
-    const cacheKey = `${collection}:${appId}:${serviceTypeId}`;
-    const cached = this.cacheGet<string[]>(cacheKey);
-    if (cached) return cached;
-
     const url = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/${pcoSegment("collection", collection)}?per_page=100`;
-    const json = await this.request(url, appId, secret).catch(() => null);
-    const items = json && Array.isArray(json.data) ? json.data : [];
-    const result = items
-      .map((n) => ({
-        name: typeof n.attributes.name === "string" ? n.attributes.name : "",
-        sequence: typeof n.attributes.sequence === "number" ? n.attributes.sequence : 0,
-      }))
-      .filter((c) => c.name)
-      .sort((a, b) => a.sequence - b.sequence)
-      .map((c) => c.name);
-
-    // Only cache a real answer. A failed request parses to an empty list, and
-    // caching that would store a FAILURE as data, with a success's TTL.
-    this.cacheSet(cacheKey, result, json ? TTL_LONG_MS : TTL_FAILED_MS);
-    return result;
+    // A failed read throws to the caller, which names it ([pco] on the route) and answers 502,
+    // never an empty list: Planning Center being down must not read as "this service type has
+    // no note categories". The failure is held, never as an empty list: see heldRead.
+    return this.heldRead(`${collection}:${appId}:${serviceTypeId}`, TTL_LONG_MS, async () => {
+      const json = await this.request(url, appId, secret);
+      const items = Array.isArray(json.data) ? json.data : [];
+      return items
+        .map((n) => ({
+          name: typeof n.attributes.name === "string" ? n.attributes.name : "",
+          sequence: typeof n.attributes.sequence === "number" ? n.attributes.sequence : 0,
+        }))
+        .filter((c) => c.name)
+        .sort((a, b) => a.sequence - b.sequence)
+        .map((c) => c.name);
+    });
   }
 
   /** The plan-note categories a service type offers, for the checklist picker. */
@@ -1331,23 +1387,20 @@ class PcoService {
    * than one extra request every fifteen minutes.
    */
   async listTeamNames(appId: string, secret: string, serviceTypeId: string): Promise<string[]> {
-    const cacheKey = `team-names:${appId}:${serviceTypeId}`;
-    const cached = this.cacheGet<string[]>(cacheKey);
-    if (cached) return cached;
-
     const url = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/teams?per_page=100`;
-    const json = await this.request(url, appId, secret).catch(() => null);
-    const items = json && Array.isArray(json.data) ? json.data : [];
-    const result = [
-      ...new Set(
-        items
-          .map((n) => (typeof n.attributes.name === "string" ? n.attributes.name : ""))
-          .filter(Boolean),
-      ),
-    ].sort((a, b) => a.localeCompare(b));
-
-    this.cacheSet(cacheKey, result, json ? TTL_LONG_MS : TTL_FAILED_MS);
-    return result;
+    // A failed read throws (held, see heldRead), so the checklist picker says Planning
+    // Center could not be read rather than offering no teams.
+    return this.heldRead(`team-names:${appId}:${serviceTypeId}`, TTL_LONG_MS, async () => {
+      const json = await this.request(url, appId, secret);
+      const items = Array.isArray(json.data) ? json.data : [];
+      return [
+        ...new Set(
+          items
+            .map((n) => (typeof n.attributes.name === "string" ? n.attributes.name : ""))
+            .filter(Boolean),
+        ),
+      ].sort((a, b) => a.localeCompare(b));
+    });
   }
 
   /**
@@ -1522,15 +1575,13 @@ class PcoService {
   /** The organization's IANA time zone (e.g. "America/Chicago"), used to render
    *  projected clock times in the plan's local time rather than the viewer's. */
   async listOrgTimeZone(appId: string, secret: string): Promise<string | null> {
-    const cacheKey = `org-tz:${appId}`;
-    const cached = this.cacheGet<string>(cacheKey);
-    if (cached) return cached;
-
-    const json = await this.request(pcoUrl``, appId, secret).catch(() => null);
-    const data = json && !Array.isArray(json.data) ? json.data : null;
-    const tz = data && typeof data.attributes.time_zone === "string" ? data.attributes.time_zone : null;
-    if (tz) this.cacheSet(cacheKey, tz, TTL_LONG_MS);
-    return tz;
+    // A failed read throws (held, see heldRead); null means the organization has no zone
+    // set, and that answer is held too, so a rundown does not ask again.
+    return this.heldRead(`org-tz:${appId}`, TTL_LONG_MS, async () => {
+      const json = await this.request(pcoUrl``, appId, secret);
+      const data = !Array.isArray(json.data) ? json.data : null;
+      return data && typeof data.attributes.time_zone === "string" ? data.attributes.time_zone : null;
+    });
   }
 
   /**
@@ -1823,7 +1874,20 @@ class PcoService {
     // The chosen "service" plan_time occurrence (e.g. 9am vs 11am). Resolved in
     // EVERY mode (cached LONG) so it can (a) supply the pre-service countdown target
     // and (b) let SPL history separate back-to-back services that share one plan.
-    const planTimes = await this.getPlanTimes(appId, secret, serviceTypeId, planId);
+    // Times that cannot be read leave the service time unknown, as no times did: the
+    // live reading itself is what this answers, and it is not failed for them.
+    // The line says once per outage what is lost, as the rundown's below does.
+    let timesRead = true;
+    const planTimes = await this.getPlanTimes(appId, secret, serviceTypeId, planId).catch((err: unknown) => {
+      timesRead = false;
+      const decision = this.liveTimesErrors.fail(errorMessage(err), Date.now());
+      if (decision.line) console.warn(scrub(decision.line));
+      return [] as PlanTime[];
+    });
+    if (timesRead) {
+      const recovered = this.liveTimesErrors.ok(Date.now());
+      if (recovered.line) console.log(scrub(recovered.line));
+    }
     const serviceTime = this.pickServiceTime(planTimes.filter((t) => t.timeType === "service"));
     const serviceTimeId = serviceTime?.id ?? null;
     const serviceTimeStartsAt = serviceTime?.startsAt ?? null;
@@ -1999,25 +2063,23 @@ class PcoService {
     serviceTypeId: string,
     planId: string,
   ): Promise<PlanTime[]> {
-    const cacheKey = `plan-times:${appId}:${planId}`;
-    const cached = this.cacheGet<PlanTime[]>(cacheKey);
-    if (cached) return cached;
-
     const url = pcoUrl`/service_types/${pcoId("serviceTypeId", serviceTypeId)}/plans/${pcoId("planId", planId)}/plan_times?per_page=100`;
-    const json = await this.request(url, appId, secret).catch(() => null);
-    const raw = json && Array.isArray(json.data) ? json.data : [];
-    const times = raw
-      .map((t) => ({
-        id: t.id,
-        name: typeof t.attributes.name === "string" ? t.attributes.name : null,
-        timeType: typeof t.attributes.time_type === "string" ? t.attributes.time_type : "",
-        startsAt: typeof t.attributes.starts_at === "string" ? t.attributes.starts_at : null,
-        endsAt: typeof t.attributes.ends_at === "string" ? t.attributes.ends_at : null,
-      }))
-      .filter((t): t is PlanTime => !!t.startsAt);
-
-    this.cacheSet(cacheKey, times, json ? TTL_LONG_MS : TTL_FAILED_MS);
-    return times;
+    // A failed read throws (held, see heldRead), and each caller says what it does
+    // without the times: the reconnect windows run their own gap check, and a rundown
+    // keeps the times it last read.
+    return this.heldRead(`plan-times:${appId}:${planId}`, TTL_LONG_MS, async () => {
+      const json = await this.request(url, appId, secret);
+      const raw = Array.isArray(json.data) ? json.data : [];
+      return raw
+        .map((t) => ({
+          id: t.id,
+          name: typeof t.attributes.name === "string" ? t.attributes.name : null,
+          timeType: typeof t.attributes.time_type === "string" ? t.attributes.time_type : "",
+          startsAt: typeof t.attributes.starts_at === "string" ? t.attributes.starts_at : null,
+          endsAt: typeof t.attributes.ends_at === "string" ? t.attributes.ends_at : null,
+        }))
+        .filter((t): t is PlanTime => !!t.startsAt);
+    });
   }
 
   /** Just the "service" occurrences (e.g. 9am vs 11am). */

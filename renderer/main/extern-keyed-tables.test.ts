@@ -189,7 +189,7 @@ describe("renderer lookups driven with a key off a saved layout", () => {
   });
 
   it("a bar item id that is a prototype member is not an item", () => {
-    // BAR_ITEMS, indexed straight off bar-config.json in bar-configurator.tsx.
+    // BAR_ITEMS, indexed straight off bar-config.json in bar-editor.tsx.
     for (const id of INHERITED) {
       assert.equal((BAR_ITEMS as Record<string, unknown>)[id], undefined, `BAR_ITEMS["${id}"]`);
     }

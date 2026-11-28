@@ -18,10 +18,12 @@ import { rundownKey } from "@main/types/servicecue-publish";
 import { RUNDOWN_NOT_SENT, SERVICES_NOT_SENT, notPublishedYet } from "../lib/public-mode";
 import { useDashboardState } from "./use-dashboard-state";
 import { pcoConnected } from "./use-stage-state";
+import { appZoneOf } from "../lib/app-zone";
 import { invoke } from "../lib/api";
 import { useFailedReads } from "../lib/use-failed-reads";
 import { useResyncOn } from "../lib/use-resync-on";
-import { ALL_COLUMNS_LAYOUT_ID, ALL_COLUMNS_SLUG, slugify, serviceCueUrl } from "./servicecue-index-view";
+import { ALL_COLUMNS_SLUG, findLayout, layoutSlug, slugOf, slugify } from "@main/services/servicecue-slug";
+import { ALL_COLUMNS_LAYOUT_ID, serviceCueUrl } from "./servicecue-index-view";
 import type { CategoryRole } from "../../main/types/servicecue-roles.js";
 
 /** The pages that open a rundown, which its back arrow may return to. */
@@ -39,8 +41,12 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   const { state, error: stateError, pcoLive } = useDashboardState();
   const [types, setTypes] = useState<ServiceTypeDTO[]>([]);
   const [rundown, setRundown] = useState<ServiceCueRundownDTO | null>(null);
-  const [layouts, setLayouts] = useState<ServiceCueLayout[]>([]);
-  const [roles, setRoles] = useState<CategoryRole[]>([]);
+  // Null until the layouts have been read, so an address naming none is said only once
+  // that is known.
+  const [layouts, setLayouts] = useState<ServiceCueLayout[] | null>(null);
+  // Null until the roles have been read: All columns appends the categories in no role, and
+  // until it knows the roles it cannot know which those are.
+  const [roles, setRoles] = useState<CategoryRole[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // On the public page, what the church has not sent yet (see notPublishedYet): said to a visitor, not as a failure.
   const [typesNotSent, setTypesNotSent] = useState(false);
@@ -108,7 +114,7 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
           setLayouts(l);
           clear("layouts");
         })
-        .catch((err: unknown) => { if (!cancelled) fail("layouts", "the column layouts", err); });
+        .catch((err: unknown) => { if (!cancelled) fail("layouts", "the ServiceCue layouts", err); });
       invoke<CategoryRole[]>("servicecue:listRoles")
         .then((r) => {
           if (cancelled) return;
@@ -211,11 +217,16 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
 
   const now = useServerClock(pcoLive?.serverNow);
 
-  const allLayouts = useMemo(() => [...layouts].sort((a, b) => a.order - b.order), [layouts]);
+  const allLayouts = useMemo(() => [...(layouts ?? [])].sort((a, b) => a.order - b.order), [layouts]);
   // Resolve the layout slug (or raw id) to a layout; the All-columns slug/id → null.
-  const layout = layoutParam === ALL_COLUMNS_SLUG || layoutParam === ALL_COLUMNS_LAYOUT_ID
+  const wantsAll = layoutParam === ALL_COLUMNS_SLUG || layoutParam === ALL_COLUMNS_LAYOUT_ID;
+  const layout = wantsAll
     ? null
-    : allLayouts.find((l) => l.id === layoutParam) ?? allLayouts.find((l) => slugify(l.name) === layoutParam.toLowerCase()) ?? null;
+    : findLayout(allLayouts, layoutParam);
+  // An address naming a layout that is not there (deleted, or a typo) used to open All
+  // columns without a word. Said only once the layouts have answered: until then every
+  // pinned address would flash it (and a read that failed never answers).
+  const layoutMissing = !wantsAll && !layout && layouts !== null;
   const layoutName = layout?.name ?? "All columns";
   const currentLayoutKey = layout?.id ?? ALL_COLUMNS_LAYOUT_ID;
   const typeNameForUrl = serviceType?.name ?? serviceTypeParam;
@@ -258,7 +269,8 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         appLogo={state?.appLogo}
         appLogoMonochrome={state?.appLogoMonochrome}
         now={now}
-        timeZone={state?.timezone}
+        // The same zone as the plan list beside it, so the page reads one zone.
+        timeZone={appZoneOf(state)}
         afterIdentity={
           resolvedTypeId && pcoConfigured ? (
             <ServiceCuePlanNav
@@ -270,10 +282,10 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
               followedPlanId={followedPlanId}
               following={following}
               fallbackLabel={[rundown?.planTitle ?? rundown?.planSeriesTitle, rundown?.planDates].filter(Boolean).join(" · ") || null}
-              timeZone={rundown?.timeZone ?? state?.timezone ?? null}
+              timeZone={rundown?.timeZone || appZoneOf(state)}
               onSelect={(id) => setPlanParam(id)}
               onOpenElsewhere={(typeId, typeName, planId) =>
-                navigateTo(serviceCueUrl(typeName ?? typeId, currentLayoutKey, layout?.name), { plan: planId }, { keepSearch: true })
+                navigateTo(serviceCueUrl(typeName ?? typeId, currentLayoutKey, layout ? layoutSlug(layout) : undefined), { plan: planId }, { keepSearch: true })
               }
             />
           ) : null
@@ -295,7 +307,7 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
                 // Through the router, keeping the query: ?plan= is the plan this page
                 // is browsing, ?text= its size and ?transport= how a panel hears the
                 // server, and a layout change is not a reason to drop any of them.
-                navigateTo(serviceCueUrl(typeNameForUrl, id, allLayouts.find((l) => l.id === id)?.name), {}, { keepSearch: true });
+                navigateTo(serviceCueUrl(typeNameForUrl, id, slugOf(allLayouts, id)), {}, { keepSearch: true });
               }}
               className="rounded-lg border border-line bg-black/30 px-3 py-1.5 text-caption1 text-fg outline-none focus:border-line-strong" aria-label="Layout">
               {allLayouts.map((l) => <option key={l.id} value={l.id} className="bg-[var(--kiosk-surface-1)]">{l.name}</option>)}
@@ -307,15 +319,19 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
         }
       />
 
-      {(failed.has("layouts") || failed.has("roles") || failed.has("plans")) && (
+      {(layoutMissing || failed.has("layouts") || failed.has("roles") || failed.has("plans")) && (
         <div className="flex flex-col gap-1.5 px-4 pt-2">
-          {failed.has("layouts") && <ErrorNote>Couldn't load the column layouts, so all columns are shown.</ErrorNote>}
+          {/* A screen pinned to a layout that was deleted, or to a mistyped address, is
+              showing every department's notes; that is worth the same weight as a read
+              that failed. */}
+          {layoutMissing && <ErrorNote>Layout "{layoutParam}" not found. Showing All columns.</ErrorNote>}
+          {failed.has("layouts") && <ErrorNote>Couldn't load the layouts, so all columns are shown.</ErrorNote>}
           {failed.has("roles") && <ErrorNote>Couldn't load the category roles, so no note columns are shown.</ErrorNote>}
           {failed.has("plans") && <ErrorNote>Couldn't load the plan list, so the plan arrows and menu have no plans to offer.</ErrorNote>}
         </div>
       )}
 
-      <ServiceCueBody rundown={rundown} roles={roles} layout={layout} render={render} error={bodyError} notice={notice} textScale={textSize / 100} />
+      <ServiceCueBody rundown={rundown} roles={roles ?? []} layout={layout} render={render} error={bodyError} notice={notice} textScale={textSize / 100} />
     </div>
   );
 }

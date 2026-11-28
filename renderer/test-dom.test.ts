@@ -75,7 +75,14 @@ describe("eventually", () => {
     assert.equal(got, 3);
   });
 
-  test("reports the last failure, not a bare timeout, when the thing never arrives", async () => {
+  test("takes one more look after the last gap, as the wait always did", { timeout: 3000 }, async () => {
+    let looks = 0;
+    // A 5 ms budget is spent inside the first 10 ms gap: the look that follows it is the one that passes.
+    await eventually(() => assert.ok(++looks >= 2, `looked ${looks} time(s)`), 5);
+    assert.equal(looks, 2);
+  });
+
+  test("reports the last failure, not a bare timeout, when the thing never arrives", { timeout: 3000 }, async () => {
     await assert.rejects(
       eventually(() => assert.equal(1, 2, "the thing never arrived"), 100),
       /the thing never arrived/,
@@ -88,7 +95,7 @@ describe("readLedger", () => {
 
   test("a read is on its way until a caller takes its body, once", async () => {
     const reads = readLedger();
-    reads.begin();
+    reads.begin("/api/x");
     const res = reads.answer(response({ a: 1 }));
     assert.equal(reads.pending(), 1, "an answer nobody has read is still on its way");
     assert.throws(() => reads.landed(), /1 read\(s\) still on their way/);
@@ -99,12 +106,36 @@ describe("readLedger", () => {
     assert.equal(reads.pending(), 0, "reading the body twice must not take two reads");
   });
 
+  test("the page's own log line is not a read: nobody takes its answer", () => {
+    const reads = readLedger();
+    reads.begin("/api/log/client");
+    assert.equal(reads.pending(), 0);
+    reads.landed();
+  });
+
+  test("only the log line itself is let off: every other /api/log read still counts", () => {
+    for (const url of ["/api/log", "/api/log/tail", "/api/log/client-history", "/api/logs"]) {
+      const reads = readLedger();
+      reads.begin(url);
+      assert.equal(reads.pending(), 1, `${url} is a read a test may wait on`);
+    }
+    const reads = readLedger();
+    reads.begin("/api/log/client?level=warn");
+    assert.equal(reads.pending(), 0, "the log line with a query is still the log line");
+  });
+
+  test("an answer taken for a read never begun is caught, not cancelled out", async () => {
+    const reads = readLedger();
+    await reads.answer(response({ a: 1 })).json();
+    assert.throws(() => reads.landed(), /1 answer\(s\) taken for reads that were never begun/);
+  });
+
   test("a read that failed is not left pending, and reset starts again", () => {
     const reads = readLedger();
-    reads.begin();
+    reads.begin("/api/x");
     reads.failed();
     assert.equal(reads.pending(), 0);
-    reads.begin();
+    reads.begin("/api/x");
     reads.reset();
     assert.equal(reads.pending(), 0);
   });
@@ -118,5 +149,43 @@ describe("isPlumbing", () => {
     for (const url of ["/api/state", "/api/outputs/display-1", "/api/log/client", "/api/history/events"]) {
       assert.equal(isPlumbing(url), false, url);
     }
+  });
+});
+
+// React stays silent about updates that escape act() unless it is told it is in a
+// test environment, and undrained work then runs after the DOM is gone. This runs
+// the real installDom rather than reading its source.
+describe("installDom and the React act environment", () => {
+  test("turns the flag on for the file and puts the previous value back on teardown", () => {
+    const g = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const outer = g.IS_REACT_ACT_ENVIRONMENT;
+    const inner = installDom();
+    assert.equal(g.IS_REACT_ACT_ENVIRONMENT, true, "installDom left React outside its act environment");
+    g.IS_REACT_ACT_ENVIRONMENT = false;
+    inner();
+    assert.equal(g.IS_REACT_ACT_ENVIRONMENT, outer, "the teardown did not restore what it found");
+  });
+
+  test("the teardown fails the file when React reported an update outside act", () => {
+    const outerError = console.error;
+    // Swallow the message so it reaches neither the log nor this file's own recorder.
+    console.error = () => {};
+    try {
+      const inner = installDom();
+      console.error("An update to Probe inside a test was not wrapped in act(...).\n\nmore text");
+      console.error("an unrelated error");
+      assert.throws(inner, /1 React act warning\(s\).*An update to Probe inside a test was not wrapped in act/);
+      assert.equal(typeof console.error, "function");
+    } finally {
+      console.error = outerError;
+    }
+  });
+
+  test("a clean file tears down quietly and gives console.error back", () => {
+    const before = console.error;
+    const inner = installDom();
+    assert.notEqual(console.error, before, "the recorder is not installed");
+    inner();
+    assert.equal(console.error, before, "the teardown left its recorder behind");
   });
 });

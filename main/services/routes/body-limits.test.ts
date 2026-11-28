@@ -20,6 +20,7 @@ import type * as http from "node:http";
 
 import { MAX_IMAGE_BYTES } from "../image-files.js";
 import { MAX_LAYOUT_IMAGE_BYTES } from "../layout-image-store.js";
+import { MAX_STAGEPLOT_PDF_BYTES } from "../stageplots-files.js";
 import {
   MAX_CONFIG_BODY_BYTES,
   MAX_IMAGE_BODY_BYTES,
@@ -64,6 +65,17 @@ describe("route body limits", () => {
     assert.ok(
       MAX_CONFIG_BODY_BYTES > MAX_IMAGE_BYTES * BASE64_EXPANSION * 2,
       "a config bundle with two full-size images must be importable",
+    );
+  });
+
+  it("the config import accepts a bundle carrying a full-size stage-plot PDF and image", () => {
+    // A backup carries every stage-plot PDF original beside the images. One at
+    // the 25 MB cap with one image at the 12 MB cap must import; the ceiling is
+    // about 48 MB of uploads in all, which a box with two full-size PDFs
+    // exceeds (its saved snapshots, recalled on the box, have no such limit).
+    assert.ok(
+      MAX_CONFIG_BODY_BYTES > (MAX_STAGEPLOT_PDF_BYTES + MAX_IMAGE_BYTES) * BASE64_EXPANSION,
+      "a config bundle with a full-size PDF original and a full-size image must be importable",
     );
   });
 

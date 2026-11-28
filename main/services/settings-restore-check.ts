@@ -325,8 +325,10 @@ const idFloors: KeyCheck = (v, k) => asObject(v, k);
 
 const SERVER_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Minted by the server (randomUUID) and never rewritten; a restore carries it
- *  so a replacement box keeps the devices bound to the old one. */
+/** Minted by the server (randomUUID). Checked here like any key, but what a
+ *  restore WRITES is decided in config-snapshot.ts (serverIdFor): this server's
+ *  own id, unless the operator said this box replaces the one the config came
+ *  from, so a second box never comes up answering as the first. */
 const serverId: KeyCheck = (v, k) => {
   if (v !== null && !(typeof v === "string" && SERVER_ID.test(v))) refuse(`${k} must be a server id or null`);
   return v;
@@ -350,6 +352,9 @@ const KEYS: { [K in keyof Required<SettingsData>]: KeyCheck } = {
   // Branding
   appName: (v, k) => {
     required(v, "string", k);
+    // No length limit here. MAX_APP_NAME is enforced where a name is typed; a
+    // backup taken before the limit existed may carry a longer one, and refusing
+    // it would refuse the operator's whole backup over a cosmetic field.
     return (v as string).trim() || "Stage Utility";
   },
   accentColor: (v, k) => (v === null ? null : hex6(v, k)),
@@ -416,8 +421,6 @@ const KEYS: { [K in keyof Required<SettingsData>]: KeyCheck } = {
   integrationConfigs,
   integrationEnabled,
   splVisibleMetrics: texts,
-  splTrendShown: bool,
-  splTrendMetric: text,
   oscFeedbackPort: (v, k) => clampOscFeedbackPort(number(v, k)),
   wirelessMeterRateMs: (v, k) => clampMeterRate(number(v, k)),
   // Start-up migrations that have run: see above.

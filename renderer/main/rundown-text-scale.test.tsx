@@ -16,7 +16,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, unmountAndTeardown } from "../test-dom.js";
+import { installRenderDom, unmountAndTeardown, mountInAct } from "../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -37,7 +37,7 @@ const proto = (globalThis as unknown as { HTMLElement: { prototype: object } }).
 Object.defineProperty(proto, "clientWidth", { get: () => WRAP_WIDTH, configurable: true });
 Object.defineProperty(proto, "scrollWidth", { get: () => WRAP_WIDTH * 3, configurable: true });
 
-const { render, cleanup, act } = await import("@testing-library/react");
+const { render, cleanup } = await import("@testing-library/react");
 const React = await import("react");
 const { RundownTable } = await import("./rundown-table.js");
 
@@ -51,9 +51,7 @@ const COLUMNS = [
 ];
 
 async function mount(textScale: number) {
-  await act(async () => {
-    render(React.createElement(RundownTable, { items: ITEMS, columns: COLUMNS, textScale } as never));
-  });
+  await mountInAct(render, React.createElement(RundownTable, { items: ITEMS, columns: COLUMNS, textScale } as never));
   const table = document.querySelector("table");
   return {
     drawsTable: !!table,

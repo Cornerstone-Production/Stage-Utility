@@ -31,6 +31,13 @@
 // server: a page of another protocol is handed to the deployer with the build it serves, and a
 // deploy starts publishing again. For a few minutes after one, the old Worker still answering is
 // waited out on the backoff instead.
+//
+// A REQUEST WITH NO ANSWER (a timeout, a dropped connection, a 5xx) may have been applied: the page
+// can store a document and the answer be lost on the way back. It is neither sent nor not sent. A
+// document or frame is forgotten as sent, so the next pass sends it whatever it is, the text it had
+// before included; a document or image is remembered as one the page may hold, so the list of what to
+// keep goes out if it is no longer wanted; and a list of what to keep is forgotten, with what it may
+// have removed, so both go again.
 
 import { addBroadcastListener } from "./broadcaster.js";
 import { errorMessage } from "./errors.js";
@@ -55,7 +62,7 @@ import {
   type PublicLive,
   type PublicSpl,
 } from "./servicecue-publish-docs.js";
-import { createPushClient, FAILURE_LOG_MAX, failureForLog, problemOf, type PageStatus, type PushClient, type PushFailure, type PushResult } from "./servicecue-publish-client.js";
+import { createPushClient, FAILURE_LOG_MAX, failureForLog, mayHaveLanded, PUBLISH_REQUEST_TIMEOUT_MS, problemOf, type PageStatus, type PushClient, type PushFailure, type PushResult } from "./servicecue-publish-client.js";
 import type { DeployHook } from "./servicecue-deployer.js";
 import { checkPublishToken, parsePublishUrl, type PublishOrigin } from "./servicecue-publish-rules.js";
 import type { ServiceCuePublishSettings } from "./servicecue-publish-store.js";
@@ -71,6 +78,7 @@ import type {
 } from "../types/stage.js";
 import type { CategoryRole } from "../types/servicecue-roles.js";
 import type { PublishProblem, PublisherStatus, SourceProblem } from "../types/servicecue-publish-status.js";
+import { backoffMs } from "./timers.js";
 import { FIXED_DOC_KEYS, FRAME_DOCS, PUBLISH_UPCOMING_DAYS, assetContentType, isFrameChannel, rundownKey, type FrameChannel, type PublicState } from "../types/servicecue-publish.js";
 
 // ── Cadence ──────────────────────────────────────────────────────────────────
@@ -104,6 +112,8 @@ export interface PublisherTimings {
   outageSettleMs: number;
   /** How long after this server deployed the page another protocol is the old Worker still answering, retried rather than held. */
   deploySettleMs: number;
+  /** How long a request with no body waits for its answer before it is one with no answer. */
+  requestTimeoutMs: number;
 }
 
 export const DEFAULT_TIMINGS: PublisherTimings = {
@@ -122,12 +132,12 @@ export const DEFAULT_TIMINGS: PublisherTimings = {
   reconcileMs: 5 * 60_000,
   outageSettleMs: DEFAULT_SETTLE_MS,
   deploySettleMs: 2 * 60_000,
+  requestTimeoutMs: PUBLISH_REQUEST_TIMEOUT_MS,
 };
 
-/** How long to wait after `failures` failures in a row: 5 s, 10 s, 20 s … up to the ceiling. */
-export function backoffMs(failures: number, minMs: number, maxMs: number): number {
-  return Math.min(maxMs, minMs * 2 ** Math.max(0, failures - 1));
-}
+// Re-exported for servicecue-deployer.ts, which still imports it from here; the
+// formula itself is timers.ts's.
+export { backoffMs };
 
 // ── What the publisher reads ─────────────────────────────────────────────────
 
@@ -225,6 +235,8 @@ class Run {
   readonly sent = new Map<string, string>();
   readonly refused = new Map<string, string>();
   readonly assets = { sent: new Set<string>(), refused: new Set<string>() };
+  /** What the page may hold that `sent` does not say: a request for it got no answer. Named in no list of what to keep, it is a reason to send one. */
+  readonly unsure = { docs: new Set<string>(), assets: new Set<string>() };
   readonly nextDue = new Map<string, number>();
   readonly currentKeys = new Set<string>();
   /** The manifest the page last accepted, and what the last status said it holds. */
@@ -256,10 +268,10 @@ class Run {
 
   constructor(
     readonly target: Target,
-    settleMs: number,
+    timings: Pick<PublisherTimings, "outageSettleMs" | "requestTimeoutMs">,
   ) {
-    this.client = createPushClient({ origin: target.origin, token: target.token, signal: this.abort.signal });
-    this.outage = new OutageLog(settleMs);
+    this.client = createPushClient({ origin: target.origin, token: target.token, signal: this.abort.signal, timeoutMs: timings.requestTimeoutMs });
+    this.outage = new OutageLog(timings.outageSettleMs);
   }
 }
 
@@ -404,7 +416,7 @@ export class ServiceCuePublisher {
   }
 
   private begin(target: Target): void {
-    const run = new Run(target, this.timings.outageSettleMs);
+    const run = new Run(target, this.timings);
     this.run = run;
     run.ticker = new Ticker<CycleOutcome>({
       tick: () => this.cycle(run),
@@ -537,6 +549,8 @@ export class ServiceCuePublisher {
       console.log("[publish] the page accepted the first request");
     }
     run.failures.delete(item);
+    // Its own success, not the heartbeat's between retries, ends the outage its lost answers are said once for.
+    run.outage.ok(`lost:${item}`, Date.now());
     // The problem ends when the request that caused it goes through, not when something lighter does.
     if (run.failures.size === 0 && run.problem) this.recover(run);
     if (!run.problem) {
@@ -724,6 +738,24 @@ export class ServiceCuePublisher {
     return decision.log ? decision.note : null;
   }
 
+  /**
+   * Did `r` get no answer the page may have acted on? The caller then forgets what it took the page to
+   * hold. Logs it as a side effect, once per outage for each request.
+   */
+  private noteLost(run: Run, item: string, what: string, r: PushResult): boolean {
+    if (r.ok || !mayHaveLanded(r)) return false;
+    const note = this.news(run, `lost:${item}`, r.kind);
+    if (note !== null) console.warn(`[publish] no answer to ${scrub(what)}, which the page may have taken all the same; it is sent again rather than taken as held or missing${scrub(note)}`);
+    return true;
+  }
+
+  /** The page may or may not hold `doc`, as last sent or at all: the next text goes whatever it is, a rundown read on its own schedule is due again at once, and a list of what to keep goes if it is no longer wanted. */
+  private markUnsure(run: Run, doc: string): void {
+    run.sent.delete(doc);
+    run.nextDue.delete(doc);
+    run.unsure.docs.add(doc);
+  }
+
   /** Put a document, unless its text is what the page already has. */
   private async put(run: Run, key: string, text: string): Promise<boolean> {
     const hash = docHash(text);
@@ -733,9 +765,12 @@ export class ServiceCuePublisher {
     if (r.ok) {
       run.sent.set(key, hash);
       run.refused.delete(key);
+      run.unsure.docs.delete(key);
       return true;
     }
-    if (r.kind === "refused") {
+    if (this.noteLost(run, `doc:${key}`, `the document ${key}`, r)) {
+      this.markUnsure(run, key);
+    } else if (r.kind === "refused") {
       // Remembered by its text, so it is not tried again until it changes.
       run.refused.set(key, hash);
       console.warn(`[publish] not sent: ${scrub(key)}, and not tried again until it changes — ${scrub(failureForLog(r.message, r.detail), FAILURE_LOG_MAX)}`);
@@ -757,7 +792,9 @@ export class ServiceCuePublisher {
     }
     if (layouts.ok) {
       run.counts.layouts = layouts.value.length;
-      await this.put(run, "servicecue-layouts", JSON.stringify(layouts.value));
+      // autoNamed is the editor's (whether a layout's first rename moves its address); the
+      // page never reads it, so it does not leave the building.
+      await this.put(run, "servicecue-layouts", JSON.stringify(layouts.value.map(({ autoNamed: _a, ...l }) => l)));
     }
     if (roles.ok) await this.put(run, "servicecue-roles", JSON.stringify(roles.value));
     run.known.pcoConfigured = !!source.state().pcoConfigured;
@@ -921,6 +958,10 @@ export class ServiceCuePublisher {
       const r = await this.send(run, `asset:${name}`, (c) => c.putAsset(name, image.data, image.mime), () => run.assets.sent.has(name));
       if (r.ok) {
         run.assets.sent.add(name);
+        run.unsure.assets.delete(name);
+      } else if (this.noteLost(run, `asset:${name}`, `the logo ${name}`, r)) {
+        // Not counted as sent, so it goes again while it is wanted; and if it is not, the list of what to keep takes it off.
+        run.unsure.assets.add(name);
       } else if (r.kind === "refused") {
         run.assets.refused.add(name);
         console.warn(`[publish] not sent: the logo ${scrub(name)}, and it is left off the page — ${scrub(failureForLog(r.message, r.detail), FAILURE_LOG_MAX)}`);
@@ -975,9 +1016,25 @@ export class ServiceCuePublisher {
     const docs = this.wantedDocs(run);
     const assets = this.wantedAssets();
     const key = JSON.stringify([docs, assets]);
-    const extras = !!run.pageHolds && (run.pageHolds.docs.some((d) => !docs.includes(d)) || run.pageHolds.assets.some((a) => !assets.includes(a)));
+    // What the page holds, or may: by its last status, by what it was sent since the last list, and by what got no answer.
+    const mayHold = {
+      docs: [...(run.pageHolds?.docs ?? []), ...run.sent.keys(), ...run.unsure.docs],
+      assets: [...(run.pageHolds?.assets ?? []), ...run.assets.sent, ...run.unsure.assets],
+    };
+    const extras = mayHold.docs.some((d) => !docs.includes(d)) || mayHold.assets.some((a) => !assets.includes(a));
     if (key === run.manifestKey && !extras) return;
     const r = await this.send(run, "manifest", (c) => c.putManifest(docs, assets));
+    if (this.noteLost(run, "manifest", "the list of what to keep", r)) {
+      // It may have removed what it did not name: none of that is held any more as far as this run knows, and this list goes again.
+      run.manifestKey = null;
+      for (const doc of [...run.sent.keys()]) if (!docs.includes(doc)) this.markUnsure(run, doc);
+      for (const name of [...run.assets.sent]) {
+        if (assets.includes(name)) continue;
+        run.assets.sent.delete(name);
+        run.unsure.assets.add(name);
+      }
+      return;
+    }
     if (!r.ok) {
       // A manifest the page will not take is not something a retry changes, and it would be said every cycle.
       const note = r.kind === "refused" ? this.news(run, "manifest", `${r.status ?? ""}`) : null;
@@ -989,10 +1046,12 @@ export class ServiceCuePublisher {
     run.pageHolds = null;
     // What the page dropped is no longer held, so it is sent afresh if it is ever wanted again; and its schedule goes with it.
     for (const doc of [...run.sent.keys()]) if (!docs.includes(doc)) run.sent.delete(doc);
+    for (const doc of [...run.unsure.docs]) if (!docs.includes(doc)) run.unsure.docs.delete(doc);
     for (const doc of [...run.nextDue.keys()]) if (!docs.includes(doc)) run.nextDue.delete(doc);
     // And its failure: a plan that comes back is not shown as failing before it has been read again.
     for (const doc of [...run.sourceFailures.keys()]) if (!docs.includes(doc)) run.sourceFailures.delete(doc);
     for (const name of [...run.assets.sent]) if (!assets.includes(name)) run.assets.sent.delete(name);
+    for (const name of [...run.unsure.assets]) if (!assets.includes(name)) run.unsure.assets.delete(name);
     // The page's own account of what it deleted: the evidence that a type or a plan that left the landing page has left the public one.
     const removed = r.removed;
     if (removed && removed.docs.length + removed.assets.length > 0) {
@@ -1094,6 +1153,9 @@ export class ServiceCuePublisher {
       run.sent.set(doc, hash);
       run.refused.delete(doc);
       run.outage.forget(`frame:${channel}`);
+    } else if (this.noteLost(run, `frame:${channel}`, `a ${channel} frame`, r)) {
+      // The page may show it: the next frame goes whatever it says, the one it said before included.
+      run.sent.delete(doc);
     } else if (r.kind === "refused") {
       run.refused.set(doc, hash);
       const note = this.news(run, `frame:${channel}`, `${r.status ?? ""}`);

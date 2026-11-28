@@ -2,12 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { cn } from "@renderer/lib/cn";
 import { useLatestRef } from "@renderer/lib/use-latest-ref";
 import { previewSrc } from "@renderer/main/preview-url";
+import { PREVIEW_MSG, readPreviewMessage, sendPreviewMessage } from "@renderer/main/preview-messages";
+import { useLivenessProbe, type LivenessProbe } from "./use-liveness-probe";
 
 const DESIGN_W = 1280;
-
-// Messages exchanged with the preview iframe (same-origin only).
-const DRAFT_MSG = "stage-utility:preview-draft";
-const READY_MSG = "stage-utility:preview-ready";
 
 /**
  * A live, non-interactive thumbnail of a View. Runs the real kiosk renderers in
@@ -28,6 +26,7 @@ export function ViewPreview({
   aspect = 16 / 9,
   draftSlots = null,
   bleed = false,
+  liveness,
 }: {
   viewId: string;
   /**
@@ -56,6 +55,11 @@ export function ViewPreview({
    * The Screens cards use it; the View editor's own preview keeps its rounded box.
    */
   bleed?: boolean;
+  /**
+   * Whether the page inside is live, for a Screens card: see use-liveness-probe.ts
+   * and preview-messages.ts. The View editor's own preview does not ask.
+   */
+  liveness?: LivenessProbe;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
@@ -64,10 +68,10 @@ export function ViewPreview({
 
   // Latest draft in a ref so the ready-handshake handler always posts current data.
   const draftRef = useLatestRef(draftSlots);
+  const onProbeLoad = useLivenessProbe(iframeRef, viewId, liveness);
 
   function postDraft(target: Window | null | undefined) {
-    if (!target) return;
-    target.postMessage({ type: DRAFT_MSG, viewId, slots: draftRef.current }, window.location.origin);
+    sendPreviewMessage(target, { type: PREVIEW_MSG.DRAFT, viewId, slots: draftRef.current });
   }
 
   useEffect(() => {
@@ -92,11 +96,8 @@ export function ViewPreview({
   // current draft so edits made before it mounted still land.
   useEffect(() => {
     function onMessage(e: MessageEvent) {
-      if (e.origin !== window.location.origin) return;
-      const data = e.data as { type?: string; viewId?: string } | null;
-      if (data?.type === READY_MSG && data.viewId === viewId) {
-        postDraft(iframeRef.current?.contentWindow);
-      }
+      const m = readPreviewMessage(e, iframeRef.current?.contentWindow, viewId);
+      if (m?.type === PREVIEW_MSG.READY) postDraft(iframeRef.current?.contentWindow);
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
@@ -131,7 +132,10 @@ export function ViewPreview({
         src={previewSrc(viewId, outputId)}
         title="View preview"
         tabIndex={-1}
-        onLoad={() => postDraft(iframeRef.current?.contentWindow)}
+        onLoad={() => {
+          postDraft(iframeRef.current?.contentWindow);
+          onProbeLoad();
+        }}
         style={{
           width: DESIGN_W,
           height: designH,

@@ -16,10 +16,6 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 import { installDom, settle, unmountAndTeardown } from "../test-dom.js";
 
 const teardown = installDom();
-// React only act-wraps a render, and only warns when an update escapes one,
-// once it is told it is in a test environment. Without this the file reads
-// as clean while 8 updates land outside act.
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let failWith: Error | null = null;
 /** Every icon write, in order — the migration is an ordering claim about two. */

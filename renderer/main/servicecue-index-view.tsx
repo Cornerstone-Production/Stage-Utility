@@ -7,22 +7,23 @@ import { pcoConnected, useStageState } from "./use-stage-state";
 import { invoke } from "../lib/api";
 import { useFailedReads } from "../lib/use-failed-reads";
 import { useResyncOn } from "../lib/use-resync-on";
+import { cn } from "../lib/cn";
+import { INLINE_LINK } from "../lib/link-classes";
 import { useOriginHref } from "../lib/back-target";
+import { ALL_COLUMNS_SLUG, slugOf, slugify } from "@main/services/servicecue-slug";
 import { SERVICES_NOT_SENT, isPublicMode, notPublishedYet } from "../lib/public-mode";
+
+const MESSAGE = "text-body text-fg-subtle text-center max-w-xs self-center";
 
 // Implicit layout that shows every note-category column — always available so the
 // landing page works before any custom layout is configured (Phase 3 adds those).
 export const ALL_COLUMNS_LAYOUT_ID = "__all__";
-export const ALL_COLUMNS_SLUG = "all-columns";
 
-/** URL-friendly slug from a name ("The Gathering" → "the-gathering"). */
-export function slugify(s: string): string {
-  return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "x";
-}
-
-/** Build a pretty ServiceCue URL from names (falls back to ids when unnamed). */
-export function serviceCueUrl(typeName: string, layoutId: string, layoutName?: string): string {
-  const laySlug = layoutId === ALL_COLUMNS_LAYOUT_ID ? ALL_COLUMNS_SLUG : slugify(layoutName ?? layoutId);
+/** Build a pretty ServiceCue URL: the service type's name, then the layout's slug
+ *  (its id when the layout is unknown). The slug is the layout's stored one, which a
+ *  rename does not change. */
+export function serviceCueUrl(typeName: string, layoutId: string, slug?: string): string {
+  const laySlug = layoutId === ALL_COLUMNS_LAYOUT_ID ? ALL_COLUMNS_SLUG : slug ?? layoutId;
   return `/servicecue/${encodeURIComponent(slugify(typeName))}/${encodeURIComponent(laySlug)}`;
 }
 
@@ -99,6 +100,10 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
     ...globalLayouts.map((l) => ({ value: l.id, label: l.name })),
     { value: ALL_COLUMNS_LAYOUT_ID, label: "All columns" },
   ];
+  // Edit layouts sits under a centred message, and stays at the left everywhere else, the loading
+  // spinner and the error included, so it does not jump left when the rows arrive.
+  const messageShown =
+    pcoConfigured === false || notSent || (!failed.has("load") && !!types && !stateLoading && rows.length === 0);
   const selectedFor = (typeId: string) => sel[typeId] ?? globalLayouts[0]?.id ?? ALL_COLUMNS_LAYOUT_ID;
 
 
@@ -130,15 +135,25 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
         <div className="m-auto flex flex-col gap-2 w-full max-w-md">
 
           {pcoConfigured === false ? (
-            <p className="text-body text-fg-subtle text-center max-w-xs">Connect Planning Center to use ServiceCue.</p>
+            <p className={MESSAGE}>
+              {/* Not on the public page, which has no settings to go to. */}
+              {isPublicMode() ? "Connect Planning Center" : <a href="/settings/integrations" className={INLINE_LINK}>Connect Planning Center</a>} to use ServiceCue.
+            </p>
           ) : notSent ? (
-            <p className="text-body text-fg-subtle text-center max-w-xs">{SERVICES_NOT_SENT}</p>
+            <p className={MESSAGE}>{SERVICES_NOT_SENT}</p>
           ) : failed.has("load") ? (
             <ErrorNote>Couldn't load ServiceCue's service types and layouts.</ErrorNote>
           ) : !types || stateLoading ? (
             <div className="flex justify-center py-8"><Loader2Icon className="size-7 text-fg-subtle animate-spin" /></div>
           ) : rows.length === 0 ? (
-            <p className="text-body text-fg-subtle text-center max-w-xs">No service types enabled. Choose them on the ServiceCue page, under Shown on the landing page.</p>
+            <p className={MESSAGE}>
+              No service types enabled.{" "}
+              {isPublicMode() ? (
+                "Choose them on the ServiceCue layouts page, under Landing page."
+              ) : (
+                <a href="/servicecue/presets#landing" className={INLINE_LINK}>Choose them on the ServiceCue layouts page, under Landing page.</a>
+              )}
+            </p>
           ) : (
             rows.map((type) => {
               const cur = selectedFor(type.id);
@@ -158,7 +173,7 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
                   </div>
                   <Tooltip label={`Open ${type.name}`}>
                     <a
-                      href={withThisPage(serviceCueUrl(type.name, cur, globalLayouts.find((l) => l.id === cur)?.name))}
+                      href={withThisPage(serviceCueUrl(type.name, cur, slugOf(globalLayouts, cur)))}
                       className="flex items-center justify-center rounded-lg border border-line bg-surface size-8 shrink-0 transition-colors hover:bg-fill-hover"
                       aria-label={`Open ${type.name}`}
                     >
@@ -169,13 +184,13 @@ export function ServiceCueIndex({ standalone = false }: { standalone?: boolean }
               );
             })
           )}
-          {/* Editing stays in the building: the public page has no presets page to go to. */}
+          {/* Editing stays in the building: the public page has no layouts page to go to. */}
           {!isPublicMode() && (
             <a
               href="/servicecue/presets"
-              className="mt-2 self-start text-caption1 text-accent hover:underline"
+              className={cn("mt-2 text-caption1 text-accent hover:underline", messageShown ? "self-center" : "self-start")}
             >
-              Edit column presets
+              Edit layouts
             </a>
           )}
         </div>

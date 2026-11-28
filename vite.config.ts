@@ -1,5 +1,5 @@
 import { defineConfig, type PluginOption } from "vite";
-import react, { reactCompilerPreset } from "@vitejs/plugin-react";
+import react from "@vitejs/plugin-react";
 import babel from "@rolldown/plugin-babel";
 import tailwindcss from "@tailwindcss/vite";
 import { resolve } from "path";
@@ -7,6 +7,7 @@ import { MANIFEST_PATH } from "./main/services/install-metadata";
 import { cleanUrlsMiddleware } from "./main/services/routes/dev-clean-urls";
 import { serverPort } from "./main/services/server-port";
 import { tsconfigAliases } from "./main/services/vite-aliases";
+import { reactCompiler } from "./main/services/vite-react-compiler";
 
 // Dev-only: map clean URLs to their entry HTML so the dev server matches what
 // the production Node server serves (see remote-server.ts tryServeStatic).
@@ -38,7 +39,7 @@ export default defineConfig({
     react(),
     // React Compiler auto-memoises components/hooks at build time (React 19).
     babel({
-      presets: [reactCompilerPreset()],
+      presets: [reactCompiler()],
     }),
     tailwindcss(),
   ],
@@ -94,6 +95,10 @@ export default defineConfig({
         changeOrigin: true,
       },
       "/layout-images": {
+        target: API_TARGET,
+        changeOrigin: true,
+      },
+      "/stageplot-images": {
         target: API_TARGET,
         changeOrigin: true,
       },

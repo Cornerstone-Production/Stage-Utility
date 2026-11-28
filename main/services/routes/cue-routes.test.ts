@@ -34,6 +34,7 @@ const { automationLog } = await import("../automation-log.js");
 const { cueTokens } = await import("../cue-tokens.js");
 const { secretsStore } = await import("../secrets.js");
 const { handlerErrorStatus } = await import("../remote-server.js");
+const { BodyTooLargeError, MAX_JSON_BODY_BYTES } = await import("./context.js");
 const { errorMessage } = await import("../errors.js");
 const { companionApi, companionDeps } = await import("../companion-api.js");
 const { companionExportFixture, FIXTURE_PAGES, FIXTURE_PAGE_IDS, fixtureActionId } = await import(
@@ -147,7 +148,7 @@ let TOKEN = "";
  * custom-variable read being answered with the whole export document.
  */
 function installCompanionStub(): void {
-  companionDeps.fetch = async (input, init) => {
+  companionDeps.fetch = async (input) => {
     const url = String(input);
     if (url.includes("/press")) {
       presses.push(url);
@@ -175,7 +176,6 @@ function installCompanionStub(): void {
         ? new Response("Not found", { status: 404 })
         : new Response(value, { status: 200 });
     }
-    void init;
     return Response.json(companionExportFixture());
   };
 }
@@ -755,7 +755,7 @@ describe("confirmRequired", () => {
     // deliberately the same 202-with-a-new-token as any other unconfirmed call:
     // 409 would tell a caller which of its two problems it has, and there is
     // nothing useful it could do differently.
-    const id = await withCue({ confirmRequired: true, cooldownSec: 0 });
+    await withCue({ confirmRequired: true, cooldownSec: 0 });
     const first = await automationEngine.callByName("projectors_on", { caller: "test", now: 1_000 });
     assert.equal(first.status, 202);
     const token = (first.body as { confirm: string }).confirm;
@@ -776,7 +776,6 @@ describe("confirmRequired", () => {
     assert.equal(replay.status, 202, "a spent confirmation ran the cue again");
     assert.notEqual((replay.body as { confirm: string }).confirm, token, "the same token came back");
     assert.equal(presses.length, 1, "a replayed confirmation pressed a second time");
-    void id;
   });
 
   test("a confirmation EXPIRES after 30 seconds", async () => {
@@ -3548,5 +3547,33 @@ describe("built-in cues through the routes", () => {
       ["obs_record_on"],
     );
     assert.match(skipped[0]!.why, /already used/);
+  });
+});
+
+describe("the body of a cue call", () => {
+  test("an over-cap body is a 413 and the cue does NOT fire", async () => {
+    // The body is read with readBodyOrEmpty. A bare `.catch(() => ({}))` swallowed
+    // the size limit, so an over-cap call proceeded with an empty body, pressed
+    // the button and answered 200.
+    await withCue();
+    await assert.rejects(
+      call("projectors_on", { headers: { ...auth(), "content-length": String(MAX_JSON_BODY_BYTES + 1) } }),
+      (err: unknown) => err instanceof BodyTooLargeError && handlerErrorStatus(err) === 413,
+    );
+    assert.equal(presses.length, 0, "a 413 call fired the cue");
+    assert.equal(automationLog.list().length, 0, "a 413 call reached the engine");
+  });
+
+  test("a body of null is read as empty, not a 500", async () => {
+    await withCue();
+    const r = await call("projectors_on", { raw: "null" });
+    assert.equal(r.status, 200);
+  });
+
+  test("a body that is not JSON still calls the cue", async () => {
+    // Deliberate: a shell sends the confirmation in the query string and may send junk.
+    await withCue();
+    const r = await call("projectors_on", { raw: "{ not json" });
+    assert.equal(r.status, 200);
   });
 });

@@ -21,6 +21,10 @@ import { asArray, asObject, checked, optional, refuse, required, uniqueIds } fro
  * them: without a name a save refuses it anyway, and the cue checks read every
  * rule's params, so one missing failed inside ANOTHER rule's check with a
  * TypeError naming neither. Other steps may omit them, as a save allows.
+ *
+ * One of the two places a rule's step shape is checked: normalizeSteps in
+ * routes/automation-routes.ts is the other, for a request body. Change one,
+ * change both.
  */
 const rulesRestoreCheck = checked(async (raw) => {
   const list = asArray(raw, "the rules");
@@ -38,7 +42,13 @@ const rulesRestoreCheck = checked(async (raw) => {
       else if (step === "trigger" && s.id === CALL_TRIGGER_ID) refuse(`${label} is a called command with no trigger params`);
     }
     optional(rule.enabled, "boolean", `${what}'s enabled`);
-    if (rule.conditions !== undefined) asArray(rule.conditions, `${what}'s conditions`);
+    if (rule.conditions !== undefined) {
+      asArray(rule.conditions, `${what}'s conditions`).forEach((entry, j) => {
+        const c = asObject(entry, `${label}'s condition ${j + 1}`);
+        required(c.id, "string", `${label}'s condition ${j + 1} id`);
+        if (c.params !== undefined) asObject(c.params, `${label}'s condition ${j + 1} params`);
+      });
+    }
     return rule;
   });
   // addRule mints a fresh id, so two rules never share one; a cue's buttons and
@@ -79,8 +89,14 @@ export const automationStore = {
   refusingSaves() {
     return rules.refusingSaves();
   },
+  /**
+   * A rule with no `conditions` reads as having none. The restore check above and
+   * docs/automation.md both let a rule omit them, and every reader (ruleIssues,
+   * the engine's condition checks) assumes an array, so the gap is closed here,
+   * where each of those gets its rules.
+   */
   async loadRules(): Promise<Rule[]> {
-    return rules.load();
+    return (await rules.load()).map((r) => (Array.isArray(r.conditions) ? r : { ...r, conditions: [] }));
   },
   async saveRules(next: Rule[]): Promise<void> {
     return rules.save(next);

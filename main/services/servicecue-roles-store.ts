@@ -3,6 +3,7 @@
 
 import type { CategoryRole } from "../types/servicecue-roles.js";
 import { DataStore } from "./data-store.js";
+import { firstFree } from "./first-free.js";
 import { asArray, checked } from "./restore-check.js";
 import { SERVICECUE_LOG_TAG } from "./servicecue-legacy-names.js";
 
@@ -26,9 +27,15 @@ export function cleanRoles(roles: readonly unknown[]): CategoryRole[] {
     }));
 }
 
-/** Stable id from a category name, so re-seeding does not churn ids. */
-function idFor(name: string): string {
-  return `role-${name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+/** Stable id from a category name, so re-seeding does not churn ids, made unique
+ *  against `taken` with a numeric suffix. A role keeps its id when it is renamed or
+ *  loses its category, and two names can reduce to one id ("A&V", "A V"), so the bare
+ *  id may already belong to another role. */
+function idFor(name: string, taken: Set<string>): string {
+  const base = `role-${name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}`;
+  const id = firstFree(base, (s) => taken.has(s));
+  taken.add(id);
+  return id;
 }
 
 /**
@@ -39,14 +46,15 @@ function idFor(name: string): string {
  * rule swallowed nine categories in one service type. A wrong automatic merge hides a
  * department's notes with no visible cause, so merging is always the operator's action.
  */
-export function seedRoles(categories: string[]): CategoryRole[] {
+export function seedRoles(categories: string[], existingIds: Iterable<string> = []): CategoryRole[] {
+  const taken = new Set(existingIds);
   const seen = new Set<string>();
   const out: CategoryRole[] = [];
   for (const raw of categories) {
     const name = raw.trim();
     if (!name || seen.has(name.toLowerCase())) continue;
     seen.add(name.toLowerCase());
-    out.push({ id: idFor(name), name, members: [name] });
+    out.push({ id: idFor(name, taken), name, members: [name] });
   }
   return out;
 }

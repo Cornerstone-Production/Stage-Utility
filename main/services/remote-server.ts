@@ -44,9 +44,11 @@ import { logRoutes } from "./routes/log-routes.js";
 import { appIconRoutes } from "./routes/app-icon-routes.js";
 import { brandHtml } from "./install-metadata.js";
 
-import { saveLayoutImage, readLayoutImage } from "./layout-image-store.js";
+import { LAYOUT_IMAGE_DIR, saveLayoutImage, readLayoutImage } from "./layout-image-store.js";
 import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
 import { readImage, storedImageHeaders } from "./image-files.js";
+import { STAGEPLOT_IMAGE_DIR } from "./stageplots-files.js";
+import { stageplotsRoutes } from "./routes/stageplots-routes.js";
 import { integrationManager } from "./integration-manager.js";
 import { obsService } from "./obs-service.js";
 import { resiService } from "./resi-service.js";
@@ -88,8 +90,8 @@ import { automationRoutes } from "./routes/automation-routes.js";
 import { cueRoutes } from "./routes/cue-routes.js";
 import { displaySettingsRoutes } from "./routes/display-settings-routes.js";
 import { kioskDeviceRoutes } from "./routes/kiosk-device-routes.js";
-import { startKioskResponder, stopKioskResponder } from "./kiosk-responder.js";
-import { settingsStore } from "./settings-store.js";
+import { startKioskResponder, stopKioskResponder, type ResponderOptions } from "./kiosk-responder.js";
+import { settingsStore, type SettingsData } from "./settings-store.js";
 import { recordDisplayScreen } from "./kiosk-devices-store.js";
 import { randomUUID } from "node:crypto";
 import { systemRoutes } from "./routes/system-routes.js";
@@ -107,8 +109,24 @@ import { HOME_SNOOZES_CHANNEL } from "../types/home-snoozes.js";
 import { BOARDS_CHANGED_CHANNEL } from "../types/boards-changed.js";
 import { boardsChangedState } from "./boards-changed.js";
 import { homeSnoozes } from "./home-snoozes.js";
+import { TRENDS_PREFS_CHANNEL } from "../types/trends-prefs.js";
+import { trendsPrefs } from "./trends-prefs.js";
 import { calendarBroadcaster, CALENDAR_CHANNEL } from "./calendar-broadcaster.js";
 import { plural } from "./plural.js";
+import { SSE_HEARTBEAT_FRAME, SSE_HEARTBEAT_MS } from "../types/sse.js";
+
+/**
+ * The folders of uploads served as they are stored, each with its reader. A
+ * folder not listed is never served: stage-plot PDF originals
+ * (stageplot-originals/) are kept for backups and deliberately absent.
+ * Branding images used to ride in stage:state as base64 and were 77% of every
+ * broadcast; layout images are read by their own store's stricter reader.
+ */
+const STORED_IMAGE_FOLDERS = new Map<string, (file: string) => Promise<{ data: Buffer; mime: string } | null>>([
+  [LAYOUT_IMAGE_DIR, readLayoutImage],
+  [BRANDING_IMAGE_DIR, (file) => readImage(BRANDING_IMAGE_DIR, file)],
+  [STAGEPLOT_IMAGE_DIR, (file) => readImage(STAGEPLOT_IMAGE_DIR, file)],
+]);
 
 /**
  * Route modules, in dispatch order. Order is load-bearing: a module that
@@ -147,6 +165,7 @@ export const ROUTE_MODULES: readonly ((c: RouteCtx) => Promise<void>)[] = [
   messagesRoutes,
   homeRoutes,
   hostNameRoutes,
+  stageplotsRoutes,
 ] as const;
 
 /**
@@ -323,11 +342,33 @@ hostNames.onRefusalOn(() => {
   }
   if (closed > 0) console.warn(`[security] closed ${scrub(closed)} event stream(s) opened by a name now refused`);
 });
-// Keep the SSE pipe warm and surface dead clients: EventSource ignores comment
-// lines, but the write itself fails (or backs up) on a half-open socket so we can
-// reap it. Without this, a slept/dropped kiosk lingers forever holding memory and
-// one of the browser's ~6 HTTP/1.1 connection slots.
-const SSE_HEARTBEAT_MS = 20_000;
+// Keep the SSE pipe warm and surface dead clients: the write fails (or backs up) on
+// a half-open socket so we can reap it. Without this, a slept/dropped kiosk lingers
+// forever holding memory and one of the browser's ~6 HTTP/1.1 connection slots. A
+// named event, so a page can tell a quiet stream from a dead one: see
+// main/types/sse.ts.
+/**
+ * One heartbeat to every open event stream. It exercises the write, so a half-open
+ * or stalled client surfaces and gets reaped, and it tells a page its stream is
+ * still delivering (main/types/sse.ts). Exported for its test; start() runs it on a
+ * timer.
+ */
+export function writeSseHeartbeats(): void {
+  for (const client of sseClients) {
+    let ok = !client.writableEnded && !client.destroyed && client.writableLength <= SSE_MAX_BUFFER_BYTES;
+    if (ok) {
+      try {
+        client.write(SSE_HEARTBEAT_FRAME);
+      } catch {
+        ok = false;
+      }
+    }
+    if (!ok) {
+      sseClients.delete(client);
+      client.destroy();
+    }
+  }
+}
 // If a client's un-flushed write buffer grows past this, it's stalled (asleep, wifi
 // gone). Drop it rather than let its backlog grow server memory without bound — the
 // broadcast loop has no backpressure otherwise.
@@ -549,6 +590,11 @@ export function writeHelloBurst(res: EventSink): void {
   // a restart, which a restore always is).
   // The LITERAL with `satisfies`, as above.
   sseWrite(res, "boards:changed" satisfies typeof BOARDS_CHANGED_CHANNEL, boardsChangedState());
+  // The metric the History Trends card plots under Sound. Chosen once and
+  // standing, so a card opened after the last change would otherwise draw the
+  // default until somebody chose again.
+  // The LITERAL with `satisfies`, as above.
+  sseWrite(res, "trends:prefs" satisfies typeof TRENDS_PREFS_CHANNEL, trendsPrefs.state());
 }
 
 /** The hello burst as frames, for a client on the polling transport. */
@@ -596,6 +642,27 @@ function sendStatic(
     res.writeHead(200, headers);
     res.end(data);
   }
+}
+
+/**
+ * What the discovery responder is started with, wired to the stage controller:
+ * the id it answers with is the controller's live copy (so New server id takes
+ * effect at once, no socket rebind), and what the duplicate-id check finds goes
+ * back there, to reach Home and Advanced through StageState. Exported so a test
+ * can hold the wiring to that, rather than only the parts on either side of it.
+ */
+export function discoveryOptions(
+  settings: Pick<SettingsData, "appName" | "kioskDiscoveryPort" | "serverId">,
+  url: () => string,
+): ResponderOptions {
+  const minted = settings.serverId ?? "";
+  return {
+    serverId: () => stageController.getState().serverIdentity.id ?? minted,
+    serverName: settings.appName || "Stage Utility",
+    url,
+    port: settings.kioskDiscoveryPort,
+    onCheck: (state) => stageController.setDuplicateCheck(state),
+  };
 }
 
 export class RemoteServer {
@@ -715,11 +782,11 @@ export class RemoteServer {
    * Bring up the kiosk discovery responder, if it is switched on.
    *
    * Off by default — see kioskDiscovery in settings-store.ts for why a fresh
-   * install must not answer. The server id is minted on first use and then never
-   * rewritten: every binding on every device refers to it, so changing it would
-   * orphan the lot.
+   * install must not answer. The server id is minted on first use and changes
+   * only when the operator says so (see serverId in settings-store.ts): every
+   * binding on every device refers to it.
    */
-  private async startDiscovery(): Promise<void> {
+  private async startDiscovery(overrides: Partial<ResponderOptions> = {}): Promise<void> {
     try {
       const settings = await settingsStore.load();
       if (!settings.kioskDiscovery) return;
@@ -727,13 +794,11 @@ export class RemoteServer {
       if (!serverId) {
         serverId = randomUUID();
         await settingsStore.patch({ serverId });
+        console.log(`[remote-server] made this server's id ${serverId}; screens set up here will bind to it`);
       }
-      startKioskResponder({
-        serverId,
-        serverName: settings.appName || "Stage Utility",
-        url: () => this.getLanUrl(),
-        port: settings.kioskDiscoveryPort,
-      });
+      stageController.setServerId(serverId);
+      // `overrides` is for a test: where the check goes and how fast, never the wiring.
+      startKioskResponder({ ...discoveryOptions({ ...settings, serverId }, () => this.getLanUrl()), ...overrides });
     } catch (err) {
       // Reported, never fatal: a server that cannot answer discovery still runs
       // every display already bound to it.
@@ -848,24 +913,7 @@ export class RemoteServer {
 
     // Heartbeat: ping every open stream so idle intermediaries don't drop it and so
     // half-open/stalled clients get reaped (write fails or backs up → dropped).
-    this.heartbeatTimer = setInterval(() => {
-      for (const client of sseClients) {
-        // ": ..." is an SSE comment line — EventSource ignores it; it just exercises
-        // the write so a half-open or stalled client surfaces and gets reaped.
-        let ok = !client.writableEnded && !client.destroyed && client.writableLength <= SSE_MAX_BUFFER_BYTES;
-        if (ok) {
-          try {
-            client.write(`: ping\n\n`);
-          } catch {
-            ok = false;
-          }
-        }
-        if (!ok) {
-          sseClients.delete(client);
-          client.destroy();
-        }
-      }
-    }, SSE_HEARTBEAT_MS);
+    this.heartbeatTimer = setInterval(writeSseHeartbeats, SSE_HEARTBEAT_MS);
     this.heartbeatTimer.unref?.();
 
     const trackConn = (socket: net.Socket) => {
@@ -1036,30 +1084,14 @@ export class RemoteServer {
     _url: URL,
     method: string,
   ): Promise<void> {
-    // ── Uploaded custom-layout images ─────────────────────────────────────
-    // Served before static so the SPA fallback doesn't swallow /layout-images/*.
+    // ── Stored images (layout objects, branding, stage-plot backgrounds) ──
+    // Served before static so the SPA fallback doesn't swallow them. The name
+    // is a content hash, so the answer is immutable and cached forever.
     {
-      const imgMatch = pathname.match(/^\/layout-images\/([^/]+)$/);
-      if (method === "GET" && imgMatch) {
-        const img = await readLayoutImage(decodeURIComponent(imgMatch[1]));
-        if (!img) {
-          res.writeHead(404, { "Content-Type": "text/plain" });
-          res.end("Not found");
-          return;
-        }
-        // Content-hashed name → immutable, cache forever.
-        res.writeHead(200, storedImageHeaders(img.mime, "public, max-age=31536000, immutable"));
-        res.end(img.data);
-        return;
-      }
-    }
-    // ── Branding images (app logo, empty-slot logo, avatar) ───────────────
-    // Same content-hashed, cache-forever treatment. These used to ride in
-    // stage:state as base64 and were 77% of every broadcast.
-    {
-      const brandMatch = pathname.match(/^\/branding-images\/([^/]+)$/);
-      if (method === "GET" && brandMatch) {
-        const img = await readImage(BRANDING_IMAGE_DIR, decodeURIComponent(brandMatch[1]));
+      const stored = /^\/([a-z-]+)\/([^/]+)$/.exec(pathname);
+      const read = method === "GET" && stored ? STORED_IMAGE_FOLDERS.get(stored[1]) : undefined;
+      if (stored && read) {
+        const img = await read(decodeURIComponent(stored[2]));
         if (!img) {
           res.writeHead(404, { "Content-Type": "text/plain" });
           res.end("Not found");

@@ -24,9 +24,7 @@ const { stageController } = await import("../stage-controller.js");
 const { configSnapshot } = await import("../config-snapshot.js");
 const { iconInput, pngDataUrl } = await import("../app-icon-fixture.js");
 const { ICON_ROUTES } = await import("../install-metadata.js");
-const { initLogCapture, getLogLines, setLogSink } = await import("../log-buffer.js");
-// The buffer only records while something is listening to it.
-setLogSink(() => {});
+const { initLogCapture, getLogLines } = await import("../log-buffer.js");
 initLogCapture();
 
 const branding = () => getLogLines().map((l) => l.msg).filter((m) => m.startsWith("[branding]"));

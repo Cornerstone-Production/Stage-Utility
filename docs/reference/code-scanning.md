@@ -7,11 +7,37 @@ what stands behind each answer in the code.
 
 `js/file-access-to-http` flags data read from a file that reaches a network
 request. `js/http-to-file-access` flags data from the network that reaches a file
-write. Neither has a sanitizer or barrier hook: no annotation, model or check in
-the code tells the query that a value is safe, so the query flags every such flow
-whatever stands between the read and the request.
+write. For the first, no annotation, model or check in the code tells the query that a
+value is safe, so it flags every such flow whatever stands between the read and the
+request. The second has a `Sanitizer` class that a model cannot add to and that a query
+can; one flow uses that (below), and every other flow is flagged whatever stands
+between the read and the write.
 
-In this app both flows are the point:
+The raw sample archive (`main/services/archive/csv-appender.ts`) writes rows built from
+Planning Center data, such as plan item ids and planned lengths, and the stock query
+flags each append of a row. (The header append was never flagged: it is not network
+data.) A row goes through `encodeRow` (`main/services/csv.ts`) first, which quotes a
+comma, quote, CR or LF, so a value cannot become a second column or record. The file's
+path is built from `[A-Za-z0-9._-]` alone (`main/services/archive/archive-paths.ts`).
+`.github/codeql/queries/` is the stock query plus `EncodeRowBarrier.qll`, which makes
+the result of `encodeRow` a sanitizer. It keeps the rule id, and the stock query is
+filtered out of the configuration.
+
+What that barrier asserts is CSV structure and nothing else. `encodeRow` does not
+neutralise content: `<script>` and a leading `=` are written as they are, because the
+archive is read back by the app and must round-trip. This query's sink is the data
+written, and it does not check the destination path. `js/path-injection` does not treat
+a network response as a source either, so a write whose path came from the network, with
+`encodeRow`'d content, would be reported by neither query. Nothing in the product does
+that. The archive's path comes from the code, and the fixture `network-path.ts` in
+`.github/codeql/tests/queries` records the gap. `encodeRows` (`rows.map(encodeRow)`) and
+`mergeCsv(..., encodeRow)` are not covered; a flow through either is still reported.
+
+The CodeQL tests list every node the barrier covers as an exact list and show a network
+value written raw or through a look-alike `encodeRow` (alerts) and through the real one
+(none); removing the barrier makes the last alert.
+
+The other flows are the point of the app:
 
 - An operator saves a credential (an API key, a client secret, a bearer token, a
   host and port) in Settings. It is read from disk and sent to the vendor it was

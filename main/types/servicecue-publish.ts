@@ -9,12 +9,17 @@
 //   - the publisher inside the app, which sends it.
 //
 // It holds names, patterns and pure functions and nothing else: no Node, no DOM,
-// no Workers API, no import. The Worker bundles it and the browser bundles it, and
-// the root test suite runs it. docs/reference/servicecue-publishing.md describes
-// the protocol these constants define.
+// no Workers API. Its one import is the app's StagePlots limits (stageplots.ts,
+// which imports nothing), so the landing list is held to the numbers the app keeps
+// rather than a copy of them; it names the .ts file because plain Node runs this
+// module for the deploy script. The Worker bundles it and the browser bundles it,
+// and the root test suite runs it. docs/reference/servicecue-publishing.md
+// describes the protocol these constants define.
 //
 // Every list below is sorted, one entry per line, so two branches that each add an
 // entry merge without a conflict and a test can pin the exact list.
+
+import { STAGEPLOT_LIMITS } from "./stageplots.ts";
 
 /** The protocol's version: the `v1` in every publish path, and `protocol` in the status answer. */
 export const PUBLISH_PROTOCOL_VERSION = 1;
@@ -51,11 +56,6 @@ export const PUBLISH_UPCOMING_DAYS = 60;
 export const PUBLIC_STALE_AFTER_MS = 2 * 60 * 1000;
 
 // ── Ids ───────────────────────────────────────────────────────────────────────
-
-/** Is this a plain object: not null, not an array. */
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 const ID = /^\d{1,20}$/;
 
@@ -404,4 +404,170 @@ export function viewerBuildFromHtml(html: string): string | null {
   }
   const m = new RegExp(`<meta\\s+name="${VIEWER_BUILD_META}"\\s+content="([^"]*)"\\s*/?>`).exec(bare);
   return m !== null && isViewerBuildId(m[1]) ? m[1] : null;
+}
+
+// ── StagePlots ────────────────────────────────────────────────────────────────
+//
+// A venue's stage plots, published behind a secret link: `/stageplots/<secret>`. Each
+// venue has its own secret, made on the church's server (32 random bytes, base64url),
+// and everything published for it is kept under that secret and nowhere else: never in
+// the docs or assets above, so no manifest, status answer or `publish:docs` message ever
+// names it, and nothing lists the venues. Deleting a secret deletes all of it.
+//
+// Under a secret, three kinds of key:
+//
+//   index          the venue: its name, notes, plots in tab order, and which plot it showed
+//   plot/<id>      one plot: its items, fade and background size
+//   image/<hash>   one converted background, as WebP
+//
+// A secret, a key or a method that is not one of these is answered exactly as a path the
+// Worker does not know, and so is a secret nothing is published under: nobody can tell a
+// link that never existed from one that was deleted.
+
+/** The public address of a venue's plots: this, a slash, and its secret. */
+export const STAGEPLOTS_PATH = "/stageplots";
+
+/** The viewer's document for a venue's plots, served at `/stageplots/<secret>` while it is published. Never at its own name. */
+export const STAGEPLOTS_HTML = "/stageplots.html";
+
+/**
+ * A secret as the server makes it: 32 bytes in unpadded base64url, 43 characters. The
+ * last character carries only two bits of the 32nd byte, so it is one of 16; a string
+ * of 43 that ends otherwise is not one a server made, and is refused like any other.
+ */
+const STAGEPLOTS_SECRET = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
+
+/** Is this a secret a venue can be published under. Checked before anything is read, so a malformed one costs no storage read. */
+export function isStagePlotsSecret(value: unknown): value is string {
+  return typeof value === "string" && STAGEPLOTS_SECRET.test(value);
+}
+
+/** A stage plots id (a venue's, a plot's): letters, digits, `-` and `_`, 1 to 80. The app's store mints and checks ids by this. */
+export const STAGEPLOTS_ID = /^[A-Za-z0-9_-]{1,80}$/;
+
+/** A content hash as the app's image store names a file: the first 16 hex of its SHA-256. */
+export const STAGEPLOTS_HASH = /^[0-9a-f]{16}$/;
+
+/** The one type a published background is. */
+export const STAGEPLOTS_IMAGE_TYPE = "image/webp";
+
+/**
+ * The most keys one secret may hold. A venue at the app's limits holds 41 (its index, 20
+ * plots, 20 backgrounds); the rest is room for a republish that sends new backgrounds
+ * before it removes the ones they replace.
+ */
+export const STAGEPLOTS_MAX_KEYS = 100;
+
+/** The key of a venue's index. */
+export const STAGEPLOTS_INDEX_KEY = "index";
+
+/** The key of a plot, or null for an id that is not one. */
+export function stagePlotsPlotKey(plotId: string): string | null {
+  return STAGEPLOTS_ID.test(plotId) ? `plot/${plotId}` : null;
+}
+
+/** The key of a background, or null for a hash that is not one. */
+export function stagePlotsImageKey(hash: string): string | null {
+  return STAGEPLOTS_HASH.test(hash) ? `image/${hash}` : null;
+}
+
+/** What a key holds: JSON, or a background. Null when it is not a key. */
+export function stagePlotsKeyKind(key: unknown): "doc" | "image" | null {
+  if (typeof key !== "string") return null;
+  if (key === STAGEPLOTS_INDEX_KEY) return "doc";
+  const slash = key.indexOf("/");
+  if (slash < 0) return null;
+  const kind = key.slice(0, slash);
+  const rest = key.slice(slash + 1);
+  if (kind === "plot") return STAGEPLOTS_ID.test(rest) ? "doc" : null;
+  if (kind === "image") return STAGEPLOTS_HASH.test(rest) ? "image" : null;
+  return null;
+}
+
+/**
+ * The secret and key a path under `base` names, or null when it names none: `base/<secret>`
+ * (key null) or `base/<secret>/<key>`. One trailing slash is allowed after a bare secret.
+ * The URL parser has already resolved `.` and `..` segments; an encoded slash arrives as
+ * sent and is part of no secret or key.
+ */
+export function stagePlotsPath(pathname: string, base: string = STAGEPLOTS_PATH): { secret: string; key: string | null } | null {
+  if (!pathname.startsWith(`${base}/`)) return null;
+  const rest = pathname.slice(base.length + 1);
+  const slash = rest.indexOf("/");
+  const secret = slash < 0 ? rest : rest.slice(0, slash);
+  if (!isStagePlotsSecret(secret)) return null;
+  if (slash < 0 || slash === rest.length - 1) return { secret, key: null };
+  const key = rest.slice(slash + 1);
+  return stagePlotsKeyKind(key) === null ? null : { secret, key };
+}
+
+/** `pathname` with anything that could be a secret under a StagePlots path replaced, for a log line. */
+export function loggablePath(pathname: string): string {
+  return pathname.replace(/(\/stageplots\/)[^/]*/, "$1<secret>");
+}
+
+// ── The landing page ──────────────────────────────────────────────────────────
+//
+// The page's own address, `/`, is a landing page while at least one venue is listed on it: a
+// ServiceCue card and a Stage plots card naming each listed venue, which opens through its own
+// secret link. With none listed, `/` goes on to `/servicecue` as it always has.
+//
+//   PUT /_publish/v1/landing   { venues: [{ name, secret, plots }] }, the whole list, replacing it
+//   GET /api/landing           that list, for the landing page
+//
+// Its own path, outside /_publish/v1/stageplots/, so a Worker from before landing pages answers
+// 404 there, which the server says as "needs updating". The list is names and links only: never
+// notes, plots or patch. A secret on it is public to anyone who opens the page; listing a venue
+// is that choice.
+
+/** Under PUBLISH_BASE_PATH: where the publisher puts the landing list. */
+export const LANDING_PUBLISH_PATH = "/landing";
+
+/** Where the landing page reads the list. */
+export const LANDING_PATH = "/api/landing";
+
+/** The landing page's document, served at `/` while a venue is listed. Never at its own name. */
+export const LANDING_HTML = "/landing.html";
+
+/** The most venues the list holds: the app's own limit. */
+export const LANDING_MAX_VENUES = STAGEPLOT_LIMITS.venues;
+/** The longest name: the app's own limit. */
+const LANDING_NAME_CHARS = STAGEPLOT_LIMITS.nameChars;
+/** The most plots a venue can have: the app's own limit. */
+const LANDING_MAX_PLOTS = STAGEPLOT_LIMITS.plotsPerVenue;
+
+/** One listed venue: its name, its secret link and how many plots it has. */
+export interface LandingVenue {
+  name: string;
+  secret: string;
+  plots: number;
+}
+
+export interface LandingList {
+  venues: LandingVenue[];
+}
+
+/**
+ * The list `raw` is, rebuilt field by field, or why it is not one. The Worker holds a PUT to
+ * this, and the landing page reads what it is answered through it, so a page never draws
+ * anything but names, counts and secrets of the one shape a server makes.
+ */
+export function readLandingList(raw: unknown): { ok: true; list: LandingList } | { ok: false; error: string } {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return { ok: false, error: "The landing list must be an object" };
+  const venues = (raw as { venues?: unknown }).venues;
+  if (!Array.isArray(venues)) return { ok: false, error: "venues must be a list" };
+  if (venues.length > LANDING_MAX_VENUES) return { ok: false, error: `At most ${LANDING_MAX_VENUES} venues` };
+  const out: LandingVenue[] = [];
+  const secrets = new Set<string>();
+  for (const v of venues as unknown[]) {
+    if (typeof v !== "object" || v === null) return { ok: false, error: "Each venue must be an object" };
+    const { name, secret, plots } = v as Record<string, unknown>;
+    if (typeof name !== "string" || name.trim() === "" || name.length > LANDING_NAME_CHARS) return { ok: false, error: `Each venue needs a name of 1 to ${LANDING_NAME_CHARS} characters` };
+    if (!isStagePlotsSecret(secret)) return { ok: false, error: "Each venue needs a StagePlots secret" };
+    if (typeof plots !== "number" || !Number.isInteger(plots) || plots < 0 || plots > LANDING_MAX_PLOTS) return { ok: false, error: `Each venue's plots must be a whole number up to ${LANDING_MAX_PLOTS}` };
+    if (secrets.has(secret)) return { ok: false, error: "A secret is listed twice" };
+    secrets.add(secret);
+    out.push({ name, secret, plots });
+  }
+  return { ok: true, list: { venues: out } };
 }

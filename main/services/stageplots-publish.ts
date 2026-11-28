@@ -1,0 +1,1633 @@
+// stageplots-publish.ts — a venue's stage plots on the public page, behind a secret link.
+//
+// Through the same page, address, token and HTTP client as ServiceCue on the web
+// (servicecue-publish-client.ts), under the StagePlots keys of the contract
+// (main/types/servicecue-publish.ts): per venue, every background its plots draw, one doc
+// per plot and an index, all under the venue's own secret. See docs/features/stageplots.md.
+//
+// THE ONE RULE: no secret is ever live on a page that the store does not know of. A new secret
+// is written to the store's pending removals before its first request goes out, and moves onto
+// its venue only once the page has it all; anything that would forget a secret (a regenerate, an
+// unpublish or delete the page cannot hear, a take-back that fails, a move to another page)
+// queues it there instead. The publisher drains that list whenever it can reach the page: at
+// start, on Publish now and Remove now, on every change, and when a page is set up again.
+//
+//   Publish        a new secret; backgrounds, then plots, then the index, which is what makes
+//                  the link a page. A background the page refuses is listed as not yet
+//                  published and the plot is drawn without it; anything else that fails
+//                  leaves the venue unpublished and takes back what went up.
+//   Regenerate     the same under a new secret, every background the old link has included,
+//                  and only then the old secret is queued for removal and removed.
+//   Unpublish      drops the venue's secret on its page. With no page to reach (none set up, or
+//                  the venue on another), it is queued for removal and the venue is unpublished.
+//                  A page that refuses the drop leaves the venue published, and says so. One
+//                  whose answer was lost may have dropped it all the same: the card says so, and
+//                  the next republish sends everything rather than only what changed.
+//   Publish now    everything again, every background included, and the queue drained. A venue
+//                  on a page other than the one set up moves to it under a new secret.
+//   A change       to the document, to the plan it follows, or to the patch (linked connection
+//                  points): each published venue is sent what changed, after a short wait, one
+//                  run at a time per venue. A change that alters nothing published (the publish
+//                  state this writes, a patch channel no published point lists) sends nothing.
+//                  A send the page did not take is sent again on the next change, after a minute
+//                  and then longer while the page keeps failing, when the Public link is saved
+//                  (a token fixed, the same address saved again) and at start, which sends every
+//                  published venue: what this process last sent is not known after a restart,
+//                  and a change saved in the wait before it would otherwise never go.
+//   The landing    the page's own address lists the venues marked listed on it: their names,
+//                  plot counts and secret links, nothing else. The list is made from the
+//                  document after every change to it and sent whenever it differs from what
+//                  that page was last sent (a listing, a rename, a plot added, a regenerate, an
+//                  unpublish, a delete, a move); a page moved away from is sent an empty one. A
+//                  Worker from before landing pages answers 404: "needs updating". A failure is
+//                  shown on the Publish card and tried again, after a minute and then longer,
+//                  and the next list goes whatever that page was sent before. A page moved away
+//                  from that will not take its empty list is said on the follow's notice and
+//                  not tried again: nothing here can reach it after the move.
+//
+// A linked connection point goes out as the device's name and colour and the channels through
+// it, resolved here at publish time (stageplots-patch-link.ts), never as the link itself. While
+// the patch cannot be read it goes out unlinked, with its last name and colour and no channels.
+//
+// THE SECRET IS NEVER LOGGED, never in an error sent back, never in a stored error: every
+// sentence goes through `say` or `errorAt`, which hide it. It is in the store and in config
+// backups (see the restore rule in stageplots-doc.ts). A browser gets it only from
+// GET /api/stageplots/venues/:id/link, the editor's Publish card: the document and its
+// broadcast leave it out (venueView), and pending ones never leave the server.
+
+import { randomBytes } from "node:crypto";
+
+import { errorMessage } from "./errors.js";
+import { plural } from "./plural.js";
+import { scrub } from "./scrub.js";
+import { createPushClient, mayHaveLanded, type PushClient, type PushFailure, type PushResult } from "./servicecue-publish-client.js";
+import { backoffMs } from "./timers.js";
+import { docHash } from "./servicecue-publish-docs.js";
+import type { PublishOrigin } from "./servicecue-publish-rules.js";
+import { resolvePlot } from "./stageplots-doc.js";
+import { publishedItems, type PatchContext, type PatchRead, type UnresolvedLink } from "./stageplots-patch-link.js";
+import {
+  PUBLISH_MAX_BODY_BYTES,
+  type LandingList,
+  STAGEPLOTS_IMAGE_TYPE,
+  STAGEPLOTS_INDEX_KEY,
+  stagePlotsImageKey,
+  stagePlotsPlotKey,
+} from "../types/servicecue-publish.js";
+import type { PatchFile } from "../types/patch.js";
+import { STAGEPLOT_LIMITS, type Background, type PendingReason, type PendingRemoval, type Plot, type PublishedItem, type PublishedPlot, type PublishedVenue, type StagePlotsDoc, type Venue, type VenuePublish } from "../types/stageplots.js";
+
+/** A new secret: 32 random bytes, base64url, 43 characters. Made here and nowhere else. */
+export function newPublishSecret(): string {
+  return randomBytes(32).toString("base64url");
+}
+
+/** The plan a venue is published for. */
+export interface PublishPlan {
+  planId: string | null;
+  planDates: string | null;
+  serviceTypeId: string | null;
+}
+
+/** Where to publish: the ServiceCue page's address and token, or why there is none. */
+export type PublishTarget = { ok: true; origin: PublishOrigin; token: string } | { ok: false; message: string };
+
+export interface StagePlotsStoreLike {
+  get(): Promise<StagePlotsDoc>;
+  update(fn: (doc: StagePlotsDoc) => StagePlotsDoc): Promise<StagePlotsDoc>;
+}
+
+export interface StagePlotsPublishDeps {
+  target(): Promise<PublishTarget>;
+  store: StagePlotsStoreLike;
+  /** A converted background's WebP bytes, by hash, or null when the file is not there. */
+  image(hash: string): Promise<Uint8Array | null>;
+  /** The plan the app follows (live or next) and its service type, or nulls with none or no Planning Center. */
+  plan(): PublishPlan;
+  /** The patch, which linked connection points resolve against. Throws when it cannot be read. */
+  patch(): Promise<PatchFile>;
+  /** The zone the page shows dates in: the app's. */
+  timeZone(): string;
+  /** Told after every write of a venue's publish state: the routes broadcast it. */
+  onSaved(doc: StagePlotsDoc): void;
+  /** Registers the callback the app's broadcaster calls for every channel. */
+  listen?: (cb: (channel: string) => void) => void;
+  /** The client for a target. A seam for a test; the app's is the ServiceCue publisher's. */
+  client?: (target: { origin: PublishOrigin; token: string }) => PushClient;
+  /** How long a change waits for more before it is published. */
+  debounceMs?: number;
+  /** How long after a failed patch read it is tried again, doubling up to `maxMs`. A seam for a test. */
+  patchRetry?: Backoff;
+  /** How long after a landing list that did not get through it is tried again, doubling up to `maxMs`. A seam for a test. */
+  landingRetry?: Backoff;
+  /** How long after a republish the page did not take it is tried again, doubling up to `maxMs`. A seam for a test. */
+  republishRetry?: Backoff;
+  now?: () => number;
+}
+
+/** What an action answered: the venue as it now is, or why not, with the status to answer it with. */
+export type PublishOutcome = { ok: true; venue: Venue; notice?: string } | { ok: false; status: 400 | 404 | 409 | 502 | 503; error: string };
+
+/** The answer to anything that would write while a config restore is landing. */
+type Restoring = { ok: false; status: 503; error: string };
+const RESTORING: Restoring = { ok: false, status: 503, error: "A config restore is under way; try again once the server is back." };
+
+/** What is said when a link is left on a page this server cannot reach now. */
+function leftOn(host: string): string {
+  return `The link is left on ${host} until that page is set up here again; then it is removed.`;
+}
+
+/** The host of an origin, for every sentence that names a page. */
+const hostOf = (origin: string) => new URL(origin).host;
+
+/** A backoff: the first wait, doubling on each failure in a row (backoffMs) up to the last. */
+export interface Backoff {
+  firstMs: number;
+  maxMs: number;
+}
+
+/**
+ * Every retry here waits a minute, then two, four… up to fifteen: a patch that cannot be read, a
+ * landing list and a republish the page did not take.
+ */
+export const RETRY: Backoff = { firstMs: 60_000, maxMs: 15 * 60_000 };
+
+/** How long the retry after `failures` failures in a row waits, on `backoff` (a test's seam) or RETRY. */
+const retryWait = (failures: number, backoff: Backoff = RETRY) => backoffMs(failures, backoff.firstMs, backoff.maxMs);
+
+/** How long a change waits for the next before it is published. */
+export const REPUBLISH_WAIT_MS = 2000;
+
+
+const MB = 1_000_000;
+const mb = (bytes: number) => (bytes / MB).toFixed(1);
+
+type Level = "log" | "warn" | "error";
+
+/** The longest last-error sentence the store keeps (stageplots-store.ts). */
+const ERROR_CHARS = 600;
+
+/**
+ * `message` as it may leave this file, logged, stored or sent back: every secret in it hidden,
+ * and cut to what the store keeps, so a long failure can never make the save of the publish it
+ * describes throw. Everything said, stored and answered goes through it.
+ */
+function hide(message: string, secrets: readonly string[]): string {
+  let text = message;
+  for (const s of secrets) if (s) text = text.split(s).join("<secret>");
+  return text.length > ERROR_CHARS ? `${text.slice(0, ERROR_CHARS - 1)}…` : text;
+}
+
+/** Every [stageplots] line this file writes: hidden, then scrubbed, so no line can carry a
+ *  secret or forge another line whatever went into it. Guarded by behaviour in
+ *  stageplots-publish.test.ts ("the log"): the source scan cannot see a console[level] call. */
+function say(level: Level, secrets: readonly string[], message: string): void {
+  console[level](`[stageplots] ${scrub(hide(message, secrets), ERROR_CHARS)}`);
+}
+
+/** A venue's last error, as hide() makes it. */
+function errorAt(at: string, message: string, secrets: readonly string[]): { at: string; message: string } {
+  return { at, message: hide(message, secrets) };
+}
+
+// ── What is published ────────────────────────────────────────────────────────
+
+/** The converted backgrounds a venue's plots draw, by hash, sorted. */
+export function venueImages(doc: StagePlotsDoc, venue: Venue): string[] {
+  const byId = new Map(doc.backgrounds.map((b) => [b.id, b]));
+  const hashes = new Set<string>();
+  for (const plot of plotsOf(doc, venue)) {
+    const bg = plot.backgroundId ? byId.get(plot.backgroundId) : undefined;
+    if (bg) hashes.add(bg.converted.hash);
+  }
+  return [...hashes].sort();
+}
+
+function plotsOf(doc: StagePlotsDoc, venue: Venue): Plot[] {
+  const byId = new Map(doc.plots.map((p) => [p.id, p]));
+  return venue.plotIds.map((id) => byId.get(id)).filter((p): p is Plot => p !== undefined);
+}
+
+/** Whether any of the venue's plots has a connection point linked to the patch. */
+function linksThePatch(doc: StagePlotsDoc, venue: Venue): boolean {
+  return plotsOf(doc, venue).some((p) => p.items.some((it) => it.patchLink));
+}
+
+/** The plan a link lists channels for: the one published. */
+const patchContext = (plan: PublishPlan): PatchContext => ({ serviceTypeId: plan.serviceTypeId, planId: plan.planId });
+
+/**
+ * One plot as the page gets it. The background's hash only once the page holds the image: a plot
+ * never names one it would draw broken. `items` are publishedItems': a linked point as its
+ * device resolves, never the link.
+ */
+export function publishedPlot(plot: Plot, background: Background | null, held: boolean, items: PublishedItem[]): PublishedPlot {
+  return {
+    id: plot.id,
+    name: plot.name,
+    bgFade: plot.bgFade,
+    items,
+    background: background ? { hash: held ? background.converted.hash : null, width: background.converted.width, height: background.converted.height } : null,
+  };
+}
+
+/** A venue's index as the page gets it: what it shows for the followed plan, at this moment. */
+export function publishedVenue(doc: StagePlotsDoc, venue: Venue, plan: Pick<PublishPlan, "planId" | "planDates">, timeZone: string): PublishedVenue {
+  const shown = resolvePlot(doc, venue.id, plan.planId);
+  const override = shown.reason === "plan" ? doc.overrides.find((o) => o.planId === plan.planId && o.venueId === venue.id) : undefined;
+  return {
+    name: venue.name,
+    notes: venue.notes,
+    plots: plotsOf(doc, venue).map((p) => ({ id: p.id, name: p.name })),
+    defaultPlotId: venue.defaultPlotId,
+    shown: { plotId: shown.plot?.id ?? null, reason: shown.reason },
+    plan: shown.reason === "plan" ? { date: override?.planDate ?? null, dates: plan.planDates } : null,
+    timeZone,
+  };
+}
+
+/** The sentence a failure is said as on the card, the log and the answer. */
+function sentence(f: PushFailure, host: string): string {
+  // Every well-formed StagePlots request the Worker knows is answered something other than 404.
+  if (f.kind === "refused" && f.status === 404) return `${host} needs updating before it can show stage plots: deploy the Worker.`;
+  const timeout = /^No answer from .+ within (\d+) seconds\.$/.exec(f.message);
+  if (f.kind === "unreachable" && timeout) return `${host} did not answer (timed out after ${timeout[1]} s).`;
+  if (f.kind === "unreachable") return `${host} could not be reached: ${f.message.replace(/\.$/, "")}.`;
+  return /[.!?]$/.test(f.message) ? f.message : `${f.message}.`;
+}
+
+/** A failure that is about the page, not the one thing sent: nothing more is worth sending. */
+const aboutThePage = (f: PushFailure) => f.kind !== "refused" || f.status === 404;
+
+type SendResult =
+  | { ok: true; sent: number; held: string[]; unpublished: { hash: string; why: string }[]; warnings: string[] }
+  /** `sent`: how many requests went out before it failed, so a caller knows whether there is anything to take back. */
+  | { ok: false; status: 400 | 502; message: string; sent: number; unsure?: true };
+
+interface SendOptions {
+  /** Send every doc, every background and the keep list, whatever this process last sent. */
+  force: boolean;
+  /** Backgrounds that must go through, or the whole send fails: what the old link held (regenerate). */
+  required: readonly string[];
+  /** The backgrounds the page holds under this secret already. */
+  held: readonly string[];
+  /** The venue as the page gets it, made once by the action or republish this send is part of, so what it records and what it sends agree. */
+  prepared: Prepared;
+}
+
+/** A venue as the page gets it, at one moment: each plot with its items resolved, the index, and the fingerprint of both. */
+interface Prepared {
+  plots: { plot: Plot; bg: Background | null; items: PublishedItem[]; unresolved: UnresolvedLink[] }[];
+  /** The index, as sent. */
+  index: string;
+  /** What tells a change to what is published from one to anything else. */
+  print: string;
+}
+
+type Sent = Extract<SendResult, { ok: true }>;
+type Target = { origin: PublishOrigin; token: string };
+
+/** The chain the queue of pending removals is drained on, beside the venues' own. */
+const PENDING_CHAIN = "\u0000pending";
+
+/** What a drain answers: the queue after it, how many went, and the page it drained against; or why it could not. */
+type Drained = { ok: true; left: PendingRemoval[]; removed: number; page: string | null } | { ok: false; message: string };
+
+/** Said when stageplots.json's pending removals are not a list (stageplots-store.ts leaves them so). */
+const DAMAGED_QUEUE = "stageplots.json's pending removals are not a list, so the old links waiting to be removed cannot be read.";
+
+/** The chain a saved page address is handled on. */
+const ADDRESS_CHAIN = "\u0000address";
+
+/** The chain the landing list is sent on. */
+const LANDING_CHAIN = "\u0000landing";
+
+
+/** What the landing page on `origin` lists: the venues published there and marked listed, home ones first. Names, plot counts and links only. */
+export function landingList(doc: StagePlotsDoc, origin: string): LandingList {
+  const listed = doc.venues.filter((v) => v.publish?.listed && v.publish.origin === origin);
+  return {
+    venues: [...listed.filter((v) => v.kind === "home"), ...listed.filter((v) => v.kind !== "home")].map((v) => ({
+      name: v.name.trim(),
+      secret: v.publish!.secret,
+      plots: v.plotIds.length,
+    })),
+  };
+}
+
+const NONE_LISTED: LandingList = { venues: [] };
+
+// ── The publisher ────────────────────────────────────────────────────────────
+
+export class StagePlotsPublisher {
+  private readonly deps: StagePlotsPublishDeps;
+  private readonly waitMs: number;
+  /** Per venue (and the queue), the run in progress: each waits for the one before. */
+  private readonly chains = new Map<string, Promise<unknown>>();
+  /** Per secret, the hash of each key's text as last sent, so a republish sends only what changed. */
+  private readonly sent = new Map<string, Map<string, string>>();
+  /** Per secret, the keys last kept. */
+  private readonly kept = new Map<string, string>();
+  /** Per venue, what the page last took (or what was refused for its own sake, a plot too large): the same again is not sent again. A send the page did not take is not here, so it goes again. */
+  private readonly attempted = new Map<string, string>();
+  /** Venues whose last republish the page did not take: tried again on the backoff until each goes. */
+  private readonly failing = new Set<string>();
+  private republishRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Failed republish rounds in a row: how long the next retry waits (backoffMs). */
+  private republishFailures = 0;
+  /** True while this publisher's own write is being broadcast: that is no change to publish. */
+  private ownWrite = false;
+  /** Pending removals whose failure has been said: said once, not on every change. */
+  private readonly saidStuck = new Set<string>();
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  /** Resolved once the pending wait has fired and its republish has finished, or the wait is cancelled. */
+  private timerDone: Promise<void> = Promise.resolve();
+  /** Resolves timerDone: called when the wait's republish finishes, or by cancelWait. */
+  private fireTimer: (() => void) | null = null;
+  private planKey: string | null = null;
+  /** The patch could not be read last time: said once until it can. */
+  private patchDown = false;
+  /** The next read of a patch that could not be read, and how long the one after it waits. */
+  private patchRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Failed reads of the patch in a row. */
+  private patchFailures = 0;
+  private started = false;
+  private stopped = false;
+  private paused = false;
+  /** What the last page-address follow could not do, for the Publish card. In memory: a restart clears it. */
+  private followNote: { at: string; message: string } | null = null;
+
+  constructor(deps: StagePlotsPublishDeps) {
+    this.deps = deps;
+    this.waitMs = deps.debounceMs ?? REPUBLISH_WAIT_MS;
+  }
+
+  /** Listen for changes, and drain what is queued (a crash may have left a publish in flight). Once. */
+  start(): void {
+    if (this.started) return;
+    this.started = true;
+    this.planKey = this.currentPlanKey();
+    this.deps.listen?.((channel) => this.heard(channel));
+    void this.drainQueued(true);
+    // What the page lists may have changed while this server was down (an un-list that never
+    // reached it): sent once now, and after that whenever it changes.
+    void this.syncLanding();
+    // What the page holds is not known after a restart: a send that failed before it, or a change
+    // saved in the wait before it, was never sent. Every published venue goes again (its plots,
+    // index and keep list; the backgrounds the store says the page holds are not resent). A venue
+    // that links the patch waits until the patch reads, so it never goes out unlinked over a
+    // page that showed its devices: unreadable now, the patch is read again on the backoff and
+    // those venues go then (patchHealed).
+    void this.readPatch().then((p) => this.republishAll(p.ok ? "all" : "unlinked", true));
+  }
+
+  /** Shutdown: no more republishing, and whatever is running finishes. */
+  async stop(): Promise<void> {
+    this.stopped = true;
+    this.cancelWait();
+    if (this.republishRetryTimer) clearTimeout(this.republishRetryTimer);
+    this.republishRetryTimer = null;
+    if (this.landingRetryTimer) clearTimeout(this.landingRetryTimer);
+    this.landingRetryTimer = null;
+    if (this.patchRetryTimer) clearTimeout(this.patchRetryTimer);
+    this.patchRetryTimer = null;
+    await Promise.all([...this.chains.values()]);
+  }
+
+  /**
+   * For a config restore: wait for every run in flight, then refuse every action and skip every
+   * republish and drain until the answer is called, so nothing here writes over the restored
+   * file. A restore that succeeds never calls it (the process restarts).
+   */
+  async pause(): Promise<() => void> {
+    this.paused = true;
+    this.cancelWait();
+    await Promise.all([...this.chains.values()]);
+    return () => {
+      this.paused = false;
+      // A change heard while paused, or a retry that came due, was skipped: the list is made again
+      // now, and anything the page did not take is sent.
+      void this.syncLanding();
+      void this.republishAll();
+    };
+  }
+
+  /** Whether a config restore holds the publisher: the Public link save refuses then (servicecue-publish-routes.ts). */
+  get restoring(): boolean {
+    return this.paused;
+  }
+
+  /** What the last landing list send could not do, shown on the Publish card's listing line; null once one goes through. */
+  private landingNote: { at: string; message: string } | null = null;
+  /** The landing list each page was last sent, by origin, as JSON. */
+  private readonly landingSent = new Map<string, string>();
+  private landingRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Failed landing list sends in a row. */
+  private landingFailures = 0;
+  /** A landing sync waiting its turn on the chain, which a later call joins instead of queueing another. */
+  private landingQueued: Promise<void> | null = null;
+
+  /** What the last landing list send could not do; null when the page holds the list. */
+  landingNotice(): { at: string; message: string } | null {
+    return this.landingNote;
+  }
+
+  /** What the last page-address follow could not do, shown on the Publish card; null when it did it all. */
+  notice(): { at: string; message: string } | null {
+    return this.followNote;
+  }
+
+  /** Every pending wait has fired and every run it queued has finished. For tests and the drive. */
+  async settle(): Promise<void> {
+    for (;;) {
+      await this.timerDone;
+      await Promise.all([...this.chains.values()]);
+      if (this.timer === null && this.chains.size === 0) return;
+    }
+  }
+
+  private now(): number {
+    return (this.deps.now ?? Date.now)();
+  }
+
+  private at(): string {
+    return new Date(this.now()).toISOString();
+  }
+
+  private client(target: Target): PushClient {
+    return (this.deps.client ?? ((t) => createPushClient(t)))(target);
+  }
+
+  private currentPlanKey(): string {
+    const p = this.deps.plan();
+    return JSON.stringify([p.planId, p.planDates, p.serviceTypeId]);
+  }
+
+  /** Read the patch for linked connection points. A failure publishes them unlinked, said on [stageplots] once until it reads again. */
+  private async readPatch(): Promise<PatchRead> {
+    try {
+      const file = await this.deps.patch();
+      if (this.patchDown) this.patchHealed();
+      return { ok: true, file };
+    } catch (err) {
+      if (!this.patchDown) {
+        say("warn", [], `could not read the patch sheet; linked connection points are published unlinked, with their last names and colours, and it is read again until it can be: ${errorMessage(err)}`);
+        this.patchDown = true;
+        this.patchFailures = 1;
+        this.retryPatchLater();
+      }
+      return { ok: false };
+    }
+  }
+
+  /** Read the patch again after the backoff, while it cannot be read. Nothing waits on it, so it never holds a run or settle(). */
+  private retryPatchLater(): void {
+    if (this.stopped || this.patchRetryTimer) return;
+    this.patchRetryTimer = setTimeout(() => {
+      this.patchRetryTimer = null;
+      if (this.stopped || !this.patchDown) return;
+      if (this.paused) return this.retryPatchLater();
+      void this.deps.patch().then(
+        () => this.patchDown && this.patchHealed(),
+        () => {
+          this.patchFailures++;
+          this.retryPatchLater();
+        },
+      );
+    }, retryWait(this.patchFailures, this.deps.patchRetry));
+    this.patchRetryTimer.unref?.();
+  }
+
+  /** The patch reads again: said once, and every venue that links it is sent what that changes. */
+  private patchHealed(): void {
+    this.patchDown = false;
+    if (this.patchRetryTimer) clearTimeout(this.patchRetryTimer);
+    this.patchRetryTimer = null;
+    say("log", [], "the patch sheet can be read again; linked connection points are published with their devices");
+    void this.republishLinked();
+  }
+
+  /** Republish each published venue with a connection point linked to the patch. The fingerprint sends nothing where nothing changed. */
+  private async republishLinked(): Promise<void> {
+    if (this.stopped || this.paused) return;
+    let doc: StagePlotsDoc;
+    try {
+      doc = await this.deps.store.get();
+    } catch (err) {
+      say("error", [], `could not read the stage plots to republish their linked connection points: ${errorMessage(err)}`);
+      return;
+    }
+    for (const venue of doc.venues) {
+      const pub = venue.publish;
+      if (!pub || !linksThePatch(doc, venue)) continue;
+      void this.serial(venue.id, () => this.republish(venue.id)).catch((err: unknown) => {
+        say("error", [pub.secret], `"${venue.name}" could not be republished: ${errorMessage(err)}`);
+      });
+    }
+  }
+
+  private heard(channel: string): void {
+    if (this.stopped || this.paused) return;
+    // A patch save may rename, recolour or re-patch a device a published point links to. The
+    // fingerprint tells whether it did: a venue that shows nothing of it is sent nothing.
+    if (channel === "stageplots:updated") {
+      // Every write to the document, this publisher's own included, is broadcast here: the one
+      // place the landing list is made from what was saved.
+      void this.syncLanding();
+      // Its own writes are publish state, which nothing published shows. Taken for a change, a
+      // failure's own last error would set off the next republish, and that its next failure,
+      // every wait for as long as the page is down.
+      if (this.ownWrite) return;
+      return this.changed();
+    }
+    if (channel === "patch:updated") return this.changed();
+    // The state is broadcast often; only the plan it follows moving is a change to what is published.
+    if (channel === "stage:state-changed") {
+      const key = this.currentPlanKey();
+      if (key === this.planKey) return;
+      this.planKey = key;
+      this.changed();
+    }
+  }
+
+  /** Something published may have changed: republish each published venue after the wait. */
+  changed(): void {
+    if (this.stopped || this.paused) return;
+    this.cancelWait();
+    let fire!: () => void;
+    this.timerDone = new Promise((resolve) => (fire = resolve));
+    this.fireTimer = fire;
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      this.fireTimer = null;
+      void this.republishAll().finally(fire);
+    }, this.waitMs);
+    this.timer.unref?.();
+  }
+
+  /**
+   * Drop the pending wait, and resolve what settle() is awaiting on it: a wait cleared and never
+   * resolved leaves settle() waiting for ever (and every test or drive that settles, with it).
+   */
+  private cancelWait(): void {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    this.fireTimer?.();
+    this.fireTimer = null;
+  }
+
+  /**
+   * Republish each published venue (`unlinked`: only those with no point linked to the patch). The
+   * fingerprint sends nothing where nothing changed. `boot`: the pass at start, which says nothing
+   * and records nothing for a venue it cannot send for want of a page (nothing changed).
+   */
+  private async republishAll(which: "all" | "unlinked" = "all", boot = false): Promise<void> {
+    if (this.stopped || this.paused) return;
+    let doc: StagePlotsDoc;
+    try {
+      doc = await this.deps.store.get();
+    } catch (err) {
+      say("error", [], `could not read the stage plots to republish them: ${errorMessage(err)}`);
+      return;
+    }
+    // A venue no longer published (unpublished, deleted, or restored over) has nothing left to
+    // resend: counted as failing, it would hold the backoff at its longest for every venue after it.
+    for (const id of [...this.failing]) if (!doc.venues.some((v) => v.id === id && v.publish)) this.republished(id, true);
+    for (const venue of doc.venues) {
+      const pub = venue.publish;
+      if (!pub) continue;
+      if (which === "unlinked" && linksThePatch(doc, venue)) continue;
+      // Nobody is waiting on a republish: what throws in one (the settings or the store
+      // unreadable) is said here, or it is never said at all.
+      void this.serial(venue.id, () => this.republish(venue.id, boot)).catch((err: unknown) => {
+        say("error", [pub.secret], `"${venue.name}" could not be republished: ${errorMessage(err)}`);
+      });
+    }
+    if (!Array.isArray(doc.pendingRemovals) || doc.pendingRemovals.length > 0) void this.drainQueued(false);
+  }
+
+  /** Run `fn` after whatever `key` (a venue, or the queue) is already running. */
+  private serial<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const run = (this.chains.get(key) ?? Promise.resolve()).then(fn, fn);
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.chains.set(key, tail);
+    void tail.then(() => {
+      if (this.chains.get(key) === tail) this.chains.delete(key);
+    });
+    return run;
+  }
+
+  /** An action, on the venue's chain, refused while a restore is landing. */
+  private action<T>(venueId: string, fn: () => Promise<T>): Promise<T | Restoring> {
+    if (this.paused) return Promise.resolve(RESTORING);
+    return this.serial<T | Restoring>(venueId, () => (this.paused ? Promise.resolve(RESTORING) : fn()));
+  }
+
+  // ── Actions ────────────────────────────────────────────────────────────────
+
+  publish(venueId: string): Promise<PublishOutcome> {
+    return this.action(venueId, async () => {
+      const found = await this.venueAndTarget(venueId, false, "Publish");
+      if (!found.ok) return found;
+      const { doc, venue, target, client, host } = found;
+      const queueFull = this.queueFull(doc, "Publish", venue.name);
+      if (queueFull) return queueFull;
+      const prepared = this.prepare(doc, venue, await this.readPatch());
+      const fresh = await this.sendFresh(client, target, doc, venue, [], prepared);
+      if (!fresh.ok) {
+        say("warn", [fresh.secret], `"${venue.name}" was not published: ${fresh.message}`);
+        return { ok: false, status: fresh.status, error: hide(fresh.message, [fresh.secret]) };
+      }
+      const { secret, r } = fresh;
+      const at = this.at();
+      const landed = await this.land(client, venueId, venue.name, secret, target.origin, stateAfterSend(secret, target.origin, at, at, r, [secret], false), null);
+      if (!landed.ok) {
+        say("error", [secret], `"${venue.name}" was not published: ${landed.message}`);
+        return { ok: false, status: 503, error: hide(landed.message, [secret]) };
+      }
+      const saved = landed.venue;
+      if (!saved) {
+        // Deleted while it was being published: the secret is still queued, so take it back now.
+        await this.takeBack(client, secret, target.origin, venue.name);
+        return { ok: false, status: 404, error: "no such venue" };
+      }
+      this.attempted.set(venueId, prepared.print);
+      say("log", [secret], `"${venue.name}" published to ${host}: ${plural(plotsOf(doc, venue).length, "plot")} and ${plural(r.held.length, "background")}${missingNote(r)}`);
+      return { ok: true, venue: saved };
+    });
+  }
+
+  /**
+   * List the venue on its page's landing page, or take it off. Only a published venue: its secret
+   * link is what the landing page opens. Answers once the page has been sent the new list, with
+   * the reason beside the venue when it could not be.
+   */
+  setListed(venueId: string, listed: boolean): Promise<PublishOutcome> {
+    return this.action(venueId, async () => {
+      const venue = await this.venueNow(venueId);
+      const what = listed ? "Show on the landing page" : "Take off the landing page";
+      if (!venue) return this.refused(what, venueId, null, 404, "no such venue");
+      if (!venue.publish) return this.refused(what, venueId, venue, 409, "The venue is not published: publish it first, and its link is what the landing page opens.");
+      let saved: Venue | null = venue;
+      if (venue.publish.listed !== listed) {
+        saved = await this.savePublish(venueId, (p) => ({ ...p, listed }));
+        if (!saved) return { ok: false, status: 404, error: "no such venue" };
+        say("log", [venue.publish.secret], `"${venue.name}" ${listed ? "listed on" : "taken off"} the landing page of ${hostOf(venue.publish.origin)}`);
+      }
+      await this.syncLanding();
+      return { ok: true, venue: saved, ...(this.landingNote ? { notice: this.landingNote.message } : {}) };
+    });
+  }
+
+  regenerate(venueId: string): Promise<PublishOutcome> {
+    return this.action(venueId, async () => {
+      const found = await this.venueAndTarget(venueId, true, "Regenerate");
+      if (!found.ok) return found;
+      const { doc, venue, target, client, host } = found;
+      const pub = venue.publish!;
+      // Checked before anything is sent: a regenerate queues the old link, and must not be the one
+      // that cannot.
+      const queueFull = this.queueFull(doc, "Regenerate", venue.name);
+      if (queueFull) return queueFull;
+      const prepared = this.prepare(doc, venue, await this.readPatch());
+      const fresh = await this.sendFresh(client, target, doc, venue, pub.publishedImages, prepared);
+      const all = [fresh.secret, pub.secret];
+      if (!fresh.ok) {
+        const message = `The link was not changed: ${fresh.message}`;
+        say("warn", all, `"${venue.name}": ${message}`);
+        const at = this.at();
+        await this.savePublish(venueId, (p) => ({ ...p, lastError: errorAt(at, message, all) }));
+        return { ok: false, status: fresh.status, error: hide(message, all) };
+      }
+      const { secret, r } = fresh;
+      const at = this.at();
+      // One write: the new link onto the venue and the old one into the queue, so a crash after it
+      // leaves the old secret queued for removal rather than nowhere.
+      const landed = await this.land(client, venueId, venue.name, secret, target.origin, stateAfterSend(secret, target.origin, at, at, r, all, pub.listed), { secret: pub.secret, origin: pub.origin, since: at, reason: "regenerated" });
+      if (!landed.ok) {
+        const message = `The link was not changed: ${landed.message}`;
+        await this.venueFailed(venue, message);
+        return { ok: false, status: 503, error: hide(message, all) };
+      }
+      const saved = landed.venue;
+      if (!saved) {
+        await this.takeBack(client, secret, target.origin, venue.name);
+        return { ok: false, status: 404, error: "no such venue" };
+      }
+      this.attempted.set(venueId, prepared.print);
+      const drained = await this.drainQueued(false);
+      const old = !drained.ok
+        ? `the old one stays queued: ${drained.message}`
+        : !drained.left.some((e) => e.secret === pub.secret)
+          ? "the old one is removed"
+          : pub.origin === target.origin
+            ? "the old one could not be removed yet and stays queued"
+            : `the old one stays queued: ${leftOn(hostOf(pub.origin))}`;
+      say("log", all, `"${venue.name}" has a new link on ${host}; ${old}`);
+      return { ok: true, venue: (await this.venueNow(venueId)) ?? saved };
+    });
+  }
+
+  unpublish(venueId: string): Promise<PublishOutcome> {
+    return this.action(venueId, async () => {
+      const doc = await this.deps.store.get();
+      const venue = doc.venues.find((v) => v.id === venueId);
+      if (!venue?.publish) return this.refused("Unpublish", venueId, venue ?? null, venue ? 409 : 404, venue ? `${venue.name} is not published` : "no such venue");
+      const pub = venue.publish;
+      const target = await this.deps.target();
+      // The page can be asked: it must say yes, or nothing changes and the card says the link works.
+      if (target.ok && target.origin === pub.origin) {
+        const host = hostOf(target.origin);
+        const r = await this.client(target).dropStagePlots(pub.secret);
+        if (!r.ok) {
+          const lost = mayHaveLanded(r);
+          // The page may have dropped it before its answer was lost: nothing sent under the secret is
+          // known to be there, its backgrounds included, which the next republish reads from the store.
+          if (lost) this.forget(pub.secret);
+          const message = lost
+            ? `${sentence(r, host)} The page may have removed it all the same, so the link may no longer work: Unpublish again to be sure it is gone, or Publish now to put it back.`
+            : `${sentence(r, host)} Nothing was unpublished, so the link still works.`;
+          say("warn", [pub.secret], `"${venue.name}" could not be unpublished: ${message}`);
+          const at = this.at();
+          await this.savePublish(venueId, (p) => ({ ...p, lastError: errorAt(at, message, [pub.secret]), ...(lost ? { publishedImages: [] } : {}) }));
+          return { ok: false, status: 502, error: hide(message, [pub.secret]) };
+        }
+        this.forget(pub.secret);
+        const after = await this.unpublishInStore(venueId, null);
+        say("log", [pub.secret], `"${venue.name}" unpublished: its link and backgrounds are removed from ${host}`);
+        return after ? { ok: true, venue: after } : { ok: false, status: 404, error: "no such venue" };
+      }
+      // No page set up, or the venue is on another: it cannot be asked, so the secret is queued and
+      // the venue unpublished. The operator sees what is left, and it goes once the page is set up.
+      const after = await this.unpublishInStore(venueId, { secret: pub.secret, origin: pub.origin, since: this.at(), reason: "unpublished" });
+      const notice = leftOn(hostOf(pub.origin));
+      say("warn", [pub.secret], `"${venue.name}" unpublished here; ${notice}`);
+      return after ? { ok: true, venue: after, notice } : { ok: false, status: 404, error: "no such venue" };
+    });
+  }
+
+  /**
+   * Before a venue is deleted: unpublish it, and queue its secret when the page does not take
+   * the drop, since nothing would be left to remove it. The answer's notice is for the operator.
+   */
+  retireForDelete(venueId: string): Promise<{ ok: true; notice?: string } | Restoring> {
+    return this.action(venueId, async (): Promise<{ ok: true; notice?: string }> => {
+      const doc = await this.deps.store.get();
+      const venue = doc.venues.find((v) => v.id === venueId);
+      const pub = venue?.publish;
+      if (!venue || !pub) return { ok: true };
+      const target = await this.deps.target();
+      if (target.ok && target.origin === pub.origin) {
+        const r = await this.client(target).dropStagePlots(pub.secret);
+        if (r.ok) {
+          this.forget(pub.secret);
+          await this.unpublishInStore(venueId, null);
+          say("log", [pub.secret], `"${venue.name}" is being deleted: its link and backgrounds are removed from ${hostOf(pub.origin)}`);
+          return { ok: true };
+        }
+        say("warn", [pub.secret], `"${venue.name}" is being deleted and its link could not be removed: ${sentence(r, hostOf(pub.origin))} It is queued for removal.`);
+      }
+      await this.unpublishInStore(venueId, { secret: pub.secret, origin: pub.origin, since: this.at(), reason: "venue deleted" });
+      const notice = target.ok && target.origin === pub.origin ? `The link could not be removed from ${hostOf(pub.origin)} yet; it is tried again until it goes.` : leftOn(hostOf(pub.origin));
+      say("warn", [pub.secret], `"${venue.name}" is being deleted; ${notice}`);
+      return { ok: true, notice };
+    });
+  }
+
+  publishNow(venueId: string): Promise<PublishOutcome> {
+    return this.action(venueId, async () => {
+      const found = await this.venueAndTarget(venueId, true, "Publish now");
+      if (!found.ok) return found;
+      const { doc, venue, target, client, host } = found;
+      const pub = venue.publish!;
+      const drained = await this.drainQueued(false);
+      let result: PublishOutcome;
+      const prepared = this.prepare(doc, venue, await this.readPatch());
+      if (pub.origin !== target.origin) result = await this.move(venue, doc, target, "Publish now", prepared);
+      else {
+        const r = await this.sendVenue(client, host, pub.secret, doc, venue, { force: true, required: [], held: [], prepared });
+        result = await this.finish(venueId, venue, r, host, [pub.secret], "published again");
+        // As a republish: what the page took is not sent again on the next change; what it did not take is.
+        const went = result.ok || (!r.ok && r.status === 400);
+        if (went) this.attempted.set(venueId, prepared.print);
+        else this.attempted.delete(venueId);
+        this.republished(venueId, went);
+      }
+      // The old links it was asked to remove too: a list that could not be read is said beside the venue, never taken for done.
+      if (drained.ok || !result.ok) return result;
+      return { ...result, notice: result.notice ? `${result.notice} ${drained.message}` : drained.message };
+    });
+  }
+
+  /** Remove now: drain the queue against the page set up. Answers what is left of it, or why it could not be read. */
+  async removePending(): Promise<{ removed: number; left: number; waiting: number } | { error: string; status: 503 }> {
+    if (this.paused) return RESTORING;
+    const drained = await this.drainQueued(false);
+    if (!drained.ok) return { status: 503, error: drained.message };
+    // A publish in flight is not an old link: the card does not show it, so it is not counted.
+    const old = drained.left.filter((e) => e.reason !== "publishing");
+    const waiting = old.filter((e) => e.origin !== drained.page).length;
+    return { removed: drained.removed, left: old.length - waiting, waiting };
+  }
+
+  /** A change: send what differs from what was last sent. Nothing at all when nothing published changed. */
+  private async republish(venueId: string, boot = false): Promise<void> {
+    if (this.paused) return;
+    let doc: StagePlotsDoc;
+    try {
+      doc = await this.deps.store.get();
+    } catch (err) {
+      say("error", [], `could not read the stage plots to republish them: ${errorMessage(err)}`);
+      return;
+    }
+    const venue = doc.venues.find((v) => v.id === venueId);
+    const pub = venue?.publish;
+    if (!venue || !pub) return;
+    const prepared = this.prepare(doc, venue, await this.readPatch());
+    const print = prepared.print;
+    if (this.attempted.get(venueId) === print) return;
+    const target = await this.deps.target();
+    if (!target.ok) {
+      // No page to send to: nothing to try again on a timer, so not failing; a Public link save
+      // follows it (pageSaved). At start nothing changed: nothing to say or record.
+      this.republished(venueId, true);
+      if (boot) return;
+      // What the page holds is now behind the document, whatever this change is: a change back to
+      // what it was sent must still go once a page is set up, and clear this error.
+      this.attempted.delete(venueId);
+      this.sent.delete(pub.secret);
+      say("warn", [pub.secret], `"${venue.name}" changed and could not be republished: ${target.message}`);
+      const at = this.at();
+      await this.savePublish(venueId, (p) => ({ ...p, lastError: errorAt(at, target.message, [pub.secret]) }));
+      return;
+    }
+    if (pub.origin !== target.origin) {
+      // move() records what it sent once the new page has it all.
+      const moved = await this.move(venue, doc, target, "A change", prepared);
+      if (!moved.ok) this.attempted.delete(venueId);
+      return this.republished(venueId, moved.ok);
+    }
+    const host = hostOf(target.origin);
+    const r = await this.sendVenue(this.client(target), host, pub.secret, doc, venue, { force: false, required: [], held: pub.publishedImages, prepared });
+    // Nothing went and nothing changed: nothing to save. (A send the page did not take always has
+    // something to send again: a key that failed is dropped from what was sent.)
+    if (r.ok && r.sent === 0 && sameList(r.held, pub.publishedImages) && sameList(r.unpublished.map((u) => u.hash).sort(), pub.unpublishedImages) && r.warnings.length === 0) {
+      this.attempted.set(venueId, print);
+      return this.republished(venueId, true);
+    }
+    const out = await this.finish(venueId, venue, r, host, [pub.secret], "republished");
+    // A plot too large to publish is refused here, not by the page: the same again would be refused
+    // again. Anything else that failed leaves what the page holds unknown (it may have stored a
+    // request whose answer was lost), so nothing is taken as on it, a change back included.
+    const went = out.ok || (!r.ok && r.status === 400);
+    if (went) this.attempted.set(venueId, print);
+    else this.attempted.delete(venueId);
+    this.republished(venueId, went);
+  }
+
+  /**
+   * After a venue's republish: one the page did not take is tried again after the backoff (and
+   * on every change before it); once every venue has gone, the backoff starts again from the
+   * first wait.
+   */
+  private republished(venueId: string, went: boolean): void {
+    if (went) {
+      this.failing.delete(venueId);
+      if (this.failing.size > 0) return;
+      this.republishFailures = 0;
+      if (this.republishRetryTimer) clearTimeout(this.republishRetryTimer);
+      this.republishRetryTimer = null;
+      return;
+    }
+    this.failing.add(venueId);
+    if (this.republishRetryTimer || this.stopped) return;
+    const ms = retryWait(++this.republishFailures, this.deps.republishRetry);
+    say("log", [], `${plural(this.failing.size, "published venue")} the page did not take ${this.failing.size === 1 ? "is" : "are"} sent again in ${Math.round(ms / 1000)} s, and on every change before that`);
+    this.republishRetryTimer = setTimeout(() => {
+      this.republishRetryTimer = null;
+      void this.republishAll();
+    }, ms);
+    this.republishRetryTimer.unref?.();
+  }
+
+  /**
+   * A venue published to a page other than the one set up: publish it there under a new secret,
+   * and queue the old one against its own page, where only that page's token can remove it. A
+   * new link because the address changes anyway, and so one secret never lives on two pages.
+   * When the new page will not take it, the venue stays where it was and says why.
+   */
+  private async move(venue: Venue, doc: StagePlotsDoc, target: Target, why: string, prepared: Prepared): Promise<PublishOutcome> {
+    const pub = venue.publish!;
+    const host = hostOf(target.origin);
+    const fresh = await this.sendFresh(this.client(target), target, doc, venue, [], prepared);
+    const all = [fresh.secret, pub.secret];
+    if (!fresh.ok) {
+      const message = `Not moved to ${host}: ${fresh.message} The link on ${hostOf(pub.origin)} stays as it is.`;
+      say("warn", all, `"${venue.name}" (${why}): ${message}`);
+      const at = this.at();
+      await this.savePublish(venue.id, (p) => ({ ...p, lastError: errorAt(at, message, all) }));
+      return { ok: false, status: fresh.status, error: hide(message, all) };
+    }
+    const at = this.at();
+    const landed = await this.land(this.client(target), venue.id, venue.name, fresh.secret, target.origin, stateAfterSend(fresh.secret, target.origin, at, at, fresh.r, all, pub.listed), {
+      secret: pub.secret,
+      origin: pub.origin,
+      since: at,
+      reason: "address changed",
+    });
+    if (!landed.ok) {
+      const message = `Not moved to ${host}: ${landed.message} The link on ${hostOf(pub.origin)} stays as it is.`;
+      await this.venueFailed(venue, message);
+      return { ok: false, status: 503, error: hide(message, all) };
+    }
+    const saved = landed.venue;
+    if (!saved) {
+      // Deleted while it was being moved: the new secret is still queued, so take it back now.
+      await this.takeBack(this.client(target), fresh.secret, target.origin, venue.name);
+      return { ok: false, status: 404, error: "no such venue" };
+    }
+    this.attempted.set(venue.id, prepared.print);
+    say("log", all, `"${venue.name}" moved to ${host} under a new link (${why}); its old link on ${hostOf(pub.origin)} is queued for removal`);
+    return { ok: true, venue: saved };
+  }
+
+  /**
+   * The Public link was saved. `old` is the page it was set up for before, with its token read
+   * before the save replaced it (null when there was none); `saved` the address the save left
+   * set up (its origin), or null when it cleared it. When the address changed, every venue on the
+   * old page moves to the new one; with no new page to move to (no token for it, or no address),
+   * every venue on the old page is taken down instead, since nothing here could reach it after
+   * this request. Then, while the old token is still in hand, everything queued against the old
+   * page (the moved venues' old links among it) is removed with it; what will not go stays
+   * queued, against the old page. Then the queue is drained for the page set up now, which a new
+   * token may have just made reachable.
+   *
+   * In the background, since a move uploads every background, and on a chain of its own, so
+   * settle() and stop() cover it. Never rejects: each step's failure is said on [stageplots] and
+   * left on the card, as the last error of each venue it concerns, and never stops the drain
+   * with the old token.
+   */
+  pageSaved(old: Target | null, saved: string | null): Promise<void> {
+    return this.serial(ADDRESS_CHAIN, () => this.afterPageSaved(old, saved));
+  }
+
+  private async afterPageSaved(old: Target | null, saved: string | null): Promise<void> {
+    if (this.paused) {
+      // The save refuses while a restore lands (servicecue-publish-routes.ts); one that got in first is said.
+      say("warn", [], "the page address was saved as a config restore began, so the published stage plots do not follow it");
+      return;
+    }
+    const away = old !== null && old.origin !== saved;
+    const hadNote = this.followNote !== null;
+    this.followNote = null;
+    const notes: string[] = [];
+    // The page left lists nothing of this server's any more: with its old token, while there is
+    // one. A failure is this follow's to say, not the landing line's (which the next list sent to
+    // the page set up now clears), and nothing tries it again: after this nothing here can reach
+    // that page.
+    if (away) {
+      const failed = await this.sendLanding(old!, NONE_LISTED);
+      if (failed) {
+        const message = `${failed} Its landing page keeps listing what it listed until ${hostOf(old!.origin)} is set up here again, or its Worker is taken down.`;
+        say("warn", [], message);
+        notes.push(message);
+      }
+    }
+    let target: PublishTarget | null = null;
+    try {
+      target = await this.deps.target();
+    } catch (err) {
+      const why = `the page settings could not be read: ${errorMessage(err)}`;
+      if (away) {
+        // Whether the new page has a token cannot be known, and the old one's is being replaced:
+        // after this nothing here could reach the old page, so its links come down now, with it.
+        const message = `The page address was saved, but ${why}. The published plots on ${hostOf(old!.origin)} were taken down with its token, since nothing here could reach that page afterwards: publish them again once the new page is set up.`;
+        say("error", [], message);
+        notes.push(message);
+        await this.takeDownOldPage(old!);
+      } else await this.followFailed(old, why);
+    }
+    if (target?.ok && (old === null || away)) await this.moveAll(target, old);
+    // The address changed (or was cleared) with no token for the new one: after this request
+    // nothing here can reach the old page, so its links come down now, with its token.
+    else if (target && !target.ok && away) await this.takeDownOldPage(old!);
+    // With the old token, whenever the save held one: the address may be the same and the token
+    // cleared, and this is then the last moment anything here can remove what waits on that page.
+    if (old) {
+      const d = await this.drainQueued(false, old);
+      if (!d.ok) notes.push(`The old links on ${hostOf(old.origin)} could not be removed with its token, and cannot be from here once it is replaced: ${d.message}`);
+    }
+    if (target?.ok) {
+      const d = await this.drainQueued(false);
+      // Said once: the same failure under the old token already names it.
+      if (!d.ok && !notes.some((n) => n.includes(d.message))) notes.push(d.message);
+      // A token fixed or entered again, or the same address saved: what the page did not take
+      // before goes now. What it took is not sent again (the fingerprint).
+      await this.republishAll();
+    }
+    if (notes.length > 0) this.followNote = { at: this.at(), message: notes.join(" ") };
+    if (hadNote || this.followNote) await this.tellCard();
+  }
+
+  /**
+   * Send the page set up the landing list made from the document, when it differs from what it was
+   * last sent. On its own chain, and one waiting at most: it reads the document when it runs, so it
+   * covers every change saved before then, and a burst of edits while a send hangs is one more send,
+   * not one each.
+   */
+  private syncLanding(): Promise<void> {
+    if (this.landingQueued) return this.landingQueued;
+    const run = this.serial(LANDING_CHAIN, async () => {
+      this.landingQueued = null;
+      if (this.stopped || this.paused) return;
+      let target: PublishTarget;
+      let doc: StagePlotsDoc;
+      try {
+        [target, doc] = await Promise.all([this.deps.target(), this.deps.store.get()]);
+      } catch (err) {
+        await this.landingFailed([], `The landing page could not be updated: ${errorMessage(err)}`);
+        return;
+      }
+      // No page set up: there is nowhere to send a list, and no venue can be published.
+      if (!target.ok) return;
+      const list = landingList(doc, target.origin);
+      const failed = await this.sendLanding(target, list);
+      if (failed) return this.landingFailed(list.venues.map((v) => v.secret), failed);
+      this.landingFailures = 0;
+      if (this.landingNote) {
+        this.landingNote = null;
+        say("log", [], `the landing page on ${hostOf(target.origin)} is up to date again`);
+        await this.tellCard();
+      }
+    });
+    this.landingQueued = run;
+    return run;
+  }
+
+  /**
+   * Send `list` to the page `target` when it is not what that page was last sent. Null once the
+   * page holds it; otherwise why not, for the caller to say. A send that fails forgets what that
+   * page was last sent: the page may have taken it and the answer been lost, so the next list goes
+   * whatever it is, the one it was sent before included.
+   */
+  private async sendLanding(target: Target, list: LandingList): Promise<string | null> {
+    const text = JSON.stringify(list);
+    if (this.landingSent.get(target.origin) === text) return null;
+    const host = hostOf(target.origin);
+    const r = await this.client(target).putLanding(list);
+    // A Worker from before landing pages has none: with nothing to list there is nothing it lacks.
+    const notThere = !r.ok && r.kind === "refused" && r.status === 404;
+    if (r.ok || (notThere && list.venues.length === 0)) {
+      const before = this.landingSent.get(target.origin);
+      this.landingSent.set(target.origin, text);
+      if (r.ok && before !== undefined) say("log", list.venues.map((v) => v.secret), `the landing page on ${host} lists ${plural(list.venues.length, "venue")} now`);
+      return null;
+    }
+    this.landingSent.delete(target.origin);
+    return notThere ? `${host} needs updating before it can show a landing page: deploy the Worker.` : `The landing page on ${host} could not be updated: ${sentence(r, host)}`;
+  }
+
+  /** The landing list of the page set up that did not get through: shown on the card, said once, and the list made and sent again later. */
+  private async landingFailed(secrets: readonly string[], message: string): Promise<void> {
+    const changed = this.landingNote?.message !== message;
+    this.landingNote = { at: this.at(), message };
+    if (changed) {
+      say("warn", secrets, `${message} It is tried again after a minute, and on every change.`);
+      await this.tellCard();
+    }
+    if (this.landingRetryTimer || this.stopped) return;
+    this.landingRetryTimer = setTimeout(
+      () => {
+        this.landingRetryTimer = null;
+        void this.syncLanding();
+      },
+      retryWait(++this.landingFailures, this.deps.landingRetry),
+    );
+    this.landingRetryTimer.unref?.();
+  }
+
+  /** Broadcast the document again, so the Publish card shows (or drops) the follow's notice. */
+  private async tellCard(): Promise<void> {
+    try {
+      this.tellSaved(await this.deps.store.get());
+    } catch (err) {
+      say("error", [], `the Publish card could not be told what following the page address left undone: ${errorMessage(err)}`);
+    }
+  }
+
+  /**
+   * Wait for every venue's run in flight (a first publish to the old page, say), so the venues the
+   * follow reads include what that run is about to save. Not the follow's own chain, which is the
+   * one running this, nor the queue's.
+   */
+  private async venueRunsDone(): Promise<void> {
+    await Promise.all([...this.chains].filter(([k]) => k !== ADDRESS_CHAIN && k !== PENDING_CHAIN).map(([, run]) => run));
+  }
+
+  /** The venues on any page but `target`'s, each moved to it on its own chain. */
+  private async moveAll(target: Target, old: Target | null): Promise<void> {
+    await this.venueRunsDone();
+    let venues: Venue[];
+    try {
+      venues = (await this.deps.store.get()).venues;
+    } catch (err) {
+      return this.followFailed(old, `the stage plots could not be read: ${errorMessage(err)}`);
+    }
+    for (const venue of venues) {
+      if (!venue.publish || venue.publish.origin === target.origin) continue;
+      await this.serial(venue.id, async () => {
+        const now = await this.venueNow(venue.id);
+        if (!now?.publish || now.publish.origin === target.origin) return;
+        const doc = await this.deps.store.get();
+        await this.move(now, doc, target, "the page address changed", this.prepare(doc, now, await this.readPatch()));
+      }).catch((err: unknown) => this.venueFailed(venue, `Not moved to ${hostOf(target.origin)}: ${errorMessage(err)}`));
+    }
+  }
+
+  /**
+   * The page this server leaves, with no new page to move to: every venue on it unpublished, its
+   * link dropped with the old token, or queued against the old page when the drop fails, so the
+   * card shows it rather than a venue claiming a link nothing here can reach.
+   */
+  private async takeDownOldPage(old: Target): Promise<void> {
+    const host = hostOf(old.origin);
+    await this.venueRunsDone();
+    let venues: Venue[];
+    try {
+      venues = (await this.deps.store.get()).venues;
+    } catch (err) {
+      return this.followFailed(old, `the stage plots could not be read: ${errorMessage(err)}`);
+    }
+    for (const venue of venues) {
+      if (venue.publish?.origin !== old.origin) continue;
+      await this.serial(venue.id, async () => {
+        const pub = (await this.venueNow(venue.id))?.publish;
+        if (!pub || pub.origin !== old.origin) return;
+        const r = await this.client(old).dropStagePlots(pub.secret);
+        if (r.ok) {
+          this.forget(pub.secret);
+          await this.unpublishInStore(venue.id, null);
+          // A warning, not a note: nobody pressed Unpublish.
+          say("warn", [pub.secret], `"${venue.name}" unpublished: the page address changed with no page to move to, so its link and backgrounds are removed from ${host}`);
+          return;
+        }
+        await this.unpublishInStore(venue.id, { secret: pub.secret, origin: pub.origin, since: this.at(), reason: "address changed" });
+        say("warn", [pub.secret], `"${venue.name}" unpublished: the page address changed with no page to move to, and its link could not be removed from ${host} (${sentence(r, host)}); it is queued for removal`);
+      }).catch((err: unknown) => this.venueFailed(venue, `The page address changed, and taking its link down from ${host} failed part way: ${errorMessage(err)}`));
+    }
+  }
+
+  /** A step of following the page address failed for every venue: said, and on each venue on the old page (every published one with none). */
+  private async followFailed(old: Target | null, why: string): Promise<void> {
+    const message = `The page address was saved, but the published stage plots could not follow it: ${why}`;
+    say("error", [], message);
+    let venues: Venue[];
+    try {
+      venues = (await this.deps.store.get()).venues;
+    } catch (err) {
+      // The store cannot be read: GET /api/stageplots answers that, which the card shows; and the log says it here.
+      say("error", [], `the stage plots could not be read to put that on each venue's card: ${errorMessage(err)}`);
+      return;
+    }
+    for (const venue of venues) if (venue.publish && (!old || venue.publish.origin === old.origin)) await this.venueFailed(venue, message);
+  }
+
+  /** A step of following the page address failed for one venue: said, and left as its last error. */
+  private async venueFailed(venue: Venue, message: string): Promise<void> {
+    const secrets = venue.publish ? [venue.publish.secret] : [];
+    say("error", secrets, `"${venue.name}": ${message}`);
+    const at = this.at();
+    try {
+      await this.savePublish(venue.id, (p) => ({ ...p, lastError: errorAt(at, message, [...secrets, p.secret]) }));
+    } catch (err) {
+      say("error", secrets, `"${venue.name}": that could not be shown on its card either: ${errorMessage(err)}`);
+    }
+  }
+
+  // ── The parts ──────────────────────────────────────────────────────────────
+
+  /** Say a refusal and answer it. Every refusal is said, so the log answers "why did Publish do nothing" as well as the card. */
+  private refused(action: string, venueId: string, venue: Venue | null, status: 404 | 409, error: string): { ok: false; status: 404 | 409; error: string } {
+    say("warn", venue?.publish ? [venue.publish.secret] : [], `${action} refused for ${venue ? `"${venue.name}"` : `venue ${venueId}`}: ${error}`);
+    return { ok: false, status, error };
+  }
+
+  /** The venue, the page to publish to and a client for it, or why not. */
+  private async venueAndTarget(
+    venueId: string,
+    published: boolean,
+    action: string,
+  ): Promise<{ ok: true; doc: StagePlotsDoc; venue: Venue; target: Target; client: PushClient; host: string } | { ok: false; status: 404 | 409; error: string }> {
+    const doc = await this.deps.store.get();
+    const venue = doc.venues.find((v) => v.id === venueId) ?? null;
+    if (!venue) return this.refused(action, venueId, null, 404, "no such venue");
+    if (published && !venue.publish) return this.refused(action, venueId, venue, 409, `${venue.name} is not published`);
+    if (!published && venue.publish) return this.refused(action, venueId, venue, 409, `${venue.name} is already published`);
+    const target = await this.deps.target();
+    if (!target.ok) return this.refused(action, venueId, venue, 409, target.message);
+    return { ok: true, doc, venue, target, client: this.client(target), host: hostOf(target.origin) };
+  }
+
+  /** A refusal when the queue is at what an action may add to, checked before anything is sent. */
+  private queueFull(doc: StagePlotsDoc, action: string, name: string): { ok: false; status: 409; error: string } | null {
+    const queued = doc.pendingRemovals;
+    if (Array.isArray(queued) && queued.length < STAGEPLOT_LIMITS.pendingRemovalsQueue) return null;
+    const error = Array.isArray(queued)
+      ? `${queued.length} old links are still waiting to be removed from a page. Remove them (Remove now, once their page is set up) before this ${action.toLowerCase()}.`
+      : `${DAMAGED_QUEUE} Fix the file before this ${action.toLowerCase()}.`;
+    say("warn", [], `${action} refused for "${name}": ${error}`);
+    return { ok: false, status: 409, error };
+  }
+
+  /**
+   * A new secret, queued before its first request goes out, then the venue sent under it. On a
+   * failure, what went up is taken back, and the secret leaves the queue only once it is gone.
+   */
+  private async sendFresh(
+    client: PushClient,
+    target: Target,
+    doc: StagePlotsDoc,
+    venue: Venue,
+    required: readonly string[],
+    prepared: Prepared,
+  ): Promise<{ ok: true; secret: string; r: Sent } | { ok: false; secret: string; status: 400 | 502; message: string }> {
+    const secret = newPublishSecret();
+    await this.queue([{ secret, origin: target.origin, since: this.at(), reason: "publishing" }]);
+    const r = await this.sendVenue(client, hostOf(target.origin), secret, doc, venue, { force: true, required, held: [], prepared });
+    if (r.ok) return { ok: true, secret, r };
+    if (r.sent > 0) await this.takeBack(client, secret, target.origin, venue.name);
+    else await this.unqueue((e) => e.secret === secret && e.origin === target.origin);
+    return { ok: false, secret, status: r.status, message: r.message };
+  }
+
+  /**
+   * promote(), and when that write fails after the page took everything: the new secret taken back
+   * from the page (left queued, and shown, when the page will not drop it), and why, for the caller
+   * to say and answer. Without it the secret stays live under a "publishing" entry the card hides.
+   */
+  private async land(client: PushClient, venueId: string, name: string, secret: string, origin: string, state: VenuePublish, old: PendingRemoval | null): Promise<{ ok: true; venue: Venue | null } | { ok: false; message: string }> {
+    try {
+      return { ok: true, venue: await this.promote(venueId, secret, origin, state, old) };
+    } catch (err) {
+      try {
+        await this.takeBack(client, secret, origin, name);
+      } catch (e) {
+        say("error", [secret], `a link that could not be saved could not be taken back either (${errorMessage(e)}); it stays queued for removal`);
+      }
+      return { ok: false, message: `What went up could not be saved here (${errorMessage(err)}), so it is taken back from ${hostOf(origin)}.` };
+    }
+  }
+
+  /**
+   * One write: `secret` (queued as publishing) onto the venue as its publish state, out of the
+   * queue, and `old` into it. Null, and the queue left as it was, when the venue is gone.
+   */
+  private async promote(venueId: string, secret: string, origin: string, state: VenuePublish, old: PendingRemoval | null): Promise<Venue | null> {
+    let saved: Venue | null = null;
+    await this.update((d) => {
+      const v = d.venues.find((x) => x.id === venueId);
+      if (!v) return d;
+      saved = { ...v, publish: state };
+      const pending = d.pendingRemovals.filter((e) => !(e.secret === secret && e.origin === origin));
+      return { ...d, venues: d.venues.map((x) => (x.id === venueId ? saved! : x)), pendingRemovals: old ? [...pending, old] : pending };
+    });
+    if (old) say("log", [old.secret], `an old link on ${hostOf(old.origin)} is queued for removal (${old.reason})`);
+    return saved;
+  }
+
+  /** The venue unpublished, and `queued` (its secret) added to the queue in the same write. The venue as it is after. */
+  private async unpublishInStore(venueId: string, queued: PendingRemoval | null): Promise<Venue | null> {
+    let after: Venue | null = null;
+    await this.update((d) => {
+      const v = d.venues.find((x) => x.id === venueId);
+      if (!v) return queued ? { ...d, pendingRemovals: [...d.pendingRemovals, queued] } : d;
+      after = withoutPublish(v);
+      return { ...d, venues: d.venues.map((x) => (x.id === venueId ? after! : x)), pendingRemovals: queued ? [...d.pendingRemovals, queued] : d.pendingRemovals };
+    });
+    this.attempted.delete(venueId);
+    // Nothing of it is left to resend: a retry still counting it would never start its backoff over.
+    this.republished(venueId, true);
+    if (queued) say("log", [queued.secret], `a link on ${hostOf(queued.origin)} is queued for removal (${queued.reason})`);
+    return after;
+  }
+
+  /** Take back what went up under a secret that will not be used. Out of the queue once gone; left in it, and said, when not. */
+  private async takeBack(client: PushClient, secret: string, origin: string, name: string): Promise<void> {
+    this.forget(secret);
+    const r = await client.dropStagePlots(secret);
+    if (r.ok) {
+      await this.unqueue((e) => e.secret === secret && e.origin === origin);
+      return;
+    }
+    // Still queued: no longer in flight, so it shows on the card and is removed as soon as it can be.
+    await this.update((d) => ({ ...d, pendingRemovals: d.pendingRemovals.map((e) => (e.secret === secret && e.origin === origin ? { ...e, reason: "not taken back" as PendingReason } : e)) }));
+    say("warn", [secret], `what went up for "${name}" before the failure could not be taken back (${r.message}); it is queued for removal`);
+  }
+
+  /**
+   * Drain the queue: drop each secret queued against `via`'s page (the page set up, unless the
+   * address-change path hands in the old one with its token). Writes only what went; a drop that
+   * fails writes nothing (so it cannot loop through its own broadcast) and is said once. At
+   * start, a publish left in flight by a crash that cannot be dropped becomes visible. Answers
+   * the queue as it is after, how many went, and the page it was drained against; or, said on
+   * [stageplots], why the queue could not be read or written, which is never "empty".
+   */
+  private drainQueued(atStart: boolean, via?: Target): Promise<Drained> {
+    return this.serial(PENDING_CHAIN, async (): Promise<Drained> => {
+      try {
+        return await this.drain(atStart, via);
+      } catch (err) {
+        const message = `The old links waiting to be removed could not be read or saved: ${errorMessage(err)}`;
+        say("error", [], message);
+        return { ok: false, message };
+      }
+    });
+  }
+
+  private async drain(atStart: boolean, via: Target | undefined): Promise<Drained> {
+    const doc = await this.deps.store.get();
+    if (!Array.isArray(doc.pendingRemovals)) throw new Error(DAMAGED_QUEUE);
+    if (this.paused || doc.pendingRemovals.length === 0) return { ok: true, left: doc.pendingRemovals, removed: 0, page: null };
+    const set = via ?? (await this.deps.target().then((t) => (t.ok ? t : null)));
+    const page = set?.origin ?? null;
+    const gone: PendingRemoval[] = [];
+    const stuckInFlight: PendingRemoval[] = [];
+    for (const e of doc.pendingRemovals) {
+      // A publish in flight is the action's own until it finishes; only a stale one (at start) is drained.
+      if (e.reason === "publishing" && !atStart) continue;
+      if (!set || e.origin !== set.origin) {
+        if (!this.saidStuck.has(`${e.secret} wait`)) {
+          this.saidStuck.add(`${e.secret} wait`);
+          say("warn", [e.secret], `an old link on ${hostOf(e.origin)} (${e.reason}) waits: ${set ? "this server is set up for another page" : "no page is set up here"}; it is removed once ${hostOf(e.origin)} is set up again`);
+        }
+        if (e.reason === "publishing") stuckInFlight.push(e);
+        continue;
+      }
+      const r = await this.client(set).dropStagePlots(e.secret);
+      if (r.ok) {
+        this.forget(e.secret);
+        gone.push(e);
+        say("log", [e.secret], `an old link on ${hostOf(e.origin)} is removed (${e.reason})`);
+      } else {
+        if (e.reason === "publishing") stuckInFlight.push(e);
+        if (!this.saidStuck.has(e.secret)) {
+          this.saidStuck.add(e.secret);
+          say("warn", [e.secret], `an old link on ${hostOf(e.origin)} (${e.reason}) could not be removed yet: ${sentence(r, hostOf(e.origin))} It is tried again on every change, Publish now and Remove now.`);
+        }
+      }
+    }
+    if (gone.length === 0 && stuckInFlight.length === 0) return { ok: true, left: doc.pendingRemovals, removed: 0, page };
+    const isGone = (e: PendingRemoval) => gone.some((g) => g.secret === e.secret && g.origin === e.origin);
+    const isStuck = (e: PendingRemoval) => stuckInFlight.some((g) => g.secret === e.secret && g.origin === e.origin);
+    const after = await this.update((d) => ({
+      ...d,
+      pendingRemovals: d.pendingRemovals.filter((e) => !isGone(e)).map((e) => (isStuck(e) ? { ...e, reason: "not taken back" as PendingReason } : e)),
+    }));
+    return { ok: true, left: after.pendingRemovals, removed: gone.length, page };
+  }
+
+  /** Add to the queue. */
+  private async queue(entries: PendingRemoval[]): Promise<void> {
+    await this.update((d) => ({ ...d, pendingRemovals: [...d.pendingRemovals, ...entries] }));
+  }
+
+  /** Take out of the queue what `which` names. */
+  private async unqueue(which: (e: PendingRemoval) => boolean): Promise<void> {
+    await this.update((d) => (d.pendingRemovals.some(which) ? { ...d, pendingRemovals: d.pendingRemovals.filter((e) => !which(e)) } : d));
+  }
+
+  /** A store write, broadcast when it changed anything. A write that hands back its input changes nothing. */
+  private async update(fn: (doc: StagePlotsDoc) => StagePlotsDoc): Promise<StagePlotsDoc> {
+    let changed = false;
+    const doc = await this.deps.store.update((d) => {
+      const next = fn(d);
+      changed = next !== d && JSON.stringify(next) !== JSON.stringify(d);
+      return changed ? next : d;
+    });
+    if (changed) this.tellSaved(doc);
+    return doc;
+  }
+
+  /** Hand the routes a write of this publisher's to broadcast. The broadcast comes back here (heard) as its own, not as a change. */
+  private tellSaved(doc: StagePlotsDoc): void {
+    this.ownWrite = true;
+    try {
+      this.deps.onSaved(doc);
+    } finally {
+      this.ownWrite = false;
+    }
+  }
+
+  /** Save a send's outcome on a published venue, say it, and answer. */
+  private async finish(venueId: string, venue: Venue, r: SendResult, host: string, secrets: string[], what: string): Promise<PublishOutcome> {
+    const at = this.at();
+    if (!r.ok) {
+      // A send whose answer was lost may have been stored: the page keeps what it had only when it refused.
+      const message = r.unsure ? `${r.message} Whether the page took it is not known.` : r.message;
+      say("warn", secrets, `"${venue.name}" could not be ${what}: ${message}${r.unsure ? "" : "; the page keeps what it had"}`);
+      const saved = await this.savePublish(venueId, (p) => ({ ...p, lastError: errorAt(at, message, secrets) }));
+      return { ok: false, status: saved ? r.status : 404, error: saved ? hide(message, secrets) : "no such venue" };
+    }
+    const saved = await this.savePublish(venueId, (p) => stateAfterSend(p.secret, p.origin, at, p.linkAt ?? p.publishedAt, r, secrets, p.listed));
+    if (!saved) return { ok: false, status: 404, error: "no such venue" };
+    say("log", secrets, `"${venue.name}" ${what} on ${host}: ${plural(r.sent, "request")}${missingNote(r)}`);
+    for (const w of r.warnings) say("warn", secrets, `"${venue.name}": ${w}`);
+    return { ok: true, venue: saved };
+  }
+
+  /** A put under `secret` that may have been stored with its answer lost, before any keep named it: the next keep goes whatever it is. */
+  private unkeep(secret: string, r: PushResult): void {
+    if (!r.ok && mayHaveLanded(r)) this.kept.delete(secret);
+  }
+
+  private forget(secret: string): void {
+    this.sent.delete(secret);
+    this.kept.delete(secret);
+    this.saidStuck.delete(secret);
+    this.saidStuck.delete(`${secret} wait`);
+  }
+
+  private async venueNow(venueId: string): Promise<Venue | null> {
+    return (await this.deps.store.get()).venues.find((v) => v.id === venueId) ?? null;
+  }
+
+  /** Write a published venue's publish state, made from what it is now. Null when the venue is gone or no longer published. */
+  private async savePublish(venueId: string, next: (current: VenuePublish) => VenuePublish): Promise<Venue | null> {
+    const doc = await this.update((d) => {
+      const v = d.venues.find((x) => x.id === venueId);
+      if (!v?.publish) return d;
+      return { ...d, venues: d.venues.map((x) => (x.id === venueId ? { ...v, publish: next(v.publish!) } : x)) };
+    });
+    return doc.venues.find((v) => v.id === venueId) ?? null;
+  }
+
+  /**
+   * The venue as the page gets it, its linked points resolved against `patch` once for the
+   * fingerprint, the size check, the send and the log. The fingerprint is each plot as the page
+   * gets it (and nothing else of the patch) with its background whole, so a re-conversion counts
+   * as a change whether or not it is held, and a patch save that changes nothing published leaves
+   * it as it was.
+   */
+  private prepare(doc: StagePlotsDoc, venue: Venue, patch: PatchRead): Prepared {
+    const byId = new Map(doc.backgrounds.map((b) => [b.id, b]));
+    const plan = this.deps.plan();
+    const plots = plotsOf(doc, venue).map((plot) => ({
+      plot,
+      bg: plot.backgroundId ? (byId.get(plot.backgroundId) ?? null) : null,
+      ...publishedItems(plot.items, patch, patchContext(plan)),
+    }));
+    const index = publishedVenue(doc, venue, plan, this.deps.timeZone());
+    const print = docHash(JSON.stringify([index, plots.map(({ plot, bg, items }) => [publishedPlot(plot, bg, true, items), bg?.converted ?? null])]));
+    return { plots, index: JSON.stringify(index), print };
+  }
+
+  /**
+   * Send a venue under `secret`: backgrounds, plots, index, and the list of keys to keep when it
+   * changed (always, when forced). Sizes are checked before anything is sent, so a plot too large to publish is a
+   * refusal by name and not half a publish.
+   */
+  private async sendVenue(client: PushClient, host: string, secret: string, doc: StagePlotsDoc, venue: Venue, opts: SendOptions): Promise<SendResult> {
+    const { plots, index } = opts.prepared;
+    for (const { plot, bg, items } of plots) {
+      const bytes = Buffer.byteLength(JSON.stringify(publishedPlot(plot, bg, true, items)));
+      if (bytes > PUBLISH_MAX_BODY_BYTES) {
+        return {
+          ok: false,
+          status: 400,
+          sent: 0,
+          message: `Plot "${plot.name}" is too large to publish (${mb(bytes)} MB; the limit is ${mb(PUBLISH_MAX_BODY_BYTES)} MB). Remove items or inputs from it, or unlink connection points that list many patch channels.`,
+        };
+      }
+    }
+    const sent = opts.force ? new Map<string, string>() : (this.sent.get(secret) ?? new Map<string, string>());
+    this.sent.set(secret, sent);
+    let count = 0;
+    /** Requests the page took: a 404 after one is not a Worker from before StagePlots. */
+    let took = 0;
+    // A Worker from before StagePlots answers every path 404 and stored nothing, so there is nothing
+    // to take back; a 404 after the page took something is a refusal like any other, and what went up goes back.
+    const fail = (r: PushFailure): SendResult => ({
+      ok: false,
+      status: 502,
+      message: sentence(r, host),
+      sent: r.kind === "refused" && r.status === 404 && took === 0 ? 0 : count,
+      // Its answer may have been lost after the page took it: said so, as the ServiceCue deploy says it.
+      ...(mayHaveLanded(r) ? { unsure: true as const } : {}),
+    });
+
+    // Backgrounds first: a plot names one only once the page holds it.
+    const needed = venueImages(doc, venue);
+    const held = new Set(opts.force ? [] : opts.held.filter((h) => needed.includes(h)));
+    const unpublished: { hash: string; why: string }[] = [];
+    for (const hash of needed) {
+      if (held.has(hash)) continue;
+      const key = stagePlotsImageKey(hash)!;
+      let bytes: Uint8Array | null;
+      try {
+        bytes = await this.deps.image(hash);
+      } catch (err) {
+        unpublished.push({ hash, why: `it could not be read on this server: ${errorMessage(err)}` });
+        continue;
+      }
+      if (bytes === null) {
+        unpublished.push({ hash, why: "it is missing on this server" });
+        continue;
+      }
+      if (bytes.byteLength > PUBLISH_MAX_BODY_BYTES) {
+        unpublished.push({ hash, why: `it is too large to publish (${mb(bytes.byteLength)} MB; the limit is ${mb(PUBLISH_MAX_BODY_BYTES)} MB)` });
+        continue;
+      }
+      const r = await client.putStagePlot(secret, key, bytes, STAGEPLOTS_IMAGE_TYPE);
+      count++;
+      this.unkeep(secret, r);
+      if (r.ok) took++;
+      if (r.ok) held.add(hash);
+      else if (aboutThePage(r)) return fail(r);
+      else unpublished.push({ hash, why: sentence(r, host) });
+    }
+    const lost = unpublished.filter((u) => opts.required.includes(u.hash));
+    if (lost.length > 0) {
+      return { ok: false, status: 502, sent: count, message: `${plural(lost.length, "background")} the old link has could not be published: ${lost[0]!.why}` };
+    }
+
+    const put = async (key: string, text: string): Promise<PushResult | null> => {
+      const h = docHash(text);
+      if (sent.get(key) === h) return null;
+      const r = await client.putStagePlot(secret, key, text, "application/json");
+      count++;
+      if (r.ok) took++;
+      // A failure may have been stored and its answer lost: what the page holds is not known, so
+      // the next send of this key goes whatever it is, the text sent before this one included.
+      if (r.ok) sent.set(key, h);
+      else {
+        sent.delete(key);
+        this.unkeep(secret, r);
+      }
+      return r;
+    };
+    for (const { plot, bg, items, unresolved } of plots) {
+      const r = await put(stagePlotsPlotKey(plot.id)!, JSON.stringify(publishedPlot(plot, bg, bg !== null && held.has(bg.converted.hash), items)));
+      if (r && !r.ok) return fail(r);
+      // Said when the plot actually went out, so once per change and not on every check.
+      if (r) unlinkedNote(secret, venue, plot, unresolved);
+    }
+    const ir = await put(STAGEPLOTS_INDEX_KEY, index);
+    if (ir && !ir.ok) return fail(ir);
+
+    const warnings: string[] = [];
+    const keys = [STAGEPLOTS_INDEX_KEY, ...plots.map(({ plot }) => stagePlotsPlotKey(plot.id)!), ...[...held].map((h) => stagePlotsImageKey(h)!)].sort();
+    const keep = JSON.stringify(keys);
+    if (opts.force || this.kept.get(secret) !== keep) {
+      const r = await client.keepStagePlots(secret, keys);
+      count++;
+      // As a put: a keep that failed may have been applied, so the next one goes whatever it is.
+      if (r.ok) this.kept.set(secret, keep);
+      else {
+        this.kept.delete(secret);
+        warnings.push(`What was taken off this venue could not be removed from ${host} yet: ${sentence(r, host)}`);
+      }
+    }
+    return { ok: true, sent: count, held: [...held].sort(), unpublished, warnings };
+  }
+
+}
+
+/**
+ * A venue's publish state after a send that went through: under `secret` on `origin`, the
+ * backgrounds the page holds and does not, and the error the send still leaves on the card
+ * (backgrounds not yet published, or what could not be pruned). One rule for a first publish,
+ * a regenerate, a move and every republish.
+ */
+function stateAfterSend(secret: string, origin: string, at: string, linkAt: string, r: Sent, secrets: readonly string[], listed: boolean): VenuePublish {
+  const lastError =
+    r.unpublished.length > 0
+      ? errorAt(at, `${plural(r.unpublished.length, "background")} not yet published: ${r.unpublished[0]!.why}`, secrets)
+      : r.warnings.length > 0
+        ? errorAt(at, r.warnings[0]!, secrets)
+        : null;
+  return { secret, origin, publishedAt: at, linkAt, lastError, publishedImages: r.held, unpublishedImages: r.unpublished.map((u) => u.hash).sort(), listed };
+}
+
+/** A [stageplots] line for a plot just sent with linked points that went out unlinked, naming each and why. */
+function unlinkedNote(secret: string, venue: Venue, plot: Plot, unresolved: readonly UnresolvedLink[]): void {
+  if (unresolved.length === 0) return;
+  const each = unresolved.map((u) => `"${u.label || "unlabelled"}" (${u.reason === "removed" ? "its patch device is gone" : "the patch sheet cannot be read"})`).join(", ");
+  say("warn", [secret], `"${venue.name}" · "${plot.name}": ${plural(unresolved.length, "connection point")} published unlinked, showing the last name and colour: ${each}`);
+}
+
+/** "; 1 background not yet published (why)", or nothing. */
+function missingNote(r: Sent): string {
+  return r.unpublished.length > 0 ? `; ${plural(r.unpublished.length, "background")} not yet published (${r.unpublished[0]!.why})` : "";
+}
+
+function withoutPublish(v: Venue): Venue {
+  const { publish: _publish, ...rest } = v;
+  return rest;
+}
+
+function sameList(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((x, i) => x === b[i]);
+}

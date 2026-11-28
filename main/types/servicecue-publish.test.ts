@@ -10,6 +10,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
+import { isRecord } from "./is-record.js";
 import type { StageState } from "./state.js";
 import * as contract from "./servicecue-publish.js";
 import {
@@ -36,7 +37,6 @@ import {
   isDocKey,
   isFrameChannel,
   isPublishId,
-  isRecord,
   isViewerBuildId,
   rundownKey,
   viewerBuildFromHtml,
@@ -389,6 +389,14 @@ describe("the page's build id", () => {
     const html = `<!doctype html>\n<!-- ${viewerBuildTag("aaaaaaaaaaaa")} -->\n<html><head>${viewerBuildTag("bbbbbbbbbbbb")}</head></html>`;
     assert.equal(viewerBuildFromHtml(html), "bbbbbbbbbbbb");
     assert.equal(viewerBuildFromHtml(`<!-- ${viewerBuildTag("aaaaaaaaaaaa")} --><html><head></head></html>`), null);
+  });
+
+  test("a comment ends at its first -->, as HTML reads it", () => {
+    assert.equal(viewerBuildFromHtml(`<!-- <!-- --> ${viewerBuildTag("aaaaaaaaaaaa")} -->${viewerBuildTag("0123456789ab")}`), "aaaaaaaaaaaa");
+  });
+
+  test("extra whitespace between the attributes is still the tag", () => {
+    assert.equal(viewerBuildFromHtml(`<meta  name="${VIEWER_BUILD_META}"   content="0123456789ab"/>`), "0123456789ab");
   });
 });
 

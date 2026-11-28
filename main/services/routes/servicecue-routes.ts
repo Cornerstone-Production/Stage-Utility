@@ -1,21 +1,25 @@
 // servicecue-routes.ts — ServiceCue
 //
-// ServiceCue: the rundown pages and their per-service-type column layouts.
+// ServiceCue: the rundown pages and their layouts, which every service type shares.
 //
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
-import { type RouteCtx, json, error, readBody, pcoReadFailed } from "./context.js";
+import { type RouteCtx, json, error, pcoReadFailed, readJsonObject } from "./context.js";
 import type { PatchFile, ServiceCueLayout, Slot } from "../../types/stage.js";
 import type { CategoryRole } from "../../types/servicecue-roles.js";
 import { SlotsNotFoundError, stageController } from "../stage-controller.js";
-import { patchStore } from "../patch-store.js";
+import { PatchLinksNotUpdated, patchStore } from "../patch-store.js";
+import { patchShapeProblem } from "../patch-shape.js";
 import { parseXlsx } from "../patch-xlsx.js";
 import { exportFilename, exportRows } from "../patch-export.js";
+import { attachmentDisposition } from "../export-filename.js";
 import { toCsv } from "../patch-export-csv.js";
 import { toXlsx } from "../patch-export-xlsx.js";
-import { broadcast } from "../broadcaster.js";
 import { servicecuePublisher } from "../servicecue-publisher-instance.js";
+import { LayoutNameRefused } from "../servicecue-slug.js";
+import { isRecord } from "../../types/is-record.js";
+import { scrub } from "../scrub.js";
 
 export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
   const { req, res, pathname, url, method } = c;
@@ -26,12 +30,22 @@ export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
     }
 
     if (method === "POST" && pathname === "/api/servicecue/layouts") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (!Array.isArray(body.layouts)) {
         error(res, "body.layouts (array) required");
         return;
       }
-      json(res, await stageController.saveServiceCueLayouts(body.layouts as ServiceCueLayout[]));
+      if (!body.layouts.every((l) => isRecord(l) && typeof l.id === "string" && typeof l.name === "string")) {
+        error(res, "Each layout needs an id and a name.");
+        return;
+      }
+      try {
+        json(res, await stageController.saveServiceCueLayouts(body.layouts as ServiceCueLayout[]));
+      } catch (err) {
+        if (!(err instanceof LayoutNameRefused)) throw err;
+        error(res, err.message); // a name the save may not use: the editor shows why
+        return;
+      }
       servicecuePublisher.nudge(); // the public page follows an edit within a second or so
       return;
     }
@@ -42,7 +56,7 @@ export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
     }
 
     if (method === "POST" && pathname === "/api/servicecue/config") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (!Array.isArray(body.serviceTypeIds)) {
         error(res, "body.serviceTypeIds (array) required");
         return;
@@ -95,14 +109,14 @@ export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
       if (format === "xlsx") {
         res.writeHead(200, {
           "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          "Content-Disposition": `attachment; filename="${filename}"`,
+          "Content-Disposition": attachmentDisposition(filename),
         });
         res.end(await toXlsx(rows));
         return;
       }
       res.writeHead(200, {
         "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": attachmentDisposition(filename),
       });
       res.end(toCsv(rows));
       return;
@@ -116,21 +130,30 @@ export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
     }
 
     if (method === "POST" && pathname === "/api/patch") {
-      const body = (await readBody(req)) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const file = body.file as PatchFile | undefined;
-      if (!file || typeof file !== "object" || !Array.isArray(file.sheets)) {
-        error(res, "body.file (PatchFile) required");
+      // A sheet whose variants, overrides or assignments are not the shape every reader takes is
+      // refused whole and said: the editor never writes one (patch-shape.ts).
+      const problem = patchShapeProblem(file);
+      if (problem) {
+        console.warn(`[patch] save refused: ${scrub(problem)}`);
+        error(res, problem);
         return;
       }
-      const saved = await patchStore.save(file);
-      broadcast("patch:updated", saved); // change-driven; editor + /patch live-update
-      json(res, saved);
+      // patchStore.save broadcasts patch:updated, for the editor, /patch and stage plots.
+      try {
+        json(res, await patchStore.save(file!));
+      } catch (err) {
+        if (!(err instanceof PatchLinksNotUpdated)) throw err;
+        // Saved and announced: 500 with a code, so the page can tell it from a save that did not happen.
+        error(res, err.message, 500, "plot-links-not-updated");
+      }
       return;
     }
 
     // Parse an uploaded .xlsx (base64) → { headers, rows } for the patch importer.
     if (method === "POST" && pathname === "/api/patch/parse-xlsx") {
-      const body = (await readBody(req)) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const b64 = typeof body.xlsx === "string" ? body.xlsx : "";
       if (!b64) {
         error(res, "body.xlsx (base64) required");
@@ -150,7 +173,7 @@ export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
     }
 
     if (method === "POST" && pathname === "/api/servicecue/roles") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (!Array.isArray(body.roles)) {
         error(res, "body.roles (array) required");
         return;
@@ -163,7 +186,7 @@ export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
     // Adds a role for any category this service type defines that no role covers yet.
     // Only ever adds — never merges, never removes.
     if (method === "POST" && pathname === "/api/servicecue/roles/seed") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       const serviceTypeId = typeof body.serviceTypeId === "string" ? body.serviceTypeId : "";
       if (!serviceTypeId) {
         error(res, "body.serviceTypeId (string) required");
@@ -210,7 +233,7 @@ export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
     }
 
     if (method === "POST" && pathname === "/api/service-type") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (typeof body.id !== "string") {
         error(res, "body.id (string) required");
         return;
@@ -221,7 +244,7 @@ export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
     }
 
     if (method === "POST" && pathname === "/api/plan") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (typeof body.id !== "string") {
         error(res, "body.id (string) required");
         return;
@@ -238,7 +261,7 @@ export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
     }
 
     if (method === "POST" && pathname === "/api/plan/mode") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (body.mode !== "auto" && body.mode !== "manual") {
         error(res, 'body.mode must be "auto" or "manual"');
         return;
@@ -263,7 +286,7 @@ export async function serviceCueRoutes(c: RouteCtx): Promise<void> {
     }
 
     if (method === "POST" && pathname === "/api/slots") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (!Array.isArray(body.slots)) {
         error(res, "body.slots (array) required");
         return;

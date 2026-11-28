@@ -7,10 +7,6 @@ import { installDom, unmountAndTeardown } from "../../test-dom.js";
 // order context-menu.test.tsx uses, and for the same reason: a static import of
 // React/testing-library would evaluate before the DOM exists.
 const teardown = installDom();
-// React only act-wraps a render, and only warns when an update escapes one,
-// once it is told it is in a test environment. Without this the file reads
-// as clean while 3 updates land outside act.
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
 const React = await import("react");
 const { useContextMenuTrigger, LONG_PRESS_MS, MOVE_CANCEL_PX } = await import("./context-menu-trigger.js");
@@ -23,6 +19,17 @@ function Trigger({ onOpen }: { onOpen: (p: { x: number; y: number }) => void }) 
   // onto its own element the way this test harness spreads everything else.
   const { cancel: _cancel, ...domProps } = useContextMenuTrigger(onOpen);
   return React.createElement("div", { "data-testid": "trigger", ...domProps }, "card");
+}
+
+/** A trigger that is itself a button (a tab, a list row), holding a control of its own. */
+function ButtonTrigger({ onOpen }: { onOpen: (p: { x: number; y: number }) => void }) {
+  const { cancel: _cancel, ...domProps } = useContextMenuTrigger(onOpen);
+  return React.createElement(
+    "div",
+    null,
+    React.createElement("button", { type: "button", "data-testid": "trigger", ...domProps }, "Tab"),
+    React.createElement("div", { "data-testid": "row", ...domProps }, React.createElement("button", { type: "button", "data-testid": "inner" }, "Switch")),
+  );
 }
 
 function touchDown(el: Element, x = 10, y = 10) {
@@ -109,6 +116,24 @@ describe("useContextMenuTrigger — long-press opens a menu on touch", () => {
       touchMove(el, MOVE_CANCEL_PX + 2, 0);
       act(() => mock.timers.tick(LONG_PRESS_MS));
       assert.equal(onOpen.mock.callCount(), 0, "movement past the threshold must cancel the press");
+    } finally {
+      mock.timers.reset();
+      await flushReact();
+    }
+  });
+
+  test("a trigger that is itself a button opens; a control inside a trigger does not", async () => {
+    const onOpen = mock.fn();
+    const { getByTestId } = render(React.createElement(ButtonTrigger, { onOpen }));
+    mock.timers.enable({ apis: ["setTimeout"] });
+    try {
+      touchDown(getByTestId("inner"));
+      act(() => mock.timers.tick(LONG_PRESS_MS));
+      touchUp(getByTestId("inner"));
+      assert.equal(onOpen.mock.callCount(), 0, "a hold on a control inside the trigger must not open the menu");
+      touchDown(getByTestId("trigger"));
+      act(() => mock.timers.tick(LONG_PRESS_MS));
+      assert.equal(onOpen.mock.callCount(), 1, "a hold on a trigger that is a button opens its menu");
     } finally {
       mock.timers.reset();
       await flushReact();

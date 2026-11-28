@@ -15,6 +15,7 @@ export const ADVANCED_TABS = [
   { id: "updates", name: "Updates" },
   { id: "schedule", name: "Schedule" },
   { id: "network", name: "Network" },
+  { id: "public-link", name: "Public link" },
   { id: "data", name: "Data" },
   { id: "video", name: "Video relay" },
 ] as const;
@@ -69,13 +70,22 @@ export const ADVANCED_SETTINGS = [
     keywords: ["12 hour", "24 hour", "12h", "24h", "am", "pm", "military", "time"],
   },
   {
+    id: "sidebar",
+    tab: "general",
+    card: "Layout",
+    name: "Sidebar",
+    description:
+      "Which pages appear in the sidebar, in which sections and in what order. Right-clicking the sidebar opens the same thing.",
+    keywords: ["navigation", "nav", "menu", "rail", "pages", "sections", "hide", "reorder", "customize", "arrange", "group"],
+  },
+  {
     id: "context-bar",
     tab: "general",
-    card: "General",
+    card: "Layout",
     name: "Context bar",
     description:
-      "Which readings appear above every page, and where they sit. Right-clicking the bar itself opens the same thing.",
-    keywords: ["header", "strip", "readings", "items", "configure", "top bar"],
+      "Which readings appear above every page, and where they sit. Right-clicking the bar opens the same thing.",
+    keywords: ["header", "strip", "readings", "items", "configure", "customize", "top bar"],
   },
 
   {
@@ -198,6 +208,15 @@ export const ADVANCED_SETTINGS = [
     keywords: ["kiosk", "discovery", "mdns", "bonjour", "broadcast", "screen", "claim", "find", "pi", "raspberry"],
   },
   {
+    id: "server-id",
+    tab: "network",
+    card: "Addresses",
+    name: "Server id",
+    description:
+      "How screens and Mac outputs tell this server from any other. Made once, and kept by a config restore unless you choose to use the config's server id.",
+    keywords: ["server id", "identity", "duplicate", "discovery", "restore", "kiosk", "screen", "mac", "helper", "bind"],
+  },
+  {
     id: "kiosk-setup",
     tab: "network",
     card: "Addresses",
@@ -226,6 +245,16 @@ export const ADVANCED_SETTINGS = [
   },
 
   {
+    id: "public-link",
+    tab: "public-link",
+    card: "Public link",
+    name: "Public link",
+    description:
+      "Publish ServiceCue to a page of your own on the web, so volunteers open a link instead of the app. The page address, the publishing token, the link to hand out with its QR code, what the public sees, and the Cloudflare connection that keeps the page up to date.",
+    keywords: ["servicecue", "publish", "cloudflare", "worker", "token", "qr", "share", "web", "url", "volunteers", "internet"],
+  },
+
+  {
     id: "auto-backups",
     tab: "data",
     card: "Backups",
@@ -243,7 +272,7 @@ export const ADVANCED_SETTINGS = [
     card: "Backups",
     name: "Config snapshot",
     description:
-      "Save, download, or restore your full configuration: views, custom layouts, integration hosts, ports and names, branding, and display options. Secrets are not included, so the file is safe to store. Upload and restore overwrites the current config and restarts the server. Saved snapshots are named copies kept on this server.",
+      "Save, download, or restore your full configuration: views, custom layouts, integration hosts, ports and names, branding, and display options. Secrets are not included, so the file is safe to store. Upload and restore overwrites the current config and restarts the server; a config saved on another server asks whether to use its server id. Saved snapshots are named copies kept on this server.",
     keywords: [
       "backup", "restore", "export", "import", "download", "upload", "recall", "saved snapshots", "named",
       "settings", "json", "save current",

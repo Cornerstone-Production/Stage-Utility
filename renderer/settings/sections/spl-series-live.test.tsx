@@ -17,13 +17,12 @@ import { eventually, installDom } from "../../test-dom.js";
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 
 const teardown = installDom();
-(globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
 
 const { act, render, cleanup, screen } = await import("@testing-library/react");
 const React = await import("react");
-const { SplDetail } = await import("./spl-history-section.js");
+const { SplDetailOnPage } = await import("../../test-fixtures/spl-detail.js");
 
 const T0 = Date.parse("2026-09-17T20:15:00.000Z");
 const MIN = 60_000;
@@ -172,7 +171,7 @@ describe("switching records", () => {
     globalThis.fetch = r.fetch;
     try {
       const view = render(
-        React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+        React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
           detail: record(KEY),
         }),
       );
@@ -185,7 +184,7 @@ describe("switching records", () => {
       r.hold = true;
       await act(async () => {
         view.rerender(
-          React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+          React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
             detail: record("two:2:2"),
           }),
         );
@@ -216,7 +215,7 @@ describe("switching records", () => {
     globalThis.fetch = r.fetch;
     try {
       render(
-        React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+        React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
           detail: record(KEY),
         }),
       );
@@ -240,7 +239,7 @@ describe("a read that failed rather than found nothing", () => {
     globalThis.fetch = r.fetch;
     try {
       render(
-        React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+        React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
           detail: record(KEY),
         }),
       );
@@ -261,7 +260,7 @@ describe("a read that failed rather than found nothing", () => {
     globalThis.fetch = r.fetch;
     try {
       render(
-        React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+        React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
           detail: record(KEY),
         }),
       );
@@ -287,7 +286,7 @@ describe("the live refetch", () => {
     globalThis.fetch = r.fetch;
     try {
       render(
-        React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+        React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
           detail: live([item("a", "MESSAGE", 0)]),
         }),
       );
@@ -316,7 +315,7 @@ describe("the live refetch", () => {
     globalThis.fetch = r.fetch;
     try {
       render(
-        React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+        React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
           detail: live([item("a", "MESSAGE", 0)]),
         }),
       );
@@ -343,7 +342,7 @@ describe("the live refetch", () => {
     globalThis.fetch = r.fetch;
     try {
       render(
-        React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+        React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
           detail: live([item("a", "MESSAGE", 0)]),
         }),
       );
@@ -366,7 +365,7 @@ describe("the live refetch", () => {
     globalThis.fetch = r.fetch;
     try {
       render(
-        React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+        React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
           detail: record(KEY),
         }),
       );
@@ -389,7 +388,7 @@ describe("the live refetch", () => {
     globalThis.fetch = r.fetch;
     try {
       const view = render(
-        React.createElement(SplDetail as unknown as React.FunctionComponent<Record<string, unknown>>, {
+        React.createElement(SplDetailOnPage as unknown as React.FunctionComponent<Record<string, unknown>>, {
           detail: live([item("a", "MESSAGE", 0)]),
         }),
       );
