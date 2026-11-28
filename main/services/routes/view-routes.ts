@@ -20,7 +20,7 @@ import {
 import type { NotesContent } from "../notes-store.js";
 import { errorMessage } from "../errors.js";
 import { isStringList } from "../../types/is-record.js";
-import { type RouteCtx, json, error, isDisplayKind, MAX_CONFIG_BODY_BYTES, readJsonObject } from "./context.js";
+import { type RouteCtx, json, error, BodyTooLargeError, isDisplayKind, MAX_CONFIG_BODY_BYTES, readJsonObject } from "./context.js";
 import { isLayoutShape, isSlotsLayoutValue, type ViewSurface } from "../../types/views.js";
 import { oscManager } from "../osc-manager.js";
 import { rosstalkManager } from "../rosstalk-manager.js";
@@ -329,6 +329,8 @@ export async function viewRoutes(c: RouteCtx): Promise<void> {
         // Still always, even on the failure path, and still unable to take the
         // process down: the reply has not been sent yet here.
         await stageController.reloadViews().catch(() => {});
+        // Too large to read is a 413 from the server, not a bad bundle.
+        if (err instanceof BodyTooLargeError) throw err;
         error(res, errorMessage(err));
       }
       return;
