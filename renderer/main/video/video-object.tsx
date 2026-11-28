@@ -15,7 +15,7 @@ import { ErrorBoundary } from "../../components/ui/error-boundary-view";
 import { logToServer } from "../../lib/client-log";
 import { errorMessage } from "@main/services/errors";
 import type { RelayStatus } from "@main/types/video";
-import { isPreviewSlug } from "../preview-url";
+import { currentSlug, isPreviewSlug } from "../preview-url";
 import { usePreviewHidden } from "../preview-messages";
 import { ListenControl } from "./listen-control";
 import { claimListen, listenPathOf, listenView, releaseListen, useListenOwner } from "./listen";
@@ -39,7 +39,7 @@ const CORNER_LABEL = {
 type VideoObjectConfig = Extract<LayoutObjectConfig, { type: "video" }>;
 
 function isPreviewRoute(): boolean {
-  return isPreviewSlug(window.location.pathname.slice(1));
+  return isPreviewSlug(currentSlug());
 }
 
 /**

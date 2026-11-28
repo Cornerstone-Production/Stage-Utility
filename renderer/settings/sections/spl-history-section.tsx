@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 
 import { invoke, onNotification, type ApiError } from "../../lib/api";
 import { toast } from "../../components/ui";
@@ -18,6 +18,8 @@ import {
   type LaneItem,
 } from "./history-chart";
 import { peakLabel, plottedMetric, type PlotPrefs, type Plotted, writePlotChoice } from "./sound-plot";
+import { useLatestRef } from "../../lib/use-latest-ref";
+import { toastStoreFailure } from "../../lib/store-failure-toast";
 
 /** Per-metric stat for an item, with legacy single-metric fallback. */
 function metricStat(item: SplItemHistory, key: string, record: ServiceSplHistory): SplMetricStat | null {
@@ -270,12 +272,12 @@ export function SplDetail({
   const [figureKeys, storeFigure] = useStoredKeys(FIGURES_STORAGE_KEY, FIGURE_KEYS, DEFAULT_FIGURES);
   function toggleFigure(key: string) {
     const err = storeFigure(key);
-    if (err) toast.error(`Could not remember that choice: ${errorMessage(err)}`);
+    toastStoreFailure(err);
   }
   const [seriesKeys, storeSeries] = useStoredKeys(SERIES_STORAGE_KEY, SERIES_KEYS, DEFAULT_SERIES);
   function toggleSeries(key: string) {
     const err = storeSeries(key);
-    if (err) toast.error(`Could not remember that choice: ${errorMessage(err)}`);
+    toastStoreFailure(err);
   }
 
   const allKeys = useMemo(() => metricKeysOf(detail), [detail]);
@@ -285,7 +287,7 @@ export function SplDetail({
    *  Trends when the organisation changes it. */
   function rememberPlot(metric: string | null) {
     const err = writePlotChoice(metric === plotted?.trends ? null : metric);
-    if (err) toast.error(`Could not remember that choice: ${errorMessage(err)}`);
+    toastStoreFailure(err);
   }
 
   /**
@@ -345,7 +347,7 @@ export function SplDetail({
 
   function toggleMetric(key: string) {
     const err = storeMetric(key);
-    if (err) toast.error(`Could not remember that choice: ${errorMessage(err)}`);
+    toastStoreFailure(err);
   }
 
   const items = useMemo(() => detail.items.slice().sort((a, b) => a.sequence - b.sequence), [detail]);
@@ -383,10 +385,7 @@ export function SplDetail({
   const [state, setState] = useState<SeriesState>({ kind: "asking" });
   /** The items as of this render, for the subscription below to compare against
    *  without taking `detail` as a dependency. */
-  const itemsRef = useRef(detail.items);
-  useEffect(() => {
-    itemsRef.current = detail.items;
-  }, [detail.items]);
+  const itemsRef = useLatestRef(detail.items);
 
   // Reset the moment the RECORD or the METRIC changes, during render rather
   // than in the effect below.
@@ -474,7 +473,7 @@ export function SplDetail({
       cancelled = true;
       off();
     };
-  }, [detail.serviceKey, primaryKey, live]);
+  }, [detail.serviceKey, primaryKey, live, itemsRef]);
 
   const raw = state.kind === "series" ? state.data : null;
   const buckets = raw?.buckets ?? null;

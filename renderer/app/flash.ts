@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
+import { useLatestRef } from "../lib/use-latest-ref";
 
 // Point at the control that actually does the job, after arriving at its page.
 //
@@ -135,17 +136,14 @@ export function flashTarget(flashId: string): void {
 export function useRevealTarget(onReveal: (flashId: string) => void): void {
   // Held in a ref so the listener is subscribed once and still sees the newest
   // callback — it is a fresh closure on every render.
-  const cbRef = useRef(onReveal);
-  useEffect(() => {
-    cbRef.current = onReveal;
-  });
+  const cbRef = useLatestRef(onReveal);
 
   // The pending target is delivered in an effect, not during render: a caller
   // that sets state from it would otherwise be setting state while rendering.
   useEffect(() => {
     const pending = pendingFlashTarget();
     if (pending) cbRef.current(pending);
-  }, []);
+  }, [cbRef]);
 
   useEffect(() => {
     const handle = (e: Event) => {
@@ -154,5 +152,5 @@ export function useRevealTarget(onReveal: (flashId: string) => void): void {
     };
     window.addEventListener(REVEAL_EVENT, handle);
     return () => window.removeEventListener(REVEAL_EVENT, handle);
-  }, []);
+  }, [cbRef]);
 }

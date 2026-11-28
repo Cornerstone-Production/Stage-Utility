@@ -7,6 +7,7 @@
 // the box selected, unless something nearer took the key or a dialog is open.
 
 import { useEffect, useRef, useState, type RefObject } from "react";
+import { useLatestRef } from "./use-latest-ref";
 
 export interface PageTabs<Id extends string> {
   tab: Id;
@@ -37,10 +38,7 @@ export function usePageTabs<Id extends string>({
   const [searchAsked, setSearchAsked] = useState(0);
   const searchAnswered = useRef(0);
 
-  const latest = useRef({ tab, onTabChange });
-  useEffect(() => {
-    latest.current = { tab, onTabChange };
-  });
+  const latest = useLatestRef({ tab, onTabChange });
 
   function goTo(next: Id, focusSearch = true) {
     if (next === searchId && focusSearch) setSearchAsked((n) => n + 1);
@@ -48,10 +46,7 @@ export function usePageTabs<Id extends string>({
     else setOwnTab(next);
   }
   // The listener below is registered once; it calls the newest goTo through this.
-  const goToRef = useRef(goTo);
-  useEffect(() => {
-    goToRef.current = goTo;
-  });
+  const goToRef = useLatestRef(goTo);
 
   useEffect(() => {
     if (tab !== searchId || searchAnswered.current === searchAsked) return;
@@ -70,7 +65,7 @@ export function usePageTabs<Id extends string>({
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [searchId]);
+  }, [searchId, goToRef]);
 
   return { tab, goTo, searchRef };
 }

@@ -59,6 +59,12 @@ export function previewViewIdFromSlug(slug: string): string | null {
   return slug.startsWith(PREVIEW_PREFIX) ? slug.slice(PREVIEW_PREFIX.length) : null;
 }
 
+/** The page's own first path segment with its slashes trimmed off both ends: "/preview-x/" and
+ *  "/preview-x" are the same page. One reader, so a slash cannot be trimmed by some callers and not others. */
+export function currentSlug(pathname: string = window.location.pathname): string {
+  return pathname.replace(/^\/+|\/+$/g, "");
+}
+
 /** Whether a path SEGMENT is a settings preview's. For a caller that only needs
  *  the yes or no — a preview iframe does not reload, send presence, or play
  *  video until asked — and would otherwise re-type the prefix. */

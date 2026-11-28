@@ -37,7 +37,7 @@ import { cn } from "../lib/cn";
 import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
 import { ConnectionBadge } from "./connection-badge";
 import { IpListField } from "./ip-list-field";
-import { numberFieldValue } from "./integration-number-fields";
+import { isSecretField, numberFieldValue } from "./integration-number-fields";
 import { droppedCredentialNotice } from "../lib/dropped-credentials";
 
 // ---- single connection card -------------------------------------------------
@@ -58,7 +58,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
     const out: Record<string, unknown> = {};
     for (const field of provider.configSchema) {
       const raw = conn.config[field.key];
-      if (field.type === "password" && typeof raw === "string" && raw !== "") {
+      if (isSecretField(field) && typeof raw === "string" && raw !== "") {
         out[field.key] = FORM_MASK;
       } else {
         out[field.key] = raw ?? "";
@@ -98,7 +98,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
     const out: Record<string, unknown> = {};
     for (const field of provider.configSchema) {
       const raw = conn.config[field.key];
-      if (field.type === "password" && typeof raw === "string" && raw !== "") {
+      if (isSecretField(field) && typeof raw === "string" && raw !== "") {
         out[field.key] = FORM_MASK;
       } else {
         out[field.key] = raw ?? "";
@@ -148,7 +148,7 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
 
     const v = localConfig[key];
     // Skip if password is still masked
-    if (field.type === "password" && typeof v === "string" && isMask(v)) return;
+    if (isSecretField(field) && typeof v === "string" && isMask(v)) return;
 
     try {
       const sent = { ...conn.config, [key]: v };

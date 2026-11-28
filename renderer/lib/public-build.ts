@@ -8,7 +8,7 @@
 // keeps what is written, nothing is reloaded.
 
 import { VIEWER_BUILD_META, isViewerBuildId } from "@main/types/servicecue-publish";
-import { readStored, writeStored, type RemovableStorage } from "./safe-storage";
+import { readStored, tabStorage, writeStored, type RemovableStorage } from "./safe-storage";
 
 /** The tab's note of the build it last reloaded for. */
 export const RELOADED_FOR_KEY = "servicecue:reloaded-for";
@@ -41,15 +41,6 @@ let reloadPage = (): void => window.location.reload();
 /** Test seam: what "reload" does. jsdom's `location.reload` cannot be replaced or observed. */
 export function __setReloadForTests(reload: (() => void) | null): void {
   reloadPage = reload ?? (() => window.location.reload());
-}
-
-/** The tab's own storage, or null where there is none or touching it throws. */
-function tabStorage(): RemovableStorage | null {
-  try {
-    return typeof sessionStorage === "undefined" ? null : sessionStorage;
-  } catch {
-    return null;
-  }
 }
 
 /** The build this tab last reloaded for, or null when none is written or the tab has no storage to say. */

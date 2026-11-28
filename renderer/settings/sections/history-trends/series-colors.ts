@@ -12,6 +12,7 @@
 // localStorage read and write are the two thin functions at the bottom, and the
 // write RETURNS its failure rather than swallowing it.
 
+import { isRecord } from "@main/types/is-record";
 import { readStored, storeFailure } from "../../../lib/safe-storage";
 
 /**
@@ -92,9 +93,9 @@ export function readColorAssignment(): ColorAssignment {
     (raw) => {
       if (!raw) return {};
       const parsed: unknown = JSON.parse(raw);
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+      if (!isRecord(parsed)) return {};
       const out: ColorAssignment = {};
-      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      for (const [k, v] of Object.entries(parsed)) {
         if (typeof v === "number" && Number.isFinite(v)) out[k] = Math.trunc(v);
       }
       return out;

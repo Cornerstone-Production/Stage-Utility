@@ -20,6 +20,7 @@ import { refreshWhileMounted } from "../lib/live-refresh";
 import { useTheme } from "../lib/use-theme";
 import { UPCOMING_PLANS_QUERY } from "../settings/sections/plan-switcher";
 import { StaleNotice } from "./stale-notice";
+import { QUIET_LINK } from "../lib/link-classes";
 
 /**
  * The frame a ServiceCue page is drawn in with no chrome around it: the same
@@ -61,7 +62,7 @@ function PublicNotFound() {
     <div className="flex flex-col items-center justify-center h-full gap-2">
       <p className="text-title3 text-fg">Page not found</p>
       <p className="text-body text-fg-muted">
-        <a href="/servicecue" className="text-accent hover:underline">
+        <a href="/servicecue" className={QUIET_LINK}>
           Back to ServiceCue
         </a>
       </p>

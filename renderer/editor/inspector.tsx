@@ -594,7 +594,7 @@ export function PlanAttachmentConfig({
       if (r && typeof r === "object" && r.height > 0) {
         const aspect = r.width / r.height; // w:h of the image in px
         const newH = (o.w * canvas.width) / aspect / canvas.height;
-        onGeom({ h: clamp(newH, 0.03, 1 - o.y) });
+        onGeom({ h: clamp(newH, MIN, 1 - o.y) });
       } else {
         // Nothing to size the box to. Doing nothing read as a button that does not work.
         toast.error(r === "empty" ? `No file matching "${match}" is on the current plan, so the box was left as it is.` : couldNotLoad);

@@ -5,6 +5,8 @@ import { useStageState } from "../main/use-stage-state";
 import { Button, Input, toast } from "./ui";
 import { SETTINGS_CARD } from "../lib/card-classes";
 import { copyText } from "../lib/clipboard";
+import { QUIET_LINK } from "../lib/link-classes";
+import { cn } from "../lib/cn";
 
 /** Where the Companion module lives. Not in the app's own repo — it ships to
  *  Companion separately, which is exactly why a link is worth having. */
@@ -110,7 +112,7 @@ export function CompanionInfoPanel({ state }: { state: IntegrationState }) {
             href={MODULE_URL}
             target="_blank"
             rel="noreferrer"
-            className="inline-flex items-center gap-1 text-accent hover:underline"
+            className={cn(QUIET_LINK, "inline-flex items-center gap-1")}
           >
             companion-module-stageutility-stageutility
             <ExternalLinkIcon className="size-3" />

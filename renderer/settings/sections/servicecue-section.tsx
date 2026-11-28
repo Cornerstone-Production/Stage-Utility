@@ -4,6 +4,9 @@ import { AlertCircleIcon, PlusIcon, ChevronLeftIcon, ChevronDownIcon } from "luc
 
 import { Button, Checkbox, ErrorNote, confirm, SkeletonRows } from "../../components/ui";
 import { cn } from "../../lib/cn";
+import { joinWithAnd } from "../../lib/join-with-and";
+import { plural } from "@main/services/plural";
+import { moveTo } from "../../lib/list-move";
 import { invoke } from "../../lib/api";
 import { useFailedReads } from "../../lib/use-failed-reads";
 import { useInAppLink } from "../../lib/use-search-param";
@@ -22,11 +25,9 @@ import {
   copyName,
   deleteLayoutBody,
   deleteRoleBody,
-  listOf,
   duplicateLayout,
   FIXED_LABEL,
   layoutRoles,
-  moveTo,
   newLayout,
   noticeText,
   noticeGroups as noticeGroupsOf,
@@ -457,8 +458,8 @@ export function ServiceCueSection() {
       if (!result.ok) failedTypes.push(`${typeName(id) ?? id} (${result.error})`);
     }
     const made = Math.max(0, latest.length - before);
-    setFailure("seed", failedTypes.length ? `Couldn't make roles for ${listOf(failedTypes)}.` : null);
-    announce(`Made ${made} ${made === 1 ? "role" : "roles"}, one for each category.`);
+    setFailure("seed", failedTypes.length ? `Couldn't make roles for ${joinWithAnd(failedTypes)}.` : null);
+    announce(`Made ${plural(made, "role")}, one for each category.`);
   }
 
   const roleActions: RoleActions = {
@@ -596,7 +597,7 @@ export function ServiceCueSection() {
           not appearing, which would read as "every category is in a role". */}
       {settingsRead && roles.length > 0 && noticeReadFailed.length > 0 && (
         <ErrorNote className="mt-4">
-          Couldn't load the note categories for {listOf(noticeReadFailed.map((id) => typeName(id) ?? id))}, so this page can't say which are in no role.
+          Couldn't load the note categories for {joinWithAnd(noticeReadFailed.map((id) => typeName(id) ?? id))}, so this page can't say which are in no role.
         </ErrorNote>
       )}
       {/* Not on a first run: with no roles, the roles section already lists every

@@ -43,6 +43,7 @@ import {
 import { laneLabel, laneSegments, segmentAt, type LaneItem, type LaneSegment } from "./lane";
 import { makeTextMeasurer } from "./measure-text";
 import { StatStrip, type StatFigure, type StripHover } from "./stat-strip";
+import { useLatestRef } from "../../../lib/use-latest-ref";
 
 /** Sampling gap past which the line breaks rather than spanning the silence. */
 const GAP_MS = 3 * 60_000;
@@ -461,10 +462,7 @@ export function HistoryChart({
   // draw a strip and pass no `onHover` — never pay for the serialisation below.
   const reportedHover = onHover && all.length ? hoverStrip : null;
   const hoverKey = reportedHover ? JSON.stringify(reportedHover) : "";
-  const onHoverRef = useRef(onHover);
-  useEffect(() => {
-    onHoverRef.current = onHover;
-  }, [onHover]);
+  const onHoverRef = useLatestRef(onHover);
   useEffect(() => {
     onHoverRef.current?.(reportedHover);
     // `reportedHover` is rebuilt every render; `hoverKey` is what is IN it.
@@ -473,7 +471,7 @@ export function HistoryChart({
   // A chart that goes away leaves no readout behind it. Without this the card
   // keeps whatever was last under the pointer, as a sentence that has lost the
   // thing it was describing.
-  useEffect(() => () => onHoverRef.current?.(null), []);
+  useEffect(() => () => onHoverRef.current?.(null), [onHoverRef]);
 
   function onMove(e: React.PointerEvent<SVGSVGElement>) {
     const svg = svgRef.current;

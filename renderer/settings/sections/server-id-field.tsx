@@ -13,6 +13,7 @@ import type { DuplicateServer, ServerIdentity } from "@main/types/kiosk";
 import { Button, confirm, toast } from "../../components/ui";
 import { invoke } from "../../lib/api";
 import { formatClock } from "../../lib/clock-format";
+import { joinWithAnd } from "../../lib/join-with-and";
 
 /** The `data-flash-id` the row carries: Needs attention's fix points here. */
 export const SERVER_ID_FLASH = "server-id";
@@ -32,8 +33,7 @@ function checkLine(check: ServerIdentity["check"], timeZone: string | null | und
 
 /** "192.168.1.60", "192.168.1.60 and 192.168.1.61": the sentence the confirm says it in. */
 function addresses(duplicates: readonly DuplicateServer[]): string {
-  const all = duplicates.map((d) => d.address);
-  return all.length <= 1 ? (all[0] ?? "") : `${all.slice(0, -1).join(", ")} and ${all.at(-1)}`;
+  return joinWithAnd(duplicates.map((d) => d.address));
 }
 
 /**

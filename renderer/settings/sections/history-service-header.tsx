@@ -28,6 +28,7 @@ import { StatStrip, type StatFigure } from "./history-chart";
 import { servicePeakLevel, type ServicePeakLevel } from "./spl-history-section";
 import { peakLabel, type PlotPrefs } from "./sound-plot";
 import { fmtDelta, fmtDur, fmtTime, isCountedItem, summarize } from "./overview-data";
+import { QUIET_LINK } from "../../lib/link-classes";
 
 /** Mean per-item over/under (seconds) + how many ran over, for items with both
  *  planned and actual times. Lives here because the "Avg overrun" KPI is its
@@ -521,7 +522,7 @@ export interface ServiceHeaderProps {
  *  History draws for a service without one. */
 export function AllServicesLink({ onClick }: { onClick: () => void }) {
   return (
-    <button className="self-start text-caption1 text-accent hover:underline" onClick={onClick}>
+    <button className={cn(QUIET_LINK, "self-start text-caption1")} onClick={onClick}>
       ← All services
     </button>
   );

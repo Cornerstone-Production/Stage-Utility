@@ -29,6 +29,7 @@ import { cn } from "../../lib/cn";
 import { Button } from "../../components/ui/button";
 import { useLiveStep } from "../../main/live-controls";
 import type { Recorder } from "../recording-status";
+import { useLatestRef } from "../../lib/use-latest-ref";
 
 /** How long "Stop recording?" waits for its second press. */
 export const STOP_CONFIRM_MS = 3000;
@@ -173,10 +174,7 @@ export function RecordingAction({ chosen }: { chosen: readonly Recorder[] }) {
   const [note, showNote] = useTransientNote();
   // What the give-up timer and a late failure judge against: the CURRENT status,
   // not the render that scheduled them.
-  const latest = useRef(chosen);
-  useEffect(() => {
-    latest.current = chosen;
-  });
+  const latest = useLatestRef(chosen);
 
   // The status channel is the only thing that finishes a press.
   const waiting = pending !== null && !arrived(chosen, pending.names, pending.verb);
@@ -200,7 +198,7 @@ export function RecordingAction({ chosen }: { chosen: readonly Recorder[] }) {
       setPending(null);
     }, CONFIRM_GIVE_UP_MS);
     return () => clearTimeout(t);
-  }, [waiting, pending, showNote]);
+  }, [waiting, pending, showNote, latest]);
 
   const run = useCallback(
     async (verb: Verb) => {
@@ -224,7 +222,7 @@ export function RecordingAction({ chosen }: { chosen: readonly Recorder[] }) {
         if (!arrived(latest.current, these.map((r) => r.name), verb)) showNote(failures.join(" "));
       }
     },
-    [targets, showNote],
+    [targets, showNote, latest],
   );
 
   const stop = useStopConfirm(() => void run("stop"), recording);

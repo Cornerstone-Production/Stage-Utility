@@ -23,7 +23,7 @@ import { ProPresenterInstancesPanel } from "./propresenter-instances-panel";
 import { ConnectionBadge } from "./connection-badge";
 import { IpListField } from "./ip-list-field";
 import { integrationDialogClass } from "./integration-dialog-size";
-import { initialConfig, numberFieldValue } from "./integration-number-fields";
+import { initialConfig, isSecretField, numberFieldValue } from "./integration-number-fields";
 import { useUpdateStatus } from "../app/queries";
 import { docsUrl } from "../lib/docs-url";
 import { droppedCredentialNotice } from "../lib/dropped-credentials";
@@ -59,6 +59,7 @@ import {
 import { Loader2Icon, RefreshCwIcon, EraserIcon } from "lucide-react";
 import { cn } from "../lib/cn";
 import { formatClock } from "../lib/clock-format";
+import { QUIET_LINK } from "../lib/link-classes";
 
 // ---- helpers ----------------------------------------------------------------
 
@@ -281,7 +282,7 @@ function VideoFeedsLinkPanel() {
   return (
     <p className="px-1 py-2 text-callout text-fg-muted">
       Feeds and the relay's status live on their own page; its ports are in Advanced.{" "}
-      <AppLink to="/video-feeds" className="text-accent hover:underline">
+      <AppLink to="/video-feeds" className={QUIET_LINK}>
         Open Video feeds
       </AppLink>
     </p>
@@ -496,7 +497,7 @@ export function IntegrationDialog({
       const config: Record<string, unknown> = {};
       for (const field of descriptor.configSchema) {
         const v = localConfig[field.key];
-        if ((field.type === "password" || field.type === "oauth-device") && typeof v === "string" && isMask(v)) {
+        if (isSecretField(field) && typeof v === "string" && isMask(v)) {
           // User hasn't changed this password — omit so the backend keeps the original
           continue;
         }

@@ -36,6 +36,7 @@ import { cn } from "../../../lib/cn";
 import { baptismStats } from "../../../lib/link-baptisms";
 import { fmtClock, fmtDate } from "../../../main/use-baptism-state";
 import { historyServiceHref } from "../service-history-section";
+import { QUIET_LINK } from "../../../lib/link-classes";
 
 export interface PastSessionsCardProps {
   sessions: readonly BaptismSession[];
@@ -80,7 +81,7 @@ export function PastSessionsCard({ sessions, loadError, onDelete }: PastSessions
                     {s.serviceKey && (
                       <>
                         {" · "}
-                        <AppLink to={historyServiceHref(s.serviceKey)} className="text-accent hover:underline">
+                        <AppLink to={historyServiceHref(s.serviceKey)} className={QUIET_LINK}>
                           open in History →
                         </AppLink>
                       </>

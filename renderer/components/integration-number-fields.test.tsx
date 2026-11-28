@@ -38,7 +38,7 @@ const { installFakeServer, withQueryClient, integrationCard, until, actUntil, se
 );
 const { INTEGRATION_DESCRIPTOR_FIXTURE } = await import("../test-fixtures/integration-descriptors.js");
 const { IntegrationsPanel } = await import("./integrations-panel.js");
-const { initialConfig, numberFieldValue } = await import("./integration-number-fields.js");
+const { initialConfig, isSecretField, numberFieldValue } = await import("./integration-number-fields.js");
 
 let server = installFakeServer();
 
@@ -481,5 +481,13 @@ describe("oauth-device is masked the same way password is", () => {
     const state = { id: "fixture", enabled: true, connection: "disconnected", message: null, config: { refreshToken: "" } } as IntegrationState;
     const seeded = initialConfig(descriptor, state);
     assert.equal(seeded.refreshToken, "");
+  });
+});
+
+describe("isSecretField", () => {
+  test("a password and an oauth-device field are secrets; the other types are not", () => {
+    assert.equal(isSecretField({ type: "password" }), true);
+    assert.equal(isSecretField({ type: "oauth-device" }), true);
+    for (const type of ["text", "number", "select", "ip-list"] as const) assert.equal(isSecretField({ type }), false, type);
   });
 });

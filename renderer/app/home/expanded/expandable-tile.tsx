@@ -14,6 +14,8 @@ import { AppLink } from "../../app-link";
 import { useExpand } from "../../../main/expand-overlay";
 import type { LayoutRenderCtx } from "../../../main/layout-renderer";
 import { expandedBodyFor } from "./registry";
+import { QUIET_LINK_RING } from "../../../lib/link-classes";
+import { cn } from "../../../lib/cn";
 
 /** Anything a press should be left to. */
 const OWN_PRESS = "a, button, input, select, textarea, summary, [role='button'], [role='link'], [contenteditable='true']";
@@ -95,7 +97,7 @@ function Expandable({
         spec.name,
         <AppLink
           to={spec.page.to}
-          className="touch-target rounded-md px-2 py-1 text-caption1 font-medium text-accent hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          className={cn(QUIET_LINK_RING, "touch-target rounded-md px-2 py-1 text-caption1 font-medium")}
         >
           {spec.page.label}
         </AppLink>,

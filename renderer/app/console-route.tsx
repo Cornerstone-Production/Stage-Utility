@@ -21,6 +21,7 @@ import { LayoutEditor } from "../editor/layout-editor";
 import { Button, EmptyState } from "../components/ui";
 import { AppLink } from "./app-link";
 import { cn } from "../lib/cn";
+import { QUIET_LINK } from "../lib/link-classes";
 
 /** How close to the top-right corner the pointer has to be for Edit to appear.
  *  Wide enough to find without aiming, small enough that it is never a surprise
@@ -62,7 +63,7 @@ export function ConsoleRoute() {
         title="That console is gone"
         hint="It may have been deleted or renamed. Screens lists everything that exists."
         action={
-          <AppLink to="/screens" className="text-footnote text-accent hover:underline">
+          <AppLink to="/screens" className={cn(QUIET_LINK, "text-footnote")}>
             Open Screens
           </AppLink>
         }

@@ -17,6 +17,7 @@ import { LogoCropper } from "./logo-cropper";
 import { useSearchParam } from "../../lib/use-search-param";
 import { MAX_APP_NAME } from "@main/services/app-name";
 import { LOGO_REQUEST_PARAM, LOGO_REQUEST_VALUE } from "./branding-links";
+import { useLatestRef } from "../../lib/use-latest-ref";
 
 // Convenience presets for the brand accent (any org can also pick a custom hex).
 // Kept non-generic: a considered blue plus a few distinct hues. Semantic status
@@ -79,10 +80,7 @@ export function BrandingSection({
   // depend on `handlers` through this ref, not through their dependency lists: a
   // page that hands down a new `handlers` on a render would otherwise flush the
   // pending save early and defeat the debounce.
-  const handlersRef = useRef(handlers);
-  useEffect(() => {
-    handlersRef.current = handlers;
-  }, [handlers]);
+  const handlersRef = useLatestRef(handlers);
   const commitAccent = useTrailingCommit<string>((next) => {
     handlersRef.current.handleSetBranding({ accentColor: next });
   }, 250);

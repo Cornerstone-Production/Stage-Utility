@@ -19,6 +19,7 @@
 // events and asks `claimClick` first in its click handler.
 
 import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useLatestRef } from "./use-latest-ref";
 
 export interface PressDragOptions<P> {
   /** How far, in screen pixels, a press moves before it is a drag and not a click. */
@@ -55,10 +56,7 @@ interface Press<P> {
 }
 
 export function usePressDrag<P>(options: PressDragOptions<P>): PressDrag<P> {
-  const opts = useRef(options);
-  useEffect(() => {
-    opts.current = options;
-  });
+  const opts = useLatestRef(options);
   const current = useRef<Press<P> | null>(null);
   const swallow = useRef(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -81,7 +79,7 @@ export function usePressDrag<P>(options: PressDragOptions<P>): PressDrag<P> {
   const end = useCallback(() => {
     setActive(false);
     opts.current.onEnd?.();
-  }, []);
+  }, [opts]);
 
   useEffect(() => {
     if (!active) return;

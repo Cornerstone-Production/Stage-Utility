@@ -73,3 +73,16 @@ describe("uid() with no randomUUID, as over plain HTTP", () => {
     assert.notEqual(a, b);
   });
 });
+
+describe("uid() in a secure context, where randomUUID exists", () => {
+  test("keeps the prefix, as it does over plain HTTP", () => {
+    assert.equal(typeof globalThis.crypto.randomUUID, "function");
+    const a = uid("slot");
+    assert.match(a, /^slot-[0-9a-f-]{36}$/);
+    assert.notEqual(a, uid("slot"));
+  });
+
+  test("defaults the prefix to id", () => {
+    assert.match(uid(), /^id-/);
+  });
+});

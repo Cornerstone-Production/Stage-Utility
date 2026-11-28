@@ -19,6 +19,7 @@
 // only ever mounted by this dialog, so the two files split along that line.
 
 import { errorMessage } from "@main/services/errors";
+import { isRecord } from "@main/types/is-record";
 import { CALL_TRIGGER_ID, calledCueName, encodeAliases, nextAliases, parseAliases } from "@main/services/cue-aliases";
 import {
   choiceList,
@@ -199,8 +200,8 @@ const NO_NAMES: ReadonlySet<string> = new Set();
 function parseRows(value: string | number | undefined): [string, string][] {
   try {
     const parsed: unknown = JSON.parse(String(value ?? "") || "{}");
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return [];
-    return Object.entries(parsed as Record<string, unknown>).map(([k, v]) => [k, String(v ?? "")] as [string, string]);
+    if (!isRecord(parsed)) return [];
+    return Object.entries(parsed).map(([k, v]) => [k, String(v ?? "")] as [string, string]);
   } catch {
     return [];
   }

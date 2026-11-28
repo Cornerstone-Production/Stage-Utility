@@ -22,6 +22,7 @@ import { slotCount } from "./board-model";
 import { showLabel } from "./board-dialogs";
 import { useBoardPreview } from "./use-board-preview";
 import { displayWidthOf, type MicSlots, type ShowTarget } from "./use-mic-slots";
+import { QUIET_LINK } from "../../lib/link-classes";
 
 /** What a screen is assumed to be when none of the ones showing a board says. */
 export const FALLBACK_DISPLAY_WIDTH_IN = 32.25;
@@ -344,7 +345,7 @@ export function BoardSection({
             <span>Columns share the width equally.</span>
           )}
           <span>·</span>
-          <button type="button" className="text-accent hover:underline" onClick={() => dialogs.chargers(board)}>
+          <button type="button" className={QUIET_LINK} onClick={() => dialogs.chargers(board)}>
             Charger layout
           </button>
           {groupColumns(slots).some(isSpacerColumn) && !layout && <span className="text-fg-subtle">Spacers count once the board is aligned.</span>}

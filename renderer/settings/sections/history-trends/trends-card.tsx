@@ -66,6 +66,7 @@ import {
   type TrendRecording,
 } from "./trends";
 import { plural } from "@main/services/plural";
+import { toastStoreFailure } from "../../../lib/store-failure-toast";
 
 /** The range choice, per browser — a view preference, like every other one in
  *  this module. A stored value that is not one of the offered ranges is
@@ -501,12 +502,12 @@ export function TrendsCard({
   function setHidden(id: string, hide: boolean) {
     if (hidden.includes(id) === hide) return;
     const err = toggleHidden(id);
-    if (err) toast.error(`Couldn't remember that: ${err.message}`);
+    toastStoreFailure(err);
   }
   function showAll() {
     // One write, not a loop of toggles — see `replaceHidden`.
     const err = replaceHidden([]);
-    if (err) toast.error(`Couldn't remember that: ${err.message}`);
+    toastStoreFailure(err);
   }
 
   /**
@@ -841,7 +842,7 @@ export function TrendsCard({
             onHover={setHover}
             onToggleSeries={(id) => {
               const err = toggleHidden(id);
-              if (err) toast.error(`Couldn't remember that: ${err.message}`);
+              toastStoreFailure(err);
             }}
             onSeriesContextMenu={openMenu}
             ariaLabel={

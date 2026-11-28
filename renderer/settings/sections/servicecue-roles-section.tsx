@@ -12,12 +12,13 @@ import type { Ref } from "react";
 
 import { Button, ErrorNote, Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue, Tooltip } from "../../components/ui";
 import { cn } from "../../lib/cn";
+import { joinWithAnd } from "../../lib/join-with-and";
 import type { ServiceCueLayout } from "../../../main/types/pco.js";
 import type { CategoryRole } from "../../../main/types/servicecue-roles.js";
 import { norm } from "../../main/role-resolve";
 import { Grip, LiftedList, useCarried, useLifted, type DragItem } from "./servicecue-drag";
 import { NameField } from "./servicecue-layout-card";
-import { ambiguousCategories, listOf, unassignedByType, unassignedDistinct } from "./servicecue-layouts-model";
+import { ambiguousCategories, unassignedByType, unassignedDistinct } from "./servicecue-layouts-model";
 
 /** The note categories the page has read, and what it could not. */
 export interface CategorySource {
@@ -70,7 +71,7 @@ export function CategoryRoles({
   const ambiguous = ambiguousCategories(roles);
   const failures = source.failedTypeIds.length > 0 && (
     <ErrorNote>
-      Couldn't load the note categories for {listOf(source.failedTypeIds.map(typeName))}, so they are not listed here.
+      Couldn't load the note categories for {joinWithAnd(source.failedTypeIds.map(typeName))}, so they are not listed here.
     </ErrorNote>
   );
   // What the categories line says when there are none to list, and why.
@@ -143,7 +144,7 @@ export function CategoryRoles({
       {ambiguous.length > 0 && (
         <p role="alert" className="mt-2.5 rounded-lg bg-warn-9/12 px-2.5 py-2 text-caption1 text-warn-11">
           In more than one role, so which column shows its note is ambiguous:{" "}
-          {ambiguous.map((a) => `${a.name} (${listOf(a.roles)})`).join("; ")}.
+          {ambiguous.map((a) => `${a.name} (${joinWithAnd(a.roles)})`).join("; ")}.
         </p>
       )}
       {failures && <div className="mt-3">{failures}</div>}

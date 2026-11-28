@@ -8,7 +8,7 @@
 // walks every renderer source and fails on any other.
 export function uid(prefix = "id"): string {
   const c = typeof crypto === "undefined" ? undefined : crypto;
-  if (typeof c?.randomUUID === "function") return c.randomUUID();
+  if (typeof c?.randomUUID === "function") return `${prefix}-${c.randomUUID()}`;
   if (typeof c?.getRandomValues === "function") {
     const hex = Array.from(c.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, "0")).join("");
     return `${prefix}-${hex}`;

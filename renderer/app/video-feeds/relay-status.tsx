@@ -14,6 +14,7 @@ import { MEDIAMTX_DISK_BYTES, MEDIAMTX_DOWNLOAD_BYTES, MEDIAMTX_VERSION } from "
 import { Switch } from "../../components/ui";
 import { formatClock } from "../../lib/clock-format";
 import { cn } from "../../lib/cn";
+import { QUIET_LINK } from "../../lib/link-classes";
 
 const mb = (bytes: number) => Math.round(bytes / 1_000_000);
 
@@ -75,7 +76,7 @@ function Detail({ children }: { children: ReactNode }) {
 function ChangePortsLink({ onChangePorts }: { onChangePorts: () => void }) {
   return (
     <Detail>
-      <button type="button" className="font-medium text-accent hover:underline" onClick={onChangePorts}>
+      <button type="button" className={cn(QUIET_LINK, "font-medium")} onClick={onChangePorts}>
         Change ports in Advanced
       </button>
     </Detail>
