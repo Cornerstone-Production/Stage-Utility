@@ -534,6 +534,16 @@ describe("Publishing", () => {
     assert.deepEqual(server.posts[0], ["save", { url: "https://another.example-account.example", token: "tok-for-it" }]);
   });
 
+  test("clears the address without a token: the server takes an empty address, and switches publishing off with it", async () => {
+    await mount();
+    await fire.click(screen.getByRole("button", { name: "Cloudflare connection" }));
+    await fire.change(input("Page address"), { target: { value: "" } });
+    await fire.blur(input("Page address"));
+    await eventually(() => assert.equal(server.posts.length, 1));
+    assert.deepEqual(server.posts[0], ["save", { url: "" }]);
+    assert.ok(!text().includes("A different address needs its token"), "told an emptied address needs a token");
+  });
+
   test("Tab from a new address to the token field saves nothing and says nothing until the pair is left", async () => {
     await mount();
     await fire.click(screen.getByRole("button", { name: "Cloudflare connection" }));

@@ -409,7 +409,8 @@ showed and makes them its own again. Linking and unlinking are draft edits, save
 
 A linked point follows its device. Rename or recolour the device on the patch sheet and
 the point shows the new name and colour in the editor and on `/stageplots` at once, with
-nothing to save; the next **Save** of the plot keeps them as its last. A device colour
+nothing to save. Each save of the patch also writes them onto the point as its last name and
+colour, so a device removed from the patch leaves the point showing what the device last had. A device colour
 that is not one of the ten swatches takes the nearest one.
 
 A tap on a linked point on `/stageplots` lists **Patch channels · *sheet***: each channel
@@ -497,7 +498,8 @@ The **Publish** card, at the foot of the editor's left column, is per venue:
   card lists it as not yet published.
 - **Republishing** is automatic. Any saved change to the venue, its plots, its plan
   overrides or its backgrounds, and the followed plan moving, is sent about two seconds
-  later; only what changed is sent. If it fails, the page keeps what it had, the card
+  later; only what changed is sent. If it fails, the page keeps what it had (when its
+  answer was lost the card says it is not known whether the page took it), the card
   shows the error, and the next change or **Publish now** tries again. A send whose
   answer never came back may have been stored all the same, so the next one sends it
   whatever it is, and the list of what the venue keeps goes with it: a plot or
