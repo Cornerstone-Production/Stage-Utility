@@ -36,8 +36,13 @@ export class PcoAuthError extends Error {
   }
 }
 
+import { scrub } from "./scrub.js";
+import { PCO_BASE, PcoUrlRefused, isPcoId, pcoAttachmentId, pcoId, pcoSegment, pcoUrl, pcoUrlOf, type PcoUrl } from "./pco-path.js";
+
 /** Longest reason PCO's answer may add to the message an operator reads. */
 const MAX_REASON = 120;
+/** How much of a refused answer's body the log keeps: enough for PCO's errors, not a gateway's whole HTML page. */
+const MAX_LOGGED_BODY = 2000;
 
 /** The short reason in a refused PCO answer: the first JSON:API error's title (else
  *  detail), otherwise the status text. The raw body can be a page of JSON and belongs in
@@ -62,11 +67,9 @@ function refusalReason(statusText: string, body: string): string {
 /** A refused PCO answer's operator-facing reason, with the whole body on a tagged log
  *  line, so the message stays readable and the evidence stays in /log. */
 function refusal(url: PcoUrl, response: Response, body: string): string {
-  console.warn(`[pco] ${scrub(response.status)} from ${scrub(url)}: ${scrub(body || response.statusText)}`);
+  console.warn(`[pco] ${scrub(response.status)} from ${scrub(url)}: ${scrub((body || response.statusText).slice(0, MAX_LOGGED_BODY))}`);
   return refusalReason(response.statusText, body);
 }
-import { scrub } from "./scrub.js";
-import { PCO_BASE, PcoUrlRefused, isPcoId, pcoAttachmentId, pcoId, pcoSegment, pcoUrl, pcoUrlOf, type PcoUrl } from "./pco-path.js";
 
 /**
  * Every version Planning Center SERVICES publishes, newest first.
