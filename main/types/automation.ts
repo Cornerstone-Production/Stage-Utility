@@ -137,7 +137,8 @@ export interface Rule {
   action: { id: string; params: Record<string, string | number> };
   /** Seconds since this rule last fired before it may fire again. */
   cooldownSec: number;
-  /** Fire at most once per PCO service occurrence (keyed on serviceTimeId). */
+  /** Fire at most once per service occurrence, the one History records the
+   *  service under (see serviceOccurrence in service-key.ts). */
   oncePerService: boolean;
   /**
    * A CALLED cue must be asked twice.

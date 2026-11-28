@@ -1125,11 +1125,9 @@ class AutomationEngine {
     };
   }
 
-  /** Identifies one service occurrence, for oncePerService: the occurrence the
-   *  recorders file this snapshot under (serviceOccurrence), which holds through
-   *  an overrun where the live service-time id has already rolled on to the
-   *  next service. Prefers what the bus just carried; falls back to the
-   *  controller when no pco:live has flowed yet. */
+  /** The service occurrence oncePerService counts by (see serviceOccurrence).
+   *  Prefers what the bus just carried; falls back to the controller when no
+   *  pco:live has flowed yet. */
   private serviceKey(): string | null {
     return serviceOccurrence(this.liveFromBus ?? stageController.getLastLive());
   }

@@ -64,11 +64,6 @@ export function recordOccurrence(record: Pick<ServiceRecord, "serviceTimeId" | "
   return record.serviceTimeId ?? record.serviceDate;
 }
 
-/** `${serviceTypeId}:${planId}:${occurrence}`, the key every recorder files under. */
-export function serviceKeyOf(serviceTypeId: string, planId: string, occurrence: string): string {
-  return `${serviceTypeId}:${planId}:${occurrence}`;
-}
-
 /** What shouldHoldThroughServiceTimeChange decided, and what announceHold needs to say it. */
 type HoldVerdict =
   | { hold: true; why: "no-occurrence" }
@@ -88,7 +83,6 @@ type TickPlacement =
       serviceTypeId: string;
       planId: string;
       date: string;
-      serviceTimeId: string | null;
       verdict: HoldVerdict | null;
     };
 
@@ -648,7 +642,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
   }
 
   /** Say what shouldHoldThroughServiceTimeChange decided, once per transition. */
-  private announceHold(verdict: HoldVerdict, live: PcoLiveDTO, serviceTimeId: string | null): void {
+  private announceHold(verdict: HoldVerdict, live: PcoLiveDTO): void {
     // Logged unconditionally, not through loggedServiceTimeChange: the split
     // this announces changes currentKey on THIS tick, so this transition is
     // never asked about again and nothing can double-log it.
@@ -661,6 +655,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     if (verdict.why !== "clock") return;
     const { hold, untilMs, startsAtMs } = verdict;
     const from = this.current?.serviceTimeId ?? null;
+    const serviceTimeId = live.serviceTimeId;
     // Keyed on the decision as well as the transition: a hold announced 35
     // minutes out is followed, ten minutes out, by the split it was holding
     // for, and that split is news too. Keyed on the transition alone, it was
@@ -741,7 +736,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     // Separate back-to-back services sharing one plan by the PCO service-time
     // occurrence (9am vs 11am). Fall back to the date when none is known.
     const serviceTimeId = live.serviceTimeId;
-    const key = serviceKeyOf(serviceTypeId, planId, liveOccurrence(live));
+    const key = `${serviceTypeId}:${planId}:${liveOccurrence(live)}`;
     if (this.currentKey === key && this.current) return { kind: "same" };
 
     // Hold the open record through a serviceTimeId change WITHIN one live service
@@ -763,7 +758,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
         ? this.shouldHoldThroughServiceTimeChange(live, serviceTimeId, gapSinceLive)
         : null;
     if (verdict?.hold) return { kind: "held", verdict };
-    return { kind: "new", key, st, serviceTypeId, planId, date, serviceTimeId, verdict };
+    return { kind: "new", key, st, serviceTypeId, planId, date, verdict };
   }
 
   /**
@@ -793,9 +788,10 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
       this.captureOpeningItem(live); // backfill for a record that opened before any item was live
       return;
     }
-    if (place.verdict) this.announceHold(place.verdict, live, live.serviceTimeId);
+    if (place.verdict) this.announceHold(place.verdict, live);
     if (place.kind === "held") return;
-    const { key, st, serviceTypeId, planId, date, serviceTimeId } = place;
+    const { key, st, serviceTypeId, planId, date } = place;
+    const serviceTimeId = live.serviceTimeId;
 
     // Only one establish runs at a time (each recorder's busy latch), so what
     // was forgotten before this one began cannot matter to it.
@@ -921,6 +917,11 @@ export abstract class ItemRecorder<T extends ServiceRecord & { items: SequencedI
    *   - a tick it will not record (the mode dropped, SERVICE END passed): the
    *     open record's occurrence, since this is the tick that closes it
    *   - anything else: the tick's own
+   *
+   * Agreeing with the recorder includes its limits: an item that goes live early
+   * for the next service, more than SERVICE_GAP_MS before its start and after
+   * the previous record closed, reopens that record (see placeTick's hold), and
+   * this answers that record's occurrence too. docs/automation.md says so.
    */
   occurrenceFor(live: PcoLiveDTO): string {
     const current = this.current;

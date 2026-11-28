@@ -181,6 +181,25 @@ describe("oncePerService keys on the occurrence the recorders use", () => {
     assert.deepEqual(suppressed(), ["already fired this service"]);
   });
 
+  it("the tick that ends an overrunning 9am is the 9am's", async () => {
+    // The mode drops out of item at the 9am's end, with the live id already on
+    // the 11am. The recorder closes the 9am's record on that tick, after the
+    // engine has judged it, so the record that is still open is the answer.
+    await onceRule({ id: "pco.service-ended", params: {} });
+
+    await poll("2026-08-23T13:55:00.000Z", NINE, null);
+    await poll("2026-08-23T14:00:00.000Z", NINE, { id: "welcome", title: "Welcome" });
+    await poll("2026-08-23T15:20:00.000Z", ELEVEN, { id: "benediction", title: "Benediction" }); // held
+    await poll("2026-08-23T15:30:00.000Z", ELEVEN, null); // the 9am ends
+    assert.equal(fires(), 1, "the 9am's end runs the cue");
+
+    await poll("2026-08-23T16:00:00.000Z", ELEVEN, { id: "welcome", title: "Welcome" });
+    await poll("2026-08-23T17:30:00.000Z", ELEVEN, null); // the 11am ends
+
+    assert.deepEqual(suppressed(), []);
+    assert.equal(fires(), 2, "and so does the 11am's");
+  });
+
   it("a plan with no service time is not taken for the last one that had one", async () => {
     // The live id was remembered only when it was non-empty, so a plan PCO gave
     // no service time to inherited the previous service's id, and a cue that ran
