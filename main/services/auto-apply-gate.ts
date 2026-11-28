@@ -12,10 +12,11 @@
 //     a service, or between two, is what this is for, and Planning Center reports
 //     nothing live then.
 //
-// A scheduled hour declined only for a window leaves the update OWED: it applies at
-// the first check after the window closes, with nothing under way, rather than at
-// the next scheduled hour. A schedule that always falls in a window (Sunday 03:00
-// with a Thursday rehearsal) would otherwise never apply, and say nothing.
+// A scheduled hour declined for a window, or for a service under way, leaves the
+// update OWED: it applies at the first check with neither, rather than at the next
+// scheduled hour. A schedule that always falls in a window (Sunday 03:00 with a
+// Thursday rehearsal), or a slot a service ran over, would otherwise be lost for
+// the week, or never apply at all, and say nothing.
 //
 // Outside a window, with nothing under way, the scheduled hour applies, even while
 // Planning Center is not answering: waiting for it would hold every update for as
@@ -39,7 +40,7 @@ export interface AutoApplyInput {
   serviceLive: boolean;
   /** When the cached service window open now closes, or null outside one. */
   windowUntil: number | null;
-  /** An earlier scheduled hour was declined only for a window, and nothing has applied since. */
+  /** An earlier scheduled hour was declined for a window or a service under way, and nothing has applied since. */
   owed: boolean;
   /** `now` in the app's time zone. */
   now: Pick<ZonedParts, "weekday" | "hour">;

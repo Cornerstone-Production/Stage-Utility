@@ -3649,7 +3649,7 @@ export class StageController {
     next.hour = clampAutoUpdateHour(next.hour);
     next.dayOfWeek = clampAutoUpdateDay(next.dayOfWeek);
     console.log(`[stage-controller] setAutoUpdate →`, scrub(next));
-    if (next.mode === "manual") this.updateOwed = false;
+    if (next.mode === "manual") this.updateOwed = null;
     this.state = { ...this.state, autoUpdate: next };
     this.state = { ...this.state, autoUpdateWindow: this.autoUpdateWindowOf() };
     await settingsStore.patch({ autoUpdate: next });
@@ -3847,13 +3847,14 @@ export class StageController {
   }
 
   /**
-   * A scheduled hour was declined only because it fell in a service window, and
-   * nothing has applied since: the next check after the window closes applies it
-   * (auto-apply-gate.ts). In memory only. A restart drops it, and the next
+   * A scheduled hour was declined only because a service was under way or it fell
+   * in a service window, and nothing has applied since: the next check with
+   * neither applies it (auto-apply-gate.ts). Holds what last held it, so a change
+   * of reason is said once. In memory only. A restart drops it, and the next
    * scheduled hour decides again; an update applying is itself a restart, and a
    * store for one flag would be a backup entry for an observation.
    */
-  private updateOwed = false;
+  private updateOwed: "live" | "window" | null = null;
 
   private async updateCheckTick(now: Date = new Date()): Promise<void> {
     try {
@@ -3861,17 +3862,21 @@ export class StageController {
     // Once per available release, and only if somebody is connected to hear it.
     await announceIfNew(updater.getStatus());
       // Nothing to pull, or nothing automatic: nothing is owed.
-      if (this.state.autoUpdate.mode === "manual" || status.behind <= 0) this.updateOwed = false;
+      if (this.state.autoUpdate.mode === "manual" || status.behind <= 0) this.updateOwed = null;
       const decision = this.shouldAutoApply(status.behind, now);
-      // Said once, when it becomes owed: the hourly checks inside the window after it say nothing more.
-      if (!decision.apply && decision.why === "window" && !this.updateOwed) {
-        this.updateOwed = true;
-        const until = serviceWindow.activeUntil(now.getTime());
-        console.log(`[stage-controller] auto-update waits: its scheduled time fell inside a planned service window, open until ${scrub(clockWithDayOf(until ?? now.getTime(), now.getTime()))}; it applies at the first check after the window closes, with no service under way`);
+      // Said once per decision: when it becomes owed, and if what holds it changes. The hourly checks in between say nothing.
+      if (!decision.apply && (decision.why === "window" || decision.why === "live") && this.updateOwed !== decision.why) {
+        this.updateOwed = decision.why;
+        if (decision.why === "window") {
+          const until = serviceWindow.activeUntil(now.getTime());
+          console.log(`[stage-controller] auto-update waits: its scheduled time fell inside a planned service window, open until ${scrub(clockWithDayOf(until ?? now.getTime(), now.getTime()))}; it applies at the first check after the window closes, with no service under way`);
+        } else {
+          console.log(`[stage-controller] auto-update waits: a service is under way (${scrub(this.serviceActivity().reasons.join(", "))}); it applies at the first check after it is not, outside a service window`);
+        }
       }
       if (decision.apply) {
-        this.updateOwed = false;
-        if (decision.late) console.log("[stage-controller] auto-update applying late: the service window that held it at its scheduled time has closed");
+        this.updateOwed = null;
+        if (decision.late) console.log("[stage-controller] auto-update applying late: what held it at its scheduled time is over");
         else console.log("[stage-controller] auto-update window — applying update");
         // auto-install applies the build but leaves the restart to the operator,
         // so an update can land on Saturday and be taken on Monday.
@@ -3892,7 +3897,7 @@ export class StageController {
       updating: updater.phase === "updating",
       serviceLive: this.serviceActivity().active,
       windowUntil: serviceWindow.activeUntil(now.getTime()),
-      owed: this.updateOwed,
+      owed: this.updateOwed !== null,
       // The APP's zone. On a UTC host "Monday 03:00" fires at 22:00 Sunday in
       // Chicago — i.e. an unattended restart in the middle of an evening service.
       now: zonedParts(now.getTime()),

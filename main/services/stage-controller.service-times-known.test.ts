@@ -222,7 +222,7 @@ describe("an update a service window held at its scheduled time", () => {
     ctl.lastLive = null;
     ctl.liveStale = false;
     ctl.state = { ...ctl.state, autoUpdate: { mode: "auto-full", dayOfWeek: 0, hour: 3 } };
-    (stageController as unknown as { updateOwed: boolean }).updateOwed = false;
+    (stageController as unknown as { updateOwed: unknown }).updateOwed = null;
     serviceWindow.setWindows([{ open: OPEN, close: CLOSE }]);
     lines = captureConsole(t, "log", "warn", "error");
     const u = updater as unknown as Record<string, unknown>;
@@ -250,7 +250,7 @@ describe("an update a service window held at its scheduled time", () => {
     assert.equal(lines.filter((l) => l.startsWith("[stage-controller] auto-update waits:")).length, 1, "said again on every check inside the window");
     await tick(sunday(14));
     assert.equal(applied, 1, "the owed update did not apply after the window closed: the schedule never applies");
-    assert.ok(lines.includes("[stage-controller] auto-update applying late: the service window that held it at its scheduled time has closed"), lines.join("\n"));
+    assert.ok(lines.includes("[stage-controller] auto-update applying late: what held it at its scheduled time is over"), lines.join("\n"));
     // Applied: nothing is owed, and the next check off-schedule does nothing.
     await tick(sunday(15));
     assert.equal(applied, 1);
@@ -265,6 +265,20 @@ describe("an update a service window held at its scheduled time", () => {
     ctl.lastLive = { ...IN_AN_ITEM, mode: "none", currentItemId: null };
     await tick(sunday(16));
     assert.equal(applied, 1);
+  });
+
+  it("a scheduled time a service ran over is owed too, said once, and applies once the service is over", async (t) => {
+    setup(t);
+    serviceWindow.setWindows([]);
+    ctl.lastLive = IN_AN_ITEM;
+    await tick(sunday(3));
+    await tick(sunday(4));
+    assert.equal(applied, 0, "applied through a service under way");
+    const said = lines.filter((l) => l.startsWith("[stage-controller] auto-update waits:"));
+    assert.deepEqual(said, ["[stage-controller] auto-update waits: a service is under way (A PCO service is live); it applies at the first check after it is not, outside a service window"]);
+    ctl.lastLive = { ...IN_AN_ITEM, mode: "none", currentItemId: null };
+    await tick(sunday(5));
+    assert.equal(applied, 1, "the slot a service ran over was lost for the week");
   });
 
   it("is no longer owed once the mode goes manual, or nothing is behind", async (t) => {
@@ -290,7 +304,7 @@ describe("a refresh whose plan reads fail keeps the windows it last read", () =>
     ctl.lastLive = { mode: "none" };
     ctl.liveStale = false;
     ctl.state = { ...ctl.state, serviceTypeId: "1", planId: "p1", autoUpdate: { mode: "auto-full", dayOfWeek: null, hour: hourNow() } };
-    (stageController as unknown as { updateOwed: unknown }).updateOwed = false;
+    (stageController as unknown as { updateOwed: unknown }).updateOwed = null;
     t.after(() => {
       Object.assign(pco, real);
       serviceWindow.setWindows([]);
