@@ -195,14 +195,14 @@ const hasHomeLink = (c: HTMLElement) => !!c.querySelector('a[href="/"]');
  * Whether the screen draws ScreenTopBar's bar, and ONLY that bar.
  *
  * Throws when a screen draws two bars, or draws the brand strip's controls
- * (the way home, the settings QR link) outside the bar: that is a view with its
+ * (any link to "/" or "/settings": the way home, the settings QR) outside the bar: that is a view with its
  * own inline copy, which ignores Top bar, Lock and ?kiosk=1. Counting the bar
  * alone would pass it, which is what the old text-based check did.
  */
 function hasTopBar(c: HTMLElement): boolean {
   const bars = c.querySelectorAll('[data-testid="kiosk-top-bar"]').length;
   assert.ok(bars <= 1, `${bars} top bars drawn on one screen`);
-  const stray = [...c.querySelectorAll('a[aria-label="Back to home"], a[aria-label="Open settings in a new tab"]')]
+  const stray = [...c.querySelectorAll('a[href="/"], a[href="/settings"]')]
     .filter((a) => !a.closest('[data-testid="kiosk-top-bar"]'))
     .map((a) => a.getAttribute("aria-label"));
   assert.deepEqual(stray, [], "the screen draws brand-strip links outside ScreenTopBar, so Top bar, Lock and ?kiosk=1 do not reach them");

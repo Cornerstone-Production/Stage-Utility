@@ -72,8 +72,8 @@ after(async () => {
 
 const VIEWS = {
   "ServiceCue": () => React.createElement(ServiceCue, { showHeader: true }),
-  "Dashboard": () => React.createElement(DashboardView, { displayId: "d1" }),
-  "Stage display": () => React.createElement(StageDisplayView, { displayId: "d1" }),
+  "Dashboard": () => React.createElement(DashboardView),
+  "Stage display": () => React.createElement(StageDisplayView),
   "SPL rundown": () => React.createElement(SplRundownView, { displayId: "d1" }),
 } as const;
 
