@@ -9,12 +9,10 @@
 // Run with SENNHEISER_DEBUG=1 to log raw datagrams and confirm the real schema on-site.
 
 import { SennheiserSscBase, buildQuery, formatSscFrequency, numOrNull, readPath, clampBars } from "./sennheiser-ssc.js";
-import type { ConfigField } from "../../types/integrations.js";
 
 export class SennheiserEwG4 extends SennheiserSscBase {
   readonly id = "sennheiser-ewg4";
   readonly label = "Sennheiser ewG4 (SSC)";
-  readonly configSchema: ConfigField[] = [];
   protected readonly defaultChannels = 2;
   protected readonly defaultDeviceType = "receiver" as const;
 
