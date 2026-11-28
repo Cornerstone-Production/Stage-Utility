@@ -22,10 +22,7 @@ import { describe, it, beforeEach } from "node:test";
 import { CALENDAR_API_VERSION, pcoCalendarService } from "./pco-calendar-service.js";
 import { PCO_API_VERSION, pcoService } from "./pco-service.js";
 import { CALENDAR_REFRESH_MS } from "../types/calendar.js";
-
-type Requester = { request: (url: string, appId: string, secret: string) => Promise<unknown> };
-const svc = pcoCalendarService as unknown as Requester;
-const realRequest = svc.request;
+import { jsonApi, restorePcoRequest, stubPcoRequest } from "./fixtures/pco-request.js";
 
 const FROM = "2026-03-01T06:00:00Z";
 const TO = "2026-04-01T05:59:59Z";
@@ -58,11 +55,7 @@ let urls: string[] = [];
 
 /** Stub PCO with a fixed payload; records every url it was asked for. */
 function stub(data: unknown[], included: unknown[] = [TAG_TEAL, TAG_AMBER]) {
-  urls = [];
-  svc.request = async (url: string) => {
-    urls.push(url);
-    return { data, included };
-  };
+  urls = stubPcoRequest(pcoCalendarService, () => jsonApi(data, included)).urls;
 }
 
 /** The url the client actually asked for, with its percent-encoding undone —
@@ -277,14 +270,12 @@ describe("pagination", () => {
    * PCO's own.
    */
   function stubPaged(pages: unknown[][], nextOf: (page: number) => string | undefined): void {
-    urls = [];
-    svc.request = async (url: string) => {
-      urls.push(url);
+    urls = stubPcoRequest(pcoCalendarService, (url) => {
       const page = offsetOf(url) / 100;
       const data = pages[page] ?? [];
       const next = nextOf(page);
-      return { data, included: [TAG_TEAL, TAG_AMBER], ...(next ? { links: { next } } : {}) };
-    };
+      return { ...jsonApi(data, [TAG_TEAL, TAG_AMBER]), ...(next ? { links: { next } } : {}) };
+    }).urls;
   }
 
   /** A next-link on PCO's own origin at `offset`. */
@@ -481,8 +472,7 @@ describe("the API version pin", () => {
   /** Run `body` with fetch stubbed; returns the headers each request carried. */
   async function captureHeaders(body: () => Promise<unknown>): Promise<Headers[]> {
     const realFetch = globalThis.fetch;
-    const realStub = svc.request;
-    svc.request = realRequest; // the real transport, not the stub above
+    restorePcoRequest(pcoCalendarService); // the real transport, not the stub above
     const seen: Headers[] = [];
     globalThis.fetch = (async (_url: string, init: RequestInit) => {
       seen.push(new Headers(init.headers));
@@ -495,7 +485,7 @@ describe("the API version pin", () => {
       await body();
     } finally {
       globalThis.fetch = realFetch;
-      svc.request = realStub;
+      restorePcoRequest(pcoCalendarService);
     }
     return seen;
   }
@@ -605,5 +595,5 @@ describe("the event-instance cache against the server's own refresh", () => {
 // this is belt-and-braces rather than load-bearing — but the stub is a module
 // singleton, and leaving one installed is not a thing to rely on a runner for.
 process.on("exit", () => {
-  svc.request = realRequest;
+  restorePcoRequest(pcoCalendarService);
 });

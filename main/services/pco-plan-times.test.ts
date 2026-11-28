@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import { describe, it, beforeEach } from "node:test";
 
 import { pcoService } from "./pco-service.js";
+import { jsonApi, restorePcoRequest, stubPcoRequest } from "./fixtures/pco-request.js";
 
 /** One plan time as PCO returns it. */
 function planTime(id: string, timeType: string, startsAt: string, endsAt: string | null = null) {
@@ -30,18 +31,10 @@ const TIMES = [
   planTime("t5", "service", "2026-08-09T99:99:99Z", null), // unparseable, kept as-is
 ];
 
-type Requester = { request: (url: string, appId: string, secret: string) => Promise<unknown> };
-const svc = pcoService as unknown as Requester;
-const realRequest = svc.request;
-
 let urls: string[] = [];
 
 function stubRequests() {
-  urls = [];
-  svc.request = async (url: string) => {
-    urls.push(url);
-    return { data: TIMES };
-  };
+  urls = stubPcoRequest(pcoService, () => jsonApi(TIMES)).urls;
 }
 
 function planTimeUrls(): string[] {
@@ -96,10 +89,9 @@ describe("plan_times is fetched once", () => {
   });
 
   it("drops a time with no start rather than carrying a null through", async () => {
-    svc.request = async (url: string) => {
-      urls.push(url);
-      return { data: [...TIMES, { id: "t6", attributes: { name: "x", time_type: "service", starts_at: null, ends_at: null } }] };
-    };
+    urls = stubPcoRequest(pcoService, () =>
+      jsonApi([...TIMES, { id: "t6", attributes: { name: "x", time_type: "service", starts_at: null, ends_at: null } }]),
+    ).urls;
     const got = await pcoService.listPlanTimes("app", "secret", "11", "21");
     assert.ok(!got.some((t) => t.startsAt == null));
   });
@@ -108,5 +100,5 @@ describe("plan_times is fetched once", () => {
 // Put the real requester back, so this file cannot poison anything importing
 // the same singleton later in the run.
 process.on("exit", () => {
-  svc.request = realRequest;
+  restorePcoRequest(pcoService);
 });

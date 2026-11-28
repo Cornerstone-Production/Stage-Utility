@@ -12,10 +12,7 @@ import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
 
 import { pcoService } from "./pco-service.js";
-
-type Requester = { request: (url: string, appId: string, secret: string) => Promise<unknown> };
-const svc = pcoService as unknown as Requester;
-const realRequest = svc.request;
+import { jsonApi, restorePcoRequest, stubPcoRequest } from "./fixtures/pco-request.js";
 
 /** An Item as PCO returns it, pointing at an arrangement (or at none). */
 function itemNode(id: string, sequence: number, arrangementId: string | null) {
@@ -35,17 +32,13 @@ const arrangement = (id: string, attributes: Record<string, unknown>) => ({ id, 
 let urls: string[] = [];
 
 function stub(data: unknown[], included: unknown[]) {
-  urls = [];
-  svc.request = async (url: string) => {
-    urls.push(url);
-    return { data, included };
-  };
+  urls = stubPcoRequest(pcoService, () => jsonApi(data, included)).urls;
 }
 
 describe("a plan item's meter", () => {
   beforeEach(() => {
     pcoService.clearCache();
-    svc.request = realRequest;
+    restorePcoRequest(pcoService);
   });
 
   it("is the included arrangement's meter, beside its bpm and name", async () => {
