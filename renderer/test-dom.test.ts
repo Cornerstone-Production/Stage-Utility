@@ -211,7 +211,7 @@ describe("the opt-in platform stubs", () => {
   test("asking for them installs both, and the teardown takes them away again", () => {
     const off = installDom(undefined, { intersectionObserver: true, matchMedia: true });
     try {
-      const observer = new (g.IntersectionObserver as new (cb: () => void) => { observe(el: unknown): void; disconnect(): void })(() => {});
+      const observer = new (g.IntersectionObserver as new (cb: () => void) => { observe: (el: unknown) => void; disconnect: () => void })(() => {});
       observer.observe({});
       observer.disconnect();
       assert.equal(win().matchMedia?.("(prefers-color-scheme: dark)").matches, false);

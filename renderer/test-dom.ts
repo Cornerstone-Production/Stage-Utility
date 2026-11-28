@@ -150,8 +150,9 @@ export function installDom(
     exposed.push("IntersectionObserver");
   }
   if (matchMedia) {
-    win.matchMedia = () => ({
+    win.matchMedia = (query: string) => ({
       matches: false,
+      media: query,
       addEventListener() {},
       removeEventListener() {},
       addListener() {},
