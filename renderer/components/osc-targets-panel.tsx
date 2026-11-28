@@ -1,5 +1,6 @@
 import { invoke as ipc, onNotification } from "../lib/api";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { useNameDraft } from "@renderer/lib/use-name-draft";
 import { useEffect, useState, type ChangeEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -49,7 +50,8 @@ function TargetBadge({ connection, message }: { connection: ConnectionState; mes
 }
 
 function TargetCard({ target, onChange }: { target: OscTarget; onChange: (t: OscTarget[]) => void }) {
-  const [name, setName] = useState(target.name);
+  // A refused rename, or an emptied field, puts the saved name back (useNameDraft).
+  const name = useNameDraft(target.name, (renamed) => patch({ name: renamed }));
   const [host, setHost] = useState(String(target.config.host ?? ""));
   const [port, setPort] = useState<number>(Number(target.config.port ?? 8000));
   const [sub, setSub] = useState(String(target.config.subscribeAddress ?? ""));
@@ -57,14 +59,15 @@ function TargetCard({ target, onChange }: { target: OscTarget; onChange: (t: Osc
   const [testResult, setTestResult] = useState<{ ok: boolean; message?: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
 
-  useResyncOn([target.name], () => setName(target.name));
-
-  async function patch(p: Record<string, unknown>) {
+  /** Resolves false when the save was refused, after saying so. */
+  async function patch(p: Record<string, unknown>): Promise<boolean> {
     try {
       const next = await ipc<OscTarget[]>("osc:updateTarget", { id: target.id, patch: p });
       onChange(next);
+      return true;
     } catch (err) {
       toast.error(`Failed to save: ${errorMessage(err)}`);
+      return false;
     }
   }
   const patchConfig = (p: Record<string, unknown>) => patch({ config: p });
@@ -93,9 +96,9 @@ function TargetCard({ target, onChange }: { target: OscTarget; onChange: (t: Osc
     <div className="flex flex-col gap-2.5">
       <div className="flex items-center gap-2">
         <Input
-          value={name}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
-          onBlur={() => name.trim() !== target.name && patch({ name: name.trim() || target.name })}
+          value={name.draft}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => name.setDraft(e.target.value)}
+          onBlur={name.commit}
           placeholder="Target name"
           className="w-40 min-w-0"
           aria-label="Target name"

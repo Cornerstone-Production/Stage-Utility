@@ -40,7 +40,14 @@ export function useNameDraft(
     }
     const sent = draft;
     const restore = () => setDraft((now) => (now === sent ? storedNow.current : now));
-    void Promise.resolve(onRename(trimmed)).then(
+    let answer: RenameResult;
+    try {
+      answer = onRename(trimmed);
+    } catch (err) {
+      restore();
+      throw err;
+    }
+    void Promise.resolve(answer).then(
       (ok) => {
         if (ok === false) restore();
       },

@@ -5,6 +5,8 @@ import { CheckCircle2Icon, Loader2Icon, PlusIcon, TrashIcon, XCircleIcon } from 
 import { invoke, onNotification } from "../lib/api";
 import { Button, InfoHint, Input, NumberInput, Separator, Status, Switch, toast } from "./ui";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { useNameDraft } from "@renderer/lib/use-name-draft";
+import { errorMessage } from "@main/services/errors";
 import { WIDE_PANEL_ATTR } from "./integration-dialog-size";
 
 const DEFAULT_PORT = 7788;
@@ -35,22 +37,30 @@ function TargetBadge({ connection, message }: { connection: ConnectionState; mes
 }
 
 function TargetCard({ target, onChanged }: { target: RossTalkTarget; onChanged: () => void }) {
-  const [name, setName] = useState(target.name);
+  // A refused rename, or an emptied field, puts the saved name back (useNameDraft).
+  const name = useNameDraft(target.name, (renamed) => patch({ name: renamed }));
   const [host, setHost] = useState(String(target.config.host ?? ""));
   const [port, setPort] = useState<number>(Number(target.config.port ?? DEFAULT_PORT));
   const [family, setFamily] = useState<RossTalkFamily>(target.config.family ?? "carbonite");
   const [testing, setTesting] = useState(false);
 
   useResyncOn([target], () => {
-    setName(target.name);
     setHost(String(target.config.host ?? ""));
     setPort(Number(target.config.port ?? DEFAULT_PORT));
     setFamily(target.config.family ?? "carbonite");
   });
 
-  async function patch(patchBody: Record<string, unknown>) {
-    await invoke("rosstalk:updateTarget", { id: target.id, patch: patchBody });
-    onChanged();
+  /** Resolves false when the save was refused, after saying so. A refusal used to
+   *  reject unhandled: no toast, and the field kept a value the device did not have. */
+  async function patch(patchBody: Record<string, unknown>): Promise<boolean> {
+    try {
+      await invoke("rosstalk:updateTarget", { id: target.id, patch: patchBody });
+      onChanged();
+      return true;
+    } catch (err) {
+      toast.error(`Failed to save: ${errorMessage(err)}`);
+      return false;
+    }
   }
 
   async function test() {
@@ -68,9 +78,9 @@ function TargetCard({ target, onChanged }: { target: RossTalkTarget; onChanged: 
     <div className="flex flex-col gap-2.5 rounded-lg border border-line bg-surface p-3">
       <div className="flex items-center gap-2">
         <Input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          onBlur={() => name !== target.name && void patch({ name })}
+          value={name.draft}
+          onChange={(e) => name.setDraft(e.target.value)}
+          onBlur={name.commit}
           className="h-7 flex-1 min-w-0 text-footnote font-medium"
           aria-label="Target name"
         />
