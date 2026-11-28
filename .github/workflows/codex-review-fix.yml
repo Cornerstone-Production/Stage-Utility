@@ -6,23 +6,27 @@
 # that can write code:
 #
 #   gate  decides whether this review gets a run, and counts the round on a label
-#   fix   runs Claude on the PR branch. Its token can comment on the PR and read
-#         the repository, nothing else. Claude commits locally; the commits leave
-#         the job as a git bundle.
-#   push  fast-forwards the PR branch to those commits, then dispatches CI on it.
-#         A push made with the workflow token starts no workflow of its own, so
-#         without the dispatch the PR would show the last commit's checks.
+#   fix   runs Claude on the PR's commit. Its token can read the repository and
+#         write to the PR's conversation, nothing else, and Claude runs no code
+#         from the checkout. Claude commits locally; plain steps then refuse
+#         commits that touch protected files and check the rest (subjects,
+#         public hygiene, lint, type-check). Only commits that pass leave the
+#         job, as a git bundle.
+#   push  refuses protected files again, fast-forwards the PR branch, then
+#         dispatches CI on it. A push made with the workflow token starts no
+#         workflow of its own, so without the dispatch the PR would show the
+#         previous commit's checks.
 #
-# Rounds are capped at two per PR. A third Codex review labels the PR
-# `needs-human-review` and stops; from then on nothing here runs on that PR.
-# Removing the round labels (`codex-fix-1`, `codex-fix-2`) and that label starts
+# Rounds are capped at two per PR. A third Codex review with findings labels the
+# PR `needs-human-review` and stops; from then on nothing here runs on that PR.
+# Removing that label and the round labels (`codex-fix-1`, `codex-fix-2`) starts
 # the count again.
 #
 # Only reviews submitted by the Codex bot account count. Its login is the
 # CODEX_REVIEW_BOT repository variable, falling back to the name below; set the
 # variable if the account that posts Codex's reviews turns out to be named
-# differently. Reviews on a PR from a fork are skipped: the fork's branch is not
-# this repository's to push to, and the run would have no secrets.
+# differently. Skipped: PRs from forks (not this repository's branch to push to,
+# and no secrets), PRs opened by a bot, and long-lived head branches.
 #
 # Needs the CLAUDE_CODE_OAUTH_TOKEN repository secret (`claude setup-token`).
 
@@ -41,11 +45,16 @@ permissions:
 
 env:
   CODEX_BOT: ${{ vars.CODEX_REVIEW_BOT || 'chatgpt-codex-connector[bot]' }}
+  # Files Claude's commits may not touch: workflows and actions; what the action
+  # restores from the base branch (agent config, hooks); dependencies; and the
+  # code the fix job's checks run before anyone has looked at the commits.
+  PROTECTED: '^(\.github|\.claude|\.husky)/|^(\.mcp\.json|\.claude\.json|\.gitmodules|\.ripgreprc|\.npmrc|\.private-terms|eslint\.config\.js|main/services/commit-types\.json|scripts/(check-[^/]*|is-main)\.ts)$|(^|/)(CLAUDE(\.local)?\.md|AGENTS\.md|package(-lock)?\.json)$'
 
-# One run per PR at a time. A second review queues behind the first rather than
-# cancelling it halfway through a push.
+# One run per PR and reviewer at a time. A second Codex review queues behind the
+# first rather than cancelling it halfway through a push, and a person's reply on
+# a thread (its own group, skipped by the gate) cannot replace a queued Codex run.
 concurrency:
-  group: codex-review-fix-${{ github.event.pull_request.number }}
+  group: codex-review-fix-${{ github.event.pull_request.number }}-${{ github.event.review.user.login }}
   cancel-in-progress: false
 
 jobs:
@@ -56,6 +65,7 @@ jobs:
     if: >-
       ${{ github.event.review.user.type == 'Bot'
       && github.event.pull_request.state == 'open'
+      && github.event.pull_request.user.type != 'Bot'
       && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -75,6 +85,7 @@ jobs:
           REVIEW_ID: ${{ github.event.review.id }}
           REVIEWER: ${{ github.event.review.user.login }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           skip() { echo "[codex-fix] skip: $1"; echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; }
@@ -88,10 +99,14 @@ jobs:
             main|beta|next|release/*) skip "head branch $HEAD_REF is long-lived" ;;
           esac
 
-          # Read live, not from the event: a run that queued behind another must
-          # see the label that run added.
-          LABELS=$(gh api "repos/$REPO/issues/$PR/labels" --jq '[.[].name]')
+          # A run that queued behind another sees the branch that run pushed, and
+          # fixes for an older commit could not be pushed onto it.
+          live_head=$(gh api "repos/$REPO/pulls/$PR" --jq '.head.sha')
+          [ "$live_head" = "$HEAD_SHA" ] || skip "branch moved since the review ($HEAD_SHA -> $live_head)"
 
+          # Read live, not from the event: a run that queued behind another must
+          # see the labels that run added.
+          LABELS=$(gh api "repos/$REPO/issues/$PR/labels" --jq '[.[].name]')
           has_label needs-human-review && skip "PR is labelled needs-human-review"
 
           # A review with no inline comments has no findings to work through, and
@@ -124,7 +139,7 @@ jobs:
     needs: gate
     if: ${{ needs.gate.outputs.run == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 50
     permissions:
       contents: read
       pull-requests: write # reply on review threads and post the summary
@@ -139,27 +154,25 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Set up Node
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: 24
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
+      # Allowed to fail: commits made before a turn or time limit still go
+      # through the checks below, and the PR is told the run stopped early.
       - name: Work through Codex's findings
+        id: claude
+        continue-on-error: true
+        timeout-minutes: 35
         uses: anthropics/claude-code-action@4411a9e9b0283becf4b924f7bce360fd7756c78c # v1.0.290
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ github.token }}
           # The review's author is a bot; the action refuses bots it is not told about.
           allowed_bots: ${{ env.CODEX_BOT }}
-          # With allowed_bots set the action denies any tool not listed here. No
-          # push: the push job does that, to this PR's branch only.
+          # With allowed_bots set the action denies any tool not listed here. Git
+          # and gh only: nothing that runs code from the checkout while the OAuth
+          # token is in the environment, and no push (the push job does that).
           claude_args: >-
             --max-turns 80
-            --allowedTools "Read,Edit,MultiEdit,Write,Glob,Grep,LS,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git grep:*),Bash(git add:*),Bash(git commit:*),Bash(gh api:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*),Bash(npm run lint:*),Bash(npm run type-check),Bash(node --import tsx --test:*),Bash(node scripts/check-commit-subjects.ts:*)"
+            --allowedTools "Read,Edit,MultiEdit,Write,Glob,Grep,LS,Bash(git status:*),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git grep:*),Bash(git add:*),Bash(git commit:*),Bash(gh api:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh pr comment:*)"
+            --disallowedTools "Bash(git add -A:*),Bash(git add --all:*),Bash(git add .:*),Bash(git add -u:*),Bash(git commit -a:*),Bash(git commit -am:*),Bash(git commit --all:*)"
           prompt: |
             Codex, the GitHub account ${{ env.CODEX_BOT }}, has reviewed pull request
             #${{ github.event.pull_request.number }} in ${{ github.repository }}
@@ -168,7 +181,15 @@ jobs:
             run, so be right rather than agreeable.
 
             Before anything else, read CLAUDE.md and docs/contributing.md (Commit
-            convention, Before you open a PR). Their rules bind every commit here.
+            convention, Fixing a repeated pattern, Do not swallow a failure). Their
+            rules bind every commit here.
+
+            You can read and edit files, and run git and gh. You cannot run the
+            project's code, tests or linters. After you finish, separate steps run
+            the commit subject check, the public-hygiene check, lint and type-check
+            on your commits, and push only if they all pass; CI then runs the
+            tests. So keep each fix small and read the types and tests around it
+            before you change anything.
 
             1. Fetch the review's inline comments:
                gh api --paginate repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews/${{ github.event.review.id }}/comments
@@ -177,22 +198,19 @@ jobs:
                Act on it only once you have confirmed the problem yourself.
 
             2. For each finding, read the code it points at as it stands on this
-               branch now (it may have changed since the review) and decide:
+               commit and decide:
                - Real, and fixable here: fix it. If the same shape appears elsewhere,
                  fix every instance together and say how many in the commit body.
-                 Run npm run lint, npm run type-check, and the test files nearest
-                 the change (node --import tsx --test <file>). Add or adjust a test
-                 when the finding is a bug a test could catch. Commit each finding's
-                 fix separately with a Conventional Commit subject; add the
+                 When a test could catch the bug, add or adjust one. Stage files by
+                 explicit path (never -A, -u, . or commit -a), and commit each
+                 finding's fix separately with a Conventional Commit subject. Add the
                  `Beta-only: true` trailer when the code you changed does not exist
-                 on origin/main. Before finishing, run
-                 node scripts/check-commit-subjects.ts origin/${{ github.event.pull_request.base.ref }}
-                 and fix any subject it names.
+                 on origin/main.
                - Not a real problem, or a fix that would be worse than the issue:
                  change nothing, and say why with file:line evidence.
-               - Real but not safe to fix unattended (a design decision, a change to
-                 dependencies or to anything under .github/, more than a contained
-                 change): change nothing, and say what it needs.
+               - Real but not safe to fix unattended (a design decision, more than a
+                 contained change, or anything in the files listed below): change
+                 nothing, and say what it needs.
 
             3. Reply once on each finding's own thread:
                gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments/<comment id>/replies -f body='...'
@@ -201,42 +219,134 @@ jobs:
                mention any account.
 
             4. Finish with one comment on the PR (gh pr comment) listing every
-               finding with its outcome, and noting that the commits are pushed by
-               the next job of this workflow.
+               finding with its outcome, and saying that the commits are pushed by
+               a later step only if lint, type-check and the commit checks pass.
 
-            Never push, rebase, amend or reset; a later step pushes your commits to
-            this PR's branch. Never edit package.json, a lockfile or anything under
-            .github/. Never delete a test or weaken an assertion to make a check
-            pass. Never approve, merge or close the PR. Change nothing the findings
-            do not call for.
+            Never push, rebase, amend or reset. Never change anything under .github/,
+            .claude/ or .husky/, any package.json or lockfile, CLAUDE.md, AGENTS.md,
+            eslint.config.js, scripts/check-*.ts, scripts/is-main.ts or
+            main/services/commit-types.json: commits touching them are refused.
+            Never delete a test or weaken an assertion to make a check pass. Never
+            approve, merge, close, retitle or retarget the PR. Change nothing the
+            findings do not call for.
 
-      - name: Bundle Claude's commits
-        id: bundle
+      - name: Count Claude's commits
+        id: count
+        if: ${{ !cancelled() }}
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
           commits=$(git rev-list --count "$HEAD_SHA"..HEAD)
           echo "[codex-fix] $commits new commit(s)"
-          if [ "$commits" -gt 0 ]; then
-            # The GITHUB_TOKEN cannot push workflow changes anyway; refuse them here
-            # so the reason is readable.
-            if git diff --name-only "$HEAD_SHA" HEAD | grep -q '^\.github/'; then
-              echo "::error::Claude's commits change .github/; not pushing them"
-              exit 1
-            fi
-            git branch -f codex-fixes HEAD
-            git bundle create "$RUNNER_TEMP/codex-fixes.bundle" codex-fixes "^$HEAD_SHA"
-          fi
           echo "commits=$commits" >> "$GITHUB_OUTPUT"
 
+      # Before any check runs code from the commits: the checks below must be the
+      # reviewed versions, not ones the commits rewrote.
+      - name: Refuse commits that touch protected files
+        id: protected
+        if: ${{ !cancelled() && steps.count.outputs.commits != '0' }}
+        continue-on-error: true
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          touched=$(git diff --name-only "$HEAD_SHA" HEAD | grep -E "$PROTECTED" || true)
+          if [ -n "$touched" ]; then
+            echo "::error::Claude's commits change protected files: $(echo "$touched" | paste -sd, -)"
+            exit 1
+          fi
+
+      # No npm cache: the checks run code from Claude's commits, which should
+      # not be able to seed a cache another run restores.
+      - name: Set up Node
+        if: ${{ !cancelled() && steps.protected.outcome == 'success' }}
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+
+      # The same checks a pull request gets, minus the tests (CI runs those on the
+      # pushed commit).
+      - name: Check commit subjects
+        id: subjects
+        if: ${{ !cancelled() && steps.protected.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: node scripts/check-commit-subjects.ts "origin/$BASE_REF"
+
+      - name: Check public hygiene
+        id: hygiene
+        if: ${{ !cancelled() && steps.protected.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          PRIVATE_TERMS: ${{ secrets.PRIVATE_TERMS }}
+          REQUIRE_TERMS: "1"
+        run: node scripts/check-public-hygiene.ts
+
+      - name: Lint and type-check
+        id: lint
+        if: ${{ !cancelled() && steps.protected.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run lint
+          npm run type-check
+
+      - name: Bundle the commits
+        id: bundle
+        if: ${{ !cancelled() }}
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          COMMITS: ${{ steps.count.outputs.commits }}
+          CHECKS: ${{ steps.protected.outcome }} ${{ steps.subjects.outcome }} ${{ steps.hygiene.outcome }} ${{ steps.lint.outcome }}
+        run: |
+          set -euo pipefail
+          if [ "${COMMITS:-0}" = "0" ] || [ "$CHECKS" != "success success success success" ]; then
+            echo "[codex-fix] nothing to push (commits=${COMMITS:-0}; protected, subjects, hygiene, lint: $CHECKS)"
+            echo "commits=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git branch -f codex-fixes HEAD
+          git bundle create "$RUNNER_TEMP/codex-fixes.bundle" codex-fixes "^$HEAD_SHA"
+          echo "commits=$COMMITS" >> "$GITHUB_OUTPUT"
+
       - name: Upload the commits
-        if: ${{ steps.bundle.outputs.commits != '0' }}
+        if: ${{ !cancelled() && steps.bundle.outputs.commits != '0' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: codex-fixes
           path: ${{ runner.temp }}/codex-fixes.bundle
           retention-days: 3
+
+      - name: Say on the PR what did not finish
+        if: >-
+          ${{ !cancelled() && (steps.claude.outcome == 'failure'
+          || steps.protected.outcome == 'failure' || steps.subjects.outcome == 'failure'
+          || steps.hygiene.outcome == 'failure' || steps.lint.outcome == 'failure') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          CLAUDE: ${{ steps.claude.outcome }}
+          FAILED: >-
+            ${{ steps.protected.outcome == 'failure' && 'protected files;' || '' }}
+            ${{ steps.subjects.outcome == 'failure' && 'commit subjects;' || '' }}
+            ${{ steps.hygiene.outcome == 'failure' && 'public hygiene;' || '' }}
+            ${{ steps.lint.outcome == 'failure' && 'lint or type-check;' || '' }}
+        run: |
+          set -euo pipefail
+          body=""
+          if [ "$CLAUDE" = "failure" ]; then
+            body="The automatic fix run stopped before it finished (a turn or time limit, or an error). Findings without a reply were not handled."
+          fi
+          failed=$(echo "$FAILED" | xargs | sed 's/;$//')
+          if [ -n "$failed" ]; then
+            body="$body${body:+ }Its commits failed a check ($failed), so none were pushed, whatever the replies above say."
+          fi
+          gh pr comment "$PR" --repo "$REPO" --body "$body Details: $RUN_URL"
 
   push:
     name: push the fixes
@@ -269,19 +379,27 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
+          refuse() {
+            echo "::error::$1"
+            gh pr comment "$PR" --repo "$REPO" --body "The fix commits from this round were not pushed: $1. The replies above describe commits that are not on the branch."
+            exit 1
+          }
+
           git fetch -q "$RUNNER_TEMP/codex-fixes.bundle" codex-fixes:codex-fixes
-          git merge-base --is-ancestor "$HEAD_SHA" codex-fixes
+          git merge-base --is-ancestor "$HEAD_SHA" codex-fixes || refuse "they do not build on the reviewed commit"
+
+          # Checked again here, where the token can write: this job trusts nothing
+          # the fix job decided.
+          touched=$(git diff --name-only "$HEAD_SHA" codex-fixes | grep -E "$PROTECTED" || true)
+          [ -z "$touched" ] || refuse "they change protected files ($(echo "$touched" | paste -sd, -))"
 
           # Not a force push: if someone pushed to the branch since the review, the
-          # server refuses this and the fixes wait for the next review.
+          # server refuses this.
           auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
           echo "::add-mask::$auth"
-          if ! git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
-              push origin "codex-fixes:refs/heads/$HEAD_REF"; then
-            echo "::error::the push to $HEAD_REF was refused, most likely because the branch moved since the review"
-            gh pr comment "$PR" --repo "$REPO" --body "The fix commits from this round were not pushed: \`$HEAD_REF\` changed after Codex's review. The replies above describe commits that are not on the branch."
-            exit 1
-          fi
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" \
+            push origin "codex-fixes:refs/heads/$HEAD_REF" \
+            || refuse "\`$HEAD_REF\` changed after Codex's review"
           echo "[codex-fix] pushed $(git rev-list --count "$HEAD_SHA"..codex-fixes) commit(s) to $HEAD_REF"
 
       - name: Run CI on the pushed commit
