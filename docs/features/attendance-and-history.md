@@ -25,8 +25,9 @@ moves to match (never earlier, so an end set in Edit times stays). A rundown
 nothing measured is left as it is, and so is a record holding more than one such
 item, or an item with no length that was not on air at the end. While an
 attendance record cannot be read, nothing is repaired and it waits for the next
-start. Rebuild from raw keeps an unknown length unknown and then repairs it the
-same way. Each record it changes is copied first, as it was, to a
+start. Records that arrive later get the same repair: an archive import repairs
+the services it brings in, and Rebuild from raw keeps an unknown length unknown
+and then repairs it. Each record it changes is copied first, as it was, to a
 `.before-repair` file beside it in `spl-history/` or `service-timeline/`, and each
 record with the gap it changes or leaves is named on a `[reconcile]` line. Open
 records are not touched.

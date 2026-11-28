@@ -547,7 +547,11 @@ The import answers what it did and, separately, what it could not do:
 `rawFilesFailed` names archive members it could not write, and
 `itemTimeEditsDropped` names per service any item time corrections whose run
 lost the merge — the local run wins, so the correction describing the run that
-did not survive goes with it. Both are empty on a clean import.
+did not survive goes with it. Both are empty on a clean import. `gapsRepaired`
+names imported services whose records a boot-time close had left half-closed,
+repaired by the boot repair's rule (see
+[What gets recorded](../features/attendance-and-history.md#what-gets-recorded)),
+and `gapRepairFailed` is why it could not run or save, else `null`.
 
 **`/api/update/apply` and `/api/update/track` answer `409`** —
 `{error: "locked", locked: true, reasons}` — while a service is live or any

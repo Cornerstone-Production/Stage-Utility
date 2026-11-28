@@ -526,6 +526,24 @@ describe("gaps something else hid, or brought in after the boot repair ran", () 
     const after = await serviceTimelineStore.get(id.serviceKey);
     assert.deepEqual([after?.items[1]?.endedAt, after?.items[1]?.actualDurationSec], [iso(CRASH), (CRASH - MESSAGE_LIVE) / 1000]);
   });
+
+  it("repairs records an archive import brings in after the boot repair ran", async () => {
+    const id = identity();
+    await serviceTimelineStore.upsert(oldClosedTimeline(id));
+    await splHistoryStore.upsert(oldClosedSpl(id));
+    await attendanceStore.upsert(attendance(id, CRASH));
+    const { buildArchive, importArchive } = await import("./archive/archive-bundle.js");
+    const zip = await buildArchive();
+    for (const store of [serviceTimelineStore, splHistoryStore, attendanceStore]) await store.delete(id.serviceKey);
+    await historyRepairsStore.save({ "old-boot-close-gaps": iso(T0) }); // ran before this import
+
+    const result = await importArchive(zip);
+    assert.ok(result.added.includes(id.serviceKey));
+    const tl = await serviceTimelineStore.get(id.serviceKey);
+    assert.deepEqual([tl?.items[1]?.endedAt, tl?.items[1]?.actualDurationSec], [iso(CRASH), (CRASH - MESSAGE_LIVE) / 1000]);
+    assert.equal((await splHistoryStore.get(id.serviceKey))?.items[1]?.endedAt, iso(CRASH));
+    assert.ok(result.gapsRepaired?.includes(id.serviceKey), "the import result does not say which records it repaired");
+  });
 });
 
 describe("a history store not all read", () => {
