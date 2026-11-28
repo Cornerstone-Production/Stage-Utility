@@ -111,6 +111,8 @@ import { boardsChangedState } from "./boards-changed.js";
 import { homeSnoozes } from "./home-snoozes.js";
 import { TRENDS_PREFS_CHANNEL } from "../types/trends-prefs.js";
 import { trendsPrefs } from "./trends-prefs.js";
+import { SERVICECUE_LISTS_CHANNEL } from "../types/servicecue-lists.js";
+import { serviceCueListsState } from "./servicecue-lists-changed.js";
 import { calendarBroadcaster, CALENDAR_CHANNEL } from "./calendar-broadcaster.js";
 import { plural } from "./plural.js";
 import { SSE_HEARTBEAT_FRAME, SSE_HEARTBEAT_MS } from "../types/sse.js";
@@ -595,6 +597,11 @@ export function writeHelloBurst(res: EventSink): void {
   // default until somebody chose again.
   // The LITERAL with `satisfies`, as above.
   sseWrite(res, "trends:prefs" satisfies typeof TRENDS_PREFS_CHANNEL, trendsPrefs.state());
+  // The last save of the ServiceCue layouts or roles. A screen re-reads both when a
+  // frame reaches it, and this one is what tells a screen that lost its stream across
+  // a save (a reconnect, a restart, which a restore always is) to read them again.
+  // The LITERAL with `satisfies`, as above.
+  sseWrite(res, "servicecue:lists" satisfies typeof SERVICECUE_LISTS_CHANNEL, serviceCueListsState());
 }
 
 /** The hello burst as frames, for a client on the polling transport. */

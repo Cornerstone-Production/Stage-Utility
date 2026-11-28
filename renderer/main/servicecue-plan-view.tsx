@@ -21,10 +21,10 @@ import { pcoConnected } from "./use-stage-state";
 import { appZoneOf } from "../lib/app-zone";
 import { invoke } from "../lib/api";
 import { useFailedReads } from "../lib/use-failed-reads";
+import { useLiveServiceCueLists } from "../lib/use-live-servicecue-lists";
 import { useResyncOn } from "../lib/use-resync-on";
 import { ALL_COLUMNS_SLUG, findLayout, layoutSlug, slugOf, slugify } from "@main/services/servicecue-slug";
 import { ALL_COLUMNS_LAYOUT_ID, serviceCueUrl } from "./servicecue-index-view";
-import type { CategoryRole } from "../../main/types/servicecue-roles.js";
 
 /** The pages that open a rundown, which its back arrow may return to. */
 const SERVICECUE_LAUNCHERS = ["/servicecue", "/servicecue/manage"] as const;
@@ -41,12 +41,6 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
   const { state, error: stateError, pcoLive } = useDashboardState();
   const [types, setTypes] = useState<ServiceTypeDTO[]>([]);
   const [rundown, setRundown] = useState<ServiceCueRundownDTO | null>(null);
-  // Null until the layouts have been read, so an address naming none is said only once
-  // that is known.
-  const [layouts, setLayouts] = useState<ServiceCueLayout[] | null>(null);
-  // Null until the roles have been read: All columns appends the categories in no role, and
-  // until it knows the roles it cannot know which those are.
-  const [roles, setRoles] = useState<CategoryRole[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // On the public page, what the church has not sent yet (see notPublishedYet): said to a visitor, not as a failure.
   const [typesNotSent, setTypesNotSent] = useState(false);
@@ -102,31 +96,14 @@ export function ServiceCuePlan({ serviceTypeParam, layoutParam }: { serviceTypeP
     const stop = refreshWhileMounted(load, ["service-types"], 60_000);
     return () => { cancelled = true; stop(); };
   }, [pcoConfigured, fail, clear]);
-  // Same reasoning for the layouts and roles: a transient failure at boot left
-  // them empty for the life of the page (see servicecue-view.tsx's comment on this
-  // exact shape).
-  useEffect(() => {
-    let cancelled = false;
-    const load = () => {
-      invoke<ServiceCueLayout[]>("servicecue:listLayouts")
-        .then((l) => {
-          if (cancelled) return;
-          setLayouts(l);
-          clear("layouts");
-        })
-        .catch((err: unknown) => { if (!cancelled) fail("layouts", "the ServiceCue layouts", err); });
-      invoke<CategoryRole[]>("servicecue:listRoles")
-        .then((r) => {
-          if (cancelled) return;
-          setRoles(r);
-          clear("roles");
-        })
-        .catch((err: unknown) => { if (!cancelled) fail("roles", "the category roles", err); });
-    };
-    load();
-    const stop = refreshWhileMounted(load, ["servicecue-layouts", "servicecue-roles"], 60_000);
-    return () => { cancelled = true; stop(); };
-  }, [fail, clear]);
+  // Null until the layouts have been read, so an address naming none is said only once
+  // that is known. The roles likewise: All columns appends the categories in no role, and
+  // until it knows the roles it cannot know which those are. Read again when they are saved,
+  // and retried after a failure at boot (see useLiveServiceCueLists).
+  const { layouts, roles } = useLiveServiceCueLists(true, { fail, clear }, {
+    layouts: "the ServiceCue layouts",
+    roles: "the category roles",
+  });
 
   // Resolve the service-type slug (or raw id) to an id.
   const serviceType = useMemo(

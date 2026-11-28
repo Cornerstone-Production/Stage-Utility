@@ -76,6 +76,10 @@ export const HYDRATED_CHANNELS = [
   // The metric the Trends card plots under Sound: chosen once and standing, so
   // a card opened after the last change must still show it.
   "trends:prefs",
+  // The ServiceCue layouts and roles' write sequence. A page that read them reads
+  // them again on a frame, so the replay is never the news: it is what a page
+  // mounting into an open stream is handed, and it has just read for itself.
+  "servicecue:lists",
 ] as const;
 
 export const HYDRATED_SET: ReadonlySet<string> = new Set<string>(HYDRATED_CHANNELS);

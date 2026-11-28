@@ -185,6 +185,8 @@ describe("what is in the bundle", () => {
       "renderer/lib/use-failed-reads.ts",
       // The stage plots page's pan and zoom.
       "renderer/lib/use-latest-ref.ts",
+      // The layouts and roles read again when saved; on the public page the Worker's doc notices.
+      "renderer/lib/use-live-servicecue-lists.ts",
       "renderer/lib/use-media-query.ts",
       "renderer/lib/use-resync-on.ts",
       "renderer/lib/use-search-param.ts",
@@ -248,6 +250,9 @@ describe("what is in the bundle", () => {
       // renderer/lib/api.ts gives Update the page now its timeout from here: two
       // numbers, and types the build erases.
       "main/types/servicecue-deploy.ts",
+      // The channel name the layouts and roles hook listens on in the building, and a type the
+      // build erases: nothing of the lists crosses it.
+      "main/types/servicecue-lists.ts",
       "main/types/servicecue-publish.ts",
       // The event stream's heartbeat name and silence deadline, which api.ts's own
       // stream reads: three constants.

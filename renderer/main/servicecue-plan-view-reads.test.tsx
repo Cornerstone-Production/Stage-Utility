@@ -325,3 +325,18 @@ test("control: every read loads, the plan's own empty state shows, nothing alert
     f.restore();
   }
 });
+
+test("a saved layout or role list is read again when the server says so, with no timer", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const f = stubFetch(null);
+  const count = (part: string) => f.asked.filter((u) => u.includes(part)).length;
+  try {
+    await mount();
+    await eventually(() => assert.deepEqual([count("/api/servicecue/layouts"), count("/api/servicecue/roles")], [1, 1]));
+    await act(async () => FakeEventSource.last?.push("servicecue:lists", { epoch: "e1", seq: 1 }));
+    await settle();
+    await eventually(() => assert.deepEqual([count("/api/servicecue/layouts"), count("/api/servicecue/roles")], [2, 2]));
+  } finally {
+    f.restore();
+  }
+});
