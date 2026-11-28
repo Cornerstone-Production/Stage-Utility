@@ -332,8 +332,9 @@ export function useStageSettings(pinnedViewId?: string) {
     }
   }
 
-  async function handleRenameView(id: string, name: string) {
-    await writeState("views:rename", { id, name }, { fail: "Failed to rename view" });
+  /** Resolves false when the rename was refused (already toasted), so the name field can put the saved name back. */
+  async function handleRenameView(id: string, name: string): Promise<boolean> {
+    return writeState("views:rename", { id, name }, { fail: "Failed to rename view" });
   }
 
   /** Resolves the copy's id, or null when it could not be made (already toasted). */
@@ -490,8 +491,9 @@ export function useStageSettings(pinnedViewId?: string) {
     }
   }
 
-  async function handleRenameOutput(id: string, name: string) {
-    await writeState("outputs:rename", { id, name }, { fail: "Failed to rename display" });
+  /** Resolves false when the rename was refused (already toasted), so the name field can put the saved name back. */
+  async function handleRenameOutput(id: string, name: string): Promise<boolean> {
+    return writeState("outputs:rename", { id, name }, { fail: "Failed to rename display" });
   }
 
   /**

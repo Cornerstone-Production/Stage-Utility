@@ -141,6 +141,20 @@ describe("the identity hero", () => {
     assert.equal(input.value, "Stage Utility", "a blank name was left in the field");
   });
 
+  // handleSetBranding answers false once it has toasted the failure. The saved name
+  // did not change, so nothing else would put it back.
+  test("a refused name is put back to the saved one", async () => {
+    const { writes } = mount({}, false);
+    const input = screen.getByRole("textbox", { name: "App name" }) as HTMLInputElement;
+    await act(async () => {
+      fireEvent.change(input, { target: { value: "Renamed app" } });
+      fireEvent.blur(input);
+      await settle();
+    });
+    assert.deepEqual(writes, [{ name: "Renamed app" }]);
+    assert.equal(input.value, "Stage Utility", "a refused name was left in the field");
+  });
+
   test("Enter commits the name", async () => {
     const { writes } = mount();
     const input = screen.getByRole("textbox", { name: "App name" }) as HTMLInputElement;

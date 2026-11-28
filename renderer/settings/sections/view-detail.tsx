@@ -7,6 +7,7 @@
 // being deleted with its old shell.
 
 import { useState, type ChangeEvent } from "react";
+import { useNameDraft } from "../../lib/use-name-draft";
 import { TrashIcon, CopyIcon, PanelTopIcon, PanelTopDashedIcon } from "lucide-react";
 import { errorMessage } from "@main/services/errors";
 import { cn } from "../../lib/cn";
@@ -61,7 +62,8 @@ export function ViewDetail({
 > & { view: View; canDelete: boolean; startEditing?: boolean }) {
   // Parent remounts this component on view change (key={view.id}), so local
   // field state initializes fresh per view.
-  const [editName, setEditName] = useState(view.name);
+  // A refused rename puts the saved name back (useNameDraft).
+  const name = useNameDraft(view.name, (renamed) => handlers.handleRenameView(view.id, renamed));
   // The layout revision THIS editing session started from. Deliberately not read
   // off the live `view` prop at save time: that updates the moment anyone else
   // saves, so every save would look up to date and the conflict check would
@@ -78,12 +80,6 @@ export function ViewDetail({
   const layoutsRead = useServiceCueLayouts(view.kind === "script", { tag: "servicecue", what: "the ServiceCue layouts for a view" });
   const serviceCueLayouts = layoutsRead.layouts ?? [];
 
-  function handleNameBlur() {
-    const trimmed = editName.trim();
-    if (trimmed && trimmed !== view.name) handlers.handleRenameView(view.id, trimmed);
-    else setEditName(view.name);
-  }
-
   const board = view.kind === "slots" ? viewBoardId(view) : null;
 
   return (
@@ -93,9 +89,9 @@ export function ViewDetail({
       {/* Header: name + kind dropdown + actions */}
       <div className="flex flex-wrap items-center gap-2">
         <Input
-          value={editName}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setEditName(e.target.value)}
-          onBlur={handleNameBlur}
+          value={name.draft}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => name.setDraft(e.target.value)}
+          onBlur={name.commit}
           // basis + min-w, not flex-1 alone. The row wraps, but the name was the
           // only flexible thing in it, so it absorbed every shortfall on behalf
           // of two fixed-width selects and two buttons — at a narrow window

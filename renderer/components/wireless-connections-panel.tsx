@@ -2,6 +2,7 @@ import { FORM_MASK, isMask } from "@main/services/mask";
 import { errorMessage } from "@main/services/errors";
 import { invoke as ipc, onNotification } from "../lib/api";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
+import { useNameDraft } from "@renderer/lib/use-name-draft";
 import { useState, useEffect, type ChangeEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -67,7 +68,8 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
     return out;
   });
 
-  const [localName, setLocalName] = useState(conn.name);
+  // A refused rename puts the saved name back, and so does an emptied field (useNameDraft).
+  const name = useNameDraft(conn.name, renameConnection);
   const [testResult, setTestResult] = useState<{ ok: boolean; message?: string } | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
@@ -83,11 +85,6 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
   const summary = provider?.configSchema
     .map((f) => conn.config[f.key])
     .find((v) => typeof v === "string" && v.trim()) as string | undefined;
-
-  // Sync local name if the connection updates from outside (e.g. broadcast)
-  useResyncOn([conn.name], () => {
-    setLocalName(conn.name);
-  });
 
   // Sync localConfig when provider changes (new schema) or connection data updates
   useResyncOn([conn.providerId, conn.config, provider], () => {
@@ -107,19 +104,19 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
     setLocalConfig(out);
   });
 
-  async function handleNameBlur() {
-    const trimmed = localName.trim();
-    if (trimmed === conn.name) return;
+  /** Resolves false when the rename was refused, after saying so. */
+  async function renameConnection(renamed: string): Promise<boolean> {
     try {
       const next = await ipc<WirelessConnection[]>("wireless:updateConnection", {
         id: conn.id,
-        patch: { name: trimmed || conn.name },
+        patch: { name: renamed },
       });
       onUpdate(next);
+      return true;
     } catch (err) {
       console.error("[WirelessConnectionsPanel:updateName]", err);
       toast.error(`Failed to rename: ${errorMessage(err)}`);
-      setLocalName(conn.name);
+      return false;
     }
   }
 
@@ -363,9 +360,9 @@ function ConnectionCard({ conn, providers, onUpdate, onRemove }: ConnectionCardP
           )}
         </Button>
         <Input
-          value={localName}
-          onChange={(e: ChangeEvent<HTMLInputElement>) => setLocalName(e.target.value)}
-          onBlur={handleNameBlur}
+          value={name.draft}
+          onChange={(e: ChangeEvent<HTMLInputElement>) => name.setDraft(e.target.value)}
+          onBlur={name.commit}
           placeholder="Connection name"
           className="w-36 min-w-0"
           aria-label="Connection name"

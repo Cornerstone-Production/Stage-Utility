@@ -7,6 +7,7 @@ import { cn } from "../../lib/cn";
 import { ColorField } from "../../components/ui/color-field";
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { useTrailingCommit } from "../../lib/use-trailing-commit";
+import { useNameDraft } from "../../lib/use-name-draft";
 import { errorMessage } from "@main/services/errors";
 import { DEFAULT_ICON_BACKGROUND, NO_TAB_BACKGROUND } from "@main/services/install-metadata";
 import { logToServer } from "../../lib/client-log";
@@ -47,7 +48,8 @@ export function BrandingSection({
   stageState,
   handlers,
 }: Pick<SectionProps, "stageState" | "handlers">) {
-  const [name, setName] = useState(stageState.appName);
+  // A refused save puts the saved name back (useNameDraft), as the sidebar's field does.
+  const name = useNameDraft(stageState.appName, (renamed) => handlers.handleSetBranding({ name: renamed }));
   /** Which asset's dialog is open. */
   const [dialog, setDialog] = useState<Target | null>(null);
   /** The open dialog's crop editor. */
@@ -117,19 +119,6 @@ export function BrandingSection({
   useResyncOn([stageState.accentColor], () => {
     setAccentDraft(stageState.accentColor ?? "#2e6691");
   });
-
-  useResyncOn([stageState.appName], () => {
-    setName(stageState.appName);
-  });
-
-  function commitName() {
-    const trimmed = name.trim();
-    if (!trimmed || trimmed === stageState.appName) {
-      setName(stageState.appName);
-      return;
-    }
-    handlers.handleSetBranding({ name: trimmed });
-  }
 
   function openPicker(target: Target) {
     pickTarget.current = target;
@@ -452,9 +441,9 @@ export function BrandingSection({
             <FieldLabel>App name</FieldLabel>
             <Describe>Shown in the sidebar, on every display&apos;s top bar and in the browser tab.</Describe>
             <Input
-              value={name}
-              onChange={(e: ChangeEvent<HTMLInputElement>) => setName(e.target.value)}
-              onBlur={commitName}
+              value={name.draft}
+              onChange={(e: ChangeEvent<HTMLInputElement>) => name.setDraft(e.target.value)}
+              onBlur={name.commit}
               onKeyDown={(e) => {
                 if (e.key === "Enter") (e.target as HTMLInputElement).blur();
               }}

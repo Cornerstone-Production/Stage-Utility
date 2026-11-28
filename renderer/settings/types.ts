@@ -54,7 +54,7 @@ export interface SectionHandlers {
   handleSetBranding: (partial: BrandingPatch) => Promise<boolean>;
   // Views (content)
   handleAddView: (name: string, kind: ViewKind, surface?: "display" | "console") => Promise<string | null>;
-  handleRenameView: (id: string, name: string) => Promise<void>;
+  handleRenameView: (id: string, name: string) => Promise<boolean>;
   /** Resolves the copy's id, or null when it could not be made. */
   handleDuplicateView: (id: string) => Promise<string | null>;
   /** Resolves whether it is gone; the failure is already toasted. */
@@ -79,7 +79,7 @@ export interface SectionHandlers {
   handleCreateScreen: (input: CreateScreenInput) => Promise<CreateScreenOutcome>;
   /** Make a screen for a waiting device and bind the device to it. */
   handleClaimDevice: (deviceId: string, input: CreateScreenInput) => Promise<CreateScreenOutcome>;
-  handleRenameOutput: (id: string, name: string) => Promise<void>;
+  handleRenameOutput: (id: string, name: string) => Promise<boolean>;
   /** `expectSurface` is the kind of view the operator confirmed going live on; the
    *  server refuses (409) when the view is the other kind by the time it writes. */
   handleSetOutputView: (id: string, viewId: string | null, expectSurface?: ViewSurface) => Promise<void>;
