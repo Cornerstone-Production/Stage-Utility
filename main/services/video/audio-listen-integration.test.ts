@@ -11,11 +11,12 @@
 import { strict as assert } from "node:assert";
 import { execFile, spawn, type ChildProcess } from "node:child_process";
 import * as fs from "node:fs/promises";
-import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
 import { promisify } from "node:util";
+import { sleep } from "../fixtures/within.js";
+import { tcpPort } from "../fixtures/free-port.js";
 
 const execFileP = promisify(execFile);
 
@@ -28,19 +29,6 @@ const { relayConfig } = await import("./mediamtx-config.js");
 const { relayUsers } = await import("./reconcile-plan.js");
 const { planAudio, resolveAudio } = await import("./audio-listen.js");
 type RelayFeed = import("./relay.js").RelayFeed;
-
-async function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const s = net.createServer();
-    s.once("error", reject);
-    s.listen(0, "127.0.0.1", () => {
-      const port = (s.address() as net.AddressInfo).port;
-      s.close(() => resolve(port));
-    });
-  });
-}
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function until<T>(what: string, ms: number, fn: () => Promise<T | undefined | false>): Promise<T> {
   const end = Date.now() + ms;
@@ -101,8 +89,8 @@ async function withRelay(
   settings: { audioSourceUrl?: string },
 ): Promise<void> {
   assert.ok(binary?.ok);
-  const [api, rtsp, rtmp, hls, whep, udp] = await Promise.all([freePort(), freePort(), freePort(), freePort(), freePort(), freePort()]);
-  const ports = { api, rtsp, rtmp, hls, webrtcHttp: whep, webrtcUdp: udp, srt: await freePort() };
+  const [api, rtsp, rtmp, hls, whep, udp] = await Promise.all([tcpPort(), tcpPort(), tcpPort(), tcpPort(), tcpPort(), tcpPort()]);
+  const ports = { api, rtsp, rtmp, hls, webrtcHttp: whep, webrtcUdp: udp, srt: await tcpPort() };
   const password = "integrationpass".padEnd(19, "1");
   const apiPass = "apipass".padEnd(20, "x");
   const feeds0: RelayFeed[] = [{ id: "cam", kind: "push", password }];
@@ -166,7 +154,7 @@ test("AAC in, Opus out: one ffmpeg per feed shared by two readers, started by th
 
 test("an audio source address is passed through with -c copy: H.264 and Opus out of an HTTP MPEG-TS stream", { skip, timeout: 120_000 }, async () => {
   assert.ok(ffmpeg.ok);
-  const httpPort = await freePort();
+  const httpPort = await tcpPort();
   const url = `http://127.0.0.1:${httpPort}/0.ts`;
   // A stand-in for an encoder's HTTP output: MPEG-TS with H.264 and Opus 48 kHz stereo.
   start(ffmpeg.resolvedPath, [

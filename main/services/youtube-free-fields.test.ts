@@ -23,6 +23,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import type { YouTubeConfig, YouTubeVideo } from "./youtube-service.js";
+import { sleep } from "./fixtures/within.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-utility-youtube-"));
 process.env.STAGE_UTILITY_DATA = path.join(TMP, "data");
@@ -31,8 +32,6 @@ process.env.HOME = path.join(TMP, "home");
 const { concurrentViewers, nextScheduledStart, youtubeService } = await import("./youtube-service.js");
 
 const realFetch = globalThis.fetch;
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 afterEach(() => {
   youtubeService.stop();
   globalThis.fetch = realFetch;

@@ -9,6 +9,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, afterEach, before, beforeEach, describe, mock, test } from "node:test";
+import { udpPort } from "./fixtures/free-port.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-responder-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -29,20 +30,12 @@ addBroadcastListener((channel, payload) => {
 const THIS_MAC = "02:00:00:00:00:aa";
 const OTHER_MAC = "02:00:00:00:00:bb";
 
-async function freePort(): Promise<number> {
-  const s = dgram.createSocket("udp4");
-  await new Promise<void>((resolve) => s.bind(0, "127.0.0.1", resolve));
-  const { port } = s.address();
-  await new Promise<void>((resolve) => s.close(() => resolve()));
-  return port;
-}
-
 let port = 0;
 let client: dgram.Socket;
 let replies: string[] = [];
 
 before(async () => {
-  port = await freePort();
+  port = await udpPort();
   startKioskResponder({
     serverId: () => "srv-test",
     serverName: "Test server",

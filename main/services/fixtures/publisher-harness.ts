@@ -109,7 +109,7 @@ export function passTime(ms: number): void {
   mock.timers.tick(ms);
 }
 
-export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+export { sleep } from "./within.js";
 
 /** Every log line a test's code wrote, from the three methods the publisher uses. */
 export const logs = (t: TestContext) => captureConsole(t, "log", "warn", "error");

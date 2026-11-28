@@ -34,6 +34,7 @@ import { describe, it, type TestContext } from "node:test";
 import { ProdComService } from "./prodcom-service.js";
 import { eventually, startProdComStub, type StubEntry } from "./fixtures/prodcom-stub.js";
 import type { ConnState } from "./integration-base.js";
+import { sleep } from "./fixtures/within.js";
 
 const NOW = Date.parse("2026-09-24T21:08:00Z");
 
@@ -112,8 +113,6 @@ const typed = (id: string, offsetMs = 0): StubEntry => ({ ...spoken(id, offsetMs
 /** A box already holding exactly `cap` historical rows — a full rolling
  *  window from the moment this service ever connects to it. */
 const fullHistory = (cap: number): StubEntry[] => Array.from({ length: cap }, (_, i) => typed(`history-${i}`, i * 1000));
-
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 describe("the silence check on a box whose transcript is already a full rolling window", () => {
   it("gives up on a silent unproven socket within a bounded number of checks", async (t: TestContext) => {

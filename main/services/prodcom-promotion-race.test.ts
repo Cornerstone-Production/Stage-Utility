@@ -18,6 +18,7 @@ import { describe, it, type TestContext } from "node:test";
 
 import { ProdComService, PROBE_USER_AGENT } from "./prodcom-service.js";
 import { eventually, startProdComStub, type ProdComStub, type StubEntry } from "./fixtures/prodcom-stub.js";
+import { sleep } from "./fixtures/within.js";
 
 const NOW = Date.parse("2026-09-23T12:00:00Z");
 
@@ -68,8 +69,6 @@ const spoken = (id: string): StubEntry => ({
   inProgress: false,
   date: new Date(NOW).toISOString(),
 });
-
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
 /** The silence check's own reads of `GET /api/v1/transcript` — the backfill is
  *  the only other caller, and it always sends `since`. */

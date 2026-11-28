@@ -21,6 +21,7 @@ import * as http from "node:http";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
+import { sleep } from "./fixtures/within.js";
 
 // Before the module graph loads, so every store reads an empty tree instead of
 // the operator's real config.
@@ -113,8 +114,6 @@ const row = (): { connection: string; message: string | null } => {
   assert.ok(s, "the ProPresenter row is not in getStates()");
   return { connection: s.connection, message: s.message };
 };
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function until(what: string, fn: () => boolean, ms = 4000): Promise<void> {
   const deadline = Date.now() + ms;

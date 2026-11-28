@@ -43,6 +43,7 @@ import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
 import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE } from "./service-window.js";
 import { SSE_MAX_BUFFER } from "./sse-reader.js";
 import type { ProPresenterStatusDTO } from "../types/stage.js";
+import { sleep } from "./fixtures/within.js";
 
 // THE unattended appliance. Without this the broadcaster fails open — its
 // documented behaviour before a transport registers a check — and the fallback
@@ -406,8 +407,6 @@ interface Reachable {
 /** The private fields a case needs to reach. Reaching in beats exporting a
  *  test-only setter: every one of these is an implementation detail. */
 const inner = (svc: unknown): Reachable => svc as Reachable;
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /** Poll `fn` until it is true, or fail with `what`. Bounded, never a bare sleep. */
 async function until(what: string, fn: () => boolean, ms = 4000): Promise<void> {

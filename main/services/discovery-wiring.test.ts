@@ -19,6 +19,7 @@ import * as path from "node:path";
 import { after, before, test } from "node:test";
 
 import { serveOnSocket, type SocketServer } from "./fixtures/socket-server.js";
+import { udpPort } from "./fixtures/free-port.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-discovery-wiring-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -47,21 +48,13 @@ async function until(what: string, ok: () => boolean, ms = 3000): Promise<void> 
   }
 }
 
-async function freePort(): Promise<number> {
-  const s = dgram.createSocket("udp4");
-  await new Promise<void>((resolve) => s.bind(0, "127.0.0.1", resolve));
-  const { port } = s.address();
-  await new Promise<void>((resolve) => s.close(() => resolve()));
-  return port;
-}
-
 /** The id discovery minted on start, as the stage state should then hold it. */
 let OWN = "";
 
 before(async () => {
   console.log = () => {};
   console.warn = () => {};
-  responderPort = await freePort();
+  responderPort = await udpPort();
   // A fresh install switching discovery on: no id yet, so the start mints one.
   await settingsStore.patch({ kioskDiscovery: true, kioskDiscoveryPort: responderPort, serverId: null });
   const remote = new RemoteServer();
