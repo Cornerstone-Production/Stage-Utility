@@ -7,9 +7,11 @@
 // layer" mode drew both. Both now say the name is ambiguous and show neither,
 // whatever PVP's order.
 //
-// Not covered here, and driven in a browser instead: how the sentence fits a
-// small tile. jsdom has no layout, so a sub-line cut off mid-word passes any
-// assertion on the markup.
+// Not covered here: how the sentence fits a tile. jsdom has no layout, so a
+// sub-line cut off mid-word passes any assertion on the markup. Both widgets
+// were looked at in Chrome on a wall at about 480x180 per tile, where the
+// sentences fit; the 257x159 tile pvp-now.test.tsx names, and the Home card,
+// were not.
 
 import { strict as assert } from "node:assert";
 import { describe, test } from "node:test";
