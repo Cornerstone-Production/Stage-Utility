@@ -21,12 +21,13 @@ import type {
   SportKind,
 } from "../types/scores.js";
 import { leagueById } from "../types/scores.js";
+import { isRecord } from "../types/is-record.js";
 
 /** A JSON object we have not proved anything about yet. */
 type Obj = Record<string, unknown>;
 
 function obj(v: unknown): Obj | null {
-  return typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Obj) : null;
+  return isRecord(v) ? v : null;
 }
 function arr(v: unknown): unknown[] {
   return Array.isArray(v) ? v : [];

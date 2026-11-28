@@ -25,12 +25,10 @@ const { configSnapshot, configFiles } = await import("./config-snapshot.js");
 const { livePoller } = await import("./live-poller.js");
 const { stageController } = await import("./stage-controller.js");
 
-type Poller = { running: boolean; timer: ReturnType<typeof setTimeout> | null };
 type Controller = {
   autoRefreshTimer: ReturnType<typeof setInterval> | null;
   updateCheckTimer: ReturnType<typeof setInterval> | null;
 };
-const poller = livePoller as unknown as Poller;
 const controller = stageController as unknown as Controller;
 
 /** A config store, and a value its restore check accepts: a restore refuses a
@@ -45,15 +43,13 @@ function snapshotOf(files: Record<string, unknown>) {
 
 /** Stand the background writers up the way boot does, without booting. */
 function pretendRunning() {
-  poller.running = true;
+  livePoller["running"] = true;
   controller.autoRefreshTimer = setInterval(() => {}, 60_000);
   controller.updateCheckTimer = setInterval(() => {}, 60_000);
 }
 
 function quiet() {
-  poller.running = false;
-  if (poller.timer) clearTimeout(poller.timer);
-  poller.timer = null;
+  livePoller.stop();
   for (const k of ["autoRefreshTimer", "updateCheckTimer"] as const) {
     if (controller[k]) clearInterval(controller[k]!);
     controller[k] = null;
@@ -80,7 +76,7 @@ describe("configSnapshot.apply — failure path", () => {
       "a restore that cannot write must report the failure, not swallow it",
     );
 
-    assert.equal(poller.running, true, "the live poller was left stopped — PCO is no longer polled");
+    assert.equal(livePoller["running"], true, "the live poller was left stopped — PCO is no longer polled");
     assert.notEqual(controller.autoRefreshTimer, null, "auto-refresh was left stopped");
     assert.notEqual(controller.updateCheckTimer, null, "update checks were left stopped");
   });
@@ -90,12 +86,12 @@ describe("configSnapshot.apply — failure path", () => {
     // auto-refresh deliberately off must not have it switched on by a failed
     // restore.
     quiet();
-    poller.running = true; // poller only
+    livePoller["running"] = true; // poller only
     await fs.mkdir(path.join(TMP, TARGET, "occupied"), { recursive: true });
 
     await assert.rejects(() => configSnapshot.apply(snapshotOf({ [TARGET]: VALID })));
 
-    assert.equal(poller.running, true);
+    assert.equal(livePoller["running"], true);
     assert.equal(controller.autoRefreshTimer, null, "a failed restore turned auto-refresh ON");
     assert.equal(controller.updateCheckTimer, null, "a failed restore turned update checks ON");
   });
@@ -103,7 +99,7 @@ describe("configSnapshot.apply — failure path", () => {
   it("leaves the writers stopped on success, because the process is about to exit", async () => {
     const applied = await configSnapshot.apply(snapshotOf({ [TARGET]: VALID }));
     assert.deepEqual(applied, [TARGET]);
-    assert.equal(poller.running, false, "a successful restore must NOT resume the poller");
+    assert.equal(livePoller["running"], false, "a successful restore must NOT resume the poller");
     assert.equal(controller.autoRefreshTimer, null);
   });
 });

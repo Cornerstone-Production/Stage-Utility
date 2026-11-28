@@ -1,4 +1,5 @@
 // companion-connections.ts — what Companion says about its own connections.
+import { isRecord } from "../types/is-record.js";
 //
 // PURE: no I/O. companion-api.ts does the GET and hands the body here; the
 // reconcile and the Test button read the summary off it.
@@ -115,7 +116,7 @@ export interface ConnectionHealth {
 const str = (v: unknown): string => (typeof v === "string" ? v : "");
 
 const rec = (v: unknown): Record<string, unknown> =>
-  v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  isRecord(v) ? v : {};
 
 /**
  * The connection list out of whatever `GET /api/connections` answered.
