@@ -114,6 +114,40 @@ handlers, persisted keys, responsive branches), each marked carried, replaced
 once lost nine controls nobody listed because they were shell behaviour, not
 settings.
 
+## Reuse before you write
+
+Before writing code that answers a question the app already answers (is a
+service live, what day is it, read this request body, name this new thing, format
+this duration), find the helper, hook, gate or formatter that answers it and call
+it. [Canonical modules](docs/contributing.md#canonical-modules) lists the homes.
+For anything not listed, search for the job (its regex, its constant, its noun),
+not only a function name: most of the copies below were named differently from
+what they copied.
+
+If the shared one is nearly right, extend it. A deliberate difference is a named
+parameter of the shared function with its reason beside it, as `slugText` takes
+`fold` because a stored slug must keep the rule it was made with. Never a second
+copy with one line changed.
+
+Each of these was a second answer to a question the app already had one for,
+and the two disagreed:
+
+- Two "is a service live" detectors. One counted Planning Center's preservice
+  countdown, reported days ahead, as live, and held the scheduled auto-update,
+  the helpers' updates and the page deploy all week.
+- Request bodies read seven ways: bad JSON was a 500 on about 85 routes and a
+  400 or an empty body elsewhere, and an over-cap cue call fired the cue and
+  answered 200.
+- A cue name derived two ways: "Café lights" became `caf_lights` from New cue and
+  `btn_cafe_lights` from a Button.
+- The live poller hand-rolled its timer instead of `Ticker`, and a credential
+  check landing mid-tick left two Planning Center poll chains running.
+- Default `<Kind> N` names counted the list in nine places, so the next name
+  after a delete repeated one already there. ServiceCue layout names had already
+  solved it.
+
+A helper that replaces a copy goes in that table in the same commit.
+
 ## Fixing a repeated pattern
 
 Before committing a fix to something that appears more than once, grep for every

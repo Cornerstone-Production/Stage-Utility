@@ -546,6 +546,88 @@ Drop `--learn` to run the tests. CI runs them whenever `.github/codeql/` changes
 the CLI version the `models` job prints at the start. Record with that version: a
 newer CLI can change how the expected output is written.
 
+## Reuse before you write
+
+Most questions a new feature asks, the app already answers somewhere: whether a
+service is running, what day it is, how to read a request body, what to name a new
+item, how to show a duration. Before writing that code, find the existing helper,
+hook, gate or formatter and call it. The table below lists the shared homes. For
+anything it does not list, search for the job (its regex, its constant, the noun
+it is about) as well as a function name, since a copy rarely shares a name with
+its original.
+
+- **Extend, do not fork.** If the shared function is nearly right, change it and
+  run its callers' tests. Do not write a near copy beside it.
+- **A deliberate difference is a parameter.** Where one caller genuinely needs
+  different behaviour, give the shared function a named option for it, with the
+  reason beside it: `slugText` takes `fold` because a slug that is stored must
+  keep the accent rule it was made with. Never a second copy with one line
+  changed.
+- **A copy you find is a repeated pattern.** Fix every instance, or remove the
+  duplication, as [CLAUDE.md](../CLAUDE.md#fixing-a-repeated-pattern) describes.
+- **A helper that replaces a copy goes in the table** in the same commit.
+
+Copies cost correctness, not lines: two implementations of one job give different
+answers once a fix lands in one of them. Two "is a service live" readings
+disagreed about Planning Center's preservice countdown, and the scheduled
+auto-update and the page deploy were held all week.
+
+### Canonical modules
+
+Sorted by module path, one row per module, so two changes that each add a row
+merge without a conflict.
+
+| Module | Answers | Call |
+|---|---|---|
+| `main/services/app-timezone.ts` | What day or hour is it? | `zonedDateKey`, `zonedParts`, `startOfZonedDay` |
+| `main/services/broadcaster.ts` | Is anyone watching this SSE channel? | `channelHasSubscribers` |
+| `main/services/bytes-format.ts` | A byte count | `formatBytes` |
+| `main/services/canonical-json.ts` | Do two records say the same thing? | `canonicalJson`, `sameJson` |
+| `main/services/capped-download.ts` | Downloading under a size cap and a stall timeout | `readCapped`, `streamToPart`, `downloadWatchdog` |
+| `main/services/commit-subject.ts` | Reading a commit subject | `parseSubject`, `isShownInNotes` |
+| `main/services/cue-name.ts` | A cue name from typed words | `deriveCueName` |
+| `main/services/data-store.ts` | Persisting a store | `DataStore` |
+| `main/services/duration-format.ts` | Seconds as `h:mm:ss` | `formatHms`, `formatSignedHms` |
+| `main/services/errors.ts` | An error as text | `errorMessage` |
+| `main/services/export-filename.ts` | A download's file name header | `attachmentDisposition` |
+| `main/services/file-exists.ts` | Is there a file at this path? | `fileExists` |
+| `main/services/first-free.ts` | A name or id not already taken | `firstFree`, `firstFreeNumbered` |
+| `main/services/http-origin.ts` | Host and Origin rules | `isCrossOrigin`, `hostnameOf`, `originFromHost` |
+| `main/services/integration-base.ts` | An integration's connect, reconnect and outage log | `ConnectionLifecycle`, `StatusIntegration` |
+| `main/services/live-service-gate.ts` | Is a service running? Should a recorder record? | `serviceRunning`, `inLiveItem`, `shouldRecordLive` |
+| `main/services/repeat-log.ts` | Logging a failure once per outage, not once per retry | `OutageLog`, `RepeatLog` |
+| `main/services/retry-after.ts` | A `Retry-After` header | `retryAfterMs` |
+| `main/services/routes/context.ts` | Reading a request body; a numeric query parameter | `readJsonObject` for an object, `readBody` for any JSON value, `queryNumber`; `readBodyOrEmpty`, `readBodyTolerant` and `readObjectBody` for the cases their comments name |
+| `main/services/scrub.ts` | Outside text in a log line | `scrub`, `scrubError` |
+| `main/services/secret-compare.ts` | Comparing a presented secret | `secretsMatch` |
+| `main/services/service-activity.ts` | May the server restart, update or deploy now? | `serviceActivity` |
+| `main/services/service-key.ts` | Which service occurrence is this? | `currentServiceKey` |
+| `main/services/service-recorder.ts` | Opening and closing a service record | `ServiceRecorder`, `ItemRecorder`, `closeTimelineItems` |
+| `main/services/slug.ts` | Text to a slug | `slugText` |
+| `main/services/ticker.ts` | A repeating timer that never overlaps itself | `Ticker` |
+| `main/services/write-queue.ts` | Serialised, atomic writes to one file outside a store | `WriteQueue`, `atomicWrite` |
+| `main/types/is-record.ts` | Is this value a plain object? | `isRecord` |
+| `renderer/components/ui/number-input.tsx` | A numeric field | `NumberInput` |
+| `renderer/lib/age-label.ts` | How long ago, in words | `ageLabel`, `formatAge` |
+| `renderer/lib/app-zone.ts` | Which zone a page answers "what day is it" in | `appZoneOf` |
+| `renderer/lib/clipboard.ts` | Copying to the clipboard | `copyText` (returns whether it worked), `copyWithToast` |
+| `renderer/lib/clock-format.ts` | A time of day shown in the browser | `formatClock` |
+| `renderer/lib/keyboard-target.ts` | Should a key press run a shortcut? | `isTypingTarget`, `modalOpen`, `isMod` |
+| `renderer/lib/list-move.ts` | Moving an item within a list | `moveTo` |
+| `renderer/lib/pointer-gesture.ts` | A drag or long press | `bindGesture` |
+| `renderer/lib/report-failure.ts` | A failure the operator is told about | `reportFailure` (toast and `/log`), `logFailure` |
+| `renderer/lib/retry-delay.ts` | The next delay of a backing-off retry | `nextRetryDelay` |
+| `renderer/lib/safe-storage.ts` | Reading and writing `localStorage` | `readStored`, `writeStored` |
+| `renderer/lib/uid.ts` | A new id in the browser | `uid` |
+| `renderer/lib/use-copy-feedback.ts` | A Copy button's copied or failed state | `useCopyFeedback` |
+| `renderer/lib/use-element-size.ts` | An element's measured size | `useElementSize` |
+| `renderer/lib/use-latest-ref.ts` | A value a once-subscribed callback reads | `useLatestRef` |
+| `renderer/lib/use-name-draft.ts` | A name field that saves when it is left | `useNameDraft` |
+| `renderer/lib/use-now.ts` | Re-rendering on a clock | `useNow` |
+| `renderer/lib/use-trailing-commit.ts` | A debounced save that is not lost on unmount | `useTrailingCommit` |
+| `renderer/lib/zoned-time-input.ts` | A time typed into a field, in the app zone | `toZonedTimeInput`, `fromZonedTimeInput` |
+| `renderer/test-dom.ts` | A renderer test waiting for React | `settle` |
+
 ## Live data and storage
 
 Installs run on modest hardware, Raspberry Pi displays included, so new server
