@@ -539,7 +539,7 @@ not move on until it is filled, by the same check the editor's
 A manual command is made with **Home Assistant off** and **Allowed during a service
 on**: it is voice-only and console-only until you switch Home Assistant on, and it
 carries no [service guard](#commands) unless you switch that off. The command name is
-derived from the name you type, `lower_snake_case`, and shown read-only on
+derived from the name you type, `lower_snake_case` with accents folded to their letter ("Café" is `cafe`) and at most 60 characters, and shown read-only on
 Review. It is never one that another command, a former name or a
 [built-in](#built-in-commands) holds — a clash gets `_2`, `_3` — and a name that would
 end in `_on` or `_off` gets `_cue` after it: "Projectors on" is `projectors_on_cue`.
