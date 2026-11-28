@@ -10,18 +10,15 @@ import * as net from "node:net";
 
 import type { RossTalkFamily, RossTalkTarget, RossTalkTargetConfig } from "../types/rosstalk.js";
 import { broadcast } from "./broadcaster.js";
-import { ConnectionLifecycle } from "./integration-base.js";
+import { ConnectionLifecycle, OUTPUT_RECONNECT_CEILING_MS } from "./integration-base.js";
 import { ROSSTALK_COMMANDS, formatCommand, sanitiseRaw } from "./rosstalk-commands.js";
 import { rosstalkStore } from "./rosstalk-store.js";
 
 const DEFAULT_PORT = 7788;
-const RECONNECT_BASE_MS = 3000;
-const RECONNECT_MAX_MS = 30000;
 
 /** One target's socket. */
-class RossTalkConnection extends ConnectionLifecycle {
+export class RossTalkConnection extends ConnectionLifecycle {
   private socket: net.Socket | null = null;
-  private backoffAttempt = 0;
   private host: string | null = null;
   private port: number = DEFAULT_PORT;
 
@@ -56,45 +53,47 @@ class RossTalkConnection extends ConnectionLifecycle {
 
   protected async connect(): Promise<void> {
     if (!this.running || !this.host) return;
+    // Every handler below asks whether its socket's run is still current: a
+    // restart destroys this socket, and its `close` lands after start() has set
+    // `running` back to true, so a `running` check queued a reconnect that
+    // opened a second socket over the live one.
+    const run = this.run;
     const sock = net.connect({ host: this.host, port: this.port });
     sock.unref(); // an idle output socket must not hold the process open
     this.socket = sock;
     sock.on("connect", () => {
-      this.backoffAttempt = 0;
+      if (!this.current(run)) return;
+      this.resetBackoff();
       this.report("connected", `Connected to ${this.host}:${this.port}`);
     });
     // Send-only protocol: drain anything the device sends so the buffer can't grow.
     sock.on("data", () => {});
     sock.on("error", (err) => {
-      if (this.attempt === 0) console.warn(`[rosstalk] ${this.host}:${this.port} unreachable (${err.message})`);
+      if (!this.current(run)) return;
+      this.noteOutage(`${this.host}:${this.port} unreachable (${err.message})`);
       this.report("error", `Can't reach ${this.host}:${this.port} — ${err.message}`);
     });
     sock.on("close", () => {
       if (this.socket === sock) this.socket = null;
-      if (this.running) this.scheduleReconnect();
+      if (this.current(run)) this.scheduleReconnect();
     });
   }
 
   /**
-   * Keeps a fixed 30s ceiling rather than the shared window-aware cap. Nothing
+   * A fixed 30s ceiling rather than the shared window-aware cap. Nothing
    * subscribes to an output, so the shared cap reads it as dormant and stretches
    * retries toward 30 minutes — a switcher powered on mid-week would sit
    * unreachable that long. Same reasoning as tsl-service.
    */
-  protected override scheduleReconnect(): void {
-    if (!this.running) return;
-    const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** this.backoffAttempt);
-    this.backoffAttempt++;
-    this.scheduleIn(delay);
-    // A waiting reconnect must not keep the process alive — otherwise a shutdown
-    // (or a test run) hangs until the timer fires. The socket is unref'd for the
-    // same reason in connect().
-    this.unrefPending();
+  protected override get reconnectCeilingMs(): number {
+    return OUTPUT_RECONNECT_CEILING_MS;
   }
 
-  /** Let the event loop exit even with a retry queued or a socket open. */
-  private unrefPending(): void {
-    (this as unknown as { reconnectTimer?: { unref?: () => void } }).reconnectTimer?.unref?.();
+  /** A waiting reconnect must not keep the process alive — otherwise a shutdown
+   *  (or a test run) hangs until the timer fires. The socket is unref'd for the
+   *  same reason in connect(). */
+  protected override get unrefReconnect(): boolean {
+    return true;
   }
 
   write(line: string): void {
