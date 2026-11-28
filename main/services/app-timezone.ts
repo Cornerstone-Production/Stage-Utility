@@ -166,16 +166,19 @@ export function zonedWallTime(
 ): number {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateKey);
   if (!m) throw new Error(`zonedWallTime expects a YYYY-MM-DD date, got "${dateKey}"`);
-  const [earlier, later] = wallCandidates(
-    Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), hour, minute, second),
-    tz,
-  );
+  const wall = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), hour, minute, second);
+  // The offsets a day either side, as well as wallCandidates' two: east of UTC
+  // both of those can land after a fall-back change and agree on the SECOND
+  // reading (02:30 in Berlin on 25 Oct), and the first would never be tried.
+  const DAY = 86_400_000;
+  const candidates = [
+    ...new Set([...wallCandidates(wall, tz), wall - zoneOffsetMs(wall - DAY, tz), wall - zoneOffsetMs(wall + DAY, tz)]),
+  ].sort((a, b) => a - b);
   const reads = (ms: number) => {
     const p = zonedParts(ms, tz);
     return zonedDateKey(ms, tz) === dateKey && p.hour === hour && p.minute === minute;
   };
-  if (reads(earlier)) return earlier;
-  return later;
+  return candidates.find(reads) ?? candidates[candidates.length - 1]!;
 }
 
 /**

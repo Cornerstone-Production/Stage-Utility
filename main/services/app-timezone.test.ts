@@ -138,6 +138,9 @@ describe("zonedWallTime", () => {
   it("takes the first of the two readings on a fall-back date", () => {
     // 1 Nov 2026: 01:30 happens at 06:30Z (CDT) and again at 07:30Z (CST).
     assert.equal(iso(zonedWallTime("2026-11-01", 1, 30, 0, "America/Chicago")), "2026-11-01T06:30:00.000Z");
+    // East of UTC too, where both naive guesses land after the change: 02:30
+    // happens at 00:30Z (CEST) and again at 01:30Z (CET) on 25 Oct 2026.
+    assert.equal(iso(zonedWallTime("2026-10-25", 2, 30, 0, "Europe/Berlin")), "2026-10-25T00:30:00.000Z");
   });
 
   it("moves a reading in the skipped hour past the gap on a spring-forward date", () => {
