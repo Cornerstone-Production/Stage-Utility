@@ -2,7 +2,6 @@
 // Protocol: ASCII-over-TCP on port 2202 (Shure control protocol, ULX family).
 // Init: GET 0 ALL, then SET 0 METER_RATE 1000 (1 s metering intervals).
 
-import type { ConfigField } from "../../types/integrations.js";
 import {
   ShureBaseProvider,
   normalisedDb,
@@ -15,26 +14,6 @@ import {
 export class ShureUlxd extends ShureBaseProvider {
   readonly id = "shure-ulxd";
   readonly label = "Shure ULX-D";
-  readonly configSchema: ConfigField[] = [
-    {
-      key: "host",
-      label: "Device IP / Hostname",
-      type: "text",
-      placeholder: "192.168.1.100",
-    },
-    {
-      key: "port",
-      label: "TCP Port",
-      type: "number",
-      placeholder: "2202",
-    },
-    {
-      key: "channels",
-      label: "Number of Channels",
-      type: "number",
-      placeholder: "4",
-    },
-  ];
 
   protected readonly defaultChannels = 4;
   protected readonly defaultDeviceType = "receiver" as const;

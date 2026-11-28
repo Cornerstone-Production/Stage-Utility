@@ -247,10 +247,10 @@ describe("what is in the bundle", () => {
       "main/services/stageplots-doc.ts",
       // renderer/lib/api.ts gives Update the page now its timeout from here: two
       // numbers, and types the build erases.
-      "main/types/servicecue-deploy.ts",
-      "main/types/servicecue-publish.ts",
       // The size limits stageplots.ts reads: constants only, no imports.
       "main/types/limits.ts",
+      "main/types/servicecue-deploy.ts",
+      "main/types/servicecue-publish.ts",
       // The event stream's heartbeat name and silence deadline, which api.ts's own
       // stream reads: three constants.
       "main/types/sse.ts",
