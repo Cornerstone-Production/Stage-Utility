@@ -5,7 +5,7 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
-import { type RouteCtx, json, error, readBody } from "./context.js";
+import { type RouteCtx, json, error, readJsonObject } from "./context.js";
 import { readSlotsTarget, INVALID_TARGET, TARGET_ERROR } from "../slots-target-body.js";
 import type { Slot } from "../../types/stage.js";
 import { SlotsNotFoundError, stageController } from "../stage-controller.js";
@@ -20,7 +20,7 @@ export async function presetRoutes(c: RouteCtx): Promise<void> {
     }
 
     if (method === "POST" && pathname === "/api/presets") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (typeof body.name !== "string" || !(body.name as string).trim()) {
         error(res, "body.name (non-empty string) required");
         return;
@@ -50,7 +50,7 @@ export async function presetRoutes(c: RouteCtx): Promise<void> {
 
     // POST /api/presets/import — add a preset from imported data (name + slots).
     if (method === "POST" && pathname === "/api/presets/import") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (typeof body.name !== "string" || !(body.name as string).trim()) {
         error(res, "body.name (non-empty string) required");
         return;
@@ -76,7 +76,7 @@ export async function presetRoutes(c: RouteCtx): Promise<void> {
 
     // POST /api/presets/reorder — { ids: string[] } (checked before :id routes)
     if (method === "POST" && pathname === "/api/presets/reorder") {
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       if (!Array.isArray(body.ids)) {
         error(res, "body.ids (array) required");
         return;
@@ -90,7 +90,7 @@ export async function presetRoutes(c: RouteCtx): Promise<void> {
     const presetApplyMatch = pathname.match(/^\/api\/presets\/([^/]+)\/apply$/);
     if (method === "POST" && presetApplyMatch) {
       const id = presetApplyMatch[1];
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       // `viewId` is explicit and unambiguous. `displayId` is the legacy shape and
       // resolves through outputs, which is how an apply could land on a different
       // view than the caller was editing.
@@ -127,7 +127,7 @@ export async function presetRoutes(c: RouteCtx): Promise<void> {
     const presetPatchMatch = pathname.match(/^\/api\/presets\/([^/]+)$/);
     if (method === "PATCH" && presetPatchMatch) {
       const id = presetPatchMatch[1];
-      const body = await readBody(req) as Record<string, unknown>;
+      const body = await readJsonObject(req);
       let presets = await stageController.listPresets();
       if (body.boardId !== undefined && (typeof body.boardId !== "string" || !body.boardId)) {
         error(res, "body.boardId must be a board id");

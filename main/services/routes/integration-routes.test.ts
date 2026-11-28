@@ -10,6 +10,7 @@ process.env.STAGE_UTILITY_DATA = fs.mkdtempSync(path.join(os.tmpdir(), "routes-"
 
 const { integrationRoutes } = await import("./integration-routes.js");
 const { callRoute } = await import("./route-harness.js");
+const { wirelessManager } = await import("../wireless-manager.js");
 
 /**
  * These cover the rejection paths — the branches that refuse bad input before
@@ -108,18 +109,13 @@ test("a path segment carrying a slash does not match the id route", async () => 
 
 // ── Malformed input ────────────────────────────────────────────────────────
 
-test("a malformed JSON body does not crash the handler", async () => {
-  // readBody rejects; what matters is the route surfacing that rather than the
-  // rejection escaping as an unhandled promise, which would take the process
-  // down and blank every display.
-  let threw = false;
-  try {
-    await callRoute(integrationRoutes, "/api/wireless/meter-rate", {
-      method: "POST",
-      raw: "{ not json at all",
-    });
-  } catch {
-    threw = true;
-  }
-  assert.ok(threw || true, "either handled or rejected — but never an unhandled crash");
+test("a malformed JSON body is refused with a status of 400 and changes nothing", async () => {
+  // The rejection carries the 400 the server answers with; the meter rate it
+  // would have set stays where it was.
+  const before = wirelessManager.getMeterRate();
+  await assert.rejects(
+    callRoute(integrationRoutes, "/api/wireless/meter-rate", { method: "POST", raw: "{ not json at all" }),
+    (err: unknown) => (err as { status?: number }).status === 400,
+  );
+  assert.equal(wirelessManager.getMeterRate(), before);
 });

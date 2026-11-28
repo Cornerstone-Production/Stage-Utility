@@ -35,7 +35,7 @@
 //
 // Every route must finish responding before it returns (see RouteCtx).
 
-import { type RouteCtx, error, json, readBody } from "./context.js";
+import { type RouteCtx, error, json, readBodyOrEmpty, readJsonObject } from "./context.js";
 import { errorMessage } from "../errors.js";
 import { scrub } from "../scrub.js";
 import { automationEngine } from "../automation-engine.js";
@@ -125,7 +125,7 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
       return;
     }
     if (!(await requireCaller(c, { allowSameOrigin: true }))) return;
-    const body = (await readBody(req)) as Record<string, unknown>;
+    const body = await readJsonObject(req);
     if (typeof body.label !== "string" || !body.label.trim()) {
       error(res, "body.label (string) required — it is how you know which token to revoke");
       return;
@@ -227,7 +227,7 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
 
     // The confirmation may arrive either way round: Home Assistant's
     // rest_command sends a body easily, a shell sends a query string easily.
-    const body = (await readBody(req).catch(() => ({}))) as Record<string, unknown>;
+    const body = await readBodyOrEmpty(req);
     const confirm = url.searchParams.get("confirm") ?? (typeof body.confirm === "string" ? body.confirm : null);
 
     const result = await automationEngine.callByName(callMatch[1]!, {
@@ -397,7 +397,7 @@ export async function cueRoutes(c: RouteCtx): Promise<void> {
 
   if (method === "POST" && pathname === "/api/automation/rules/import-pairs") {
     if (!(await requireCaller(c, { allowSameOrigin: true }))) return;
-    const body = (await readBody(req)) as Record<string, unknown>;
+    const body = await readJsonObject(req);
     // Either key, or both, in ONE request: the dialog offers pairs and single
     // buttons in one list and a single Import button, and two requests would
     // report two half-results for one press.

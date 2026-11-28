@@ -8,9 +8,10 @@
 
 import { hasContent } from "../types/pvp.js";
 import type { PvpLayerDTO, PvpLayerState, PvpStatusDTO } from "../types/pvp.js";
+import { isRecord } from "../types/is-record.js";
 
 const rec = (v: unknown): Record<string, unknown> =>
-  v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  isRecord(v) ? v : {};
 
 const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
 
@@ -143,8 +144,7 @@ export function parseWorkspace(json: unknown): PvpLayerDTO[] {
  * it caches one for five minutes.
  */
 export function isPlaylistsResponse(json: unknown): boolean {
-  const p = rec(json).playlist;
-  return p !== undefined && typeof p === "object" && p !== null && !Array.isArray(p);
+  return isRecord(rec(json).playlist);
 }
 
 /**

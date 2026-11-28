@@ -146,3 +146,11 @@ test("a pull address that is only a scheme is refused, not saved as a feed that 
   }
   assert.equal(parseFeedInput({ name: "Cam", source: { kind: "pull", url: "rtsp://192.0.2.10/stream", username: "" } }, new Set(["pull"])).ok, true);
 });
+
+test("a body that is not an object is Invalid input, an array included", () => {
+  // An array passed the old `typeof === "object"` check and was answered "Name is
+  // required." — a reader fixing the wrong thing.
+  for (const bad of [null, [], [{ name: "X" }], "x", 5]) {
+    assert.deepEqual(parseFeedInput(bad, OFFERED), { ok: false, error: "Invalid input." }, JSON.stringify(bad));
+  }
+});
