@@ -255,22 +255,6 @@ export function Stat({
   );
 }
 
-/**
- * History's records, for the headline figures.
- *
- * Read here rather than threaded down from the route: Home is the only other
- * consumer, and useHistoryLists is History's own read, so a service that
- * finishes on Sunday updates Thursday's headline without a reload, and a read
- * that fails is said the same way on the same `[history]` tag. The SPL summary
- * is read only when a card is actually drawing the line — Home is the page
- * every operator lands on, and nobody who leaves the setting off should pay for
- * it.
- */
-function useHistoryRecords(wantSpl = false) {
-  const { list, attList, splList, failed } = useHistoryLists({ spl: wantSpl });
-  return { list, attList, splList, failed };
-}
-
 /** "the a", "the a and the b", "the a, the b and the c" — the join-with-and
  *  shape, plus this file's own "the " prefix per item. */
 function theList(items: string[]): string {
@@ -451,7 +435,12 @@ export function RecentServicesCard({
    *  the menu and keeps tracking the pointer underneath it. */
   hoverSuppressed?: boolean;
 }) {
-  const { list, attList, splList, failed } = useHistoryRecords(showSpl);
+  // History's own lists, through History's own hook: Home is the only other
+  // consumer, the same pushes keep it current (a service that finishes on
+  // Sunday updates Thursday's headline without a reload), and a failed read is
+  // said the same way on [history]. The SPL summary is read only while this
+  // card draws the sound line; Home is where every operator lands.
+  const { list, attList, splList, failed } = useHistoryLists({ spl: showSpl });
 
   // Scoped to the ACTIVE service type, like History's Overview — an Events night
   // must not show up under a Weekend heading. asOf is null: on Home the question

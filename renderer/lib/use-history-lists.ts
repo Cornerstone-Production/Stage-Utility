@@ -76,17 +76,21 @@ function useLiveList<T extends { serviceKey: string }>(
 ): {
   value: T[] | null;
   set: Dispatch<SetStateAction<T[] | null>>;
-  /** Start a read: pushes from now until `answer` are kept for it. */
+  /** Start a read: pushes from now until a read is answered are kept for it. */
   begin: () => number;
   /** Install a read's answer (or keep the list, for a failure that should not
-   *  empty it), with every push since `begin` laid over it. False, and nothing
-   *  installed, for a read a newer one superseded or that outlived the page. */
+   *  empty it), with every push kept since the first unanswered `begin` laid
+   *  over it. False, and nothing installed, for a read a newer one superseded
+   *  or that outlived the page. */
   answer: (read: number, rows: T[] | null | "keep") => boolean;
 } {
   const [value, set] = useState<T[] | null>(() => seed ?? null);
   const reads = useRef(0);
-  const inFlight = useRef(false);
-  const pushed = useRef(new Map<string, T>());
+  /** The pushes kept for the reads still out, newest per key; null while no
+   *  read is out. A second read sent before the first answered keeps what the
+   *  first had kept: a push that arrived before any list was drawn exists
+   *  nowhere else. */
+  const pushed = useRef<Map<string, T> | null>(null);
 
   // A read still out when the page goes is not answered into it.
   useEffect(() => () => { reads.current += 1; }, []);
@@ -96,22 +100,20 @@ function useLiveList<T extends { serviceKey: string }>(
     return onNotification(channel, (p) => {
       const rec = p as T | null;
       if (!rec) return;
-      if (inFlight.current) pushed.current.set(rec.serviceKey, rec);
+      pushed.current?.set(rec.serviceKey, rec);
       set((prev) => (prev ? upsertByServiceKey(prev, rec) : prev));
     });
   }, [channel]);
 
   const begin = useCallback(() => {
-    inFlight.current = true;
-    pushed.current = new Map();
+    pushed.current ??= new Map();
     reads.current += 1;
     return reads.current;
   }, []);
   const answer = useCallback((read: number, rows: T[] | null | "keep") => {
     if (read !== reads.current) return false;
-    inFlight.current = false;
-    const late = [...pushed.current.values()];
-    pushed.current = new Map();
+    const late = [...(pushed.current?.values() ?? [])];
+    pushed.current = null;
     set((prev) => {
       const base = rows === "keep" ? (prev ?? []) : (rows ?? []);
       return late.reduce<T[]>((acc, rec) => upsertByServiceKey(acc, rec), base);

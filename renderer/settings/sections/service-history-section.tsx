@@ -543,10 +543,6 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // tells the two apart; nothing here may treat "not answered yet" or "the
   // read failed" as "there is nothing to report".
   const [baptisms, setBaptisms] = useState<BaptismSession[] | null>(null);
-  // attList (attendance for every service) builds the day rows and the Trends
-  // card; splList is one level per service, the sound measure on Trends. The
-  // settled flags tell "none recorded" from "not read yet", which the Trends
-  // card must not confuse. All from useHistoryLists, above.
 
   /**
    * The SPL record behind each of the VISIBLE MONTH's rows, so a row's peak
