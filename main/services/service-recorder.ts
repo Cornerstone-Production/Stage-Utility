@@ -259,6 +259,13 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
   private loggedSkippedOpener: string | null = null;
   /** The airing on the last tick this recorder handled. */
   private lastAiring: Airing | null = null;
+  /**
+   * The record of a service that was closed because the live mode dropped into
+   * the next occurrence's arrival ramp, while the ramp is what this recorder
+   * holds. An item coming back is either that service resuming or the next one
+   * starting, and the hold rule decides which, once (see serviceComingBack).
+   */
+  private droppedService: Pick<ServiceRecord, "serviceKey" | "serviceTypeId" | "planId" | "serviceDate" | "serviceTimeId" | "openingItemId"> | null = null;
   /** The airing already on when the current record was established — see
    *  captureOpeningItem. */
   private inheritedAiring: Airing | null = null;
@@ -398,6 +405,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    * one. ensureRecord guards its resume of a held copy or stored record itself.
    */
   forget(serviceKey: string): boolean {
+    if (this.droppedService?.serviceKey === serviceKey) this.droppedService = null;
     const wasUnsaved = this.unsaved.delete(serviceKey);
     this.forgotten.add(serviceKey);
     if (this.currentKey !== serviceKey && this.current?.serviceKey !== serviceKey) return wasUnsaved;
@@ -406,6 +414,17 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     this.currentKey = null;
     this.generation += 1;
     return true;
+  }
+
+  /**
+   * Whether the held record covered a service that ran, so that with no item live
+   * it is a finished service and not one to hold through an occurrence change
+   * (see ensureRecord). False here: the timeline and SPL establish a record only
+   * with an item live, so the question never decides anything for them.
+   * Attendance answers from serviceStartedAt.
+   */
+  protected coveredAService(): boolean {
+    return false;
   }
 
   /**
@@ -546,6 +565,40 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
   }
 
   /**
+   * The key of the service closed at a drop of the live mode (droppedService),
+   * when an item comes back and the hold rule says it is that service resuming
+   * rather than the next one starting. Null otherwise. Asked once: whatever it
+   * decides, the dropped service is forgotten, and so it is when the record held
+   * since has covered a service of its own, or the plan or day moved on.
+   *
+   * Without it the attendance recorder, which has to put the next occurrence's
+   * arrivals somewhere and so splits at the drop, kept the rest of a service
+   * whose mode only blinked in the next one's record, while SPL and the
+   * timeline, which record nothing with no item live, resumed the first.
+   */
+  private serviceComingBack(
+    live: PcoLiveDTO,
+    key: string,
+    serviceTypeId: string,
+    planId: string,
+    date: string,
+    serviceTimeId: string | null,
+    gapSinceLive: number,
+  ): string | null {
+    const dropped = this.droppedService;
+    if (!dropped || !inLiveItem(live)) return null;
+    this.droppedService = null;
+    if (!this.current || this.coveredAService()) return null;
+    if (dropped.serviceTypeId !== serviceTypeId || dropped.planId !== planId || dropped.serviceDate !== date) return null;
+    if (dropped.serviceKey === key) return null; // reported as that occurrence again: the ordinary split resumes it
+    if (!this.shouldHoldThroughServiceTimeChange(live, serviceTimeId, gapSinceLive, dropped)) return null;
+    console.log(
+      `[service-recorder] ${this.label}: an item came back with the next service still more than ${SERVICE_GAP_MS / 60_000} min off — ${scrub(dropped.serviceKey)} is resuming, not ending; returning to it`,
+    );
+    return dropped.serviceKey;
+  }
+
+  /**
    * The key changed while the SAME plan, on the SAME date, is still live. Is this
    * one service whose occurrence id moved under it, or the next service starting?
    *
@@ -584,8 +637,9 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     live: PcoLiveDTO,
     serviceTimeId: string | null,
     gapSinceLive: number,
+    held: Pick<ServiceRecord, "serviceKey" | "serviceTimeId" | "openingItemId"> | null = this.current,
   ): boolean {
-    const from = this.current?.serviceTimeId ?? null;
+    const from = held?.serviceTimeId ?? null;
     if (serviceTimeId == null || from == null) return true; // no two occurrences to compare
     const startsAtMs = live.serviceTimeStartsAt ? Date.parse(live.serviceTimeStartsAt) : NaN;
     if (!Number.isFinite(startsAtMs)) return gapSinceLive < SERVICE_GAP_MS;
@@ -597,10 +651,10 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     // through loggedServiceTimeChange: the split below changes currentKey on
     // THIS tick, so this transition is never asked about again and nothing can
     // double-log it.
-    const openingItemId = this.current?.openingItemId ?? null;
+    const openingItemId = held?.openingItemId ?? null;
     if (hold && openingItemId != null && live.currentItemId === openingItemId) {
       console.log(
-        `[service-recorder] ${this.label}: "${scrub(live.label ?? live.currentItemTitle ?? openingItemId)}" went live again during the hold — the next service has begun, closing ${this.current?.serviceKey ?? "the open record"} and opening a new record`,
+        `[service-recorder] ${this.label}: "${scrub(live.label ?? live.currentItemTitle ?? openingItemId)}" went live again during the hold — the next service has begun, closing ${held?.serviceKey ?? "the open record"} and opening a new record`,
       );
       return false;
     }
@@ -612,7 +666,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     const transition = `${from}→${serviceTimeId}:${hold ? "hold" : "split"}`;
     if (this.loggedServiceTimeChange !== transition) {
       this.loggedServiceTimeChange = transition;
-      const closing = `closing ${this.current?.serviceKey ?? "the open record"} and opening a new record`;
+      const closing = `closing ${held?.serviceKey ?? "the open record"} and opening a new record`;
       console.log(
         hold
           ? `[service-recorder] ${this.label}: service time ${from} → ${serviceTimeId}, holding the open record (next occurrence starts in ${Math.round(untilMs / 60_000)} min)`
@@ -695,8 +749,10 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     // Separate back-to-back services sharing one plan by the PCO service-time
     // occurrence (9am vs 11am). Fall back to the date when none is known.
     const serviceTimeId = live.serviceTimeId;
-    const key = `${serviceTypeId}:${planId}:${serviceTimeId ?? date}`;
-    if (this.currentKey === key && this.current) {
+    let key = `${serviceTypeId}:${planId}:${serviceTimeId ?? date}`;
+    const back = this.serviceComingBack(live, key, serviceTypeId, planId, date, serviceTimeId, gapSinceLive);
+    if (back) key = back;
+    else if (this.currentKey === key && this.current) {
       this.captureOpeningItem(live); // backfill for a record that opened before any item was live
       return;
     }
@@ -704,22 +760,43 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     // Hold the open record through a serviceTimeId change WITHIN one live service
     // — see SERVICE_GAP_MS.
     //
-    // Only while there is a service to hold for: the record is still open, or a
-    // plan item is live (an item coming back after a mode drop resumes the
-    // closed record, as SPL and the timeline do). A closed record and no item
-    // live is a service that has ended, and the tick is the attendance ramp for
-    // the NEXT occurrence; holding there appended its arrivals to the finished
-    // record, after its end, until the hold released ten minutes before the
-    // next start.
-    if (
-      this.current &&
-      (this.current.endedAt == null || inLiveItem(live)) &&
+    // Only while there is a service to hold for: a plan item is live (an item
+    // coming back after a mode drop resumes the closed record, as SPL and the
+    // timeline do), or the record is still open and has not yet covered a
+    // service (an arrival ramp whose occurrence id resolved). No item live is a
+    // service that has ended, and the tick is the attendance ramp for the NEXT
+    // occurrence; holding there appended its arrivals to the finished record,
+    // after its end, until the hold released ten minutes before the next start.
+    // An attendance record is still OPEN at that tick when the mode dropped
+    // straight into the next ramp (it closes on a "post" tick, and a ramp tick
+    // is "pre"), so open alone is not a service to hold for once one has run.
+    const sameDay =
+      this.current != null &&
       this.current.serviceTypeId === serviceTypeId &&
       this.current.planId === planId &&
-      this.current.serviceDate === date &&
+      this.current.serviceDate === date;
+    if (
+      !back &&
+      sameDay &&
+      (inLiveItem(live) || (this.current!.endedAt == null && !this.coveredAService())) &&
       this.shouldHoldThroughServiceTimeChange(live, serviceTimeId, gapSinceLive)
     ) {
       return;
+    }
+    // Closed at the drop rather than held, and kept in mind in case an item comes back.
+    if (!back && sameDay && !inLiveItem(live) && this.current!.endedAt == null && this.coveredAService()) {
+      const c = this.current!;
+      this.droppedService = {
+        serviceKey: c.serviceKey,
+        serviceTypeId: c.serviceTypeId,
+        planId: c.planId,
+        serviceDate: c.serviceDate,
+        serviceTimeId: c.serviceTimeId,
+        openingItemId: c.openingItemId ?? null,
+      };
+      console.log(
+        `[service-recorder] ${this.label}: ${scrub(c.serviceKey)} ended with no item live, in the arrival ramp for ${scrub(key)}; closing it, and returning to it if an item comes back while the next service is still more than ${SERVICE_GAP_MS / 60_000} min off`,
+      );
     }
 
     // Only one establish runs at a time (each recorder's busy latch), so what

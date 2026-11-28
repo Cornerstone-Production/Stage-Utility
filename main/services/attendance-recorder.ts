@@ -73,6 +73,11 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
     sensourceService.pollNowIfIdle();
   }
 
+  /** A record that has seen a service tick has covered a service: see the base's hold. */
+  protected override coveredAService(): boolean {
+    return this.current?.serviceStartedAt != null;
+  }
+
   /** What (if anything) to sample this tick — see attendance-phase.ts. */
   private classify(live: PcoLiveDTO): Phase | null {
     return classifyPhase(live, {
