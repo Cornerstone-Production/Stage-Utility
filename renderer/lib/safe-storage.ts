@@ -34,6 +34,16 @@ export function browserStorage(): RemovableStorage | null {
   }
 }
 
+/** The tab's own sessionStorage, or null where there is none or merely touching it
+ *  throws. For what must not outlive or leave this tab (a reload note, an update handshake). */
+export function tabStorage(): RemovableStorage | null {
+  try {
+    return typeof sessionStorage === "undefined" ? null : sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Read `key` and turn what is there into a value. `parse` gets null when nothing
  * is stored. `fallback` when there is no storage, when reading throws, or when

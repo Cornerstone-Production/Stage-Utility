@@ -14,6 +14,8 @@
 //     on every SSE reconnect).
 // `reloadScheduled` makes them idempotent so they cannot double-reload.
 
+import { readStored, removeStored, tabStorage, writeStored } from "../lib/safe-storage";
+
 /** sessionStorage, not local: the handshake is scoped to this tab. */
 const UPDATE_PENDING_KEY = "stageUtility.update.pending";
 const UPDATE_DONE_KEY = "stageUtility.update.done";
@@ -35,32 +37,17 @@ export function currentServerVersion(): string | null {
 
 /** Record which version we are updating FROM, so a later hello can tell us it finished. */
 export function markUpdatePending(): void {
-  try {
-    sessionStorage.setItem(
-      UPDATE_PENDING_KEY,
-      JSON.stringify({ fromVersion: serverVersion, at: Date.now() }),
-    );
-  } catch {
-    // sessionStorage unavailable — the durable update:status path still works;
-    // only the faster server:hello comparison is lost.
-  }
+  // Storage unavailable: the durable update:status path still works; only the
+  // faster server:hello comparison is lost.
+  writeStored(UPDATE_PENDING_KEY, JSON.stringify({ fromVersion: serverVersion, at: Date.now() }), tabStorage());
 }
 
 export function pendingUpdate(): { fromVersion: string | null } | null {
-  try {
-    const raw = sessionStorage.getItem(UPDATE_PENDING_KEY);
-    return raw ? (JSON.parse(raw) as { fromVersion: string | null }) : null;
-  } catch {
-    return null;
-  }
+  return readStored(UPDATE_PENDING_KEY, (raw) => (raw ? (JSON.parse(raw) as { fromVersion: string | null }) : null), null, tabStorage());
 }
 
 export function clearUpdatePending(): void {
-  try {
-    sessionStorage.removeItem(UPDATE_PENDING_KEY);
-  } catch {
-    /* nothing to clear if storage is unavailable */
-  }
+  removeStored(UPDATE_PENDING_KEY, tabStorage());
 }
 
 /**
@@ -73,12 +60,10 @@ export function clearUpdatePending(): void {
 export function finishUpdateAndReload(version: string | null): void {
   if (reloadScheduled) return;
   reloadScheduled = true;
-  try {
-    sessionStorage.removeItem(UPDATE_PENDING_KEY);
-    if (version) sessionStorage.setItem(UPDATE_DONE_KEY, JSON.stringify({ version }));
-  } catch {
-    /* the reload still needs to happen; only the banner is lost */
-  }
+  // The reload still needs to happen; only the banner is lost if storage is.
+  const tab = tabStorage();
+  removeStored(UPDATE_PENDING_KEY, tab);
+  if (version) writeStored(UPDATE_DONE_KEY, JSON.stringify({ version }), tab);
   setTimeout(() => window.location.reload(), RELOAD_DELAY_MS);
 }
 
@@ -89,14 +74,10 @@ export function finishUpdateAndReload(version: string | null): void {
  * subsequent navigation within the same tab.
  */
 export function takeJustUpdated(): { version: string } | null {
-  try {
-    const raw = sessionStorage.getItem(UPDATE_DONE_KEY);
-    if (!raw) return null;
-    sessionStorage.removeItem(UPDATE_DONE_KEY);
-    return JSON.parse(raw) as { version: string };
-  } catch {
-    return null;
-  }
+  const tab = tabStorage();
+  const done = readStored(UPDATE_DONE_KEY, (raw) => (raw ? (JSON.parse(raw) as { version: string }) : null), null, tab);
+  removeStored(UPDATE_DONE_KEY, tab);
+  return done;
 }
 
 /** Test seam — resets the module's one-shot guard between cases. */
