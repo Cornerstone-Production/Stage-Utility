@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 
-import { migrateBoards } from "./slot-boards.js";
+import { migrateBoards, withFreshIds } from "./slot-boards.js";
 import type { SlotsFile, SlotsOverride } from "./slots-store.js";
 import type { LayoutObject, Slot, View } from "../types/stage.js";
 
@@ -363,5 +363,23 @@ describe("the writes a merge needs", () => {
     assert.ok(next.file.boards.has("g-left-copy"), "a board edited since the merge was recorded was deleted");
     assert.deepEqual(next.file.defaults.get("g-left-copy")?.get(WEEKEND)?.map((x) => x.id), ["new-0"]);
     assert.equal(next.file.pendingMerges, undefined);
+  });
+});
+
+describe("withFreshIds", () => {
+  test("every row gets a new id and keeps its other fields, and the input is untouched", () => {
+    const rows = [
+      { id: "a", label: "Lead" },
+      { id: "b", label: "Keys" },
+    ];
+    const copy = withFreshIds(rows);
+    assert.deepEqual(copy.map((r) => r.label), ["Lead", "Keys"]);
+    assert.equal(new Set([...rows, ...copy].map((r) => r.id)).size, 4, "a copied row shared an id with its source or its sibling");
+    assert.deepEqual(rows.map((r) => r.id), ["a", "b"]);
+  });
+
+  test("takes the id source it is given", () => {
+    let n = 0;
+    assert.deepEqual(withFreshIds([{ id: "a" }, { id: "b" }], () => `fresh-${++n}`), [{ id: "fresh-1" }, { id: "fresh-2" }]);
   });
 });

@@ -11,10 +11,19 @@
 // its object id, a "view" grid's is the view it embeds. So the screens resolve
 // the same rows either way.
 
+import { randomUUID } from "node:crypto";
+
 import type { LayoutObject, LayoutObjectConfig, Slot, SlotBoardMeta, SlotsLayout, View } from "../types/stage.js";
 import type { SlotsFile, SlotsOverride } from "./slots-store.js";
 import { walkLayoutObjects } from "./view-refs.js";
 import { canonicalJson } from "./canonical-json.js";
+
+/** Copies of `rows` with a new id on each, for rows being copied to another board:
+ *  two boards must never share a slot row identity. `freshId` is injectable for a
+ *  caller whose ids a test has to know. */
+export function withFreshIds<T extends { id: string }>(rows: readonly T[], freshId: () => string = randomUUID): T[] {
+  return rows.map((r) => ({ ...r, id: freshId() }));
+}
 
 type GridConfig = Extract<LayoutObjectConfig, { type: "slots-grid" }>;
 
