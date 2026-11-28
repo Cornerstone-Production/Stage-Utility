@@ -356,7 +356,7 @@ export async function applyViewBundle(raw: unknown, opts: ImportOptions = {}): P
         continue;
       }
       // Fresh slot ids: two boards must never share a slot row identity.
-      defaults.set(landing, withFreshIds(rows));
+      defaults.set(landing, withFreshIds(rows, randomUUID));
     }
     const meta = Object.hasOwn(incomingBoards, oldId) ? incomingBoards[oldId] : undefined;
     const name = freeName(meta?.name ?? "Imported board", boardNames);

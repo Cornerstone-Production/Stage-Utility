@@ -193,8 +193,20 @@ async function download(
   limits: AttachmentLimits,
 ): Promise<CachedFile | null> {
   const watchdog = downloadWatchdog({ idleMs: limits.idleMs, totalMs: limits.totalMs });
+  // Asking PCO for the link is part of the download: a hung open is abandoned by the
+  // same watchdog, and an answer that took a while is not held against the transfer.
+  const open = async (opts?: { fresh?: boolean }): Promise<string> => {
+    const aborted = new Promise<never>((_, reject) => {
+      const fail = (): void => reject(watchdog.signal.reason);
+      if (watchdog.signal.aborted) fail();
+      else watchdog.signal.addEventListener("abort", fail, { once: true });
+    });
+    const url = await Promise.race([openUrl(opts), aborted]);
+    watchdog.touch();
+    return url;
+  };
   try {
-    let resp = await fetch(await openUrl(), { signal: watchdog.signal });
+    let resp = await fetch(await open(), { signal: watchdog.signal });
     if (resp.status === 401 || resp.status === 403) {
       // The cached signed link expired ahead of its TTL; one re-open, one retry.
       // Said while the file is still downloading, not while it is already in a
@@ -202,7 +214,7 @@ async function download(
       // to the one outage line on every request from every display.
       if (!outage.failing(id)) console.warn(`[attachment-cache] link for ${scrub(id)} rejected (HTTP ${resp.status}); re-opening`);
       await resp.body?.cancel().catch(() => {});
-      resp = await fetch(await openUrl({ fresh: true }), { signal: watchdog.signal });
+      resp = await fetch(await open({ fresh: true }), { signal: watchdog.signal });
     }
     if (!resp.ok) {
       await resp.body?.cancel().catch(() => {});

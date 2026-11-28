@@ -212,6 +212,34 @@ describe("attachment cache", () => {
       assert.equal(file, null);
     });
 
+    test("a PCO open that never answers times out too, and the next request starts afresh", async (t) => {
+      t.after(() => { globalThis.fetch = realFetch; mock.restoreAll(); });
+      mock.method(console, "error", () => {});
+      let opens = 0;
+      const hung = () => { opens += 1; return new Promise<string>(() => {}); };
+      const file = await within(getAttachmentFile("stall-3", "application/pdf", "plot.pdf", hung, "", LIMITS), 3_000, "a hung open");
+      assert.equal(file, null);
+      await within(getAttachmentFile("stall-3", "application/pdf", "plot.pdf", hung, "", LIMITS), 3_000, "the retry");
+      assert.equal(opens, 2, "the hung open stayed in flight");
+    });
+
+    test("a slow body that keeps moving outlives the idle window", async (t) => {
+      t.after(() => { globalThis.fetch = realFetch; });
+      globalThis.fetch = (async () => {
+        let sent = 0;
+        return new Response(new ReadableStream<Uint8Array>({
+          async pull(controller) {
+            await new Promise((r) => setTimeout(r, 40));
+            controller.enqueue(new Uint8Array(8));
+            if (++sent === 5) controller.close();
+          },
+        }), { status: 200 });
+      }) as typeof fetch;
+      const file = await getAttachmentFile("slow-1", "application/pdf", "plot.pdf", open, "", { ...LIMITS, idleMs: 100 });
+      assert.ok(file, "a download that keeps moving was abandoned for being quiet");
+      assert.equal((await fs.stat(file.path)).size, 40);
+    });
+
     test("a body past the size cap is refused, and nothing is written", async (t) => {
       t.after(() => { globalThis.fetch = realFetch; mock.restoreAll(); });
       const errors: string[] = [];

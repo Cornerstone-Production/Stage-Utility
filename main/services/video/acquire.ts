@@ -73,8 +73,19 @@ export async function relayBinaryPresent(): Promise<boolean> {
 export async function relayArchivePresent(): Promise<boolean> {
   const asset = assetFor();
   if (!asset) return false;
-  return fileExists(path.join(relayDir(), "downloads", asset.name));
+  try {
+    return await fileExists(path.join(relayDir(), "downloads", asset.name));
+  } catch (err) {
+    // A status read, polled by the Advanced page and read at boot: it must not
+    // throw. ensureBinary looks at the same file and returns the failure as its reason.
+    const why = scrub(errorMessage(err));
+    if (why !== lastArchiveProblem) console.warn(`[video] cannot look for the MediaMTX archive: ${why}`);
+    lastArchiveProblem = why;
+    return false;
+  }
 }
+/** The last archive problem logged, so a polled read says each one once. */
+let lastArchiveProblem: string | null = null;
 
 /** A file with bytes in it that this process may run — not merely a name.
  *  An extract interrupted partway leaves the name with no bytes, and a file

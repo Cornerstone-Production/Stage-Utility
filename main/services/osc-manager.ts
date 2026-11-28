@@ -51,8 +51,9 @@ class OscManager {
   private feedback: Record<string, number | string | boolean> = {};
   private subTimers = new Map<string, ReturnType<typeof setInterval>>();
   private readonly feedbackThrottle = trailing(FEEDBACK_THROTTLE_MS, () => {
+    const settle = this.settleBroadcast; // before the broadcast: a re-entrant schedule makes a new one
     broadcast("osc:feedback", this.getFeedback());
-    this.settleBroadcast();
+    settle();
   });
   private settleBroadcast: () => void = () => {};
   /** The throttled `osc:feedback` broadcast in flight, if any. See

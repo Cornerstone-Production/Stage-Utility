@@ -7,6 +7,7 @@
 // id and name is invented; the shape is the one that motivated boards.
 
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { describe, test } from "node:test";
 
 import { migrateBoards, withFreshIds } from "./slot-boards.js";
@@ -372,7 +373,7 @@ describe("withFreshIds", () => {
       { id: "a", label: "Lead" },
       { id: "b", label: "Keys" },
     ];
-    const copy = withFreshIds(rows);
+    const copy = withFreshIds(rows, randomUUID);
     assert.deepEqual(copy.map((r) => r.label), ["Lead", "Keys"]);
     assert.equal(new Set([...rows, ...copy].map((r) => r.id)).size, 4, "a copied row shared an id with its source or its sibling");
     assert.deepEqual(rows.map((r) => r.id), ["a", "b"]);
