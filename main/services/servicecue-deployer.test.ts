@@ -317,6 +317,20 @@ describe("a service being live", () => {
     assert.equal(puts(), 1);
   });
 
+  it("an Update the page now without override is refused if a service went live during the checks, and goes with it", async (t) => {
+    captureConsole(t, "log", "warn");
+    fake.respond = (r) => {
+      if (/\/tokens\/verify$/.test(r.path)) world.live = true;
+      return undefined;
+    };
+    const d = makeDeployer({ ...FAST, nowEveryMs: 0 });
+    assert.deepEqual(await d.deployNow(), { kind: "waiting", reasons: LIVE_REASONS });
+    assert.equal(puts(), 0, "the page was deployed into a service that went live during the checks, with no override");
+    assert.equal((await d.deployNow({ override: true })).kind, "deployed");
+    assert.equal(puts(), 1);
+    fake.respond = () => undefined;
+  });
+
   it("is checked again just before the upload: a service that went live during the checks is waited out", async (t) => {
     captureConsole(t, "log");
     // The service goes live while the token is being checked, a request that can take up to a minute.

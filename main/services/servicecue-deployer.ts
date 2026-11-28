@@ -466,6 +466,10 @@ export class ServiceCueDeployer implements DeployHook {
         if (nowActivity.active || nowWindow !== null || !this.deps.serviceTimesKnown()) {
           return this.wait(mode, nowActivity.active ? "live" : nowWindow !== null ? "window" : "unknown", nowWindow, `build ${pageBuild ?? "unknown"} to ${manifest.build}`, nowActivity.reasons);
         }
+      } else if (!override) {
+        // Asked for, without the override: a service that went live during the checks is refused, as one live at the start is.
+        const nowActivity = this.deps.serviceActivity();
+        if (nowActivity.active) return this.wait(mode, "live", null, `build ${pageBuild ?? "unknown"} to ${manifest.build}`, nowActivity.reasons);
       }
       // Gone ahead of a service under way, by override: said every time, never folded into the decision lines.
       const overrode = mode === "now" && override ? this.liveReasons() : null;
