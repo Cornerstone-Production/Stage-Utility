@@ -15,21 +15,23 @@ import { invoke } from "../lib/api";
 import { errorMessage } from "@main/services/errors";
 import { toast } from "../components/ui";
 import { usePlanChecklist } from "./use-plan-checklist";
+import { useTrailingCommit } from "../lib/use-trailing-commit";
 
 interface NotesContent {
   text?: string;
   items?: { id: string; text: string; done: boolean }[];
 }
 
-/** Debounce so a save is a sentence, not a keystroke. Long enough to batch
- *  typing, short enough that walking away from the panel does not lose it. */
+/** Debounce so a save is a sentence, not a keystroke. What is still waiting when
+ *  the object goes away (a view switch, leaving the page in the app) is sent then,
+ *  by useTrailingCommit, rather than dropped with the timer. */
 const SAVE_DEBOUNCE_MS = 600;
 
 function useSavedContent(objectId: string, all: Record<string, NotesContent> | undefined) {
   const server = all?.[objectId];
   const [local, setLocal] = useState<NotesContent | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** From the keystroke until the save it schedules has settled. */
   const pending = useRef(false);
 
   // Follow the server unless this operator is mid-edit, or a save FAILED —
@@ -40,30 +42,32 @@ function useSavedContent(objectId: string, all: Record<string, NotesContent> | u
     if (!pending.current && !saveError) setLocal(null);
   }, [server, saveError]);
 
+  // The object id travels with the content: the commit runs after the render that
+  // scheduled it, and must write to the object the text was typed into.
+  const commit = useTrailingCommit<{ objectId: string; content: NotesContent }>((next) => {
+    // The catch REPORTS rather than swallowing. api.ts throws and does not
+    // toast, so an empty catch here would lose the operator's typing in
+    // silence — "it looked saved until the next restart" is precisely the
+    // failure this repository has a rule against.
+    //
+    // setSaveError also stops the local copy being dropped on the next server
+    // broadcast, so what they typed stays on screen instead of reverting
+    // under them while an error toast explains why. After an unmount there is
+    // no screen; the toast still says the note was not saved.
+    void invoke("notes:set", next)
+      .then(() => { setSaveError(null); })
+      .catch((e: unknown) => {
+        setSaveError(errorMessage(e));
+        toast.error(`Could not save that note: ${errorMessage(e)}`);
+      })
+      .finally(() => { pending.current = false; });
+  }, SAVE_DEBOUNCE_MS);
+
   function save(next: NotesContent) {
     setLocal(next);
     pending.current = true;
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => {
-      // The catch REPORTS rather than swallowing. api.ts throws and does not
-      // toast, so an empty catch here would lose the operator's typing in
-      // silence — "it looked saved until the next restart" is precisely the
-      // failure this repository has a rule against.
-      //
-      // setSaveError also stops the local copy being dropped on the next server
-      // broadcast, so what they typed stays on screen instead of reverting
-      // under them while an error toast explains why.
-      void invoke("notes:set", { objectId, content: next })
-        .then(() => { setSaveError(null); })
-        .catch((e: unknown) => {
-          setSaveError(errorMessage(e));
-          toast.error(`Could not save that note: ${errorMessage(e)}`);
-        })
-        .finally(() => { pending.current = false; });
-    }, SAVE_DEBOUNCE_MS);
+    commit({ objectId, content: next });
   }
-
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
   return [local ?? server ?? {}, save] as const;
 }
