@@ -534,6 +534,20 @@ describe("Publishing", () => {
     assert.deepEqual(server.posts[0], ["save", { url: "https://another.example-account.example", token: "tok-for-it" }]);
   });
 
+  test("keeps a token typed while the saved address is empty, sends nothing, and says why", async () => {
+    // Publishing with no address is a file the editor never writes (a restore, a hand edit), and the card must
+    // not drop the token typed to repair it: the server would refuse a token with no address, so nothing is sent.
+    server.dto = { ...server.dto, url: "" };
+    await mount();
+    await fire.click(screen.getByRole("button", { name: "Cloudflare connection" }));
+    await fire.change(input("Publishing token"), { target: { value: long("tok-typed") } });
+    await fire.blur(input("Publishing token"));
+    await settle();
+    assert.deepEqual(server.posts, [], "a token was sent with no address to be saved for");
+    assert.equal(input("Publishing token").value, long("tok-typed"), "the typed token was dropped");
+    assert.ok(text().includes("Enter the page address with the token: a token is saved for one address."), text());
+  });
+
   test("clears the address without a token: the server takes an empty address, and switches publishing off with it", async () => {
     await mount();
     await fire.click(screen.getByRole("button", { name: "Cloudflare connection" }));

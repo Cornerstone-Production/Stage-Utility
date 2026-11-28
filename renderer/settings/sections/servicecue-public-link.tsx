@@ -469,11 +469,19 @@ export function PublicLinkCard({
     if (!dto || working) return;
     const changed = originOf(addr) !== originOf(dto.url);
     if (!changed && typedToken === null) return;
-    // An emptied address needs no token: the server takes it as it is, and removes the saved token and switches publishing off with it.
-    const cleared = addr.trim() === "";
+    // An address that was set and is now emptied needs no token: the server takes it as it is, and removes the saved
+    // token and switches publishing off with it.
+    const empty = addr.trim() === "";
+    const cleared = changed && empty;
     if (changed && typedToken === null && !cleared) {
       // The server would refuse it, and says so; this says it before anything is sent.
       setHint("A different address needs its token: paste it again.");
+      return;
+    }
+    if (empty && !changed) {
+      // A token with no address to be saved for: the server would refuse it. Kept in its field for the address to join,
+      // and said here rather than sent.
+      setHint("Enter the page address with the token: a token is saved for one address.");
       return;
     }
     if (changed && !(await movingIsOk(addr))) return;
