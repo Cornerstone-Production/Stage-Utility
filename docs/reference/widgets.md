@@ -654,7 +654,7 @@ screens that have a Button for the command, Home included.
 A Companion or App action pick saves a command of its own for the Button, at once,
 before the layout is saved. It is a **Called by name** rule named `btn_<label>`
 (the picked button's or action's name when the label is blank), a `lower_snake_case`
-name made unique against every command name and former name; one ending `_on` or
+name (accents folded to their letter, at most 60 characters) made unique against every command name and former name; one ending `_on` or
 `_off` gets `_cue` added, because a lone one would read as half of an ON/OFF pair
 and never appear in the list. It is enabled, hidden from Home Assistant, allowed
 during a service, with no conditions and no cooldown, and it belongs to that

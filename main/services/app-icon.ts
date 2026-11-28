@@ -14,6 +14,7 @@ import { MAX_BRANDING_DATA_URL_CHARS, looksLikeStoredRef } from "./branding-imag
 import { isDataUrl } from "./image-files.js";
 import { isHex6 } from "./settings-rules.js";
 import { DEFAULT_ICON_BACKGROUND, ICON_SIZES, NO_TAB_BACKGROUND, type IconField } from "./install-metadata.js";
+import { isRecord } from "../types/is-record.js";
 
 export interface IconCrop {
   scale: number;
@@ -113,8 +114,8 @@ export function iconBackgrounds(settings: { appIconBackground?: string; appIconT
 type IconParse = { ok: true; value: AppIconInput | null } | { ok: false; error: string };
 
 export function parseCrop(v: unknown): IconCrop | null {
-  if (typeof v !== "object" || v === null) return null;
-  const c = v as Record<string, unknown>;
+  if (!isRecord(v)) return null;
+  const c = v;
   return typeof c.scale === "number" && typeof c.x === "number" && typeof c.y === "number"
     ? { scale: c.scale, x: c.x, y: c.y }
     : null;

@@ -54,7 +54,7 @@ import { isCompanionVariableRef } from "./companion-export.js";
 import { STATE_ANY_OTHER } from "./companion-state-source.js";
 // From cue-aliases, NOT from the trigger registry: the registry reaches
 // node:url, and this module is imported by the settings page.
-import { CALL_TRIGGER_ID, calledCueName, parseAliases } from "./cue-aliases.js";
+import { CALL_TRIGGER_ID, calledCueName, cueKey, parseAliases } from "./cue-aliases.js";
 import type { Rule } from "../types/automation.js";
 
 /** The values a bound pair's variable is expected to hold, absent anything else. */
@@ -209,7 +209,7 @@ export function stateBindingProblem(params: Record<string, string | number>): st
  * pastes carried an entity the integration's own list said did not exist.
  */
 export function isPairHalfName(cue: string): boolean {
-  return /_(on|off)$/.test(cue.trim().toLowerCase());
+  return /_(on|off)$/.test(cueKey(cue));
 }
 
 /**
@@ -459,14 +459,28 @@ export function boundCuePairs(rules: readonly Rule[]): CuePair[] {
   return cuePairs(rules).filter((p) => p.binding !== null);
 }
 
+/** "main_conf_tvs" -> "Main Conf Tvs". The cue name is all there is to go on. */
+export function humaniseCueName(cue: string): string {
+  return cue
+    .split("_")
+    .filter((w) => w !== "")
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
 /**
- * What to call a cue on a screen — the words, not the rule's name.
+ * What a person calls a cue: on a screen, in the manifest Home Assistant reads and
+ * in the YAML pasted into it. THE one answer, so the same rules are the same words
+ * whichever way Home Assistant was set up.
  *
- * The operator's own `says` first, with a trailing "on" taken off: it is there
- * so the cue can be SAID and is not part of the thing's name. "Projectors on"
- * is a sentence; the switch is called Projectors. Falling back to the cue name
- * humanised, never to the rule's `name` field — a rule may be called "Rule 4",
- * and a house full of switches called that is worse than one called by its cue.
+ * The operator's own `says` first, with a trailing "on" taken off: it is there so
+ * the cue can be SAID and is not part of the thing's name. "Projectors on" is a
+ * sentence; the switch is called Projectors. Falling back to the cue name
+ * humanised, never to the rule's `name` field: a rule's name is a label in the
+ * rules list that the operator may have worded for reading, not saying, and
+ * GET /api/cues has always answered with the humanised cue name, which a Home
+ * Assistant integration holds live. (Falling back to the rule's name instead is
+ * the one-line alternative here.)
  *
  * Here rather than in cue-manifest.ts, which is where it was, because the rule
  * editor names the switch an operator is about to hide and cue-manifest reaches
@@ -474,12 +488,77 @@ export function boundCuePairs(rules: readonly Rule[]): CuePair[] {
  */
 export function spokenCueName(params: Record<string, string | number>, fallback: string): string {
   const stripped = String(params.says ?? "").trim().replace(/\s+on$/i, "").trim();
-  if (stripped) return stripped;
-  return fallback
-    .split("_")
-    .filter((w) => w !== "")
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(" ");
+  return stripped || humaniseCueName(fallback);
+}
+
+/** One cue that carries a name a person says: a switch or a script in the generated YAML, a switch or a button in the manifest. */
+export interface SpokenCue {
+  /** `switch:<base>` or `script:<cue name>`. Unique across the document. */
+  key: string;
+  /** `switch` or `script` — Home Assistant's own two domains. */
+  kind: "switch" | "script" | "button";
+  /** The id it gets in its domain: a pair's base, or a script's cue name. */
+  id: string;
+  /** The words, from `says` or the rule's name. */
+  friendly: string;
+}
+
+/**
+ * No two objects may share the name a person says — ACROSS THE KINDS, not
+ * within each.
+ *
+ * A switch's `friendly_name` and a script's `alias` are the same thing to a
+ * voice assistant: the words somebody says out loud. Two of them saying
+ * "Projectors" is an assistant that picks one at random, and the operator finds
+ * out which in the middle of a service. Disambiguating the switches on their own
+ * — which is all this did — left two scripts whose cues have the same `says`
+ * both called that, and a switch and a script colliding with each other
+ * entirely unhandled.
+ *
+ * The Companion import already separates most of this on the way in: a name
+ * found on two pages is spoken with its page name (see cueSlugs). A
+ * hand-written cue has no page, and two operators typing the same `says` is
+ * exactly what this catches.
+ *
+ * Three tiers, and every collision is resolved by the second or the third:
+ *
+ *  1. the words, when this is the only object saying them,
+ *  2. else the id humanised — a pair's base, a script's cue name. Ids are
+ *     unique WITHIN a kind, because a pair is keyed by a cue name the engine
+ *     refuses to duplicate,
+ *  3. else the id humanised with its domain, which separates the one case tier
+ *     2 cannot: a pair based `projectors` and a one-shot cue called
+ *     `projectors`, which are `switch.projectors` and `script.projectors` in
+ *     Home Assistant and two different things.
+ *
+ * Returned as a map rather than a rewritten list so the switches and the scripts
+ * can be emitted from their own loops while sharing one answer.
+ */
+export function distinctSpokenNames(items: readonly SpokenCue[]): Map<string, string> {
+  const tally = (of: (item: SpokenCue) => string): Map<string, number> => {
+    const counts = new Map<string, number>();
+    for (const item of items) {
+      const key = of(item).toLowerCase();
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  };
+  const said = tally((i) => i.friendly);
+  const humanised = tally((i) => humaniseCueName(i.id));
+
+  const out = new Map<string, string>();
+  for (const item of items) {
+    if ((said.get(item.friendly.toLowerCase()) ?? 0) < 2) {
+      out.set(item.key, item.friendly);
+      continue;
+    }
+    const fallback = humaniseCueName(item.id);
+    out.set(
+      item.key,
+      (humanised.get(fallback.toLowerCase()) ?? 0) < 2 ? fallback : `${fallback} (${item.kind})`,
+    );
+  }
+  return out;
 }
 
 /**

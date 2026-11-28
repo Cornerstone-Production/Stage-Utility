@@ -43,8 +43,8 @@ import type { NotesContent } from "./notes-store.js";
  * would otherwise reject on its own write path are rejected here too.
  */
 function assertBundle(b: unknown): asserts b is ViewBundle {
-  const o = b as Record<string, unknown> | null;
-  if (!o || typeof o !== "object" || Array.isArray(o)) throw new Error("import — not a JSON object");
+  if (!isRecord(b)) throw new Error("import — not a JSON object");
+  const o = b;
   if (o.kind !== "stage-utility-view") {
     // Named, because picking the config snapshot by mistake is the likely error
     // and "invalid file" would teach nobody anything.
@@ -128,8 +128,8 @@ function assertBundle(b: unknown): asserts b is ViewBundle {
       if (typeof e.sheetId !== "string" || typeof e.sheetName !== "string") {
         throw new Error("import — a patch variant entry does not name its sheet");
       }
-      const v = e.variant as Record<string, unknown> | null;
-      if (!v || typeof v !== "object" || Array.isArray(v)) {
+      const v = e.variant;
+      if (!isRecord(v)) {
         throw new Error(`import — the patch variant for "${e.sheetName}" is not an object`);
       }
       if (typeof v.id !== "string" || !v.id || typeof v.name !== "string") {
