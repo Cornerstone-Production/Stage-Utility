@@ -247,6 +247,8 @@ export function BoardSection({
             onKeyDown={(e) => {
               if (e.key === "Enter") e.currentTarget.blur();
               if (e.key === "Escape") {
+                // Handled here: Theme photos puts itself away on an Escape nobody took.
+                e.preventDefault();
                 name.setDraft(board.name);
                 setRenaming(false);
               }

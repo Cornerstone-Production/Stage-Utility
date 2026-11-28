@@ -76,6 +76,9 @@ export const HYDRATED_CHANNELS = [
   // The metric the Trends card plots under Sound: chosen once and standing, so
   // a card opened after the last change must still show it.
   "trends:prefs",
+  // Theme photos being made: progress, and the position a Mic slots page reads
+  // to know it missed a change. State, so a page opened mid-run sees the run.
+  "photo-themes:changed",
 ] as const;
 
 export const HYDRATED_SET: ReadonlySet<string> = new Set<string>(HYDRATED_CHANNELS);

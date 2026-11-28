@@ -24,6 +24,7 @@ import { Loader2Icon, PanelRightIcon, PlusIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { LeaveGuard } from "../../components/leave-guard";
+import { usePointerSensors } from "../drag-parts";
 import { Button, EmptyState, ErrorNote } from "../../components/ui";
 import { cn } from "../../lib/cn";
 import { usePageActions } from "../page-actions";
@@ -35,11 +36,13 @@ import { applyDrop, columnLead, itemsOf, isSpacer, stackState } from "./board-mo
 import { ChargerLayoutDialog, CopyFromDialog, DeleteBoardDialog, NewBoardDialog } from "./board-dialogs";
 import { BoardSection, type BoardDialogs } from "./board-section";
 import type { DragData, DropData } from "./board-preview";
+import { PhotoThemesPanel } from "./photo-themes/photo-themes-panel";
+import { themePhotosReason } from "./photo-themes/theme-photos-reason";
+import { usePhotoThemes, type PhotoPlan } from "./photo-themes/use-photo-themes";
 import { PlanCheck } from "./plan-check";
 import { SlotInspector, SpacerInspector } from "./slot-inspector";
 import { makeSharesWith } from "./shares-with";
-import { usePointerSensors } from "../drag-parts";
-import { TopBar } from "./top-bar";
+import { ThemePhotosReasonLine, TopBar } from "./top-bar";
 import { displayWidthOf, showTargets, useMicSlots, type ShowTarget } from "./use-mic-slots";
 
 /** The slot zones win over a card's own, and a pointer picks by where it is; a
@@ -83,6 +86,24 @@ export function MicSlotsPage() {
 
   const targets = showTargets(mic.views);
 
+  // ── Theme photos: for the plan being edited, never a Default ─────────────
+  const wire = mic.wireTarget();
+  const photoPlan: PhotoPlan | null =
+    mic.hasPlan && mic.side === "plan" && mic.planId && mic.serviceTypeId
+      ? { planId: mic.planId, serviceTypeId: mic.serviceTypeId, sortDate: wire?.kind === "plan" ? ((wire.sortDate as string | null) ?? null) : null }
+      : null;
+  const photos = usePhotoThemes(photoPlan);
+  const [photoOpen, setPhotoOpen] = useState(false);
+  const photoReason = themePhotosReason({ hasServiceType: !!mic.serviceTypeId, hasPlan: mic.hasPlan, side: mic.side });
+  // Off (a Default) closes it, and it stays closed when the reason clears:
+  // it never lingers over a page it cannot act on, or reopens unasked.
+  if (photoReason && photoOpen) setPhotoOpen(false);
+  const photoPanel = photoOpen && !photoReason && photoPlan !== null ? photoPlan : null;
+  const closePhotoPanel = () => {
+    setPhotoOpen(false);
+    document.querySelector<HTMLElement>("[data-theme-photos-button]")?.focus({ preventScroll: true });
+  };
+
   // ── deep link: ?board=<id> scrolls to and selects that board ────────────
   const linkedBoard = linked && mic.boards.some((b) => b.id === linked) ? linked : null;
   const activeBoardId = mic.selection?.boardId ?? linkedBoard;
@@ -119,7 +140,14 @@ export function MicSlotsPage() {
     setSeenSel(selId);
     if (selId) setHelpOpen(false);
   }
-  const inspectorOpen = !!sel || helpOpen;
+  // One sheet at a time on the right: the inspector gives way while Theme photos is open,
+  // and selecting a slot (which asks for the inspector) puts Theme photos away.
+  const [seenSelForPhotos, setSeenSelForPhotos] = useState(selId);
+  if (selId !== seenSelForPhotos) {
+    setSeenSelForPhotos(selId);
+    if (selId && photoOpen) setPhotoOpen(false);
+  }
+  const inspectorOpen = (!!sel || helpOpen) && !photoPanel;
 
   function onDragStart(e: DragStartEvent) {
     const data = e.active.data.current as DragData | undefined;
@@ -144,7 +172,10 @@ export function MicSlotsPage() {
         if (inspectorOpen) {
           mic.select(null);
           setHelpOpen(false);
-        } else setHelpOpen(true);
+        } else {
+          setPhotoOpen(false);
+          setHelpOpen(true);
+        }
       }}
       tooltip="Show or hide the inspector"
       className={inspectorOpen ? "border border-accent/55 bg-accent/12" : "border border-line-strong"}
@@ -188,7 +219,18 @@ export function MicSlotsPage() {
   return (
     <div className="flex flex-col gap-4 pb-[50vh] max-sm:pb-24" data-mic-slots-page>
       {router && <MicSlotsLeaveGuard dirty={mic.dirty} count={mic.dirtyIds.length} />}
-      <TopBar mic={mic} savedOpen={savedOpen} onSavedOpen={setSavedOpen} savedBoardId={savedBoard ?? sel?.boardId ?? mic.boards[0]?.id ?? null} />
+      <TopBar
+        mic={mic}
+        savedOpen={savedOpen}
+        onSavedOpen={setSavedOpen}
+        savedBoardId={savedBoard ?? sel?.boardId ?? mic.boards[0]?.id ?? null}
+        photos={photos}
+        photoPlan={photoPlan}
+        photoReason={photoReason}
+        photoPanelOpen={photoOpen}
+        onPhotoPanel={setPhotoOpen}
+      />
+      {photoReason && <ThemePhotosReasonLine reason={photoReason} mic={mic} />}
       {mic.targetsFailed != null && (
         <ErrorNote>Couldn't read a board's layouts: {errorMessage(mic.targetsFailed)}. A board that could not be read cannot be edited until it is.</ErrorNote>
       )}
@@ -302,6 +344,11 @@ export function MicSlotsPage() {
             </p>
           </div>
         </aside>
+        {photoPanel && (
+          <div className="lg:sticky lg:top-14 lg:ml-4 lg:w-[430px] lg:shrink-0">
+            <PhotoThemesPanel plan={photoPanel} planLabel={mic.typeName ? `${mic.label} · ${mic.typeName}` : mic.label} photos={photos} onClose={closePhotoPanel} />
+          </div>
+        )}
       </div>
 
       <NewBoardDialog

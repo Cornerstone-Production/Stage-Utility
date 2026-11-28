@@ -471,7 +471,12 @@ own variables, set on the command line of the machine being set up:
 
 **Tooling and tests.** `STAGE_UTILITY_TEST_RELEASE_BASE` points the Mac output
 helper download, and the releases API call that gives its digest, at a test server
-instead of GitHub, and the server logs a notice when it is set. `STAGE_UTILITY_RELEASE_NOTES_DIR` redirects where
+instead of GitHub, and the server logs a notice when it is set.
+`STAGE_UTILITY_OPENAI_BASE_URL` points [photo theme](../features/photo-themes.md)
+requests (the key test and image edits) at a fake OpenAI, such as the one the tests
+run (`main/services/photo-themes/photo-themes-harness.ts`), and the server logs a
+notice under `[photo-theme]` when it is set; an address that is not `http(s)` is
+ignored, and said so. `STAGE_UTILITY_RELEASE_NOTES_DIR` redirects where
 the release-notes script looks for notes. `PRIVATE_TERMS` and `REQUIRE_TERMS` are
 read by the public-hygiene check in CI, described in
 [Contributing](../contributing.md#public-hygiene). None of these has a use in
