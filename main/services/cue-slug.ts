@@ -19,7 +19,30 @@ export function collapse(text: string): string {
 }
 
 /**
+ * lower snake_case, letters/digits/underscore, from text already prepared by the
+ * caller: anything else collapses to a single underscore and the edges are trimmed.
+ * The one copy of that regex chain. A caller that has to keep an older name stable
+ * (see layerSlug) uses this directly; every other name goes through slugForCue.
+ */
+export function snakeCase(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+/** Accents folded to their letter: "Café" is "Cafe", not "Caf" and a stray `_`. */
+function foldAccents(text: string): string {
+  return text.normalize("NFKD").replace(/[̀-ͯ]/g, "");
+}
+
+/**
  * A cue name from a button label: lower snake_case, letters/digits/underscore.
+ *
+ * NOT accent-folded, on purpose: the Companion import and its reconcile pass
+ * re-derive a slug from a label every time and compare it with the stored cue
+ * name, so folding here would stop an already-imported "Café" button matching its
+ * `caf_` command and offer it again. A NEW cue's name goes through slugForNewCue.
  *
  * The name is said out loud to a voice assistant and typed into a Home Assistant
  * config, so it has to survive both. Anything else collapses to a single
@@ -27,8 +50,10 @@ export function collapse(text: string): string {
  * reject rather than a cue called `_`.
  */
 export function slugForCue(text: string): string {
-  return collapse(text)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
+  return snakeCase(collapse(text));
+}
+
+/** slugForCue with accents folded to their letter ("Café" is `cafe`): the slug of a NEW cue's name, which nothing re-derives. */
+export function slugForNewCue(text: string): string {
+  return slugForCue(foldAccents(text));
 }

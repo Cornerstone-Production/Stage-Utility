@@ -8,7 +8,12 @@ timing — and browsable afterwards under **History** in the sidebar.
 Three recorders run while a service is live, keyed to the plan and the specific
 service time so a 9am and an 11am stay separate. They finalise at the plan's
 service-end marker and are reconciled on startup, so a restart mid-service does
-not lose the record.
+not lose the record. A record a crash left open is closed at boot the way the
+recorders close one, every item with an end and each rundown item with its
+length, at the last moment the records show the service running. That is the
+last in-service attendance sample when one came after the last item change;
+otherwise the item that was on air keeps no length, since nothing measured it.
+If the service is still live, the next tick reopens the record and that item.
 
 While Planning Center reports a service live, **nothing time-based can stop it
 being recorded** — no clock, calendar or time zone. A recording ends only when the
@@ -38,8 +43,11 @@ a momentary Planning Center cache miss. Neither may split a recording in progres
 So the change is judged by the new occurrence's own start time — the open record is
 held only while that occurrence is still more than ten minutes away, and closed and
 replaced once it has started or is about to. Where no start time is available the
-decision falls back to the gap since the last live item: under ten minutes holds,
-longer splits.
+decision falls back to the gap since the last live item of the running service,
+the same for all three recorders: under ten minutes holds, longer splits. Time
+parked on an item past SERVICE END does not count as the service running. A
+record that has already closed is held only for a plan item coming back; the
+next service's arrival ramp opens that service's own record.
 
 Each decision is logged once, whichever way it goes, and a hold that later
 ends in a split logs the split too:
@@ -811,7 +819,10 @@ unreachable, not that the room emptied.
 Recording covers more than the service proper. Sampling starts during the arrival
 ramp — the lead window before the service time, default 60 minutes — and continues
 through a taper after the last item, also 60 minutes by default, so the curve shows
-the room emptying. Both windows are set in Advanced → Schedule.
+the room emptying. Both windows are set in Advanced → Schedule. The taper ends
+with its window even while Planning Center stays on an item past the plan's
+SERVICE END header; at 0, nothing is sampled after the reading taken as the
+service closes.
 
 Only the service proper feeds peak, low, average and last; the ramp and taper
 would otherwise drag those figures toward an empty room — far enough that an
