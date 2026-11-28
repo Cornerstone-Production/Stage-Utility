@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "rea
 import { useResyncOn } from "@renderer/lib/use-resync-on";
 import { CableIcon, ChevronRightIcon, TriangleAlertIcon } from "lucide-react";
 
+import { AppLink } from "../app/app-link";
 import { invoke } from "../lib/api";
 import { useStageState } from "./use-stage-state";
 import { useStatusChannel } from "./use-status-channel";
@@ -68,7 +69,7 @@ function PatchFooter() {
     <div className="mt-6 flex items-center justify-center gap-2 text-caption2 text-fg-faint">
       <CableIcon className="size-3.5" />
       <span>Read-only · updates live ·</span>
-      <a href="/patch/edit" className="text-accent hover:underline">Edit the patch</a>
+      <AppLink to="/patch/edit" className="text-accent hover:underline">Edit the patch</AppLink>
     </div>
   );
 }

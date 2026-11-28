@@ -18,6 +18,8 @@
 // 4. IT UPDATES LIVE. A push on patch:updated has to reach the open table.
 // 5. A NARROW PANE IS STILL THE STACKED COLUMN, from the same filters. What decides
 //    is the width of the pane beside the sidebar, not of the window.
+// 6. THE FOOTER'S LINK TO THE EDITOR IS THE ROUTER'S. A plain anchor reloads the
+//    page and the router never sees the move (its in-app leave handling is skipped).
 //
 // What is NOT here, because jsdom loads no stylesheet and reports every
 // offsetHeight as 0: the 34px row height, the 270px sticky column, the amber tint
@@ -54,6 +56,8 @@ const { render, cleanup, screen, within, fireEvent } = await import("@testing-li
 const React = (await import("react")).default;
 const { act } = await import("react");
 const { PatchView } = await import("./patch-view.js");
+const { RouterContextProvider } = await import("@tanstack/react-router");
+const { routerAt } = await import("../test-fixtures/router.js");
 const { DEFAULT_STAGE_STATE } = await import("./test-render-ctx.js");
 const { __resetForTests: resetStageState } = await import("./use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
@@ -160,8 +164,12 @@ function file(...sheets: PatchSheet[]): PatchFile {
   return { sheets, updatedAt: "2026-01-01T00:00:00.000Z" };
 }
 
+/** The router the page sits in: its footer link is an in-app Link, which throws without one. */
+let router: ReturnType<typeof routerAt>;
+
 async function mount() {
-  await mountInAct(render, React.createElement(PatchView));
+  router = routerAt("/patch", "/patch", "/patch/edit");
+  await mountInAct(render, React.createElement(RouterContextProvider, { router, children: React.createElement(PatchView) }));
   await settle();
   await settle();
 }
@@ -548,6 +556,17 @@ describe("at desk width", () => {
     const edit = screen.getByRole("link", { name: "Edit the patch" });
     assert.equal(edit.getAttribute("href"), "/patch/edit");
     assert.equal(screen.queryAllByRole("table").length, 0);
+  });
+
+  test("the footer's link to the editor goes there through the router, not by a page load", async () => {
+    await mount();
+    const edit = screen.getByRole("link", { name: "Edit the patch" });
+    // A plain anchor is not prevented: the browser would load the page afresh,
+    // and the router (and its leave guard on the way back) never sees the move.
+    const notPrevented = fireEvent.click(edit, { button: 0 });
+    assert.equal(notPrevented, false, "the click was left to the browser, which reloads the page");
+    await settle();
+    assert.equal(router.state.location.pathname, "/patch/edit");
   });
 });
 
