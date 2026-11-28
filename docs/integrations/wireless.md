@@ -161,6 +161,16 @@ Wireless Gear panel overrides that: while you are watching, retries stay brisk
 regardless of the window, so a pack you are waiting on comes back promptly rather
 than on the dormant schedule.
 
+A device that goes away without closing its connection is noticed rather than
+left reading its last figures. Shure links send a heartbeat every minute on top
+of TCP keep-alive; Sennheiser SSC receivers are marked offline after 8 s with no
+reply. Spectera's telemetry arrives on a receive-only stream, so a stream that
+carries nothing for 20 s is followed by one request to the base station: any
+answer means it is idle and stays connected, no answer within 10 s marks its
+packs offline and starts the retries. How often a quiet Spectera base station
+sends on its own has not been measured on hardware, which is why silence alone
+never marks it offline.
+
 A failed link is logged once per outage rather than once per retry, tagged by
 driver and naming the device's address: a refused Spectera password
 (`[spectera] 192.168.1.130:443 refused the API password (HTTP 401) ...`), a
