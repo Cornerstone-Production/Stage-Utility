@@ -936,6 +936,28 @@ describe("/qsys/manage", () => {
     assert.match(document.body.textContent ?? "", /Imported 1 control\./);
   });
 
+  test("an import over a stored-invalid list is refused: the refusal is shown, the invalid notice stays, nothing claims success", async () => {
+    render(React.createElement(ConfirmHost));
+    const reason = "the stored allowlist is not valid (entry 1: min must not be above max), so nothing is writable; it is kept until a save replaces it";
+    server.allow = { entries: [], invalid: reason, rev: "r1" };
+    server.importAnswer = { status: 409, body: { error: reason } };
+    await open("/qsys/manage");
+    await wait(60);
+    const body = { format: "stage-utility-qsys-allowlist", version: 1, entries: [] };
+    act(() => {
+      fireEvent.change(screen.getByLabelText("Allowlist file to import"), { target: { files: [new File([JSON.stringify(body)], "list.json", { type: "application/json" })] } });
+    });
+    await wait(40);
+    act(() => {
+      fireEvent.click(screen.getByText("Replace the list"));
+    });
+    await wait(60);
+    assert.match(screen.getByRole("alert").textContent ?? "", /Nothing was imported: .*not valid/);
+    assert.equal(/Imported \d+ control/.test(document.body.textContent ?? ""), false, "a refused import said it imported");
+    assert.match(document.body.textContent ?? "", /min must not be above max/, "the invalid notice went away");
+    assert.ok(screen.getByText("Start a new, empty list"));
+  });
+
   test("a panel's settings save its kind and address and keep its siblings and return time", async () => {
     server.views = [{ ...ZONE, qsys: { kind: "volunteer", slug: "zone-1", siblings: ["booth"], returnAfterMin: 9 } }, BOOTH];
     await open("/qsys/manage");
