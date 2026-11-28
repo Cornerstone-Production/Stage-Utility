@@ -261,7 +261,9 @@ export abstract class ConnectionLifecycle {
    */
   private noteHealthy(): void {
     if (!this.connectionOutages.failing(OUTAGE_KEY)) return;
-    if (this.sayRecovered()) return;
+    // Never asked on the success itself: OutageLog measures from the last
+    // FAILURE, so after a retry gap as long as the window the first success
+    // would be "recovered" at once and the next failure a fresh outage.
     this.clearSettle();
     this.settleTimer = setTimeout(() => {
       this.settleTimer = null;
@@ -284,10 +286,9 @@ export abstract class ConnectionLifecycle {
   }
 
   /** Ask the outage log whether the run is over, and say so if it is. */
-  private sayRecovered(): boolean {
+  private sayRecovered(): void {
     const said = this.connectionOutages.ok(OUTAGE_KEY, Date.now());
     if (said.log) console.log(`[${this.log}] reachable again${said.note}`);
-    return said.log;
   }
 
   private clearSettle(): void {

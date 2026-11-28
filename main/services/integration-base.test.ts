@@ -46,6 +46,7 @@ class Fake extends StatusIntegration<Dto> {
   callRestart(): void { this.restart(); }
   say(line: string, kind?: string): void { this.noteOutage(line, kind); }
   healthy(): void { this.resetBackoff(); }
+  retry(): void { this.scheduleReconnect(); }
   callScheduleIn(ms: number): void { this.scheduleIn(ms); }
   nextDelay(): number { return this.nextReconnectDelayMs(); }
   stopTimers(): void { this.clearReconnect(); }
@@ -326,6 +327,26 @@ describe("the outage log the base keeps", () => {
     f.stop();
     t.mock.timers.tick(10 * 60_000);
     assert.deepEqual(lines, ["[fake] refused"], "a stopped integration announced a recovery");
+  });
+
+  test("a success after a retry gap as long as the window is not a recovery until it has held", (t) => {
+    const { f, lines } = started(t);
+    f.say("refused");
+    t.mock.timers.tick(10 * 60_000); // a long back-off
+    f.healthy();
+    f.say("refused"); // and down again before it held
+    assert.deepEqual(lines, ["[fake] refused"], "a flap after a long back-off was a recovery and a new outage");
+  });
+
+  test("a retry cancels a pending recovery, though no failure was said", (t) => {
+    // A socket the far end closes cleanly says no failure; it just retries.
+    const { f, lines } = started(t);
+    f.shouldFail = true; // the retries fail quietly from here
+    f.say("refused");
+    f.healthy();
+    f.retry();
+    t.mock.timers.tick(3 * 60_000);
+    assert.deepEqual(lines, ["[fake] refused"], "a connection that dropped was announced as recovered");
   });
 
   test("start() forgets the outage, so the first failure after a restart is said again", (t) => {

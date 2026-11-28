@@ -38,8 +38,8 @@ async function refusingPort(): Promise<number> {
 }
 
 /** Spin the event loop (setImmediate is not mocked) until `cond` holds. */
-async function until(cond: () => boolean, what: string): Promise<void> {
-  const deadline = performance.now() + 5000;
+async function until(cond: () => boolean, what: string, ms = 5000): Promise<void> {
+  const deadline = performance.now() + ms;
   while (!cond()) {
     if (performance.now() > deadline) throw new Error(`timed out waiting for ${what}`);
     await new Promise((r) => setImmediate(r));
@@ -129,31 +129,71 @@ test("TSL: the same fixed 30 s ceiling, and the outage reaches the log once", as
 // new run, and the reconnect opened a second socket over the live one, held
 // for the life of the process. The read-after-await guard's event-handler twin.
 
-test("RossTalk: a restart leaves one socket open, not two", async (t) => {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+/** A switcher that counts the connections it accepts and holds open. */
+async function countingSwitcher(t: TestContext): Promise<{ port: number; accepted: () => number; open: Set<net.Socket> }> {
   const open = new Set<net.Socket>();
+  let accepted = 0;
   const server = net.createServer((s) => {
+    accepted++;
     open.add(s);
     s.on("close", () => open.delete(s));
     s.on("error", () => {});
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-  const { port } = server.address() as net.AddressInfo;
-  const states: string[] = [];
-  const conn = new RossTalkConnection("restart", (s) => states.push(s));
   t.after(async () => {
-    conn.stop();
     for (const s of open) s.destroy();
     await new Promise<void>((r) => server.close(() => r()));
   });
+  return { port: (server.address() as net.AddressInfo).port, accepted: () => accepted, open };
+}
 
-  conn.configure("127.0.0.1", port);
-  await until(() => open.size === 1 && states.includes("connected"), "the first socket");
-  conn.configure("127.0.0.1", port); // a settings save: restart
-  await until(() => states.filter((s) => s === "connected").length >= 1 && open.size >= 1, "the second connect");
-  for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
-  t.mock.timers.tick(30_000); // any reconnect the stale close queued
-  for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r));
+/** Configure twice (a settings save), then fire any reconnect a stale close queued. */
+async function restartAgainst(
+  t: TestContext,
+  sw: Awaited<ReturnType<typeof countingSwitcher>>,
+  configure: () => void,
+  connected: () => number,
+): Promise<void> {
+  configure();
+  await until(() => connected() === 1 && sw.accepted() === 1, "the first socket");
+  configure();
+  // The new socket is up and the switcher has seen the old one close.
+  await until(() => connected() === 2 && sw.accepted() === 2 && sw.open.size === 1, "the restart");
+  t.mock.timers.tick(30_000);
+  // Expected to time out: a stray reconnect to localhost lands in milliseconds.
+  await until(() => sw.accepted() > 2 || sw.open.size !== 1, "a stray reconnect", 300).catch(() => {});
+}
 
-  assert.equal(open.size, 1, `one restart left ${open.size} sockets open on the switcher`);
+test("RossTalk: a restart leaves one socket open, not two", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const sw = await countingSwitcher(t);
+  const states: string[] = [];
+  const conn = new RossTalkConnection("restart", (s) => states.push(s));
+  t.after(() => conn.stop());
+
+  await restartAgainst(t, sw, () => conn.configure("127.0.0.1", sw.port), () => states.filter((s) => s === "connected").length);
+
+  assert.equal(sw.accepted(), 2, `one restart dialled the switcher ${sw.accepted()} times`);
+  assert.equal(sw.open.size, 1, `one restart left ${sw.open.size} sockets open on the switcher`);
+});
+
+test("TSL: a restart leaves one socket open, and the new one still sending", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const sw = await countingSwitcher(t);
+  const states: string[] = [];
+  tslService.setConnectionListener((s) => states.push(s));
+  t.after(() => {
+    tslService.setConnectionListener(() => {});
+    tslService.stop();
+  });
+
+  await restartAgainst(t, sw, () => tslService.configure("127.0.0.1", sw.port, []), () => states.filter((s) => s === "connected").length);
+
+  assert.equal(sw.accepted(), 2, `one restart dialled the multiviewer ${sw.accepted()} times`);
+  assert.equal(sw.open.size, 1, `one restart left ${sw.open.size} sockets open on the multiviewer`);
+  assert.equal(
+    (tslService as unknown as { connected: boolean }).connected,
+    true,
+    "the old socket's close marked the live one disconnected",
+  );
 });
