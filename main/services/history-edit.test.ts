@@ -33,6 +33,7 @@ const {
   mergeServiceRecords,
   recalcAttendance,
   ServiceIsLiveError,
+  setItemTimes,
   WindowTrimsDataError,
 } = await import("./history-edit.js");
 const { applyItemTimeEdits } = await import("./history-item-times.js");
@@ -789,6 +790,15 @@ describe("a refused window edit leaves the recorders alone", () => {
     try {
       await assert.rejects(() => editServiceWindow(KEY, { endedAt: at(-30), trim: true }), InvalidWindowError);
       assert.deepEqual(order, [], "a refused edit released the recorders' copies");
+    } finally {
+      restore();
+    }
+  });
+
+  it("a refused item time (an end before its start) forgets nothing", async () => {
+    try {
+      await assert.rejects(() => setItemTimes(KEY, "a", 0, { startedAt: at(30), endedAt: at(10) }), /end has to come after the start/);
+      assert.deepEqual(order, [], "a refused item time released the recorders' copies");
     } finally {
       restore();
     }

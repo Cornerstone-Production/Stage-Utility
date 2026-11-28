@@ -515,7 +515,6 @@ export async function setItemTimes(
   times: { startedAt?: string | null; endedAt?: string | null },
 ): Promise<ServiceTimeline> {
   await assertEditable("edited", serviceKey);
-  forgetAll(serviceKey); // see editServiceWindow
   // Names the RUN, not just the item: an item can appear twice in one record, and
   // a log line naming only the title cannot tell an operator which row moved.
   const run = `${itemId}#${sequence}`;
@@ -572,6 +571,8 @@ export async function setItemTimes(
     }
   }
 
+  // After every refusal above, so a refused edit changes nothing; before the record is touched. See editServiceWindow.
+  forgetAll(serviceKey);
   const rest = (tl.itemTimeEdits ?? []).filter((e) => !(e.itemId === itemId && e.sequence === sequence));
   const cleared = startedAt === undefined && endedAt === undefined;
   if (!cleared) {
