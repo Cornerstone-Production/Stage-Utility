@@ -8,7 +8,7 @@
 import { appTimeZone } from "./app-timezone.js";
 import { addBroadcastListener, broadcast } from "./broadcaster.js";
 import { patchStore } from "./patch-store.js";
-import { checkPublishToken, parsePublishUrl } from "./servicecue-publish-rules.js";
+import { resolvePublishTarget } from "./publish-target.js";
 import { readPublishToken, servicecuePublishStore } from "./servicecue-publish-store.js";
 import { stageController } from "./stage-controller.js";
 import { readStagePlotImage, stagePlotsView } from "./stageplots-files.js";
@@ -22,13 +22,21 @@ import { STAGEPLOTS_CHANNEL, type StagePlotsDoc, type StagePlotsView } from "../
 export const NO_PAGE =
   "Set up the public link first: the page address and its publishing token, under Public link at the foot of the ServiceCue layouts page.";
 
-/** The ServiceCue page's address and token, whether or not ServiceCue publishing is switched on. */
+/**
+ * The ServiceCue page's address and token, whether or not ServiceCue publishing is switched on.
+ * "Set up the public link first" is for a link that is not set up (no address, or no token for it);
+ * one that is saved but unusable, or unreadable, says what is wrong with it.
+ */
 export async function publishTarget(): Promise<PublishTarget> {
-  const parsed = parsePublishUrl((await servicecuePublishStore.load()).url);
-  if (!parsed.ok) return { ok: false, message: NO_PAGE };
-  const token = (await readPublishToken(parsed.origin)).trim();
-  if (token === "" || checkPublishToken(token) !== null) return { ok: false, message: NO_PAGE };
-  return { ok: true, origin: parsed.origin, token };
+  const found = await resolvePublishTarget({
+    loadUrl: async () => (await servicecuePublishStore.load()).url,
+    loadToken: readPublishToken,
+  });
+  if (found.ok) return found;
+  // A read that failed is thrown, as the publisher expects of a target (readTarget): it is neither "no page" nor a bad token.
+  if (found.reason === "unreadable") throw new Error(found.cause);
+  if (found.unset) return { ok: false, message: NO_PAGE };
+  return { ok: false, message: `The public link cannot be used: ${found.message}` };
 }
 
 /** The patch the publisher resolves linked points against. Strict: an unreadable or set-aside

@@ -58,6 +58,7 @@
 import { randomBytes } from "node:crypto";
 
 import { errorMessage } from "./errors.js";
+import { hideSecrets } from "./publish-target.js";
 import { plural } from "./plural.js";
 import { scrub } from "./scrub.js";
 import { createPushClient, mayHaveLanded, type PushClient, type PushFailure, type PushResult } from "./servicecue-publish-client.js";
@@ -90,7 +91,10 @@ export interface PublishPlan {
 }
 
 /** Where to publish: the ServiceCue page's address and token, or why there is none. */
-export type PublishTarget = { ok: true; origin: PublishOrigin; token: string } | { ok: false; message: string };
+export type PublishTarget =
+  | { ok: true; origin: PublishOrigin; token: string }
+  /** `unreadable`: the settings or the token could not be read at all, which is not the same as none being set up. `message` is whole sentences; `cause` is what the read said. */
+  | { ok: false; message: string; unreadable?: { cause: string } };
 
 export interface StagePlotsStoreLike {
   get(): Promise<StagePlotsDoc>;
@@ -173,8 +177,7 @@ const ERROR_CHARS = 600;
  * describes throw. Everything said, stored and answered goes through it.
  */
 function hide(message: string, secrets: readonly string[]): string {
-  let text = message;
-  for (const s of secrets) if (s) text = text.split(s).join("<secret>");
+  const text = hideSecrets(message, secrets);
   return text.length > ERROR_CHARS ? `${text.slice(0, ERROR_CHARS - 1)}…` : text;
 }
 
@@ -737,7 +740,8 @@ export class StagePlotsPublisher {
       const venue = doc.venues.find((v) => v.id === venueId);
       if (!venue?.publish) return this.refused("Unpublish", venueId, venue ?? null, venue ? 409 : 404, venue ? `${venue.name} is not published` : "no such venue");
       const pub = venue.publish;
-      const target = await this.deps.target();
+      const target = await this.readTarget();
+      if (!target.ok && target.unreadable) return this.refused("Unpublish", venueId, venue, 503, `${target.message} Nothing was unpublished, so the link still works.`);
       // The page can be asked: it must say yes, or nothing changes and the card says the link works.
       if (target.ok && target.origin === pub.origin) {
         const host = hostOf(target.origin);
@@ -774,12 +778,14 @@ export class StagePlotsPublisher {
    * the drop, since nothing would be left to remove it. The answer's notice is for the operator.
    */
   retireForDelete(venueId: string): Promise<{ ok: true; notice?: string } | Restoring> {
-    return this.action(venueId, async (): Promise<{ ok: true; notice?: string }> => {
+    return this.action(venueId, async (): Promise<{ ok: true; notice?: string } | Restoring> => {
       const doc = await this.deps.store.get();
       const venue = doc.venues.find((v) => v.id === venueId);
       const pub = venue?.publish;
       if (!venue || !pub) return { ok: true };
-      const target = await this.deps.target();
+      const target = await this.readTarget();
+      // Deleting now would queue the link as if no page were set up, when the page may be fine and only its settings unread.
+      if (!target.ok && target.unreadable) return { ok: false, status: 503, error: `${target.message} Nothing was deleted.` };
       if (target.ok && target.origin === pub.origin) {
         const r = await this.client(target).dropStagePlots(pub.secret);
         if (r.ok) {
@@ -849,7 +855,12 @@ export class StagePlotsPublisher {
     const prepared = this.prepare(doc, venue, await this.readPatch());
     const print = prepared.print;
     if (this.attempted.get(venueId) === print) return;
-    const target = await this.deps.target();
+    const target = await this.readTarget();
+    if (!target.ok && target.unreadable) {
+      // Said here, and not counted as failing: nothing was sent, and the settings read is tried again on the next change.
+      say("error", [pub.secret], `"${venue.name}" could not be republished: ${target.message}`);
+      return;
+    }
     if (!target.ok) {
       // No page to send to: nothing to try again on a timer, so not failing; a Public link save
       // follows it (pageSaved). At start nothing changed: nothing to say or record.
@@ -996,11 +1007,10 @@ export class StagePlotsPublisher {
         notes.push(message);
       }
     }
-    let target: PublishTarget | null = null;
-    try {
-      target = await this.deps.target();
-    } catch (err) {
-      const why = `the page settings could not be read: ${errorMessage(err)}`;
+    let target: PublishTarget | null = await this.readTarget();
+    if (!target.ok && target.unreadable) {
+      const why = `the page settings could not be read: ${target.unreadable.cause}`;
+      target = null;
       if (away) {
         // Whether the new page has a token cannot be known, and the old one's is being replaced:
         // after this nothing here could reach the old page, so its links come down now, with it.
@@ -1046,9 +1056,13 @@ export class StagePlotsPublisher {
       let target: PublishTarget;
       let doc: StagePlotsDoc;
       try {
-        [target, doc] = await Promise.all([this.deps.target(), this.deps.store.get()]);
+        [target, doc] = await Promise.all([this.readTarget(), this.deps.store.get()]);
       } catch (err) {
         await this.landingFailed([], `The landing page could not be updated: ${errorMessage(err)}`);
+        return;
+      }
+      if (!target.ok && target.unreadable) {
+        await this.landingFailed([], `The landing page could not be updated: ${target.unreadable.cause}`);
         return;
       }
       // No page set up: there is nowhere to send a list, and no venue can be published.
@@ -1210,9 +1224,24 @@ export class StagePlotsPublisher {
   // ── The parts ──────────────────────────────────────────────────────────────
 
   /** Say a refusal and answer it. Every refusal is said, so the log answers "why did Publish do nothing" as well as the card. */
-  private refused(action: string, venueId: string, venue: Venue | null, status: 404 | 409, error: string): { ok: false; status: 404 | 409; error: string } {
+  private refused(action: string, venueId: string, venue: Venue | null, status: 404 | 409 | 503, error: string): { ok: false; status: 404 | 409 | 503; error: string } {
     say("warn", venue?.publish ? [venue.publish.secret] : [], `${action} refused for ${venue ? `"${venue.name}"` : `venue ${venueId}`}: ${error}`);
     return { ok: false, status, error };
+  }
+
+  /**
+   * The page to publish to. `deps.target()` throws when the saved settings or the token cannot be
+   * read; that comes back here as a failed target with `unreadable` set, so every caller meets it
+   * as a value: an action refuses (503, nothing changed), a background step says it and stops.
+   * Said by the caller, which knows what it was doing.
+   */
+  private async readTarget(): Promise<PublishTarget> {
+    try {
+      return await this.deps.target();
+    } catch (err) {
+      const cause = errorMessage(err);
+      return { ok: false, message: `The page settings could not be read: ${cause}`, unreadable: { cause } };
+    }
   }
 
   /** The venue, the page to publish to and a client for it, or why not. */
@@ -1220,14 +1249,14 @@ export class StagePlotsPublisher {
     venueId: string,
     published: boolean,
     action: string,
-  ): Promise<{ ok: true; doc: StagePlotsDoc; venue: Venue; target: Target; client: PushClient; host: string } | { ok: false; status: 404 | 409; error: string }> {
+  ): Promise<{ ok: true; doc: StagePlotsDoc; venue: Venue; target: Target; client: PushClient; host: string } | { ok: false; status: 404 | 409 | 503; error: string }> {
     const doc = await this.deps.store.get();
     const venue = doc.venues.find((v) => v.id === venueId) ?? null;
     if (!venue) return this.refused(action, venueId, null, 404, "no such venue");
     if (published && !venue.publish) return this.refused(action, venueId, venue, 409, `${venue.name} is not published`);
     if (!published && venue.publish) return this.refused(action, venueId, venue, 409, `${venue.name} is already published`);
-    const target = await this.deps.target();
-    if (!target.ok) return this.refused(action, venueId, venue, 409, target.message);
+    const target = await this.readTarget();
+    if (!target.ok) return this.refused(action, venueId, venue, target.unreadable ? 503 : 409, target.message);
     return { ok: true, doc, venue, target, client: this.client(target), host: hostOf(target.origin) };
   }
 
@@ -1351,7 +1380,13 @@ export class StagePlotsPublisher {
     const doc = await this.deps.store.get();
     if (!Array.isArray(doc.pendingRemovals)) throw new Error(DAMAGED_QUEUE);
     if (this.paused || doc.pendingRemovals.length === 0) return { ok: true, left: doc.pendingRemovals, removed: 0, page: null };
-    const set = via ?? (await this.deps.target().then((t) => (t.ok ? t : null)));
+    let set: Target | null = via ?? null;
+    if (!set) {
+      const found = await this.readTarget();
+      // Rethrown to drainQueued, which says it and answers the failure: an unread page is not "no page", whose queue waits.
+      if (!found.ok && found.unreadable) throw new Error(found.unreadable.cause);
+      set = found.ok ? found : null;
+    }
     const page = set?.origin ?? null;
     const gone: PendingRemoval[] = [];
     const stuckInFlight: PendingRemoval[] = [];
