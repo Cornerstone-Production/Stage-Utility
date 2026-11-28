@@ -80,6 +80,9 @@ const REQUEST_FACING = [
   // arrives verbatim in an HTTP body wherever a rebuild is triggered.
   "archive/rebuild-baptism.ts",
   "archive/rebuild.ts",
+  // Its one line names the service keys it moves arrival counts between, built
+  // from Planning Center ids, which arrive in an HTTP response body.
+  "attendance-recorder.ts",
   "automation-engine.ts",
   // Its suppression line names the STORED rule that owns a built-in's cue name
   // — both the rule's name and the cue name are typed into an HTTP body.
@@ -463,6 +466,8 @@ function requestFacingFiles(): string[] {
     // logged nothing at all until a refused press started being surfaced on
     // /log, which is when it acquired the exposure.
     path.join(HERE, "action-invoke.ts"),
+    // Names the service keys it moves arrival counts between; see REQUEST_FACING.
+    path.join(HERE, "attendance-recorder.ts"),
     // Rule names are typed into an HTTP body and action detail carries whatever a
     // provider or device said back, so the engine is request-facing in exactly the
     // sense this scan means. It logged nothing at all until a failed rule started

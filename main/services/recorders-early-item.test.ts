@@ -44,6 +44,8 @@ type Held = {
   lastLiveAt: number;
   stoppedAt: number;
   splitOnRamp: unknown;
+  lastAiring: unknown;
+  inheritedAiring: unknown;
   forget(key: string): boolean;
   getRecord(key: string): Promise<Rec | null>;
 };
@@ -138,6 +140,9 @@ describe("after a service ends, before the next one", () => {
       rec.lastLiveAt = 0;
       rec.stoppedAt = 0;
       rec.splitOnRamp = null;
+      // A previous test's airing would count as already on air here.
+      rec.lastAiring = null;
+      rec.inheritedAiring = null;
     }
   });
 
@@ -217,6 +222,15 @@ describe("after a service ends, before the next one", () => {
     let raw = 1000;
     const { sensourceService } = await import("./sensource-service.js");
     t.mock.method(sensourceService, "getLatest", () => ({ connected: true, total: { attendance: raw, occupancy: 200 } }));
+    const pushed: { serviceKey: string; samples: { t: string }[] }[] = [];
+    let collecting = true;
+    const { addBroadcastListener } = await import("./broadcaster.js");
+    addBroadcastListener((channel, payload) => {
+      if (collecting && channel === "attendance:history") pushed.push(structuredClone(payload) as (typeof pushed)[number]);
+    });
+    t.after(() => {
+      collecting = false;
+    });
     await tick(NINE, "occ-a", "welcome");
     await airs(NINE + 2 * MIN, NINE + 30 * MIN, rolling, "song");
     await airs(NINE + 32 * MIN, NINE + 68 * MIN, rolling, "message");
@@ -227,6 +241,13 @@ describe("after a service ends, before the next one", () => {
     }
 
     const att = RECORDERS[1]![1] as unknown as { getRecord(k: string): Promise<{ samples: { t: string; attendance: number; phase?: string }[]; attendanceBaseline: number | null } | null> };
+    // From the file, not the store's cached object: the stopped record is saved again without them.
+    const onDisk = JSON.parse(await fs.readFile(path.join(TMP, "attendance-history", `${keyFor("occ-a").replace(/[^A-Za-z0-9._-]+/g, "-")}.json`), "utf8")) as {
+      samples: { t: string }[];
+    };
+    assert.deepEqual(onDisk.samples.filter((x) => Date.parse(x.t) >= drop).map((x) => x.t), [], "the 9am's file still holds the 11am's arrivals");
+    const lastNine = pushed.filter((p) => p.serviceKey === keyFor("occ-a")).at(-1);
+    assert.deepEqual(lastNine?.samples.filter((x) => Date.parse(x.t) >= drop).map((x) => x.t), [], "History was last shown the 9am with the 11am's arrivals");
     const nine = await att.getRecord(keyFor("occ-a"));
     const eleven = await att.getRecord(keyFor("occ-b"));
     assert.deepEqual(nine?.samples.filter((x) => Date.parse(x.t) >= drop).map((x) => x.t), [], "the 11am's arrivals are in the 9am");
@@ -235,6 +256,53 @@ describe("after a service ends, before the next one", () => {
     // Counted from the 11am's own first count, as its other samples are.
     assert.equal(ramp[0]?.attendance, 0);
     assert.ok(ramp.every((x, i) => i === 0 || x.attendance >= ramp[i - 1]!.attendance), JSON.stringify(ramp));
+  });
+
+  it("does not hold or publish the stopped record when History deletes it during its second save", async (t) => {
+    const { sensourceService } = await import("./sensource-service.js");
+    t.mock.method(sensourceService, "getLatest", () => ({ connected: true, total: { attendance: 1000, occupancy: 200 } }));
+    await tick(NINE, "occ-a", "welcome");
+    await airs(NINE + 2 * MIN, NINE + 68 * MIN, rolling, "song");
+    for (let at = NINE + 70 * MIN; at <= NINE + 76 * MIN; at += 2 * MIN) await tickNoItem(at, "occ-b");
+    const { attendanceStore } = await import("./attendance-store.js");
+    const realUpsert = attendanceStore.upsert.bind(attendanceStore);
+    let saves = 0;
+    t.mock.method(attendanceStore, "upsert", async (rec: { serviceKey: string }) => {
+      if (rec.serviceKey === keyFor("occ-a") && ++saves === 2) {
+        attendanceRecorder.forget(rec.serviceKey); // the operator's delete lands mid-save
+        throw new Error("disk full");
+      }
+      return realUpsert(rec as never);
+    });
+    const pushes: string[] = [];
+    let collecting = true;
+    const { addBroadcastListener } = await import("./broadcaster.js");
+    addBroadcastListener((channel, payload) => {
+      if (collecting && channel === "attendance:history") pushes.push((payload as { serviceKey: string }).serviceKey);
+    });
+    t.after(() => {
+      collecting = false;
+    });
+    await tickNoItem(NINE + 78 * MIN, "occ-b"); // the split, ten minutes after it last ran
+
+    assert.equal(saves, 2, `the stopped record was not saved again (${saves}) ${JSON.stringify(pushes)}`);
+    assert.equal(attendanceRecorder.isHolding(keyFor("occ-a")), false, "a deleted record is held to be written back");
+    assert.equal(pushes.filter((k) => k === keyFor("occ-a")).length, 1, "the deleted record was published again");
+  });
+
+  it("moves only arrival counts from the stop on, re-based on the incoming record's own baseline", () => {
+    type Sample = { t: string; attendance: number; occupancy: number; phase?: "pre" | "post" };
+    type Att = { serviceKey: string; samples: Sample[]; attendanceBaseline: number | null };
+    const stop = NINE + 70 * MIN;
+    const at = (m: number, attendance: number, phase?: "pre" | "post"): Sample => ({ t: iso(NINE + m * MIN), attendance, occupancy: 100, ...(phase ? { phase } : {}) });
+    const from: Att = { serviceKey: "a", attendanceBaseline: 100, samples: [at(-20, 5, "pre"), at(30, 300), at(70, 310, "pre"), at(72, 320, "post"), at(74, 330, "pre")] };
+    const into: Att = { serviceKey: "b", attendanceBaseline: 400, samples: [at(90, 50)] };
+    const moved = (attendanceRecorder as unknown as { takeAfterStop(f: Att, i: Att, s: string): boolean }).takeAfterStop(from, into, iso(stop));
+
+    assert.equal(moved, true);
+    assert.deepEqual(from.samples.map((x) => x.t), [at(-20, 0).t, at(30, 0).t, at(72, 0).t], "its own ramp or its taper moved");
+    assert.equal(into.attendanceBaseline, 400, "the incoming record's own baseline was replaced");
+    assert.deepEqual(into.samples.map((x) => [x.t, x.attendance]), [[at(70, 0).t, 10], [at(74, 0).t, 30], [at(90, 0).t, 50]]);
   });
 
   it("still holds attendance on the ramp through a brief mode drop mid-overrun", async () => {
@@ -249,10 +317,12 @@ describe("after a service ends, before the next one", () => {
     }
   });
 
-  it("takes attendance back to the service when the airing it stopped on returns after the ramp split", async () => {
+  it("takes attendance back to the service when the airing it stopped on returns after the ramp split", async (t) => {
     // Mid-overrun, Planning Center leaves item mode for twelve minutes inside
     // the 11am's arrival window, then comes back on the same airing. The item
     // recorders hold it for the 9am; attendance had split onto the 11am's ramp.
+    const { sensourceService } = await import("./sensource-service.js");
+    t.mock.method(sensourceService, "getLatest", () => ({ connected: true, total: { attendance: 1000, occupancy: 200 } }));
     await tick(NINE, "occ-a", "welcome");
     const songLive = NINE + 2 * MIN;
     await airs(songLive, NINE + 74 * MIN, rolling, "song");
@@ -263,6 +333,12 @@ describe("after a service ends, before the next one", () => {
       assert.equal(rec.current?.serviceKey, keyFor("occ-a"), `${name}: the returning airing went to the next service`);
       assert.equal(rec.current?.endedAt, null, `${name}: the record is open again`);
     }
+    // The lull's counts are the 9am's again, as the item recorders keep the lull.
+    type Counts = { samples: { t: string; phase?: string }[] };
+    const back = (await RECORDERS[1]![1].getRecord(keyFor("occ-b"))) as unknown as Counts | null;
+    assert.deepEqual(back?.samples.filter((x) => x.phase === "pre").map((x) => x.t), [], "the lull's counts stayed with the 11am");
+    const nineCounts = RECORDERS[1]![1].current as unknown as Counts;
+    assert.ok(nineCounts.samples.some((x) => Date.parse(x.t) >= NINE + 76 * MIN && x.phase === "pre"), "the lull's counts are missing from the 9am");
     // The ramp record it left closes after it opened, not at the 9am's stop.
     const ramp = await RECORDERS[1]![1].getRecord(keyFor("occ-b"));
     const opened = (ramp as unknown as { startedAt: string } | null)?.startedAt;
@@ -285,6 +361,25 @@ describe("after a service ends, before the next one", () => {
     await tick(NINE + 90 * MIN, "occ-b", "song", { since: songLive });
 
     assert.notEqual(RECORDERS[1]![1].current?.serviceKey, keyFor("occ-a"), "went back to a record deleted in History");
+  });
+
+  it("does not make up the stopped service's record when it is gone by the time it is resumed", async (t) => {
+    await tick(NINE, "occ-a", "welcome");
+    const songLive = NINE + 2 * MIN;
+    await airs(songLive, NINE + 74 * MIN, rolling, "song");
+    for (let at = NINE + 76 * MIN; at <= NINE + 88 * MIN; at += 2 * MIN) await tickNoItem(at, "occ-b");
+    const { attendanceStore } = await import("./attendance-store.js");
+    const realGet = attendanceStore.get.bind(attendanceStore);
+    let reads = 0;
+    t.mock.method(attendanceStore, "get", async (key: string) => {
+      // There for the go-back lookup, gone by the read that resumes it.
+      if (key === keyFor("occ-a") && reads++ > 0) return null;
+      return realGet(key);
+    });
+    await tick(NINE + 90 * MIN, "occ-b", "song", { since: songLive });
+
+    const cur = RECORDERS[1]![1].current as unknown as { serviceKey: string; serviceTimeId: string | null } | null;
+    assert.ok(!(cur?.serviceKey === keyFor("occ-a") && cur.serviceTimeId === "occ-b"), "made a 9am record carrying the 11am's occurrence");
   });
 
   it("splits with the item recorders when the airing that returns is the service's opening item", async () => {
@@ -364,6 +459,9 @@ describe("silence is not an end", () => {
       rec.lastLiveAt = 0;
       rec.stoppedAt = 0;
       rec.splitOnRamp = null;
+      // A previous test's airing would count as already on air here.
+      rec.lastAiring = null;
+      rec.inheritedAiring = null;
     }
   });
 

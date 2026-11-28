@@ -79,7 +79,8 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
    * held the stopped record in case the service came back (see
    * shouldHoldThroughServiceTimeChange), the room filling was the next
    * service's. Re-based on the incoming record's own baseline, which is the
-   * first of them when it has none, as its other samples are.
+   * first of them when it has none, as its other samples are. Going back to a
+   * stopped service, the ramp record's counts return to it the same way.
    */
   protected override takeAfterStop(from: ServiceAttendance, into: ServiceAttendance, stopIso: string): boolean {
     const stopMs = Date.parse(stopIso);
@@ -90,11 +91,12 @@ class AttendanceRecorder extends ServiceRecorder<ServiceAttendance> {
     into.attendanceBaseline ??= rawOf(moving[0]!);
     const base = into.attendanceBaseline;
     from.samples = from.samples.filter((x) => !moving.includes(x));
+    if (from.samples.length === 0) from.attendanceBaseline = null; // nothing left counted from it
     into.samples = [...moving.map((x) => ({ ...x, attendance: Math.max(0, rawOf(x) - base) })), ...into.samples].sort(
       (a, b) => Date.parse(a.t) - Date.parse(b.t),
     );
     console.log(
-      `[attendance-recorder] ${moving.length} arrival count(s) taken after ${scrub(from.serviceKey)} stopped belong to ${scrub(into.serviceKey)}; moved there`,
+      `[attendance-recorder] ${scrub(moving.length)} arrival count(s) taken after ${scrub(from.serviceKey)} stopped belong to ${scrub(into.serviceKey)}; moved there`,
     );
     return true;
   }
