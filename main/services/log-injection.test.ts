@@ -216,6 +216,9 @@ const REQUEST_FACING = [
   "routes/state-routes.ts",
   "routes/status-routes.ts",
   "routes/system-routes.ts",
+  // Logs nothing: it answers an unknown target id off the path as a 404 and
+  // rethrows everything else.
+  "routes/unknown-target.ts",
   // Its one outage line names the feed id off the proxied URL (validated
   // against the feed list first, so it is never an attacker's raw string)
   // and whatever the relay's own error said back.
