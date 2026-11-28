@@ -146,6 +146,8 @@ const EXPECTED_RUNTIME = [
   "automation-log.json",
   "baptism.json",
   "checklist-ticks.json",
+  // Which one-time repairs of THIS machine's history have run.
+  "history-repairs.json",
   // Which Needs attention problems were snoozed this week.
   "home-snoozes.json",
   "host-names-seen.json",

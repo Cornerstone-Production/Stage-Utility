@@ -298,6 +298,39 @@ export class KeyedRecordStore<T extends Keyed> {
     });
   }
 
+  /**
+   * Replace one record that is already on disk, keeping the file as it was
+   * beside it first, as `<file>.<suffix>`: for a repair that rewrites records
+   * an operator never asked to change.
+   *
+   * The copy is the file's bytes, not the record re-serialised, and an existing
+   * copy is never replaced: a second run must not turn "the original" into the
+   * first run's result. A record whose file could not be read, or is not there,
+   * throws and writes nothing; it is never held beside like a recording's save,
+   * since nothing is lost by leaving it alone. The suffix must not end in
+   * `.json`, or the next load would read the copy as a record.
+   */
+  async replaceKeepingPrior(record: T, suffix: string): Promise<void> {
+    if (suffix.endsWith(".json")) throw new Error(`a kept copy named *.${suffix} would load as a record`);
+    await this.enqueue(async () => {
+      const map = await this.loadAll();
+      const unread = this.unreadFor(record.serviceKey);
+      if (unread) throw unread;
+      const file = path.join(this.dir(), safeName(record.serviceKey));
+      const copy = `${file}.${suffix}`;
+      let kept = false;
+      try {
+        await fs.access(copy);
+        kept = true;
+      } catch (err) {
+        if (!isNotFound(err)) throw err;
+      }
+      if (!kept) await atomicWrite(copy, await fs.readFile(file));
+      await this.writeOne(record);
+      map.set(record.serviceKey, record);
+    });
+  }
+
   private async writeHeld(record: T, unread: StoreReadError): Promise<void> {
     const name = safeName(record.serviceKey);
     const held = `${name}.held-${RUN_STAMP}`;
