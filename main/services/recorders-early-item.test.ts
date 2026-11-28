@@ -266,4 +266,20 @@ describe("silence is not an end", () => {
       assert.equal(rec.current?.endedAt, null, `${name}: the record closed`);
     }
   });
+
+  it("holds through the first tick after a restart, with nothing yet to say the service stopped", async () => {
+    // As if a running record were resumed into memory at boot: the recorder
+    // holds it, but has seen no tick of this process, running or stopped.
+    await tick(NINE, "occ-a", "welcome");
+    await airs(NINE + 2 * MIN, NINE + 64 * MIN, rolling, "song");
+    for (const [, rec] of RECORDERS) {
+      rec.lastLiveAt = 0;
+      rec.lastStoppedAt = 0;
+    }
+    await tick(NINE + 66 * MIN, "occ-b", "message");
+
+    for (const [name, rec] of RECORDERS) {
+      assert.equal(rec.current?.serviceKey, keyFor("occ-a"), `${name}: a restart split the running service`);
+    }
+  });
 });

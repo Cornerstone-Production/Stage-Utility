@@ -242,8 +242,8 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
   /** Last live-item tick, for measuring the gap between services. */
   protected lastLiveAt = 0;
   /** Last tick that saw the service NOT running (Planning Center left item
-   *  mode, or sat past SERVICE END). Later than lastLiveAt means the service
-   *  stopped, which silence alone (no ticks at all) does not. */
+   *  mode, or sat past SERVICE END). Later than the last running tick means the
+   *  service stopped, which silence alone (no ticks at all) does not. */
   private lastStoppedAt = 0;
   /** Re-entrancy latch: the poller fires every tick and onLiveTick awaits I/O. */
   protected busy = false;
@@ -594,11 +594,13 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    * a brief lull (a mode drop mid-service, back within the gap, on any item),
    * the airing the service stopped on coming back (it went live before the
    * service stopped), and silence: no ticks at all, a Planning Center outage
-   * mid-overrun, is no evidence the service ended. Judged by the ticks rather
-   * than by the record's end alone, because attendance can still hold the
-   * record open on the next service's arrival ramp; and by Planning Center's
-   * live_start_at rather than the item id, because back-to-back services share
-   * a plan, so the next service's items carry the same ids.
+   * mid-overrun, is no evidence the service ended.
+   *
+   * Judged by the ticks rather than by the record's end alone, because
+   * attendance can still hold the record open on the next service's arrival
+   * ramp. Judged by Planning Center's live_start_at rather than the item id,
+   * because back-to-back services share a plan, so the next service's items
+   * carry the same ids.
    */
   private shouldHoldThroughServiceTimeChange(
     live: PcoLiveDTO,
@@ -613,13 +615,19 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     const untilMs = startsAtMs - Date.now();
     const hold = untilMs > SERVICE_GAP_MS;
 
-    // An ended service is held only for itself. Logged unconditionally, like
-    // the opening item below, and for the same reason.
+    // An ended service is held only for itself. Only once a running tick has
+    // been seen: with none since this process started, there is nothing to
+    // say the service stopped. Logged unconditionally, for the reason the
+    // opening item's line below gives.
     const lastRanMs = Date.now() - gapSinceLive;
+    const ran = Number.isFinite(gapSinceLive);
     const stopped = this.current?.endedAt != null || this.lastStoppedAt > lastRanMs;
-    if (hold && stopped && gapSinceLive >= SERVICE_GAP_MS && live.currentItemId && itemLiveSinceMs(live) > lastRanMs) {
+    const endedLongEnough = ran && stopped && gapSinceLive >= SERVICE_GAP_MS;
+    const airedSinceItRan = live.currentItemId != null && itemLiveSinceMs(live) > lastRanMs;
+    if (hold && endedLongEnough && airedSinceItRan) {
+      const ended = this.current?.serviceKey ?? "the open record";
       console.log(
-        `[service-recorder] ${this.label}: "${scrub(live.label ?? live.currentItemTitle ?? live.currentItemId)}" went live after the service in ${this.current?.serviceKey ?? "the open record"} stopped, ${Math.round(untilMs / 60_000)} min before service time ${serviceTimeId} — the next service's, closing ${this.current?.serviceKey ?? "the open record"} and opening a new record`,
+        `[service-recorder] ${this.label}: "${scrub(live.label ?? live.currentItemTitle ?? live.currentItemId ?? "")}" went live after the service in ${ended} stopped, ${Math.round(untilMs / 60_000)} min before service time ${serviceTimeId} — the next service's, closing ${ended} and opening a new record`,
       );
       return false;
     }
