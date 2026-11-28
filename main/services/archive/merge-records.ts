@@ -154,11 +154,13 @@ const PAIR_MS = 15_000;
  * Where they do not overlap there is no such evidence, and only the bug's own
  * signature is looked for: a baseline equal to the record's first sample (the
  * value the bug copied in, unchanged since) on a record whose daily total sits
- * well above baseline + its latest sample. A legitimate record shares that
- * shape only when its counter really started near zero, where a shift by its
- * baseline is right anyway, or a trimmed one did; the fallback then costs what
- * every import did before this alignment existed, plus a line on the log. A
- * corrupted record a later fixed-code edit re-based is not recognised.
+ * well above baseline + its latest sample. A recorder's first sample is 0, so
+ * in practice that is "baseline 0 and a total far above its counts", which a
+ * legitimate record also shows when its counter really started at 0 and its
+ * tail was trimmed or split-saved. Such a record is joined unshifted, as every
+ * import did before this alignment existed, with a line on the log; the other
+ * box's samples then read off by that box's own baseline. A corrupted record a
+ * later fixed-code edit re-based is not recognised without an overlap.
  */
 export function framesDisagree(mine: AttendanceRecord, theirs: AttendanceRecord): string | null {
   const mineBase = finiteOrNull(mine.attendanceBaseline);
@@ -172,7 +174,14 @@ export function framesDisagree(mine: AttendanceRecord, theirs: AttendanceRecord)
   const levels: number[] = [];
   for (const [t, raw] of b) {
     let best: [number, number] | null = null;
-    for (const p of a) if (Math.abs(p[0] - t) <= PAIR_MS && (best == null || Math.abs(p[0] - t) < Math.abs(best[0] - t))) best = p;
+    for (const p of a) {
+      // A reading at the very same instant is a copy an earlier import took
+      // from this archive, not a second box's evidence: pairing with it would
+      // measure only the two baselines, and a re-import would decide
+      // differently from the first.
+      if (p[0] === t) continue;
+      if (Math.abs(p[0] - t) <= PAIR_MS && (best == null || Math.abs(p[0] - t) < Math.abs(best[0] - t))) best = p;
+    }
     if (best) {
       diffs.push(Math.abs(best[1] - raw));
       levels.push(Math.max(best[1], raw));
@@ -200,16 +209,23 @@ export function framesDisagree(mine: AttendanceRecord, theirs: AttendanceRecord)
 }
 
 /**
- * The merge as it was before frames were aligned, for a record whose baseline
- * cannot be trusted: samples unioned unshifted (this box's on a clash), the
+ * The merge as it was before frames were aligned, for a pair whose baselines
+ * cannot both be right: samples unioned unshifted (this box's on a clash), the
  * peaks recomputed over in-service samples and never lowered, everything else
- * filled, never overwritten. This box's baseline is kept, never filled from
- * the archive's.
+ * filled, never overwritten. Two departures: this box's baseline is kept,
+ * never filled from the archive's, and the lowest room count and the raw
+ * daily total, which no baseline touches, take what either machine saw.
  */
 function fillOnlyAttendance(mine: AttendanceRecord, theirs: AttendanceRecord, readings: AttendanceSample[]): AttendanceRecord {
   const own = Array.isArray(mine.samples) ? mine.samples : [];
   const samples = mergeByKey(own, readings, (x) => x.t).sort((a, b) => a.t.localeCompare(b.t));
   const out: AttendanceRecord = { ...fillMissingFields(mine, theirs, ["samples", "attendanceBaseline"]), samples };
+  // The room count and the raw daily total depend on no baseline, so the
+  // lowest and the total take what either machine saw.
+  const mins = [mine.minOccupancy, theirs.minOccupancy].map(finiteOrNull).filter((v): v is number => v != null);
+  if (mins.length) out.minOccupancy = Math.min(...mins);
+  const totals = [mine.totalAttendance, theirs.totalAttendance].map(finiteOrNull).filter((v): v is number => v != null);
+  if (totals.length) out.totalAttendance = Math.max(...totals);
   const svc = inServiceSamples(samples);
   if (svc.length) {
     const peakOf = (field: "attendance" | "occupancy") =>

@@ -81,10 +81,14 @@ recomputed over the filled gap: a peak never falls below, and the lowest room
 count never rises above, what either machine recorded itself, and the last
 reading is the later machine's own. A recording too old to carry its start
 count is joined as it stands, and so is a pair whose start counts cannot both
-be right: where the two recordings overlap, both machines read one counter, so
-their counts must agree there (a record last edited on v1.9.3 or v1.9.4 can
-carry a start count of 0 that is not true). An archive sample that is not a
-reading is left out. The import logs an
+be right. A record last edited on v1.9.3 or v1.9.4 can carry a start count of
+0 that is not true. Where the two recordings overlap, both machines read one
+counter, so their counts must agree there. Where they do not, a record whose
+start count is 0 while its daily total sits well above its counts is not
+aligned on; that also catches a genuine 0 whose tail was trimmed, which is
+then joined as it stands. A wrong start count that a later edit re-based is
+not caught without an overlap. An archive sample that is not a reading is
+left out. The import logs an
 `[archive]` line for each. Records imported before this alignment existed are
 left as they are.
 

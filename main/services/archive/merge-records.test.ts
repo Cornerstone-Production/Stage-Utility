@@ -509,8 +509,44 @@ test("an empty record's baseline is no frame: a Recalculate on it then an import
 });
 
 test("a reading whose stamp will not parse does not decide the check", () => {
-  const a = boxRecord(0, 10, 0, () => 300);
-  const b = boxRecord(5, 15, 7, () => 300);
-  const bogus = { ...b, samples: [{ t: "bogus", attendance: 0, occupancy: 300 }, ...b.samples] };
-  assert.equal(mergeAttendanceRecord(a, bogus).frames, "aligned");
+  // A trimmed record with a real baseline, no overlap with the other box, and
+  // an unreadable sample first that happens to equal its baseline: read as
+  // its first sample, it would wear the bug's signature.
+  const trimmed = { ...boxRecord(0, 10, 0, () => 300), totalAttendance: rawAt(10) + 400 };
+  const bogus = { ...trimmed, samples: [{ t: "bogus", attendance: 500, occupancy: 300 }, ...trimmed.samples] };
+  assert.equal(mergeAttendanceRecord(bogus, boxRecord(20, 30, 7, () => 300)).frames, "aligned");
+});
+
+test("importing the same archive twice changes nothing, whichever way the check went", () => {
+  const corrupted = { ...boxRecord(0, 10, 0, () => 300), attendanceBaseline: 0 };
+  const honest = boxRecord(5, 15, 7, (m) => (m === 12 ? 240 : 300));
+  // The case that tells: this box honest with a baseline near 0, the archive
+  // corrupted to 0. A re-import that paired the archive's readings with the
+  // copies the first import took would see two baselines 12 apart and align.
+  const fast = (from: number, to: number, skewSec: number, baseline: number) => ({
+    ...boxRecord(from, to, skewSec, () => 300),
+    attendanceBaseline: baseline,
+    samples: Array.from({ length: to - from + 1 }, (_, i) => ({
+      t: new Date(T9 + (from + i) * 60_000 + skewSec * 1000).toISOString(),
+      attendance: 12 + 50 * (from + i) - (12 + 50 * from),
+      occupancy: 300,
+    })),
+    totalAttendance: 12 + 50 * to,
+  });
+  const nearZero = fast(0, 20, 0, 12);
+  const zeroed = fast(10, 20, 7, 0); // really baselined at 512
+  for (const [mine, theirs] of [[corrupted, honest], [honest, corrupted], [boxRecord(0, 25, 0, () => 300), honest], [nearZero, zeroed]] as const) {
+    const once = mergeAttendanceRecord(mine, theirs);
+    const twice = mergeAttendanceRecord(once.record, theirs);
+    assert.equal(twice.frames, once.frames, "a re-import decided differently");
+    assert.deepEqual(twice.record, once.record);
+  }
+});
+
+test("a merge it will not align still takes the lower room count and the larger daily total", () => {
+  const corrupted = { ...boxRecord(0, 10, 0, () => 300), attendanceBaseline: 0 };
+  const honest = boxRecord(5, 15, 7, (m) => (m === 12 ? 240 : 300));
+  const out = mergeAttendanceRecord(corrupted, honest).record;
+  assert.equal(out.minOccupancy, 240);
+  assert.equal(out.totalAttendance, rawAt(15));
 });
