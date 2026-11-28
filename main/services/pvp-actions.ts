@@ -18,7 +18,7 @@
 
 import { errorMessage } from "./errors.js";
 import type { ActionDef, ActionResult } from "../types/automation.js";
-import { hasContent, type PvpLayerDTO } from "../types/pvp.js";
+import { findPvpLayer, hasContent, type PvpLayerDTO } from "../types/pvp.js";
 import { pvpService } from "./pvp-service.js";
 import { externKeyed } from "../types/extern-keyed.js";
 
@@ -74,25 +74,32 @@ const CUE_PARAM = {
  * name, so a layer called "2" could not be addressed by name at all.
  *
  * A name that matches nothing is a failure with the names that DO exist in it.
- * "Layer not found" alone would leave an operator guessing at a typo.
+ * "Layer not found" alone would leave an operator guessing at a typo. A name
+ * two or more layers share is a failure too, never the first of them: see
+ * findPvpLayer.
  */
 async function resolveLayer(
   params: Record<string, unknown>,
 ): Promise<{ layer: PvpLayerDTO } | { error: string }> {
-  const want = String(params.layer ?? "").trim().toLowerCase();
-  if (!want) return { error: "no layer name configured" };
+  const name = String(params.layer ?? "");
+  if (!name.trim()) return { error: "no layer name configured" };
   // Through readWorkspace, which is the same try/catch producing the same
   // message. Two copies of a read that turns a throw into an operator-facing
   // string is two places for the wording, and the recovery, to drift.
   const got = await readWorkspace();
   if ("error" in got) return got;
   const layers = got.layers;
-  const layer = layers.find((l) => l.name.trim().toLowerCase() === want);
-  if (!layer) {
-    const known = layers.map((l) => `"${l.name}"`).join(", ") || "no layers";
-    return { error: `no layer named "${String(params.layer)}" — PVP has ${known}` };
+  const found = findPvpLayer(layers, name);
+  if (found.kind === "duplicate") {
+    return {
+      error: `${found.layers.length} layers are called "${name}" in PVP — rename one so the cue can tell them apart`,
+    };
   }
-  return { layer };
+  if (found.kind === "missing") {
+    const known = layers.map((l) => `"${l.name}"`).join(", ") || "no layers";
+    return { error: `no layer named "${name}" — PVP has ${known}` };
+  }
+  return { layer: found.layer };
 }
 
 /** A layer from a fresh read, by uuid. The verify predicates work on uuid rather

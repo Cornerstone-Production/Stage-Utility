@@ -18,7 +18,7 @@ import { PvpCountdownOnly } from "./pvp-countdown-only";
 import { pvpNowLayout, pvpWarnColor, pvpWarnTone } from "./pvp-now-config";
 import { Readout } from "./readout";
 import type { LayoutHAlign, PvpNowLayout } from "@main/types/views";
-import { hasContent, type PvpLayerDTO, type PvpStatusDTO } from "@main/types/pvp";
+import { findPvpLayer, hasContent, type PvpLayerDTO, type PvpStatusDTO } from "@main/types/pvp";
 
 /** Both surfaces' configs, which differ only in whether a layer can be named. */
 export type PvpNowConfig = {
@@ -148,7 +148,8 @@ export const PVP_NOW_CAPTION = "ProVideoPlayer";
  *
  * A named layer is matched on its NAME and returned whether or not it holds
  * anything — an operator who pinned a widget to Exit Screen wants to know Exit
- * Screen is empty, not to watch the widget wander to another layer.
+ * Screen is empty, not to watch the widget wander to another layer. A name two
+ * layers share returns neither (see findPvpLayer); `pinnedLayer` says why.
  *
  * With no name it follows content, preferring the FIRST layer in PVP's own
  * stack order that holds something. That is what a wall wants, since nobody is
@@ -158,25 +159,30 @@ export function chooseNowLayer(
   layers: readonly PvpLayerDTO[],
   layerName: string | null | undefined,
 ): PvpLayerDTO | null {
-  const want = (layerName ?? "").trim().toLowerCase();
-  if (want) return layers.find((l) => l.name.trim().toLowerCase() === want) ?? null;
+  const want = (layerName ?? "").trim();
+  if (want) {
+    const got = findPvpLayer(layers, want);
+    return got.kind === "found" ? got.layer : null;
+  }
   return layers.find(hasContent) ?? null;
 }
 
 /**
- * Does a pinned layer name exist among the live layers?
+ * What a pinned layer name finds among the live layers.
  *
- * Matched the way `chooseNowLayer` matches — trimmed, case-insensitive — so the
- * two never disagree about whether a name is "in the list". An unpinned widget
- * (blank name) has no notion of "not found" and answers true.
+ * Through findPvpLayer, as `chooseNowLayer` is, so the two never disagree
+ * about whether a name is "in the list". An unpinned widget (blank name) has no
+ * notion of "not found" and answers "unpinned".
  */
-export function pinnedLayerExists(layers: readonly PvpLayerDTO[], layerName: string | null | undefined): boolean {
-  const want = (layerName ?? "").trim().toLowerCase();
-  if (!want) return true;
-  return layers.some((l) => l.name.trim().toLowerCase() === want);
+export function pinnedLayer(
+  layers: readonly PvpLayerDTO[],
+  layerName: string | null | undefined,
+): "unpinned" | "found" | "missing" | "duplicate" {
+  const want = (layerName ?? "").trim();
+  return want ? findPvpLayer(layers, want).kind : "unpinned";
 }
 
-export type PvpNowBadge = "playing" | "paused" | "still" | "ended" | "empty" | "not found";
+export type PvpNowBadge = "playing" | "paused" | "still" | "ended" | "empty" | "not found" | "duplicate";
 
 /**
  * The state word for a layer ALONE — no progress object needed, because
@@ -200,12 +206,18 @@ export function pvpLayerStateWord(layer: PvpLayerDTO | null): PvpNowBadge {
 /**
  * The state word beside the caption.
  *
- * `found` is false only for a PINNED name PVP is not reporting — never for the
- * ordinary "nothing has content" case, which is `empty`. It is checked first:
- * a layer that does not exist has no state of its own to report.
+ * `pin` is "missing" only for a PINNED name PVP is not reporting — never for
+ * the ordinary "nothing has content" case, which is `empty` — and "duplicate"
+ * for a pinned name two or more layers share. Both are checked first: a layer
+ * that does not exist, or cannot be told from another, has no state of its own
+ * to report.
  */
-export function nowBadge(layer: PvpLayerDTO | null, found = true): PvpNowBadge {
-  if (!found) return "not found";
+export function nowBadge(
+  layer: PvpLayerDTO | null,
+  pin: ReturnType<typeof pinnedLayer> = "found",
+): PvpNowBadge {
+  if (pin === "missing") return "not found";
+  if (pin === "duplicate") return "duplicate";
   return pvpLayerStateWord(layer);
 }
 
@@ -234,11 +246,11 @@ function Badge({ badge }: { badge: PvpNowBadge }) {
 /**
  * Why this widget has nothing to show, in the operator's words.
  *
- * PURE and exported so the five cases are pinned by a test. Five different
+ * PURE and exported so the six cases are pinned by a test. Six different
  * nothings said differently, for the reason pvp-object's emptyReason exists: one
  * is a machine to go and look at, one is a layout to fix, one is a name that
- * does not match anything live, one is neither, and one is that we have not
- * heard yet.
+ * does not match anything live, one is a name two layers share, one is
+ * neither, and one is that we have not heard yet.
  *
  * The "not found" sentence deliberately does not echo the name back — unlike
  * `noSuchLayer`, the list object's sentence for the same idea. Here the name is
@@ -251,10 +263,10 @@ export function nowEmptyReason(status: PvpStatusDTO | null, layerName: string | 
   // below it is reached with a connected snapshot in hand.
   const unavailable = pvpUnavailableReason(status);
   if (unavailable !== null) return unavailable;
-  const want = (layerName ?? "").trim();
-  if (want) {
-    return pinnedLayerExists(status?.layers ?? [], want) ? "Nothing on this layer" : "No layer by this name in PVP";
-  }
+  const pin = pinnedLayer(status?.layers ?? [], layerName);
+  if (pin === "missing") return "No layer by this name in PVP";
+  if (pin === "duplicate") return "More than one layer has this name";
+  if (pin === "found") return "Nothing on this layer";
   return "Nothing on screen";
 }
 
@@ -275,12 +287,13 @@ export function PvpNowObject({
 }) {
   const layers = status?.layers ?? [];
   const layer = chooseNowLayer(layers, config.layerName);
-  // "not found" is a verdict about PVP's live layer list, so it needs one. With
+  // "not found" and "duplicate" are verdicts about PVP's live layer list, so
+  // they need one. With
   // no usable snapshot (not configured, offline, nothing heard yet) the tile
   // says "empty" and the sub-line says why; claiming the layer does not exist
   // when we cannot see any layers would send the operator to fix a layout that
   // is fine.
-  const found = pvpUnavailableReason(status) !== null || pinnedLayerExists(layers, config.layerName);
+  const pin = pvpUnavailableReason(status) !== null ? "found" : pinnedLayer(layers, config.layerName);
   // The widget's own hold wins over the PVP card's default — an operator who
   // set one on this specific tile did so to disagree with the card, and a
   // fallback that ignored it would make the override a control that does
@@ -295,7 +308,7 @@ export function PvpNowObject({
   // time as `progress`: a still that IS counting down already has its value
   // slot, and a second clock beside it would answer the same question twice.
   const onScreenSec = !progress && layer ? stillOnScreenSec(layer, now) : null;
-  const badge = nowBadge(layer, found);
+  const badge = nowBadge(layer, pin);
   const layout = pvpNowLayout(config);
   const compact = layout === "compact";
   // The warning colour of the TIME, which is the countdown and only the
@@ -331,7 +344,7 @@ export function PvpNowObject({
     );
   }
 
-  if (badge === "empty" || badge === "not found") {
+  if (badge === "empty" || badge === "not found" || badge === "duplicate") {
     return (
       <Readout
         caption={caption}
@@ -356,8 +369,8 @@ export function PvpNowObject({
   }
 
   if (compact) {
-    // `layer` is non-null here — the two cases it can be null (`empty` and
-    // `not found`) already returned above.
+    // `layer` is non-null here — the three cases it can be null (`empty`,
+    // `not found` and `duplicate`) already returned above.
     const valueText = progress
       ? fmtDuration(progress.remainingSec)
       : layer

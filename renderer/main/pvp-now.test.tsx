@@ -27,7 +27,7 @@ import { describe, test } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
-  PvpNowObject, chooseNowLayer, nowBadge, nowEmptyReason, pinnedLayerExists,
+  PvpNowObject, chooseNowLayer, nowBadge, nowEmptyReason, pinnedLayer,
   pvpNowLabel, stripExtension, PVP_NOW_CAPTION, type PvpNowConfig,
 } from "./pvp-now.js";
 import type { PvpLayerDTO, PvpStatusDTO } from "@main/types/pvp";
@@ -121,24 +121,31 @@ describe("the badge", () => {
   });
 
   test("a pinned name PVP is not reporting is `not found`, checked before content", () => {
-    assert.equal(nowBadge(null, false), "not found");
-    // found=false wins even if a layer happened to be passed in.
-    assert.equal(nowBadge(layer(), false), "not found");
+    assert.equal(nowBadge(null, "missing"), "not found");
+    // "missing" wins even if a layer happened to be passed in.
+    assert.equal(nowBadge(layer(), "missing"), "not found");
+  });
+
+  test("a pinned name two layers share is `duplicate`, checked before content", () => {
+    assert.equal(nowBadge(null, "duplicate"), "duplicate");
   });
 });
 
-describe("pinnedLayerExists", () => {
+describe("pinnedLayer", () => {
   const three = [layer({ uuid: "a", name: "Top" }), layer({ uuid: "b", name: "Middle" })];
   test("an unpinned widget (blank name) has no notion of not-found", () => {
-    assert.equal(pinnedLayerExists(three, null), true);
-    assert.equal(pinnedLayerExists(three, "  "), true);
+    assert.equal(pinnedLayer(three, null), "unpinned");
+    assert.equal(pinnedLayer(three, "  "), "unpinned");
   });
   test("matched trimmed and case-insensitive, like chooseNowLayer", () => {
-    assert.equal(pinnedLayerExists(three, " top "), true);
-    assert.equal(pinnedLayerExists(three, "TOP"), true);
+    assert.equal(pinnedLayer(three, " top "), "found");
+    assert.equal(pinnedLayer(three, "TOP"), "found");
   });
-  test("a name matching nothing live is false", () => {
-    assert.equal(pinnedLayerExists(three, "Typo"), false);
+  test("a name matching nothing live is missing", () => {
+    assert.equal(pinnedLayer(three, "Typo"), "missing");
+  });
+  test("a name two live layers share is duplicate", () => {
+    assert.equal(pinnedLayer([...three, layer({ uuid: "c", name: "top" })], "Top"), "duplicate");
   });
 });
 

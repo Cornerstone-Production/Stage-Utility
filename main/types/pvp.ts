@@ -163,3 +163,43 @@ export const PVP_OFFLINE: PvpStatusDTO = { connected: false, layers: [], sampled
  * be written the other way.
  */
 export const hasContent = (l: PvpLayerDTO): boolean => l.state !== "empty";
+
+/** A layer looked up by its name — see findPvpLayer. */
+export type PvpLayerMatch<L> =
+  | { kind: "found"; layer: L }
+  | { kind: "missing" }
+  | { kind: "duplicate"; layers: L[] };
+
+/**
+ * The one layer called `name`, matched trimmed and case-insensitively, the way
+ * an operator types a name into a rule, a switch or a layout.
+ *
+ * Every reader that takes a layer by name asks here, so the action, the
+ * automation condition, the Home Assistant switch and the wall widgets find the
+ * same layer or refuse together. They used to match the same way and answer a
+ * duplicate three different ways.
+ *
+ * Two or more layers of that name is "duplicate", never the first hit. PVP
+ * allows the duplicate, and the first hit is whichever layer PVP lists first: a
+ * cue that hid it, a condition that judged it or a switch that reported it
+ * would be acting on a layer nobody chose. Each caller refuses in its own words
+ * instead. A blank name matches nothing.
+ */
+export function findPvpLayer<L extends { name: string }>(layers: readonly L[], name: string): PvpLayerMatch<L> {
+  const want = name.trim().toLowerCase();
+  const hits = want ? layers.filter((l) => l.name.trim().toLowerCase() === want) : [];
+  if (hits.length === 1) return { kind: "found", layer: hits[0] };
+  return hits.length === 0 ? { kind: "missing" } : { kind: "duplicate", layers: hits };
+}
+
+/** Every layer name PVP reports more than once, as the operator wrote the first of each. */
+export function duplicatedPvpLayerNames(layers: readonly { name: string }[]): string[] {
+  const seen = new Map<string, { name: string; count: number }>();
+  for (const l of layers) {
+    const key = l.name.trim().toLowerCase();
+    const got = seen.get(key);
+    if (got) got.count += 1;
+    else seen.set(key, { name: l.name.trim(), count: 1 });
+  }
+  return [...seen.values()].filter((v) => v.count > 1).map((v) => v.name);
+}

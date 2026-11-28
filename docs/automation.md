@@ -243,7 +243,9 @@ condition holds rather than blocking, so a half-built rule does not silently nev
 fire — with one deliberate exception: a ProVideoPlayer layer condition with no
 layer named does **not** hold, because "some layer, I did not say which" would
 qualify a rule against a layer nobody chose. That question is **ProVideoPlayer has
-something on screen**, which exists separately. None of them hold while PVP has
+something on screen**, which exists separately. For the same reason a layer name
+two PVP layers share does not hold either (see
+[ProVideoPlayer](integrations/provideoplayer.md#rules)). None of them hold while PVP has
 never connected, either: unreachable is unknown, not empty. "Baptism phase is" does not hold at all until the timer has run — including
 for "idle", because before it runs we do not know that it is idle.
 
@@ -730,7 +732,8 @@ the second colon, so a layer called `Lower Thirds: Speaker` is written
 the reading, exactly as it stops the action: the state then reads unknown with
 `No PVP layer called "<name>"` rather than reporting the layer as shown. Two
 layers of one name read unknown too — PVP allows the duplicate, and a switch
-that silently picked one of them would report a layer nobody chose.
+that silently picked one of them would report a layer nobody chose. The action
+refuses the same name, so the switch and the command fail together.
 
 `app:youtube.live` and `app:resi.live` are read-only: there is no action here that
 starts or stops a broadcast on either platform. Bind a pair to one when the command

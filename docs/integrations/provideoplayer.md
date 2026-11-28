@@ -136,6 +136,14 @@ ProVideoPlayer stops the rule**, silently. Nothing else will tell you. A name th
 is only digits cannot be used at all: PVP reads an all-digits value as a position
 rather than a name, and Stage refuses it rather than firing at the wrong thing.
 
+**Two layers with one name are neither.** PVP allows the duplicate, and Stage
+never picks one of them: a command naming it fails with `2 layers are called
+"<name>" in PVP`, a trigger on it does not fire, a condition on it does not hold,
+a layer-state source reads unknown, and a widget set to it shows neither layer
+and reads **duplicate**. The server log names each shared name once, on a
+`[pvp] more than one layer is called …` line, and says again when every name is
+unique. Rename one of the layers in PVP.
+
 ## Layer state on a command pair
 
 A command pair can report a layer's own state instead of a Companion variable, so the
@@ -150,7 +158,8 @@ direction is the opposite one.
 
 Layer names are matched here exactly as the actions match them, and break the
 same way: rename the layer in PVP and the state reads unknown with `No PVP layer
-called "<name>"`, beside an action that has stopped working. A PVP that is not
+called "<name>"`, beside an action that has stopped working. Two layers of that
+name read unknown, beside an action that refuses (see above). A PVP that is not
 connected reads unknown too — never "shown".
 
 **Every layer already has three commands.** While ProVideoPlayer is switched on,

@@ -48,7 +48,7 @@ import { useSplState } from "../main/use-spl-state";
 import { useWirelessChannels } from "../app/queries";
 import { usePeopleCountState } from "../main/use-people-count-state";
 import { useObsStatus } from "../main/use-obs-state";
-import { hasContent, type PvpStatusDTO } from "@main/types/pvp";
+import { findPvpLayer, hasContent, type PvpLayerDTO, type PvpStatusDTO } from "@main/types/pvp";
 import { DEFAULT_PVP_NOW_LABEL, PVP_NOW_LABEL_OPTIONS, pvpLayerStateWord, type PvpNowLabel } from "../main/pvp-now";
 import { WARN_MAX_SEC, pvpNowLayout, pvpNowRowStates, pvpWarnThresholds, withPvpNowLayout } from "../main/pvp-now-config";
 import { PvpLayoutRow } from "./pvp-layout-row";
@@ -122,13 +122,31 @@ function pvpSummary(pvp: PvpStatusDTO | null): string {
   return `${pvp.layers.length} layers, ${withContent} with content`;
 }
 
-/** Matched the way `chooseNowLayer` in pvp-now.tsx matches: trimmed,
- *  case-insensitive. Both the picker and the widget it configures have to
- *  agree on what "in the list" means, or a name the picker calls found could
- *  render `not found` on the wall. */
-function pvpLayerNamed(layers: readonly { name: string }[], name: string): { name: string } | undefined {
-  const want = name.trim().toLowerCase();
-  return layers.find((l) => l.name.trim().toLowerCase() === want);
+/** Through findPvpLayer, as `chooseNowLayer` in pvp-now.tsx is. Both the
+ *  picker and the widget it configures have to agree on what "in the list"
+ *  means, or a name the picker calls found could render `not found` on the
+ *  wall. A name two layers share IS in the list, as one option: the widget
+ *  then says `duplicate`, and the option says so too. */
+function pvpLayerNamed(layers: readonly PvpLayerDTO[], name: string): PvpLayerDTO | undefined {
+  const got = findPvpLayer(layers, name);
+  if (got.kind === "missing") return undefined;
+  return got.kind === "found" ? got.layer : got.layers[0];
+}
+
+/** One picker option per name: PVP's layers with each shared name listed once,
+ *  where it first appears, as `<name> · duplicate` rather than as two options
+ *  with one value. */
+export function pvpLayerOptions(layers: readonly PvpLayerDTO[]): { name: string; word: string }[] {
+  const seen = new Set<string>();
+  const out: { name: string; word: string }[] = [];
+  for (const l of layers) {
+    const key = l.name.trim().toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const got = findPvpLayer(layers, l.name);
+    out.push({ name: l.name, word: got.kind === "duplicate" ? "duplicate" : pvpLayerStateWord(l) });
+  }
+  return out;
 }
 
 const PVP_CUSTOM_LAYER = "__pvp-custom__";
@@ -199,8 +217,8 @@ function PvpLayerPicker({
           <SelectTrigger aria-label={label} className="w-full"><SelectValue /></SelectTrigger>
           <SelectContent>
             <SelectItem value="">{emptyLabel}</SelectItem>
-            {layers.map((l) => (
-              <SelectItem key={l.name} value={l.name}>{`${l.name} · ${pvpLayerStateWord(l)}`}</SelectItem>
+            {pvpLayerOptions(layers).map((o) => (
+              <SelectItem key={o.name} value={o.name}>{`${o.name} · ${o.word}`}</SelectItem>
             ))}
             {notFound && <SelectItem value={stored}>{`${stored} · not found`}</SelectItem>}
             <SelectItem value={PVP_CUSTOM_LAYER}>Type a layer name…</SelectItem>
