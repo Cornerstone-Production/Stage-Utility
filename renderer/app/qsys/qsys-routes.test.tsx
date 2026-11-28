@@ -840,6 +840,20 @@ describe("/qsys/manage", () => {
     assert.match(document.body.textContent ?? "", /Adding a control needs the Core connected/);
   });
 
+  test("Export is off, with its reason, while the table holds unsaved edits", async () => {
+    await open("/qsys/manage");
+    await wait(60);
+    const exp = () => screen.getByText("Export").closest("button") as HTMLButtonElement;
+    assert.equal(exp().disabled, false);
+    act(() => {
+      fireEvent.change(screen.getByLabelText(`Max for ${MIX} gain`), { target: { value: "0" } });
+      fireEvent.blur(screen.getByLabelText(`Max for ${MIX} gain`));
+    });
+    await wait(10);
+    assert.equal(exp().disabled, true, "Export stayed on over unsaved edits, so it would download a list the table does not show");
+    assert.match(document.body.textContent ?? "", /Save or discard your edits before .*exporting/);
+  });
+
   test("Export downloads the allowlist file; Import sends a file once confirmed and shows the server's answer", async () => {
     render(React.createElement(ConfirmHost));
     const saved: Blob[] = [];

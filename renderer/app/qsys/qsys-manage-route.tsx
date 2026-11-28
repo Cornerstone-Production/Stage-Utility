@@ -899,7 +899,7 @@ function AllowlistSection({
         <div className="w-56" data-qsys-add-control>
           <QsysCoreBrowser kind="any" writable={false} value={null} onChange={addControl} label="Add a control" placeholder="Add a control" clearable={false} disabled={busy || !connected} exclude={onList} />
         </div>
-        <Button size="small" variant="transparent" disabled={busy} onClick={() => void exportList()}>
+        <Button size="small" variant="transparent" disabled={busy || dirty} onClick={() => void exportList()}>
           Export
         </Button>
         <Button size="small" variant="transparent" disabled={busy || dirty} onClick={() => importInput.current?.click()}>
@@ -929,7 +929,7 @@ function AllowlistSection({
         </div>
       )}
       {panels.length > 0 && !connected && <p className="text-caption1 text-fg-muted">Adding a panel's controls needs the Core connected: their limits come from it.</p>}
-      {dirty && <p className="text-caption1 text-fg-muted">Save or discard your edits before adding a panel's controls or importing a file.</p>}
+      {dirty && <p className="text-caption1 text-fg-muted">Save or discard your edits before adding a panel's controls, exporting or importing a file.</p>}
       {current && entries.length === 0 && <p className="text-footnote text-fg-muted">Nothing is on the list, so no panel can change anything.</p>}
       {entries.length > 0 && (
         <div className="overflow-x-auto rounded-xl border border-line bg-surface">
