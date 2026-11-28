@@ -22,14 +22,21 @@
 // (follow recomputed from layout in onScroll, scrollIntoView in a passive
 // effect); the scroll-up case fails with the "user scrolled up" branch removed,
 // with the overflow-anchor toggle removed,
-// and again with the "back at the bottom" branch removed; the wheel case fails
-// with the wheel listener removed; the up-key case fails with the key listener
-// on the feed instead of the document; and the scrolls-nothing case fails when
-// input alone ends following.
+// and again with the "back at the bottom" branch removed; the wheel, up-key and
+// scrollbar cases fail with the release at the pin removed, and the scrollbar
+// case also fails when that release needs recent wheel, touch or key input; the
+// shrink case fails when the release does not check for the bottom; and the
+// scrolls-nothing case fails when input alone ends following.
 //
-// Not driven in a browser: touch and the keyboard. The wheel was, in Chromium
-// and WebKit; a scroll-up by any means also ends following through the "moved
-// up" rule, which is what those two rely on when their event arrives late.
+// Driven through a real server fed by a fake ProdCom, from a full 100-line buffer
+// with 5-line bursts of varied heights, in Chromium (headless shell 1243) and
+// WebKit (2359), both older builds than playwright-core's pins: 3 minutes of
+// following read 0 px from the bottom on all 360 samples in each; a scrollTop
+// change with no input event, standing in for a scrollbar drag, and a wheel up
+// each held the reader's line still through 15 s of bursts; scrolling back to the
+// bottom followed again. Touch and the keyboard were not driven, and neither was a
+// real scrollbar thumb. A scroll-up by any means ends following through the
+// "moved up" rule, at the pin or at its scroll event, with no input event needed.
 
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
@@ -253,6 +260,44 @@ describe("the scrollable transcript feed keeps following the newest line", () =>
     (g.document as Document).body.dispatchEvent(new W.KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
     rerender(<TranscriptFeed lines={windowEndingAt(102)} scrollable />);
     assert.equal(layout.distance(), 0, "a key that moved nothing must not leave the feed behind");
+  });
+
+  test("a scrollbar drag up, which sends no wheel, touch or key event, is not undone by the next push", () => {
+    const { rerender, scroller, layout } = mount(windowEndingAt(99));
+    assert.equal(layout.distance(), 0);
+
+    // The thumb is dragged (or touch momentum carries on after the finger lifts):
+    // the browser scrolls with no input event on the feed, and a push is committed
+    // before the scroll event from that scroll is delivered.
+    scroller.scrollTop = layout.max() - 300;
+    const held = scroller.scrollTop;
+    rerender(<TranscriptFeed lines={windowEndingAt(100)} scrollable />);
+    assert.equal(scroller.scrollTop, held, "the push pulled the operator back down mid-drag");
+    layout.scrollEvent();
+    rerender(<TranscriptFeed lines={windowEndingAt(101)} scrollable />);
+    assert.equal(scroller.scrollTop, held, "a second push pulled the operator back down");
+  });
+
+  test("a push that shrinks the content while following, which the browser clamps, keeps following", () => {
+    // Every line long, then the oldest long line evicted for a short one: the
+    // content shrinks by two rows and the browser clamps scrollTop to the new
+    // bottom, which is above where the last pin left it. Nobody scrolled.
+    const long = (i: number) => makeLine(100 + i);
+    const short = (i: number): TranscriptLineDTO => ({ ...makeLine(i), id: `S${i}`, text: `short ${i}` });
+    const first = Array.from({ length: 100 }, (_, k) => long(k));
+    const { rerender, layout } = mount(first);
+    assert.equal(layout.distance(), 0);
+
+    const shrunk = [...first.slice(1), short(1)];
+    rerender(<TranscriptFeed lines={shrunk} scrollable />);
+    assert.equal(layout.distance(), 0, "the clamp left the feed off its newest line");
+
+    // The next line lands before the clamp's scroll event is delivered, so
+    // nothing but the pin's own decision says whether it is followed.
+    rerender(<TranscriptFeed lines={[...shrunk, long(200)]} scrollable />);
+    assert.equal(layout.distance(), 0, "the clamp turned following off, so the next line was not followed");
+    layout.scrollEvent();
+    assert.equal(layout.distance(), 0);
   });
 
   test("an up key, with focus anywhere on the page, is not undone by the next push", () => {
