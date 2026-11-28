@@ -24,6 +24,7 @@
 // onto Cloudflare's own origin, and a redirect is an error and not a hop. Nothing here puts a
 // token, or a token Cloudflare handed back, in an error: `CloudflareError` is what a caller logs.
 
+import { formatBytes } from "./bytes-format.js";
 import { blake3 } from "@noble/hashes/blake3.js";
 import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import * as fs from "node:fs";
@@ -285,7 +286,7 @@ export function readBundle(dir: string, manifest: DeployManifest = readManifest(
       .sort()
       .map((p): BundleFile => {
         const bytes = fs.readFileSync(path.join(publicDir, p));
-        if (bytes.byteLength > MAX_ASSET_BYTES) throw new BundleUnavailable(`${p} is over Cloudflare's ${MAX_ASSET_BYTES / 1024 / 1024} MiB limit for one file`);
+        if (bytes.byteLength > MAX_ASSET_BYTES) throw new BundleUnavailable(`${p} is over Cloudflare's ${formatBytes(MAX_ASSET_BYTES, { whole: true })} limit for one file`);
         return { path: p, bytes, hash: assetHash(bytes, p), contentType: contentTypeOf(p) };
       });
     if (files.length === 0) throw new BundleUnavailable("the page's public/ folder has no files");

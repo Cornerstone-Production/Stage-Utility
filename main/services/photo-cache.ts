@@ -1,6 +1,7 @@
 // Fetches PCO photo URLs and caches them to disk under userData/cache/photos/.
 // Returns the local file path so the stage-photo:// protocol can serve it.
 
+import { formatBytes } from "./bytes-format.js";
 import * as crypto from "crypto";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -268,7 +269,7 @@ export async function prunePhotoCache(): Promise<void> {
   const dir = await getCacheDir();
   const r = await pruneCacheDir(dir, { maxAgeMs: MAX_AGE_MS, maxBytes: MAX_BYTES });
   if (r.removed > 0) {
-    console.log(`[photo-cache] pruned ${scrub(r.removed)} file(s), freed ${scrub((r.freedBytes / 1e6).toFixed(1))} MB`);
+    console.log(`[photo-cache] pruned ${scrub(r.removed)} file(s), freed ${scrub(formatBytes(r.freedBytes))}`);
   }
 }
 
