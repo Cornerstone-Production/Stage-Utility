@@ -193,6 +193,7 @@ class ReaperService extends StatusIntegration<ReaperStatusDTO> {
   async transport(command: ReaperTransportCommand): Promise<{ ok: boolean; detail: string }> {
     const { host, port } = this;
     if (!host || !port) return { ok: false, detail: "REAPER is not configured" };
+    const run = this.run;
     try {
       if (command === "record") {
         const { read, status } = parseTransport(await this.fetchTransport(host, port));
@@ -208,7 +209,9 @@ class ReaperService extends StatusIntegration<ReaperStatusDTO> {
         // it, so the indicator and the cue state do not wait for the next tick.
         // Past the refusal, so an unreadable answer never publishes a confident
         // "not recording" over a machine that may well be.
-        if (this.running) this.emitIfChanged(status);
+        // The run, so a read of a host the operator has since moved away from
+        // is not published as the new one's.
+        if (this.current(run)) this.emitIfChanged(status);
         if (status.recording) {
           console.log("[reaper] transport record -> already recording");
           return { ok: true, detail: "already recording" };
@@ -234,9 +237,12 @@ class ReaperService extends StatusIntegration<ReaperStatusDTO> {
 
   protected async connect(): Promise<void> {
     if (!this.running || !this.host || !this.port) return;
+    const run = this.run;
     try {
       const body = await this.fetchTransport(this.host, this.port);
-      if (!this.running) return;
+      // The run, not `running`: a host change restarts inside this await, and
+      // the old box's answer must not be published as the new one's.
+      if (!this.current(run)) return;
       const { read, status } = parseTransport(body);
       // Reached SOMETHING, but not REAPER. A green badge over a machine whose
       // transport cannot be read is the same lie `transport` now refuses to act
@@ -262,6 +268,9 @@ class ReaperService extends StatusIntegration<ReaperStatusDTO> {
       // unattended box that is the whole point of automation.
       this.scheduleIn(this.inDemand ? POLL_MS : IDLE_POLL_MS);
     } catch (err) {
+      // A failure from the host the operator has just moved away from is not
+      // the new host's: nothing to report, blank or reschedule.
+      if (!this.current(run)) return;
       // "Unreachable" is the wrong word for a box that answered, so the two
       // causes word themselves and share everything else.
       const where = `${this.host}:${this.port}`;

@@ -88,12 +88,15 @@ class SmaartService extends StatusIntegration<SplMetricsDTO> {
 
   protected async connect(): Promise<void> {
     if (!this.running || !this.host || !this.port) return;
+    const run = this.run;
     const adapter = new ModernSmaartAdapter(this.host, this.port);
     this.adapter = adapter;
     try {
       await adapter.connect({ password: this.password });
       const inputs = await adapter.listInputs();
-      if (!this.running) {
+      // The run, not `running`: a reconfigure restarts inside these awaits, and
+      // this adapter belongs to the host the operator moved away from.
+      if (!this.current(run)) {
         adapter.close();
         return;
       }
@@ -116,6 +119,13 @@ class SmaartService extends StatusIntegration<SplMetricsDTO> {
       );
       this.publish(this.last, true);
     } catch (err) {
+      // teardown() closes the old adapter on a reconfigure, so its read rejects
+      // here. That is not the new host's failure: report, blank and reschedule
+      // nothing, or the reconnect would later replace the live adapter unclosed.
+      if (!this.current(run)) {
+        adapter.close();
+        return;
+      }
       const msg = errorMessage(err);
       if (this.attempt === 0) console.warn(`[smaart] ${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);
       this.report("error", `Can't reach ${this.host}:${this.port} — ${msg}`);

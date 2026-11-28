@@ -412,11 +412,23 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
     // 60s of headroom: a token that expires mid-request would surface as a
     // spurious auth error and a needless reconnect.
     if (this.token && Date.now() < this.tokenExpiresAt - 60_000) return this.token;
-    if (!this.username || !this.password) throw new Error("Resi is not configured");
-    const { token, expiresInSec } = await this.fetchToken(this.username, this.password);
-    this.token = token;
-    this.tokenExpiresAt = Date.now() + expiresInSec * 1000;
-    return this.token;
+    const { username, password } = this;
+    if (!username || !password) throw new Error("Resi is not configured");
+    const { token, expiresInSec } = await this.fetchToken(username, password);
+    // Cached only for the account it was issued to. A reconfigure inside that
+    // await has cleared the cache for a different account, and writing the old
+    // one's token back would have every later poll read the old account's
+    // encoders until the token expired.
+    if (this.isAccount(username, password)) {
+      this.token = token;
+      this.tokenExpiresAt = Date.now() + expiresInSec * 1000;
+    }
+    return token;
+  }
+
+  /** Are these still the credentials this instance is configured with? */
+  private isAccount(username: string | null, password: string | null): boolean {
+    return username === this.username && password === this.password;
   }
 
   private async fetchCustomerId(token: string): Promise<string> {
@@ -429,8 +441,11 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
 
   private async ensureCustomerId(token: string): Promise<string> {
     if (this.customerId) return this.customerId;
-    this.customerId = await this.fetchCustomerId(token);
-    return this.customerId;
+    const { username, password } = this;
+    const customerId = await this.fetchCustomerId(token);
+    // The same rule as the token: cached for the account that asked.
+    if (this.isAccount(username, password)) this.customerId = customerId;
+    return customerId;
   }
 
   private async fetchEncoderStatus(token: string, customerId: string): Promise<ResiEncoder[]> {
@@ -465,8 +480,11 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
    */
   private async refreshEvents(token: string, customerId: string): Promise<string | null> {
     if (this.eventsFetchedAt && Date.now() - this.eventsFetchedAt < EVENTS_CACHE_MS) return this.eventsError;
+    const { username, password } = this;
     try {
       const rows = await this.fetchEvents(token, customerId);
+      // Another account's broadcasts and names are not this one's to cache.
+      if (!this.isAccount(username, password)) return null;
       this.eventsFetchedAt = Date.now();
       this.events = rows;
       // Merged, not replaced: an encoder whose last broadcast has aged off the
@@ -474,23 +492,27 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
       for (const [id, name] of encoderNamesFrom(rows)) this.names.set(id, name);
       return null;
     } catch (err) {
-      this.eventsFetchedAt = Date.now();
+      if (this.isAccount(username, password)) this.eventsFetchedAt = Date.now();
       return errorMessage(err);
     }
   }
 
   protected async connect(): Promise<void> {
     if (!this.running || !this.configured) return;
+    const run = this.run;
     try {
       const token = await this.ensureToken();
       const customerId = await this.ensureCustomerId(token);
       const all = await this.fetchEncoderStatus(token, customerId);
-      if (!this.running) return;
+      // The run, not `running`: a reconfigure restarts inside these awaits, and
+      // the old account's encoders must not be published as the new one's.
+      if (!this.current(run)) return;
 
       // Deliberately AFTER the status call and deliberately not fatal: this is
       // the join that supplies names and a reported start, and the readout it
       // decorates has to survive without it.
       const eventsError = await this.refreshEvents(token, customerId);
+      if (!this.current(run)) return;
       if (eventsError !== this.eventsError) {
         this.eventsError = eventsError;
         if (eventsError) {
@@ -520,6 +542,9 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
 
       this.scheduleIn(this.inDemand ? POLL_MS : IDLE_POLL_MS);
     } catch (err) {
+      // A failure of the run the operator replaced is not this run's: it must
+      // not drop the new account's token, report, blank or reschedule.
+      if (!this.current(run)) return;
       const msg = errorMessage(err);
       if (this.attempt === 0) console.warn(`[resi] status unavailable (${msg}) — backing off quietly`);
       // A rejected token is worth dropping so the next attempt re-authenticates

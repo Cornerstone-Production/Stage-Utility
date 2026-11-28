@@ -42,6 +42,9 @@ class Fake extends StatusIntegration<Dto> {
 
   // Surface protected bits the tests need to observe.
   get attemptCount(): number { return this.attempt; }
+  get runNow(): number { return this.run; }
+  isCurrent(run: number): boolean { return this.current(run); }
+  callRestart(): void { this.restart(); }
   callScheduleIn(ms: number): void { this.scheduleIn(ms); }
   nextDelay(): number { return this.nextReconnectDelayMs(); }
   stopTimers(): void { this.clearReconnect(); }
@@ -127,6 +130,21 @@ describe("ConnectionLifecycle", () => {
     await new Promise((r) => setTimeout(r, 30));
     assert.equal(f.attemptCount, 0, "a success must clear the back-off counter");
     f.stop();
+  });
+
+  test("a run captured before a restart is not current after it, though `running` is", () => {
+    // restart() is stop() then start() in one tick, so `running` cannot tell a
+    // read started before it from one started after. The run can.
+    const f = new Fake();
+    f.shouldFail = true;
+    f.start();
+    const before = f.runNow;
+    assert.equal(f.isCurrent(before), true);
+    f.callRestart();
+    assert.equal(f.isCurrent(before), false, "a read from before the restart still counted as current");
+    assert.equal(f.isCurrent(f.runNow), true);
+    f.stop();
+    assert.equal(f.isCurrent(f.runNow), false, "a stopped integration has no current run");
   });
 
   test("repeat reports of the same state are suppressed", async () => {

@@ -269,8 +269,13 @@ class YouTubeService extends StatusIntegration<YouTubeStatusDTO> {
     return configComplete(this.cfg);
   }
 
+  /** Is `cfg` what this instance is configured with now, field for field? */
+  private isConfig(cfg: YouTubeConfig): boolean {
+    return (Object.keys(EMPTY) as (keyof YouTubeConfig)[]).every((k) => cfg[k] === this.cfg[k]);
+  }
+
   configure(next: YouTubeConfig): void {
-    const changed = (Object.keys(EMPTY) as (keyof YouTubeConfig)[]).some((k) => next[k] !== this.cfg[k]);
+    const changed = !this.isConfig(next);
     if (changed) {
       // Anything cached belongs to the old credentials or the old channel.
       this.accessToken = null;
@@ -379,10 +384,16 @@ class YouTubeService extends StatusIntegration<YouTubeStatusDTO> {
   private async ensureAccessToken(cfg: YouTubeConfig): Promise<string> {
     if (this.accessToken && Date.now() < this.accessExpiresAt - 60_000) return this.accessToken;
     const token = await this.exchangeRefresh(cfg.clientId, cfg.clientSecret, cfg.refreshToken);
-    this.accessToken = token;
-    // Google's access tokens are an hour; assume the short end rather than
-    // parsing a field we would then have to trust.
-    this.accessExpiresAt = Date.now() + 55 * 60_000;
+    // Cached only for the configuration that asked. A reconfigure inside that
+    // await cleared the cache for different credentials, and the Test button
+    // asks with credentials that are not saved yet; neither may leave a token
+    // the poll then uses.
+    if (this.isConfig(cfg)) {
+      this.accessToken = token;
+      // Google's access tokens are an hour; assume the short end rather than
+      // parsing a field we would then have to trust.
+      this.accessExpiresAt = Date.now() + 55 * 60_000;
+    }
     return token;
   }
 
@@ -406,7 +417,8 @@ class YouTubeService extends StatusIntegration<YouTubeStatusDTO> {
     }>(`${API}/channels?part=contentDetails&${by}`, undefined, cfg.apiKey);
     const uploads = body.items?.[0]?.contentDetails?.relatedPlaylists?.uploads ?? uploadsPlaylistFrom(channel);
     if (!uploads) throw new Error(`YouTube has no channel matching "${channel}"`);
-    this.uploadsPlaylist = uploads;
+    // The same rule as the token: another channel's playlist is not this one's.
+    if (this.isConfig(cfg)) this.uploadsPlaylist = uploads;
     return uploads;
   }
 
@@ -506,9 +518,12 @@ class YouTubeService extends StatusIntegration<YouTubeStatusDTO> {
 
   protected async connect(): Promise<void> {
     if (!this.running || !this.configured) return;
+    const run = this.run;
     try {
       const seen = await this.look(this.cfg);
-      if (!this.running) return;
+      // The run, not `running`: a reconfigure restarts inside this await, and
+      // the old channel's answer must not be published as the new one's.
+      if (!this.current(run)) return;
 
       if (!this.last.connected) {
         this.resetBackoff();
@@ -518,6 +533,9 @@ class YouTubeService extends StatusIntegration<YouTubeStatusDTO> {
       this.emitIfChanged({ connected: true, ...seen });
       this.scheduleIn(this.inDemand ? POLL_MS : IDLE_POLL_MS);
     } catch (err) {
+      // A failure of the run the operator replaced is not this run's: it must
+      // not drop the new token, report, blank or arm the quota wait.
+      if (!this.current(run)) return;
       const msg = errorMessage(err);
       if (this.attempt === 0) console.warn(`[youtube] ${msg} — backing off quietly`);
       // A refused token is worth dropping so the next attempt re-exchanges.

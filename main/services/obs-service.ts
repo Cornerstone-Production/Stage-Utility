@@ -233,6 +233,7 @@ class ObsService extends StatusIntegration<ObsStatusDTO> {
 
   protected async connect(): Promise<void> {
     if (!this.running || !this.host || !this.port) return;
+    const run = this.run;
     const adapter = new ObsWebSocketAdapter(this.host, this.port);
     this.adapter = adapter;
     adapter.onEvent((e) => this.onEvent(adapter, e));
@@ -273,6 +274,12 @@ class ObsService extends StatusIntegration<ObsStatusDTO> {
     } catch (err) {
       const msg = errorMessage(err);
       adapter.close();
+      // teardown() closes the old adapter on a reconfigure, so its handshake
+      // rejects here. The success side has always checked for a superseded
+      // adapter and this side did not: the old host's failure was reported on
+      // the new host's row, blanked it, and queued a reconnect that later built
+      // a second adapter over the live one without closing it.
+      if (!this.current(run)) return;
       if (this.adapter === adapter) this.adapter = null;
       this.goOffline();
 

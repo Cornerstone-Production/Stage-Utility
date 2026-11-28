@@ -32,6 +32,21 @@ const RECONNECT_BASE_MS = 3000;
 export abstract class ConnectionLifecycle {
   protected running = false;
 
+  /**
+   * Which run of this integration is current. Bumped by every stop(); capture
+   * it (`const run = this.run`) before an await and ask `current(run)` after it.
+   *
+   * `running` cannot answer that. restart() is stop() then start() in the same
+   * tick, so `running` goes false and back to true while a read against the OLD
+   * host is still in flight; the read resumes, sees `running`, and acts for the
+   * new host. A failure wrote "Can't reach <old host>" on the new host's row,
+   * blanked its displays and replaced its healthy poll timer with a back-off; a
+   * success was published as the new box's state. PVP, ProPresenter and OBS
+   * each carried a guard of their own for it, and REAPER, Resi, YouTube and
+   * Smaart did not.
+   */
+  private runId = 0;
+
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
   private onConn: ((state: ConnState, message: string | null) => void) | null = null;
@@ -112,6 +127,7 @@ export abstract class ConnectionLifecycle {
   }
 
   stop(): void {
+    this.runId++;
     this.running = false;
     this.clearReconnect();
     this.teardown();
@@ -120,6 +136,18 @@ export abstract class ConnectionLifecycle {
   protected restart(): void {
     this.stop();
     if (this.configured) this.start();
+  }
+
+  /** The current run, to capture before an await. See `runId`. */
+  protected get run(): number {
+    return this.runId;
+  }
+
+  /** Is the run that captured `run` still the one this integration is on? False
+   *  once it has been stopped, restarted or reconfigured. Checked after every
+   *  await, on the failure side as well as the success side. */
+  protected current(run: number): boolean {
+    return this.running && run === this.runId;
   }
 
   /**

@@ -536,26 +536,11 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
   private req: http.ClientRequest | null = null;
   private publishTimer: ReturnType<typeof setTimeout> | null = null;
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
-  /**
-   * Which run of this instance is current. Bumped by stop(), captured at the top
-   * of every async method, and re-checked after EVERY await in place of
-   * `running`.
-   *
-   * `running` is not sufficient and never was. configure() calls restart(),
-   * which is `stop(); start()` SYNCHRONOUSLY, so `running` goes false and back to
-   * true inside one tick: a connect() parked on the /version round trip resumes,
-   * sees `running === true`, and subscribes with the host and port it captured
-   * before the reconfigure. subscribe() then overwrites `stream` and `req`, and
-   * whichever assignment loses is never destroyed — closeStream() only knows the
-   * last pair — so a second stream is held open on the booth machine for the life
-   * of the process with its data handler still feeding the same frame buffer. The
-   * manager calls configure() on every settings write, a bare poll-interval
-   * change included, so the window is one HTTP round trip wide and reachable.
-   *
-   * A counter rather than a boolean because the question is "is this still MY
-   * run", which a flag that has been set back to true cannot answer.
-   */
-  private epoch = 0;
+  // Which run is current is the base's (integration-base.ts `run` and
+  // `current(run)`), captured at the top of every async method here and
+  // re-checked after EVERY await in place of `running`. configure() used to
+  // land inside connect()'s /version round trip and subscribe a second stream
+  // nothing ever closed; see the base's note on `runId`.
   /** True while publish() is inside the playlist fetch; see publishSerially. */
   private publishing = false;
   /** A frame landed while a publish was in flight — run one more when it ends. */
@@ -670,7 +655,7 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     if (!moved) return;
     // Everything this instance has learned belongs to the machine it is leaving:
     // the macro names, the playlist, the frames, the fallback verdict. stop()
-    // bumps the epoch and teardown() drops all of it. Starting again is the
+    // ends the run and teardown() drops all of it. Starting again is the
     // caller's call, because only the caller knows whether it is switched on.
     // stop() resets the report, so a repoint gets fresh feedback too.
     this.stop();
@@ -694,10 +679,10 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
   }
 
   /**
-   * End this run before tearing anything down, so every continuation parked on
-   * an await abandons its work when it resumes. See `epoch`.
-   *
-   * And forget what the row was last told. Every other integration resets the
+   * Forget what the row was last told. (The base's stop() ends the run before
+   * tearing anything down, so every continuation parked on an await abandons
+   * its work when it resumes.)
+   * Every other integration resets the
    * report in configure(), which runs on every apply pass; this one deliberately
    * does not re-dial an unchanged target, so stop() is the only moment left that
    * means "the operator changed something". Without it, switching the
@@ -709,36 +694,8 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
    * integration off and on is the first thing anybody tries.
    */
   override stop(): void {
-    this.epoch++;
     this.resetReport();
     super.stop();
-  }
-
-  /** Has the run that captured `epoch` been stopped or superseded? Checked after
-   *  every await, because `running` alone cannot see a restart. */
-  private stale(epoch: number): boolean {
-    return !this.running || this.superseded(epoch);
-  }
-
-  /**
-   * The counter half of `stale()`, WITHOUT the `running` check — "has this
-   * instance been reconfigured or torn down since I captured the epoch", asked by
-   * work that is legitimate on an instance that is not running.
-   *
-   * It exists for work that is legitimate on an instance that is not running:
-   * the rule editor asks every CONFIGURED instance (`hasTarget`), and an
-   * instance whose integration is switched off is still configured, so `stale()`
-   * would report every one of its reads as abandoned and the editor would never
-   * list its macros at all.
-   *
-   * listMacros used to be the only caller and no longer is one: the question
-   * there is "is this answer still about the machine I am pointed at", which the
-   * ADDRESS answers exactly and this answers too broadly — the epoch moves on
-   * any stop(), so a save that changed nothing about where to dial reported a
-   * perfectly healthy machine as unreadable. Only `stale()` composes it now.
-   */
-  private superseded(epoch: number): boolean {
-    return epoch !== this.epoch;
   }
 
   /**
@@ -951,7 +908,7 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     if (!this.running || !this.host || !this.port) return;
     const host = this.host;
     const port = this.port;
-    const epoch = this.epoch;
+    const epoch = this.run;
     try {
       // Connectivity probe — gates the card badge and is the same request the
       // Test button makes. Kept ahead of the subscription so an unreachable
@@ -959,8 +916,8 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       await getJson(host, port, "/version");
       // stop() — or a restart, which puts `running` back to true inside the same
       // tick — can land inside that await. Without this the subscription below
-      // opens a second stream nothing will ever close. See `epoch`.
-      if (this.stale(epoch)) return;
+      // opens a second stream nothing will ever close. See the base's `runId`.
+      if (!this.current(epoch)) return;
 
       if (this.streamFallback) {
         await this.pollOnce(host, port, epoch);
@@ -971,7 +928,7 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       // Same gap on the way out: a run that ended while the subscribe was in
       // flight must not pin the NEXT run into the fallback, nor report an
       // outage for a socket its own stop() destroyed.
-      if (this.stale(epoch)) return;
+      if (!this.current(epoch)) return;
       if (outcome.kind === "unsupported") {
         console.warn(
           `[propresenter] status/updates unsupported (HTTP ${outcome.status}) — ` +
@@ -991,7 +948,7 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       // stop() destroys the in-flight request, which surfaces here as a failure.
       // A deliberate shutdown is not an outage and must not write one to the log,
       // and a superseded run must not schedule a reconnect racing the live one.
-      if (this.stale(epoch)) return;
+      if (!this.current(epoch)) return;
       const msg = errorMessage(err);
       // Log only the first failure of an outage, then stay quiet until it recovers —
       // a machine off all week shouldn't spam the log every retry.
@@ -1402,17 +1359,17 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
       return;
     }
     // The epoch, not `running` — the one await continuation in this file that
-    // read the flag instead, against a class doc (see `epoch`) saying every one
+    // read the flag instead, against a class doc (see the base's `runId`) saying every one
     // re-checks the counter. configure() is stop-then-start inside a tick, so
     // `running` is back to true by the time this resumes and the loop runs
     // another publish for a run that has already been superseded.
-    const epoch = this.epoch;
+    const epoch = this.run;
     this.publishing = true;
     try {
       do {
         this.publishAgain = false;
         await this.publish();
-      } while (this.publishAgain && !this.stale(epoch));
+      } while (this.publishAgain && this.current(epoch));
     } finally {
       this.publishing = false;
     }
@@ -1420,11 +1377,11 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
 
   private async publish(): Promise<void> {
     if (!this.running || !this.host || !this.port) return;
-    const epoch = this.epoch;
+    const epoch = this.run;
     const { active, slide, slideIndex, playlistActive, timers } = this.frames;
     const services = await this.resolveServiceItems(this.host, this.port, playlistActive, epoch);
     // stop() — or a restart — landed inside the playlist fetch.
-    if (this.stale(epoch)) return;
+    if (!this.current(epoch)) return;
     this.emit(this.buildStatus(active, slide, slideIndex, services, timers));
   }
 
@@ -1446,10 +1403,10 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
     // Five round trips wide. A stopped instance emitting "connected" here undoes
     // the OFFLINE frame stop() just published; a superseded one emits the old
     // machine's slide onto the new one's channel.
-    if (this.stale(epoch)) return;
+    if (!this.current(epoch)) return;
 
     const services = await this.resolveServiceItems(host, port, playlistActive, epoch);
-    if (this.stale(epoch)) return;
+    if (!this.current(epoch)) return;
 
     this.emit(this.buildStatus(active, slide, slideIndex, services, timers));
     this.report("connected", `Connected to ${host}:${port}`);
@@ -1500,7 +1457,7 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
         // teardown() empties this cache precisely so a reconnect to a different
         // (or edited) service cannot leak a stale "next item". A read that was
         // already in flight must not put the old one straight back.
-        if (this.stale(epoch)) return { current: curName, next: null };
+        if (!this.current(epoch)) return { current: curName, next: null };
         const items = pick(pl, "items");
         this.playlistItems = Array.isArray(items)
           ? items
@@ -1514,7 +1471,7 @@ class ProPresenterService extends StatusIntegration<ProPresenterStatusDTO> {
         this.playlistFailures = 0;
         this.playlistRetryAt = 0;
       } catch (err) {
-        if (this.stale(epoch)) return { current: curName, next: null };
+        if (!this.current(epoch)) return { current: curName, next: null };
         // Not rethrown, and this is the one place in this file that degrades
         // rather than propagates: the caller is about to publish a whole status
         // frame, and failing it because one optional field could not be resolved

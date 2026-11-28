@@ -133,6 +133,7 @@ class ScoresService extends StatusIntegration<ScoresStatusDTO> {
 
   protected async connect(): Promise<void> {
     if (!this.running || !this.configured) return;
+    const run = this.run;
 
     // WHICH DAYS TO ASK FOR.
     //
@@ -186,7 +187,9 @@ class ScoresService extends StatusIntegration<ScoresStatusDTO> {
         }
       }
     }
-    if (!this.running) return;
+    // The run, not `running`: a change to the followed teams restarts inside
+    // these awaits, and the old list's games must not become the new baseline.
+    if (!this.current(run)) return;
 
     // A slate we could not read this time keeps whatever it last said about
     // being live. Otherwise one failed request would end the carry and drop the
