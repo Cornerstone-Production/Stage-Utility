@@ -19,6 +19,7 @@ import {
 } from "./history-chart";
 import { peakLabel, plottedMetric, type PlotPrefs, type Plotted, writePlotChoice } from "./sound-plot";
 import { useLatestRef } from "../../lib/use-latest-ref";
+import { toastStoreFailure } from "../../lib/store-failure-toast";
 
 /** Per-metric stat for an item, with legacy single-metric fallback. */
 function metricStat(item: SplItemHistory, key: string, record: ServiceSplHistory): SplMetricStat | null {
@@ -271,12 +272,12 @@ export function SplDetail({
   const [figureKeys, storeFigure] = useStoredKeys(FIGURES_STORAGE_KEY, FIGURE_KEYS, DEFAULT_FIGURES);
   function toggleFigure(key: string) {
     const err = storeFigure(key);
-    if (err) toast.error(`Could not remember that choice: ${errorMessage(err)}`);
+    toastStoreFailure(err);
   }
   const [seriesKeys, storeSeries] = useStoredKeys(SERIES_STORAGE_KEY, SERIES_KEYS, DEFAULT_SERIES);
   function toggleSeries(key: string) {
     const err = storeSeries(key);
-    if (err) toast.error(`Could not remember that choice: ${errorMessage(err)}`);
+    toastStoreFailure(err);
   }
 
   const allKeys = useMemo(() => metricKeysOf(detail), [detail]);
@@ -286,7 +287,7 @@ export function SplDetail({
    *  Trends when the organisation changes it. */
   function rememberPlot(metric: string | null) {
     const err = writePlotChoice(metric === plotted?.trends ? null : metric);
-    if (err) toast.error(`Could not remember that choice: ${errorMessage(err)}`);
+    toastStoreFailure(err);
   }
 
   /**
@@ -346,7 +347,7 @@ export function SplDetail({
 
   function toggleMetric(key: string) {
     const err = storeMetric(key);
-    if (err) toast.error(`Could not remember that choice: ${errorMessage(err)}`);
+    toastStoreFailure(err);
   }
 
   const items = useMemo(() => detail.items.slice().sort((a, b) => a.sequence - b.sequence), [detail]);

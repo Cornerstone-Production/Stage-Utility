@@ -38,7 +38,6 @@ import { logToServer } from "../../../lib/client-log";
 import { prefersReducedMotion } from "../../../lib/reduced-motion";
 import { useServerNow } from "../../../lib/server-clock";
 import { useServiceTimeline } from "../../../main/use-service-timeline";
-import { toast } from "../../../components/ui";
 import { ErrorNote } from "../../../components/ui/error-note";
 import { PeopleTable } from "./people-table";
 import {
@@ -67,6 +66,7 @@ import {
   type TimerLaneItem,
 } from "./session-lane";
 import { useLatestRef } from "../../../lib/use-latest-ref";
+import { toastStoreFailure } from "../../../lib/store-failure-toast";
 
 /** The Session card's own Customize choice: whether the plan lane draws at
  *  all. One group, one option, deliberately — see the card's own head for
@@ -492,7 +492,7 @@ export function SessionChart({ state, onHover }: SessionChartProps) {
           selected={laneKeys}
           onToggle={(key) => {
             const err = toggleLane(key);
-            if (err) toast.error(`Couldn't remember that: ${err.message}`);
+            toastStoreFailure(err);
           }}
         />
       </div>

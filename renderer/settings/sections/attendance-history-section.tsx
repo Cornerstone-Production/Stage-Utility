@@ -1,7 +1,5 @@
 import { useMemo } from "react";
 
-import { toast } from "../../components/ui";
-import { errorMessage } from "@main/services/errors";
 import {
   CustomizePopover,
   HistoryChart,
@@ -11,6 +9,7 @@ import {
   type ChartSeries,
   type LaneItem,
 } from "./history-chart";
+import { toastStoreFailure } from "../../lib/store-failure-toast";
 
 // Which chart series/overlays and at-rest figures to surface. Attendance has a
 // fixed, small set (not arbitrary per-item columns), so the keys are enumerated
@@ -126,7 +125,7 @@ export function AttendanceDetail({ detail, timeline }: { detail: ServiceAttendan
    *  says so rather than quietly forgetting the choice at the next reload. */
   function toggleMetric(key: string) {
     const err = storeMetric(key);
-    if (err) toast.error(`Could not remember that choice: ${errorMessage(err)}`);
+    toastStoreFailure(err);
   }
 
   const avgOccupancy = averageOccupancy(detail);

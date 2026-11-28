@@ -25,7 +25,7 @@ import { useMemo, useRef } from "react";
 import { CopyIcon, DownloadIcon, WrenchIcon } from "lucide-react";
 
 import { cn } from "../../../lib/cn";
-import { Button, toast } from "../../../components/ui";
+import { Button } from "../../../components/ui";
 import { copyReport } from "../../../lib/copy-report";
 import { useServerNow } from "../../../lib/server-clock";
 import { fmtBaptizeMs, fmtClock, fmtDate } from "../../../main/use-baptism-state";
@@ -40,6 +40,7 @@ import {
 } from "./figures";
 import { useServiceLive } from "./use-service-live";
 import { baptismRebuildDisabledReason, rebuildTargetLabel, runBaptismRebuild } from "./rebuild";
+import { toastStoreFailure } from "../../../lib/store-failure-toast";
 
 /** The five sections the nav links to, in page order. Session, People, Past
  *  sessions and Trends each render as their own card in baptism-operator.tsx;
@@ -255,7 +256,7 @@ export function BaptismHeader({
               selected={figureKeys}
               onToggle={(key) => {
                 const err = toggleFigure(key);
-                if (err) toast.error(`Couldn't remember that: ${err.message}`);
+                toastStoreFailure(err);
               }}
             />
           }
