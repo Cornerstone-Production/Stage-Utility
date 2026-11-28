@@ -34,3 +34,10 @@ export function useElementSize(ref: RefObject<Element | null>): { w: number; h: 
   }, [ref]);
   return size;
 }
+
+/** The width a chart draws at, from `useElementSize(...).w`: the measured width, floored at 320 so a
+ *  narrow card never squeezes the plot to nothing, and 640 while nothing is measured (jsdom, or the
+ *  first frame). The one place those two numbers live. */
+export function chartWidth(measured: number): number {
+  return measured > 0 ? Math.max(320, measured) : 640;
+}
