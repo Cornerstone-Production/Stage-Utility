@@ -39,6 +39,7 @@ import type { AddKind, Arrange, EditorAction } from "../../main/stageplots/edito
 import { ROTATE_STEP, ROTATE_STEP_SHIFT, angleTo, round1 } from "../../main/stageplots/geometry";
 import { PALETTE } from "./stageplots-palette";
 import type { PanZoom } from "../../main/stageplots/use-pan-zoom";
+import { isMod } from "../../lib/keyboard-target";
 
 /** Arrow keys move this far, in plot units, and Shift with them this far. */
 export const NUDGE = 4;
@@ -218,7 +219,7 @@ export function StagePlotsCanvas({ name, items, selectedId, background, fade, pz
 
   const onKeyDown = (e: KeyboardEvent<SVGSVGElement>) => {
     const it = items.find((x) => x.id === selectedId);
-    if (e.metaKey || e.ctrlKey) {
+    if (isMod(e)) {
       const key = e.key.toLowerCase();
       const arrange = ARRANGE_KEYS[e.code];
       if (arrange) {

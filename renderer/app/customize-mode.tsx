@@ -52,6 +52,7 @@ import { useIsMobile } from "../lib/use-media-query";
 import { ALL_DESTINATIONS } from "./destinations";
 import { resolveIcon } from "../components/icon-set";
 import { useRailDrag } from "./use-rail-drag";
+import { isTypingTarget, modalOpen } from "../lib/keyboard-target";
 
 export { useCustomize, type CustomizeTab, type CustomizeValue } from "./customize-context";
 
@@ -277,8 +278,7 @@ export function CustomizeProvider({ children }: { children: ReactNode }) {
     if (!customizing || dragging) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
-      if (e.target instanceof Element && e.target.closest("input, textarea, select, [contenteditable='true']")) return;
-      if (document.querySelector("[role='menu'], [role='dialog'], [role='alertdialog']")) return;
+      if (isTypingTarget(e.target) || modalOpen()) return;
       done();
     };
     document.addEventListener("keydown", onKey);

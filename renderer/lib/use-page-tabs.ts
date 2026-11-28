@@ -7,6 +7,7 @@
 // the box selected, unless something nearer took the key or a dialog is open.
 
 import { useEffect, useRef, useState, type RefObject } from "react";
+import { isMod, modalOpen } from "./keyboard-target";
 
 export interface PageTabs<Id extends string> {
   tab: Id;
@@ -62,9 +63,9 @@ export function usePageTabs<Id extends string>({
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "f") return;
+      if (!isMod(e) || e.altKey || e.shiftKey || e.key.toLowerCase() !== "f") return;
       // Something nearer already took the key, or a dialog is open and the page behind it is not the operator's focus.
-      if (e.defaultPrevented || document.querySelector('[role="dialog"], [role="alertdialog"]')) return;
+      if (e.defaultPrevented || modalOpen()) return;
       e.preventDefault();
       goToRef.current(searchId);
     }
