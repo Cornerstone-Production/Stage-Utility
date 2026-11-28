@@ -386,5 +386,19 @@ test("replaceKeepingPrior writes nothing over a record whose file could not be r
   await assert.rejects(s.replaceKeepingPrior(rec("u:1", "2026-07-26T09:00:00.000Z"), "before-x"), /will not parse/);
   assert.deepEqual((await fs.readdir(dir)).sort(), ["u-1.json"]);
   assert.equal(await fs.readFile(path.join(dir, "u-1.json"), "utf8"), "{ not json");
-  await assert.rejects(s.replaceKeepingPrior(rec("u:1", "x"), "copy.json"), /would load as a record/);
+  for (const suffix of ["copy.json", "json"]) {
+    await assert.rejects(s.replaceKeepingPrior(rec("u:1", "x"), suffix), /would load as a record/, suffix);
+  }
+});
+
+test("replaceKeepingPrior leaves the cached record as it was when the write fails", async (t) => {
+  const s = make("t-keep-fail", "t-keep-fail.json");
+  await s.upsert(rec("f:1", "2026-07-26T09:00:00.000Z", "original"));
+  const dir = path.join(dataDir, "t-keep-fail");
+  await fs.writeFile(path.join(dir, "f-1.json.before-x"), "kept already"); // so only the record's write is tried
+  await fs.chmod(dir, 0o500);
+  t.after(() => fs.chmod(dir, 0o700));
+
+  await assert.rejects(s.replaceKeepingPrior(rec("f:1", "2026-07-26T09:00:00.000Z", "repaired"), "before-x"));
+  assert.equal((await s.get("f:1"))?.title, "original", "the cache holds a write that never landed");
 });

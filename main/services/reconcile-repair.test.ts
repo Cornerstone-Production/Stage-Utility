@@ -293,12 +293,70 @@ describe("what the repair never touches", () => {
     const open = oldClosedSpl(id);
     open.endedAt = null;
     await splHistoryStore.upsert(open);
+    const openTl = oldClosedTimeline(id);
+    openTl.endedAt = null;
+    openTl.items[1] = { ...openTl.items[1]!, endedAt: null };
+    await serviceTimelineStore.upsert(openTl);
     await attendanceStore.upsert(attendance(id, CRASH));
     await reconcileOpenRecords();
 
-    assert.equal(await exists(fileOf("spl-history", id.serviceKey) + BACKUP), false, "the repair rewrote an open record");
+    for (const dir of ["spl-history", "service-timeline"] as const) {
+      assert.equal(await exists(fileOf(dir, id.serviceKey) + BACKUP), false, `the repair rewrote an open ${dir} record`);
+    }
     assert.equal((await splHistoryStore.get(id.serviceKey))?.endedAt, iso(CRASH), "the boot-time close did not close it");
+    assert.equal((await serviceTimelineStore.get(id.serviceKey))?.endedAt, iso(CRASH), "the boot-time close did not close it");
     assert.ok(!lines.some((l) => l.includes(id.serviceKey) && l.includes("repaired")), lines.join("\n"));
+  });
+
+  it("does not stop the boot-time close over a record it cannot read the items of", async () => {
+    const broken = identity();
+    const odd = oldClosedTimeline(broken) as Partial<ServiceTimeline>;
+    delete odd.items;
+    await serviceTimelineStore.upsert(odd as ServiceTimeline);
+    const id = identity();
+    const open = oldClosedSpl(id);
+    open.endedAt = null;
+    await splHistoryStore.upsert(open);
+    await reconcileOpenRecords();
+
+    assert.equal((await splHistoryStore.get(id.serviceKey))?.endedAt, iso(OLD_END), "the orphan was not closed");
+  });
+
+  it("fills only the last item to go live, not an open one a merge left mid-record", async () => {
+    // An old-close fragment merged in History with the rest of the service:
+    // MESSAGE has no end, and CLOSING ran after it. Ending MESSAGE at the
+    // service's end would draw it across CLOSING.
+    const id = identity();
+    const spl = oldClosedSpl(id);
+    spl.items.push({ ...spl.items[0]!, itemId: "closing", title: "closing", sequence: 2, startedAt: iso(T0 + 30 * MIN), endedAt: iso(T0 + 70 * MIN) });
+    spl.endedAt = iso(T0 + 70 * MIN);
+    await splHistoryStore.upsert(spl);
+    const tl = oldClosedTimeline(id);
+    tl.items[1] = { ...tl.items[1]!, endedAt: null };
+    tl.items.push({ itemId: "closing", title: "Closing", sequence: 2, plannedLengthSec: 600, startedAt: iso(T0 + 30 * MIN), endedAt: iso(T0 + 70 * MIN), actualDurationSec: 2400 });
+    tl.endedAt = iso(T0 + 70 * MIN);
+    await serviceTimelineStore.upsert(tl);
+    await attendanceStore.upsert(attendance(id, T0 + 75 * MIN));
+    const before = [await bytes(fileOf("spl-history", id.serviceKey)), await bytes(fileOf("service-timeline", id.serviceKey))];
+    await reconcileOpenRecords();
+
+    assert.deepEqual([await bytes(fileOf("spl-history", id.serviceKey)), await bytes(fileOf("service-timeline", id.serviceKey))], before);
+    assert.equal(lines.filter((l) => l.startsWith("[reconcile]") && l.includes(id.serviceKey) && l.includes("left as it is")).length, 2, lines.join("\n"));
+  });
+
+  it("never moves a record's end earlier", async () => {
+    // An end later than anything attendance saw (an operator's window edit):
+    // the item it left open closes there, and the end stays.
+    const id = identity();
+    const spl = oldClosedSpl(id);
+    spl.endedAt = iso(CRASH + 20 * MIN);
+    await splHistoryStore.upsert(spl);
+    await attendanceStore.upsert(attendance(id, CRASH));
+    await reconcileOpenRecords();
+
+    const after = await splHistoryStore.get(id.serviceKey);
+    assert.equal(after?.endedAt, iso(CRASH + 20 * MIN));
+    assert.equal(after?.items[1]?.endedAt, iso(CRASH + 20 * MIN));
   });
 
   it("tries again next boot when a record could not be saved, and repairs the rest", async (t) => {
@@ -308,10 +366,16 @@ describe("what the repair never touches", () => {
     await serviceTimelineStore.upsert(oldClosedTimeline(fine));
     await attendanceStore.upsert(attendance(failing, CRASH));
     await attendanceStore.upsert(attendance(fine, CRASH));
+    await splHistoryStore.upsert(oldClosedSpl(failing));
     const real = serviceTimelineStore.replaceKeepingPrior.bind(serviceTimelineStore);
     const mocked = t.mock.method(serviceTimelineStore, "replaceKeepingPrior", async (rec: ServiceTimeline, suffix: string) => {
       if (rec.serviceKey === failing.serviceKey) throw new Error("disk full");
       return real(rec, suffix);
+    });
+    const realSpl = splHistoryStore.replaceKeepingPrior.bind(splHistoryStore);
+    const mockedSpl = t.mock.method(splHistoryStore, "replaceKeepingPrior", async (rec: ServiceSplHistory, suffix: string) => {
+      if (rec.serviceKey === failing.serviceKey) throw new Error("disk full");
+      return realSpl(rec, suffix);
     });
     await reconcileOpenRecords();
 
@@ -322,9 +386,49 @@ describe("what the repair never touches", () => {
     );
     const failed = await serviceTimelineStore.get(failing.serviceKey);
     assert.equal(failed?.items[1]?.actualDurationSec, null, "the cached record changed although its save failed");
+    assert.equal((await splHistoryStore.get(failing.serviceKey))?.items[1]?.endedAt, null, "the cached SPL record changed although its save failed");
 
     mocked.mock.restore();
+    mockedSpl.mock.restore();
     await reconcileOpenRecords();
     assert.equal((await serviceTimelineStore.get(failing.serviceKey))?.endedAt, iso(CRASH), "not tried again on the next boot");
+  });
+});
+
+describe("a history store not all read", () => {
+  beforeEach(async (t) => {
+    captureConsole(t as TestContext, "log", "warn", "error");
+    await notYetRepaired();
+  });
+
+  it("is not marked done, so the records it could not read are looked at next boot", async (t) => {
+    const { StoreReadError } = await import("./data-store.js");
+    t.mock.method(serviceTimelineStore, "unreadable", () => new StoreReadError("a file in service-timeline", new Error("EIO")));
+    await reconcileOpenRecords();
+    assert.equal((await historyRepairsStore.load())["old-boot-close-gaps"], undefined);
+  });
+});
+
+// Last in the file: a record file that will not parse is held unread until the
+// process exits, so every later test would run with the witness incomplete.
+describe("with the people counts not all read", () => {
+  let lines: string[] = [];
+  beforeEach(async (t) => {
+    lines = captureConsole(t as TestContext, "log", "warn", "error");
+    await notYetRepaired();
+  });
+
+  it("writes nothing and tries again next boot", async () => {
+    const id = identity();
+    await serviceTimelineStore.upsert(oldClosedTimeline(id));
+    await splHistoryStore.upsert(oldClosedSpl(id));
+    const before = [await bytes(fileOf("service-timeline", id.serviceKey)), await bytes(fileOf("spl-history", id.serviceKey))];
+    await fs.writeFile(path.join(TMP, "attendance-history", "zz-unreadable.json"), "{ not json");
+    attendanceStore.invalidate();
+    await reconcileOpenRecords();
+
+    assert.deepEqual([await bytes(fileOf("service-timeline", id.serviceKey)), await bytes(fileOf("spl-history", id.serviceKey))], before);
+    assert.equal((await historyRepairsStore.load())["old-boot-close-gaps"], undefined, "marked done without the witness");
+    assert.ok(lines.some((l) => l.startsWith("[reconcile]") && l.includes("waits for the next boot")), lines.join("\n"));
   });
 });
