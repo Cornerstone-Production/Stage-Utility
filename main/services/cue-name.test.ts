@@ -114,3 +114,13 @@ describe("deriveCueName: every path gives the same name for the same words", () 
     assert.equal(deriveCueName("Walk now", ["btn_walk_now"], BUTTON_CUE), "btn_walk_now_2");
   });
 });
+
+describe("cueKey: the one way a cue name is compared", () => {
+  test("trims, lower-cases, and is empty for what is not a name", async () => {
+    const { cueKey } = await import("./cue-aliases.js");
+    assert.equal(cueKey("  Foyer_TVs "), "foyer_tvs");
+    assert.equal(cueKey(undefined), "");
+    assert.equal(cueKey({}), "");
+    assert.equal(cueKey(5), "5");
+  });
+});

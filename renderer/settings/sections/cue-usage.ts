@@ -10,7 +10,7 @@
 
 import { useMemo } from "react";
 
-import { parseAliases } from "@main/services/cue-aliases";
+import { cueKey, parseAliases } from "@main/services/cue-aliases";
 import type { CueButtonUse } from "@main/services/button-ownership";
 import { useQuery, type QueryClient } from "@tanstack/react-query";
 
@@ -61,7 +61,7 @@ export function usesOf(usage: CueUsage | undefined, names: readonly string[]): C
   const seen = new Set<string>();
   const out: CueUse[] = [];
   for (const name of names) {
-    for (const use of usage.get(name.trim().toLowerCase()) ?? []) {
+    for (const use of usage.get(cueKey(name)) ?? []) {
       const key = `${use.viewId}\u0000${use.objectId}`;
       if (seen.has(key)) continue;
       seen.add(key);

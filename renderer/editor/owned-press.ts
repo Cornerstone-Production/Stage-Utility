@@ -15,7 +15,7 @@
 // Button as it was and tells the operator what the server said. The server logs
 // the rule it adds or rewrites on a tagged `[automation]` line, owner included.
 
-import { calledCueName } from "@main/services/cue-aliases";
+import { calledCueName, cueKey } from "@main/services/cue-aliases";
 import { deriveCueName } from "@main/services/cue-name";
 import { BUTTON_CUE, buttonCueRule, chosenLabel, namesTakenForNewCue } from "@main/services/cue-naming";
 import { slugForCue } from "@main/services/cue-slug";
@@ -47,7 +47,7 @@ const sameOwner = (a: OwnedBy | undefined, b: OwnedBy) => !!a && a.viewId === b.
  */
 export function ownedRuleFor(rules: readonly Rule[], owner: PressOwner, cue: string): Rule | null {
   const mine = rules.filter((r) => sameOwner(r.ownedBy, owner));
-  const bound = cue.trim().toLowerCase();
+  const bound = cueKey(cue);
   return mine.find((r) => bound !== "" && calledCueName(r.trigger) === bound) ?? mine[0] ?? null;
 }
 
@@ -58,7 +58,7 @@ export function ownedRuleFor(rules: readonly Rule[], owner: PressOwner, cue: str
  */
 export function pressKindOf(rules: readonly Rule[], owner: PressOwner, cue: string): PressKind | null {
   const own = ownedRuleFor(rules, owner, cue);
-  const bound = cue.trim().toLowerCase();
+  const bound = cueKey(cue);
   // A Button re-pointed at another command leaves its old rule behind, owned and
   // unused: that Button is on A command, not on the rule it no longer presses.
   if (own && bound !== "" && calledCueName(own.trigger) === bound) {
@@ -85,12 +85,12 @@ type UsageUse = Pick<PressOwner, "viewId" | "objectId">;
  * editor holds as the draft, which `/api/cues/usage` (the SAVED views) does not know yet.
  */
 export function draftUsers(objects: readonly LayoutObject[], viewId: string, cue: string): PressOwner[] {
-  const key = cue.trim().toLowerCase();
+  const key = cueKey(cue);
   const out: PressOwner[] = [];
   const visit = (list: readonly LayoutObject[]) => {
     for (const o of list) {
       const c = o.config as { type?: string; cue?: unknown };
-      if (c.type === "cue-button" && typeof c.cue === "string" && key !== "" && c.cue.trim().toLowerCase() === key) {
+      if (c.type === "cue-button" && key !== "" && cueKey(c.cue) === key) {
         out.push({ viewId, objectId: o.id });
       }
       if (o.children?.length) visit(o.children);

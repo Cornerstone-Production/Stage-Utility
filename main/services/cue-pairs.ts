@@ -54,7 +54,7 @@ import { isCompanionVariableRef } from "./companion-export.js";
 import { STATE_ANY_OTHER } from "./companion-state-source.js";
 // From cue-aliases, NOT from the trigger registry: the registry reaches
 // node:url, and this module is imported by the settings page.
-import { CALL_TRIGGER_ID, calledCueName, parseAliases } from "./cue-aliases.js";
+import { CALL_TRIGGER_ID, calledCueName, cueKey, parseAliases } from "./cue-aliases.js";
 import type { Rule } from "../types/automation.js";
 
 /** The values a bound pair's variable is expected to hold, absent anything else. */
@@ -209,7 +209,7 @@ export function stateBindingProblem(params: Record<string, string | number>): st
  * pastes carried an entity the integration's own list said did not exist.
  */
 export function isPairHalfName(cue: string): boolean {
-  return /_(on|off)$/.test(cue.trim().toLowerCase());
+  return /_(on|off)$/.test(cueKey(cue));
 }
 
 /**
