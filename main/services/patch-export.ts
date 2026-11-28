@@ -12,6 +12,7 @@
 
 import type { PatchDevice, PatchEndpoint, PatchHop, PatchSheet } from "../types/stage.js";
 import { zonedDateKey } from "./app-timezone.js";
+import { filenameSlug } from "./export-filename.js";
 import { mergeOverrides, resolvePatch } from "./patch-resolve.js";
 
 export interface ExportRow {
@@ -169,8 +170,9 @@ export function exportFilename(
   ext: string,
   at: number = Date.now(),
 ): string {
-  const slug = (s: string) =>
-    s.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "patch";
+  // The shared slug, for its length cap. "patch" where the other exports drop
+  // an empty segment: the sheet name is this file's only label.
+  const slug = (s: string) => filenameSlug(s) || "patch";
   // The app's zone, not the server's clock. toISOString() here dated a file
   // exported at 22:35 in Chicago as the NEXT day, which is how you end up with
   // two "different" patch sheets from one evening.
