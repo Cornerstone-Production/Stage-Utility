@@ -440,6 +440,27 @@ count sits on the same line every time, so the second PR to land always
 conflicts with the first. A count is also a weaker guard on its own: two
 additions and one removal leave the number unchanged and the test still green.
 
+## Codex review auto-fix
+
+When Codex submits a review on a pull request from a branch of this repository,
+`codex-review-fix.yml` has Claude work through its inline findings. Claude checks
+each one against the code on the branch, commits a fix for those it confirms
+(under the same rules as any commit here), and replies on every thread:
+`Fixed in <sha>`, `Declined` with the reason, or `Left for review` when the fix
+is a decision, a dependency or workflow change, or too large to make unattended.
+It ends with one comment on the pull request listing each finding's outcome.
+
+| What | How |
+|---|---|
+| Who it answers | Reviews by the account in the `CODEX_REVIEW_BOT` repository variable, `chatgpt-codex-connector[bot]` when unset. A review with no inline comments is skipped. |
+| Where it runs | Same-repository pull requests whose head is not `main`, `beta`, `next` or a `release/*` branch. The workflow has to be on the pull request's base branch. |
+| How many times | Two rounds per pull request, counted by the `codex-fix-1` and `codex-fix-2` labels. A third review adds `needs-human-review` and stops it; remove the labels to start the count again. |
+| What it can write | Claude's job can only comment. Its commits reach the branch through a separate job that fast-forwards it, never forces, and refuses changes under `.github/`. If the branch moved since the review, the push is refused and the pull request says so. |
+| Checks | A push made with the workflow token starts no workflow, so the push job dispatches `ci.yml` on the branch. The commit convention and other `pull_request` checks run again on the next push. |
+| Credentials | The `CLAUDE_CODE_OAUTH_TOKEN` repository secret, made with `claude setup-token`. |
+
+Every decision the gate makes is a `[codex-fix]` line in the run's log.
+
 ## CodeQL
 
 Code scanning is a workflow in this repository, not GitHub's default setup, so its
