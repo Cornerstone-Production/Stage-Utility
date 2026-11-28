@@ -9,7 +9,7 @@ import { installDom } from "../test-dom.js";
 
 const teardown = installDom();
 
-const { render, cleanup, act, fireEvent } = await import("@testing-library/react");
+const { render, renderHook, cleanup, act, fireEvent } = await import("@testing-library/react");
 const { settle } = await import("../test-dom.js");
 const { useNameDraft } = await import("./use-name-draft.js");
 
@@ -104,5 +104,24 @@ describe("useNameDraft", () => {
     });
     await settle();
     assert.equal(input.value, "Foyer 2");
+  });
+
+  // No caller throws (they toast and answer false), so a throw is a bug: it is
+  // rethrown, and the field is not left holding a name that was never saved.
+  test("a rename that throws puts the stored name back and rethrows", (t) => {
+    const hook = renderHook(() => useNameDraft("Lobby", () => { throw new Error("boom"); }));
+    t.after(() => hook.unmount());
+    act(() => hook.result.current.setDraft("Foyer"));
+    // Caught inside act: act drops the updates queued by a callback that throws.
+    let thrown: unknown = null;
+    act(() => {
+      try {
+        hook.result.current.commit();
+      } catch (err) {
+        thrown = err;
+      }
+    });
+    assert.match(String(thrown), /boom/, "the throw was swallowed");
+    assert.equal(hook.result.current.draft, "Lobby");
   });
 });
