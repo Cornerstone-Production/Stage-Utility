@@ -22,6 +22,7 @@ import { describe, it, type TestContext } from "node:test";
 import { ProdComService } from "./prodcom-service.js";
 import { startProdComStub, type StubEntry } from "./fixtures/prodcom-stub.js";
 import type { ConnState } from "./integration-base.js";
+import { until, sleep } from "./fixtures/within.js";
 
 const NOW = Date.parse("2026-09-23T12:00:00Z");
 const FALLBACK_CARD_MESSAGE = "Fallback stream — the websocket carried no transcript";
@@ -80,21 +81,6 @@ const spoken = (id: string, offsetMs = 0): StubEntry => ({
   date: new Date(NOW + offsetMs).toISOString(),
 });
 
-async function eventually(
-  ready: () => boolean,
-  what: string | (() => string),
-  timeoutMs = 4000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (ready()) return;
-    await new Promise((r) => setTimeout(r, 5));
-  }
-  assert.fail(`timed out waiting for ${typeof what === "function" ? what() : what}`);
-}
-
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-
 describe("a promoted websocket that stops delivering demotes rather than staying trusted", () => {
   it("falls back to SSE, backfills the missed line, and latches the box silent", async (t: TestContext) => {
     const stub = await startProdComStub({ channels: CHANNELS });
@@ -105,10 +91,10 @@ describe("a promoted websocket that stops delivering demotes rather than staying
     });
     svc.configure("127.0.0.1", stub.port, null);
 
-    await eventually(() => svc.wsOpenNow, "the websocket to open");
+    await until(() => svc.wsOpenNow, "the websocket to open");
     stub.wsTranscript(spoken("first-line"));
-    await eventually(() => svc.onWebSocketNow, "promotion");
-    await eventually(() => svc.texts().includes("first-line"), "the promoting line to land");
+    await until(() => svc.onWebSocketNow, "promotion");
+    await until(() => svc.texts().includes("first-line"), "the promoting line to land");
 
     // One healthy window: the promoting delivery already satisfies it, so the
     // baseline advances with no REST paging (see prodcom-silent-websocket.test.ts's
@@ -120,18 +106,18 @@ describe("a promoted websocket that stops delivering demotes rather than staying
     stub.addEntry(spoken("missed-while-promoted"));
     stub.wsPing();
 
-    await eventually(() => svc.onWebSocketNow === false, "the socket to be demoted");
+    await until(() => svc.onWebSocketNow === false, "the socket to be demoted");
     assert.equal(svc.knownSilent, true, "the box was not latched as known-silent");
-    await eventually(
+    await until(
       () => stub.sseOpens >= 2,
       () => `expected SSE to reopen after demotion, got ${stub.sseOpens} open(s)`,
     );
 
-    await eventually(
+    await until(
       () => svc.texts().includes("missed-while-promoted"),
       "the missed line to be backfilled once SSE reopens",
     );
-    await eventually(
+    await until(
       () => svc.reports.some((r) => r.state === "connected" && r.message === FALLBACK_CARD_MESSAGE),
       "the card to say the fallback is carrying captions because the websocket did not",
     );
@@ -151,14 +137,14 @@ describe("a promoted websocket that stops delivering demotes rather than staying
     });
     svc.configure("127.0.0.1", stub.port, null);
 
-    await eventually(() => svc.wsOpenNow, "the websocket to open");
+    await until(() => svc.wsOpenNow, "the websocket to open");
     const checkReads = (): number =>
       stub.requests.filter((r) => r.url.startsWith("/api/v1/transcript?") && !r.url.includes("since=")).length;
     const beforePromotion = checkReads();
     stub.wsTranscript(spoken("first-line"));
-    await eventually(() => svc.onWebSocketNow, "promotion");
+    await until(() => svc.onWebSocketNow, "promotion");
     // The first promoted window's read goes out, and fails.
-    await eventually(() => checkReads() > beforePromotion, "the first promoted window to ask REST");
+    await until(() => checkReads() > beforePromotion, "the first promoted window to ask REST");
     await sleep(20);
     assert.equal(svc.baselineNow, null, "precondition: no read has ever given this socket a baseline");
 
@@ -170,11 +156,11 @@ describe("a promoted websocket that stops delivering demotes rather than staying
       stub.wsPing();
       await sleep(80);
     }
-    await eventually(
+    await until(
       () => svc.onWebSocketNow === false,
       () => `the quiet promoted socket to be demoted; buffer ${JSON.stringify(svc.texts())}`,
       2000,
     );
-    await eventually(() => svc.texts().includes("missed-0"), "the missed lines to be backfilled once SSE reopens");
+    await until(() => svc.texts().includes("missed-0"), "the missed lines to be backfilled once SSE reopens");
   });
 });

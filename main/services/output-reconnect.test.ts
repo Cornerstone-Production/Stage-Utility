@@ -16,6 +16,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, test, type TestContext } from "node:test";
+import { until } from "./fixtures/within.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-output-reconnect-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -35,15 +36,6 @@ async function refusingPort(): Promise<number> {
   const { port } = server.address() as net.AddressInfo;
   await new Promise<void>((r) => server.close(() => r()));
   return port;
-}
-
-/** Spin the event loop (setImmediate is not mocked) until `cond` holds. */
-async function until(cond: () => boolean, what: string, ms = 5000): Promise<void> {
-  const deadline = performance.now() + ms;
-  while (!cond()) {
-    if (performance.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((r) => setImmediate(r));
-  }
 }
 
 /** Capture console.warn lines tagged `[tag]` for the life of the test. */

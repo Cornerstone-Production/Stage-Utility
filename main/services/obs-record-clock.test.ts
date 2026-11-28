@@ -25,6 +25,7 @@ import { after, before, beforeEach, describe, test } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { until, sleep } from "./fixtures/within.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-utility-obs-clock-"));
 process.env.STAGE_UTILITY_DATA = path.join(TMP, "data");
@@ -36,19 +37,6 @@ const { obsRecordTimecode, recordElapsedMs } = await import("./obs-record-clock.
 const { FakeObs } = await import("./obs-server-harness.js");
 
 const fake = new FakeObs();
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/** Wait, bounded, for something the service does asynchronously after a push: how long OBS's
- *  answer takes to arrive and be folded is the machine's load, not a number a case can guess. */
-async function until(ready: () => boolean, what: string, timeoutMs = 5000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (ready()) return;
-    await sleep(5);
-  }
-  assert.fail(`timed out waiting for ${what}`);
-}
-
 /** Every `obs:status` frame that went out, in order. */
 const frames: unknown[] = [];
 addBroadcastListener((channel, payload) => {

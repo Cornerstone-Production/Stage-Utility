@@ -18,6 +18,7 @@ import { describe, it, type TestContext } from "node:test";
 
 import { ProdComService, PROBE_USER_AGENT } from "./prodcom-service.js";
 import { startProdComStub, type ProdComStub, type StubOptions } from "./fixtures/prodcom-stub.js";
+import { until } from "./fixtures/within.js";
 
 const NOW = Date.parse("2026-09-18T23:50:00Z");
 
@@ -77,15 +78,6 @@ async function connected(t: TestContext, options: StubOptions = {}): Promise<{ s
   return { stub, svc };
 }
 
-async function eventually(ready: () => boolean, what: string, timeoutMs = 4000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (ready()) return;
-    await new Promise((r) => setTimeout(r, 5));
-  }
-  assert.fail(`timed out waiting for ${what}`);
-}
-
 /** Real client upgrades only. The refused-upgrade probe (see
  *  prodcom-upgrade-probe.test.ts) hits the same path, and counting it here would
  *  make every refusal look like two attempts. */
@@ -100,11 +92,11 @@ describe("the fallback retries the websocket on a timer", () => {
     const { stub, svc } = await connected(t, { refuseWebSocket: true });
     // sseOpens counts the SERVER accepting the stream; the client arms the retry
     // when it sees the 200, which is a tick or two later.
-    await eventually(() => svc.retryArmed, "the retry to be armed on the fallback");
+    await until(() => svc.retryArmed, "the retry to be armed on the fallback");
     await svc.settled();
     assert.equal(wsAttempts(stub), 1, "only the first, refused upgrade so far");
 
-    await eventually(() => wsAttempts(stub) >= 2, "a second websocket attempt on the timer");
+    await until(() => wsAttempts(stub) >= 2, "a second websocket attempt on the timer");
   });
 
   it("costs one refused upgrade and nothing else", async (t) => {
@@ -119,7 +111,7 @@ describe("the fallback retries the websocket on a timer", () => {
       await stub.close();
     });
     svc.configure("127.0.0.1", stub.port, null);
-    await eventually(() => svc.retryArmed, "the retry to be armed on the fallback");
+    await until(() => svc.retryArmed, "the retry to be armed on the fallback");
     await svc.settled();
 
     const before = {
@@ -134,7 +126,7 @@ describe("the fallback retries the websocket on a timer", () => {
       console.debug = realDebug;
     });
 
-    await eventually(() => wsAttempts(stub) > before.ws, "the timer's attempt");
+    await until(() => wsAttempts(stub) > before.ws, "the timer's attempt");
     // Settle past the refusal, so anything the old design would have done has
     // had time to happen.
     await new Promise((r) => setTimeout(r, 200));
@@ -160,7 +152,7 @@ describe("the fallback retries the websocket on a timer", () => {
     // what makes an attempt count as OPEN, whether or not it goes on to prove
     // itself — either way there is already one in flight, so the clock has
     // nothing to do.
-    await eventually(() => svc.wsOpenNow, "the websocket to open");
+    await until(() => svc.wsOpenNow, "the websocket to open");
     await svc.settled();
     assert.equal(svc.retryArmed, false, "a retry timer is ticking while the websocket is already up");
 
@@ -179,10 +171,10 @@ describe("the fallback retries the websocket on a timer", () => {
       await stub.close();
     });
     svc.configure("127.0.0.1", stub.port, null);
-    await eventually(() => stub.sseOpens === 1, "the fallback stream to open");
+    await until(() => stub.sseOpens === 1, "the fallback stream to open");
 
     stub.setRefuseWebSocket(false); // ProdCom is back
-    await eventually(() => svc.wsOpenNow, "the websocket to open");
+    await until(() => svc.wsOpenNow, "the websocket to open");
     assert.equal(svc.retryArmed, false, "the retry must be disarmed once the websocket is up");
   });
 
@@ -194,7 +186,7 @@ describe("the fallback retries the websocket on a timer", () => {
     // re-armed when the next fallback comes up, so clearing it here loses
     // nothing.
     const { svc } = await connected(t, { refuseWebSocket: true });
-    await eventually(() => svc.retryArmed, "the retry to be armed on the fallback");
+    await until(() => svc.retryArmed, "the retry to be armed on the fallback");
 
     await svc.reconnectNow();
     assert.equal(svc.retryArmed, false, "a stale retry timer survived into the next connection attempt");
@@ -202,7 +194,7 @@ describe("the fallback retries the websocket on a timer", () => {
 
   it("stop() clears the retry", async (t) => {
     const { stub, svc } = await connected(t, { refuseWebSocket: true });
-    await eventually(() => svc.retryArmed, "the retry to be armed on the fallback");
+    await until(() => svc.retryArmed, "the retry to be armed on the fallback");
     await svc.settled();
 
     svc.stop();

@@ -14,6 +14,7 @@ import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, before, beforeEach, test, type TestContext } from "node:test";
+import { until } from "./fixtures/within.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-utility-obs-lifecycle-"));
 process.env.STAGE_UTILITY_DATA = path.join(TMP, "data");
@@ -45,14 +46,6 @@ async function refusingPort(): Promise<number> {
   const { port } = server.address() as net.AddressInfo;
   await new Promise<void>((r) => server.close(() => r()));
   return port;
-}
-
-async function until(cond: () => boolean, what: string): Promise<void> {
-  const deadline = performance.now() + 5000;
-  while (!cond()) {
-    if (performance.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((r) => setTimeout(r, 10));
-  }
 }
 
 /** [obs] warn lines, and every delay handed to scheduleIn, for the test. */

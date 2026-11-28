@@ -15,6 +15,7 @@ import * as path from "node:path";
 import { after, before, mock, test } from "node:test";
 
 import { serveOnSocket, type SocketServer } from "./fixtures/socket-server.js";
+import { until } from "./fixtures/within.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-subscribe-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -28,17 +29,6 @@ let server: SocketServer;
 
 const post = (pathname: string, body: string) => server.send("POST", pathname, { headers: { "Content-Type": "application/json" }, body });
 const subscribe = (cid: unknown, channels: unknown) => post("/api/events/subscribe", JSON.stringify({ cid, channels }));
-
-/** Resolves once `done()` holds, checking every few milliseconds; fails after `ms`.
- *  A closed socket reaches the server's close handler a moment after the client
- *  sees it go, and nothing the client can observe marks that moment. */
-async function waitFor(done: () => boolean, what: string, ms = 2000): Promise<void> {
-  const until = Date.now() + ms;
-  while (!done()) {
-    if (Date.now() > until) assert.fail(what);
-    await new Promise((r) => setTimeout(r, 5));
-  }
-}
 
 /** An event stream held open until `close`, resolved once the server has it. */
 function openStream(query: string): Promise<{ close(): Promise<void> }> {
@@ -109,7 +99,7 @@ test("a stream claims a report that arrived before it, and takes it away when it
   } finally {
     await stream.close();
   }
-  await waitFor(() => channelReports.get("worker-1") === undefined, "the report outlived its stream");
+  await until(() => channelReports.get("worker-1") === undefined, "the report outlived its stream");
   assert.equal(channelNamedByClient("video:probe"), false);
 });
 
@@ -130,7 +120,7 @@ test("a reconnect whose new stream opens before the old one's close keeps its re
   };
   try {
     await first.close();
-    await waitFor(() => closed === 1, "the server never saw the first stream close");
+    await until(() => closed === 1, "the server never saw the first stream close");
   } finally {
     console.log = realLog;
   }
@@ -143,7 +133,7 @@ test("a reconnect whose new stream opens before the old one's close keeps its re
   } finally {
     await second.close();
   }
-  await waitFor(() => channelReports.get("reconnecting") === undefined, "the report outlived its last stream");
+  await until(() => channelReports.get("reconnecting") === undefined, "the report outlived its last stream");
 });
 
 test("a poll client holds its report past the wait an unclaimed one gets", async () => {

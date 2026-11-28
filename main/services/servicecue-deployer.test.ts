@@ -8,7 +8,7 @@ import * as fs from "node:fs";
 
 import { captureConsole } from "./fixtures/capture-console.js";
 import { sleep } from "./fixtures/publisher-harness.js";
-import { within } from "./fixtures/within.js";
+import { until } from "./fixtures/within.js";
 import { ACCOUNT_ID, API_TOKEN, FakeCloudflare, failure } from "./fixtures/fake-cloudflare.js";
 import { BUILD_A, BUILD_B, writeBundle, type WrittenBundle } from "./fixtures/deploy-bundle.js";
 import { cloudflareOrigin } from "./servicecue-cloudflare.js";
@@ -39,20 +39,6 @@ interface World {
 }
 let world: World;
 
-/** Until `check` holds, bounded on the real clock; the poll stops when the wait does. */
-async function until(check: () => boolean, what: string): Promise<void> {
-  let waiting = true;
-  try {
-    await within(
-      (async () => {
-        while (waiting && !check()) await new Promise((r) => setImmediate(r));
-      })(),
-      what,
-    );
-  } finally {
-    waiting = false;
-  }
-}
 const reaches = (d: ServiceCueDeployer, state: string) => until(() => d.status().state === state, `the state ${state}`);
 
 const deployers: ServiceCueDeployer[] = [];

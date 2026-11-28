@@ -6,7 +6,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { captureConsole } from "../fixtures/capture-console.js";
-import { within } from "../fixtures/within.js";
+import { within, until } from "../fixtures/within.js";
 import { FakeSupervisor } from "../fixtures/fake-supervisor.js";
 
 // Before any store is constructed: every import below builds its stores
@@ -43,18 +43,6 @@ type RelaySupervisorLike = import("./video-service.js").RelaySupervisorLike;
  */
 const attach = (relay: VideoRelay, supervisor: RelaySupervisorLike, ports: VideoPorts = DEFAULT_VIDEO_PORTS) =>
   videoService.attachRelay(relay, supervisor, ports, { on: false, why: null });
-
-/** Real wall-clock polling, never affected by a test's own mocked setTimeout
- *  or Date (performance.now() is neither), for a condition the service offers
- *  no seam for: a real supervisor's respawn timer, a line through a stream. */
-async function waitUntil(predicate: () => boolean, what: string, timeoutMs = 2000): Promise<void> {
-  const start = performance.now();
-  for (;;) {
-    if (predicate()) return;
-    if (performance.now() - start > timeoutMs) throw new Error(`still waiting after ${timeoutMs} ms for ${what}`);
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-}
 
 // Every test here shares the one videoService, and so its OutageLog: an outage
 // one test leaves open would swallow, as a repeat of the same failure, the
@@ -200,7 +188,7 @@ const pollOnce = () => (videoService as unknown as { pollOnce(): Promise<void> }
  *  nothing when it lands. Read off the guard itself because the service has
  *  no seam for polls yet. */
 const pollsIdle = () =>
-  waitUntil(() => (videoService as unknown as { pollingGeneration: number | null }).pollingGeneration === null, "the poll in flight to finish");
+  until(() => (videoService as unknown as { pollingGeneration: number | null }).pollingGeneration === null, "the poll in flight to finish");
 
 /** The service's own unawaited work — a status change's settle, a log
  *  line's B-frames mark, every publish — has landed. */
@@ -1981,7 +1969,7 @@ test("against a real supervisor: an exit publishes failing at once, and running 
     children[0]!.emit("exit", null, "SIGKILL");
     await backgroundIdle(); // the exit's own publish, well inside the 1 s backoff
     assert.deepEqual(published, ["failing"], "the exit must reach every client before anything else happens");
-    await waitUntil(() => published.includes("running"), "the respawn's running status", 5000); // after the 1 s backoff
+    await until(() => published.includes("running"), "the respawn's running status", 5000); // after the 1 s backoff
     await backgroundIdle(); // and anything it published after, which the exact list below must see
     assert.deepEqual(published, ["failing", "running"]);
   } finally {
@@ -2019,7 +2007,7 @@ test("against a real supervisor: the not-answering flag does not carry over into
   try {
     await sup.start("/bin/mediamtx", "/tmp/cfg.yml");
     children[0].stdout.write("2026/09/28 10:00:00 INF MediaMTX v1.21.1, ...\n");
-    await waitUntil(() => sup.version() !== null, "the banner to reach the line reader"); // through a stream
+    await until(() => sup.version() !== null, "the banner to reach the line reader"); // through a stream
     await pollOnce();
     assert.equal(videoService.current().relay.state, "running");
     assert.equal(videoService.current().feeds.find((f) => f.id === id)?.status.state, "live");
@@ -2031,7 +2019,7 @@ test("against a real supervisor: the not-answering flag does not carry over into
     await pollOnce(); // a poll during backoff — fails; the supervisor already says failing on its own
     assert.equal(videoService.current().relay.state, "failing");
 
-    await waitUntil(() => sup.status().state === "running", "the real respawn", 5000); // restartDelayMs(0) = 1 s
+    await until(() => sup.status().state === "running", "the real respawn", 5000); // restartDelayMs(0) = 1 s
     await backgroundIdle(); // spawnChild()'s status event -> publish
 
     apiUp = true; // the fresh process's API is reachable, but nothing has POLLED it yet
@@ -2652,7 +2640,7 @@ test("reconciles are single-flight — a change arriving mid-reconcile is folded
     // arrives here, finds one already running, and marks dirty rather than
     // firing a second overlapping relay.reconcile() call.
     const addB = videoService.addFeed({ name: "Interleave B", source: { kind: "push", protocol: "rtmp" } });
-    await waitUntil(
+    await until(
       () => (videoService as unknown as { reconcileDirty: boolean }).reconcileDirty,
       "B's own write and reconcileRelay() call to reach \"mark dirty\" (a second, overlapping reconcile never marks it)",
     );

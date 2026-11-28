@@ -16,6 +16,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, mock, test } from "node:test";
+import { until } from "./fixtures/within.js";
 
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), "messages-service-"));
 process.env.STAGE_UTILITY_DATA = DATA;
@@ -59,13 +60,6 @@ const logged = (prefix: string) => lines.filter((l) => l.startsWith(prefix));
 
 /** Real time, for fs to finish. The mock clock does not move. */
 const pause = (ms = 2) => new Promise<void>((r) => realSetTimeout(r, ms));
-async function until(cond: () => boolean, what: string): Promise<void> {
-  for (let i = 0; i < 500; i++) {
-    if (cond()) return;
-    await pause();
-  }
-  assert.fail(`never happened: ${what}`);
-}
 
 /** 2026-10-07 10:00 in Chicago (CDT, UTC-5). */
 const TEN_AM = Date.UTC(2026, 9, 7, 15, 0, 0);
