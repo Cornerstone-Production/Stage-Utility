@@ -228,7 +228,7 @@ describe("a browser that will not store the choice", () => {
     assert.equal(group("plot").getByRole("radio", { name: /LCeq/ }).getAttribute("aria-checked"), "true");
     assert.deepEqual(
       errors.mock.calls.map((c) => c.arguments[0]),
-      ["Could not remember that choice: quota exceeded"],
+      ["Couldn't remember that choice: quota exceeded"],
       "the refused save was not reported",
     );
   });
