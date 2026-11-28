@@ -45,8 +45,10 @@ switch into and out of that mode is logged on the `[reconnect]` tag.
 
 A window, or a run of windows that overlap, is held to four days: a Thursday rehearsal
 through Sunday's last service is about three, and anything longer is taken as wrong plan
-times. It is cut to four days from where it opens, and the cut is logged once on
-`[reconnect]`. What waits out a window (the scheduled auto-update, the Mac helpers'
+times. It is cut back to its last four days, keeping the end, which is the service, and
+dropping the early part, which is the earliest rehearsal's lead: a Tuesday rehearsal
+before a Sunday service still holds the Sunday morning. The cut, and the part dropped, is
+logged once on `[reconnect]`. What waits out a window (the scheduled auto-update, the Mac helpers'
 updates and the public page's deploy) would otherwise wait for as long as the bad times
 said. A plan whose times fail to read on a refresh keeps the window its last good read
 gave, while that window is still to come.

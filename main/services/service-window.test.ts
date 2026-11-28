@@ -9,7 +9,7 @@
 import assert from "node:assert/strict";
 import { test, describe, it, beforeEach } from "node:test";
 
-import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE, MAX_WINDOW_MS } from "./service-window.js";
+import { serviceWindow, DEFAULT_RECONNECT_SCHEDULE } from "./service-window.js";
 
 const MIN = 60_000;
 const ACTIVE_CAP_MS = 120_000;
@@ -224,34 +224,47 @@ test("isDormant is true only between windows, with the schedule known and the fe
 
 // Nothing real holds a window longer than about three days (a Thursday rehearsal to
 // Sunday's last service). Bad plan times, or windows overlapping into a chain, must
-// not hold the auto-update, the Mac updates and the page deploy for good.
+// not hold the auto-update, the Mac updates and the page deploy for good. The cut
+// keeps the END: that is the service.
 describe("a window longer than four days", () => {
   const DAY = 24 * 60 * MIN;
+  const HOUR = 60 * MIN;
   beforeEach(() => serviceWindow.setWindows([]));
 
-  it("is cut to four days, and said once however often it is set", (t) => {
+  it("keeps a Tuesday-rehearsal plan's Sunday: the 09:00 before a 10:00 service is still inside", (t) => {
+    t.mock.method(console, "warn", () => {});
+    // Tuesday 17:00 (a 19:00 rehearsal, less the 120-minute lead) to Sunday 14:00: 117 h.
+    const tuesday = Date.UTC(2026, 10, 24, 23, 0);
+    const close = tuesday + 117 * HOUR;
+    serviceWindow.setWindows([{ open: tuesday, close }]);
+    const sunday9 = tuesday + 112 * HOUR;
+    assert.equal(serviceWindow.activeUntil(sunday9), close, "the Sunday 09:00 before the service fell outside the window");
+  });
+
+  it("drops the early part, keeps the last four days, and says which part, once however often it is set", (t) => {
     const lines: string[] = [];
     t.mock.method(console, "warn", (...a: unknown[]) => lines.push(a.map(String).join(" ")));
     const now = Date.now();
     const bad = [{ open: now - DAY, close: now + 30 * DAY }];
     serviceWindow.setWindows(bad);
     serviceWindow.setWindows(bad);
-    assert.equal(serviceWindow.activeUntil(now), now - DAY + MAX_WINDOW_MS);
-    assert.equal(lines.filter((l) => /^\[reconnect\] a service window from .* runs \d+ h, longer than 96 h: it is cut to 96 h/.test(l)).length, 1, lines.join("\n"));
+    assert.equal(serviceWindow.activeUntil(now), null, "the dropped early part still held");
+    assert.equal(serviceWindow.activeUntil(now + 29 * DAY), now + 30 * DAY);
+    assert.equal(lines.filter((l) => /^\[reconnect\] a service window from .* runs \d+ h, longer than 96 h: its first \d+ h, to .*, are dropped and its last 96 h kept/.test(l)).length, 1, lines.join("\n"));
   });
 
-  it("holds a run of overlapping windows to the same four days", (t) => {
+  it("holds a run of overlapping windows to its final four days", (t) => {
     t.mock.method(console, "warn", () => {});
     const now = Date.now();
-    // Three-day windows, each opening before the last closes: chained, they would run nine days.
+    // Three-day windows, each opening before the last closes: chained, they would run seven days, to now + 6 days.
     serviceWindow.setWindows([
       { open: now - DAY, close: now + 2 * DAY },
       { open: now + DAY, close: now + 4 * DAY },
       { open: now + 3 * DAY, close: now + 6 * DAY },
     ]);
-    assert.equal(serviceWindow.activeUntil(now), now - DAY + MAX_WINDOW_MS);
-    // Five days into the chain, past the ceiling: it holds nothing.
-    assert.equal(serviceWindow.activeUntil(now + 4 * DAY), null);
+    assert.equal(serviceWindow.activeUntil(now), null, "the run's early part, before its final four days, still held");
+    assert.equal(serviceWindow.activeUntil(now + 2 * DAY + HOUR), now + 6 * DAY);
+    assert.equal(serviceWindow.activeUntil(now + 5 * DAY), now + 6 * DAY, "the end of the run, its service, was not held");
   });
 
   it("leaves a real Thursday-to-Sunday window alone", () => {

@@ -25,6 +25,12 @@ const ACTIVE_CAP_MS = 120_000; // 2 min — the busy-window / demand ceiling
  * it the plan times are taken as wrong and the window is cut, said once: what waits
  * out a window (the scheduled auto-update, the Mac helpers' updates, the page
  * deploy) would otherwise wait for as long as the bad times said.
+ *
+ * Cut from the CLOSE backward: the last four days are kept and the early part goes.
+ * The end of a window is the service; its start is the earliest rehearsal's lead. A
+ * Tuesday rehearsal before a Sunday service is a real window of about 117 h, and cut
+ * from its open it ended on Saturday, so the scheduled restart at 09:00 on Sunday
+ * went ahead an hour before the service.
  */
 export const MAX_WINDOW_MS = 4 * 24 * 60 * 60_000;
 
@@ -54,8 +60,12 @@ class ServiceWindowService {
     this.windows = windows
       .map((w) => {
         if (w.close - w.open <= MAX_WINDOW_MS) return w;
-        this.sayCut(`window:${w.open}:${w.close}`, `a service window from ${new Date(w.open).toISOString()} runs ${Math.round((w.close - w.open) / 3_600_000)} h, longer than ${MAX_WINDOW_MS / 3_600_000} h: it is cut to ${MAX_WINDOW_MS / 3_600_000} h (a plan's times may be wrong)`);
-        return { open: w.open, close: w.open + MAX_WINDOW_MS };
+        const kept = w.close - MAX_WINDOW_MS;
+        this.sayCut(
+          `window:${w.open}:${w.close}`,
+          `a service window from ${new Date(w.open).toISOString()} to ${new Date(w.close).toISOString()} runs ${Math.round((w.close - w.open) / 3_600_000)} h, longer than ${MAX_WINDOW_MS / 3_600_000} h: its first ${Math.round((kept - w.open) / 3_600_000)} h, to ${new Date(kept).toISOString()}, are dropped and its last ${MAX_WINDOW_MS / 3_600_000} h kept (a plan's times may be wrong)`,
+        );
+        return { open: kept, close: w.close };
       })
       .sort((a, b) => a.open - b.open);
     this.known = true;
@@ -122,11 +132,16 @@ class ServiceWindowService {
       runClose = w.close;
     }
     if (!(now >= runOpen && now <= runClose)) return null;
-    // A run of overlapping windows is held to the same ceiling as one: chained, they could hold anything for good.
+    // A run of overlapping windows is held to the same ceiling as one, measured back from its last close: chained,
+    // they could hold anything for good, and the end of the run is the service it leads up to.
     if (runClose - runOpen > MAX_WINDOW_MS) {
-      this.sayCut(`run:${runOpen}`, `service windows from ${new Date(runOpen).toISOString()} overlap into a run longer than ${MAX_WINDOW_MS / 3_600_000} h: it is cut to ${MAX_WINDOW_MS / 3_600_000} h`);
-      // Past the ceiling, the run no longer holds anything.
-      return runOpen + MAX_WINDOW_MS >= now ? runOpen + MAX_WINDOW_MS : null;
+      const kept = runClose - MAX_WINDOW_MS;
+      this.sayCut(
+        `run:${runOpen}:${runClose}`,
+        `service windows from ${new Date(runOpen).toISOString()} to ${new Date(runClose).toISOString()} overlap into a run longer than ${MAX_WINDOW_MS / 3_600_000} h: its first ${Math.round((kept - runOpen) / 3_600_000)} h, to ${new Date(kept).toISOString()}, are dropped and its last ${MAX_WINDOW_MS / 3_600_000} h kept`,
+      );
+      // Before what is kept, the run holds nothing.
+      return now >= kept ? runClose : null;
     }
     return runClose;
   }
