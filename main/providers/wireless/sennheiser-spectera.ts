@@ -77,14 +77,23 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
   private reconnectMs = RECONNECT_BASE_MS;
   private channels = new Map<string, ChannelState>();
 
-  // ── DeviceProvider interface ──────────────────────────────────────────────
+  protected logTag(): string {
+    return "[spectera]";
+  }
 
+  /** The base station as a log line names it: two of them must be told apart. */
+  private where(): string {
+    return `${scrub(this.host ?? "?")}:${this.port}`;
+  }
+
+  // ── DeviceProvider interface ──────────────────────────────────────────────
 
   async connect(cfg: Record<string, unknown>): Promise<void> {
     const target = specteraTarget(cfg);
     this.host = target.host;
     this.port = target.port;
     this.password = typeof cfg.password === "string" ? cfg.password : "";
+    this.forgetFailures();
     this.running = true;
     this.openStream();
   }
@@ -128,14 +137,18 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
       },
       (res) => {
         if (res.statusCode === 401 || res.statusCode === 403) {
-          if (DEBUG) console.log(`[spectera] auth failed (${res.statusCode})`);
+          this.reportFailure(
+            "auth",
+            `${this.where()} refused the API password (HTTP ${res.statusCode}). ` +
+              "Check the password under Wireless Gear, and that API access is enabled on the base station.",
+          );
           res.resume();
           this.setState("error");
           this.scheduleReconnect();
           return;
         }
         if (res.statusCode !== 200) {
-          if (DEBUG) console.log(`[spectera] unexpected status ${res.statusCode}`);
+          this.reportFailure(`status ${res.statusCode}`, `${this.where()} answered the telemetry stream with HTTP ${res.statusCode}`);
           res.resume();
           this.scheduleReconnect();
           return;
@@ -147,8 +160,8 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
       },
     );
     this.req = req;
-    req.on("error", (err) => {
-      if (DEBUG) console.log(`[spectera] request error: ${scrub(err.message)}`);
+    req.on("error", (err: NodeJS.ErrnoException) => {
+      this.reportFailure(`error ${err.code ?? err.message}`, `${this.where()} stream failed: ${scrub(err.message)}`);
       this.onStreamClosed();
     });
     req.end();
@@ -211,6 +224,7 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
   // optional `event:` and one or more `data:` lines. Framing lives in the shared
   // reader (services/sse-reader.ts).
   private onSse(chunk: string): void {
+    this.reportWorking();
     for (const event of this.sse.push(chunk)) this.handleEvent(event);
   }
 
@@ -257,11 +271,25 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
       },
       (res) => {
         if (DEBUG) console.log(`[spectera] subscribe → status ${res.statusCode}`);
+        // A refused subscription leaves the stream open and "connected" with no
+        // telemetry on it, which nothing else would ever explain.
+        const code = res.statusCode ?? 0;
+        if (code < 200 || code >= 300) {
+          this.reportFailure(
+            `subscribe ${code}`,
+            `${this.where()} refused the telemetry subscription (HTTP ${code}); the stream is open but no readings will arrive`,
+            "subscribe",
+          );
+        }
         res.resume();
       },
     );
-    put.on("error", (err) => {
-      if (DEBUG) console.log(`[spectera] subscribe error: ${scrub(err.message)}`);
+    put.on("error", (err: NodeJS.ErrnoException) => {
+      this.reportFailure(
+        `subscribe ${err.code ?? err.message}`,
+        `${this.where()} telemetry subscription failed: ${scrub(err.message)}`,
+        "subscribe",
+      );
     });
     put.write(body);
     put.end();

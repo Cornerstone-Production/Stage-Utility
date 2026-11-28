@@ -4,6 +4,7 @@
 // leading `<` / whitespace and trim; tokenise by spaces. Ignore partial/empty.
 
 import * as net from "net";
+import { scrub } from "../../services/scrub.js";
 import type { DeviceChannel, DeviceProvider } from "../../types/devices.js";
 import type { ConfigField } from "../../types/integrations.js";
 import { DeviceProviderBase, blankChannel, type ChannelState } from "./device-provider-base.js";
@@ -70,8 +71,13 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
   async connect(cfg: Record<string, unknown>): Promise<void> {
     this.enabled = true;
     this.cfg = this.parseCfg(cfg);
+    this.forgetFailures();
     this.initChannelStates(this.cfg.channels);
     await this.openSocket();
+  }
+
+  protected logTag(): string {
+    return `[shure:${this.id}]`;
   }
 
   async disconnect(): Promise<void> {
@@ -367,12 +373,12 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
     });
 
     socket.on("timeout", () => {
-      if (this.reconnectAttempts === 0) console.warn(`[shure:${this.id}] socket timeout`);
+      this.reportFailure("timeout", "socket timeout");
       socket.destroy();
     });
 
     socket.on("error", (err) => {
-      if (this.reconnectAttempts === 0) console.warn(`[shure:${this.id}] socket error: ${err.message}`);
+      this.reportFailure(`error ${(err as NodeJS.ErrnoException).code ?? err.message}`, `socket error: ${scrub(err.message)}`);
       this.setState("error");
       // Tear down so 'close' fires and we reconnect with back-off, rather than
       // leaving a half-open socket lingering.
@@ -397,6 +403,7 @@ export abstract class ShureBaseProvider extends DeviceProviderBase implements De
   }
 
   private handleData(chunk: string): void {
+    this.reportWorking();
     this.receiveBuffer += chunk;
 
     // Messages are delimited by `>`. Split on it; last segment is a partial frame.

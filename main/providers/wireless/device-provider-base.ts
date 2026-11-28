@@ -21,6 +21,7 @@ import type { DeviceStatus } from "../../types/devices.js";
 import { channelHasSubscribers } from "../../services/broadcaster.js";
 import { serviceWindow } from "../../services/service-window.js";
 import { cleared } from "../../services/timers.js";
+import { OutageLog } from "../../services/repeat-log.js";
 
 /**
  * Per-channel telemetry, shared by every driver.
@@ -109,6 +110,10 @@ export abstract class DeviceProviderBase {
   private reconnectTimer: NodeJS.Timeout | null = null;
   private readonly intervals = new Map<string, NodeJS.Timeout>();
   private watchdog: NodeJS.Timeout | null = null;
+  private readonly outages = new OutageLog();
+
+  /** The tag every line from this driver starts with, e.g. `[shure:shure-ulxd]`. */
+  protected abstract logTag(): string;
 
   onStatus(cb: (s: DeviceStatus) => void): void {
     this.statusCb = cb;
@@ -218,5 +223,40 @@ export abstract class DeviceProviderBase {
   protected stopAllTimers(): void {
     this.stopLinkTimers();
     this.clearReconnect();
+  }
+
+  // ── Saying a link failed ────────────────────────────────────────────────────
+  //
+  // Once per OUTAGE, through the shared OutageLog (services/repeat-log.ts): the
+  // first failure of a run, the first of each new kind, a reminder every 15
+  // minutes, and one line when the link has held again. Not under a debug
+  // variable: Spectera and SSC used to write their failures only under
+  // SPECTERA_DEBUG / SENNHEISER_DEBUG, so a wrong password or a wrong address
+  // left the panel saying "error" and /log saying nothing.
+
+  /**
+   * Report a failure. `kind` separates problems that must not hide one another
+   * (a refused password, then an unreachable host). `key` separates failures
+   * that are not the link's — a frame the driver could not read is not an
+   * outage, and must not end or extend one. `message` is the operator's line,
+   * without the tag; every device- or operator-supplied value in it is scrubbed
+   * by the caller.
+   */
+  protected reportFailure(kind: string, message: string, key = "link"): void {
+    const d = this.outages.fail(key, kind, Date.now());
+    if (d.log) console.warn(`${this.logTag()} ${message}${d.note}`);
+  }
+
+  /** The link is working: the device sent something. Cheap enough to call on
+   *  every chunk, and ends a run only once it has held. */
+  protected reportWorking(key = "link"): void {
+    const d = this.outages.ok(key, Date.now());
+    if (d.log) console.log(`${this.logTag()} working again${d.note}`);
+  }
+
+  /** A new configuration: nothing learned about the old address or password is
+   *  true of the new one, so the next failure is news. */
+  protected forgetFailures(): void {
+    this.outages.forget();
   }
 }

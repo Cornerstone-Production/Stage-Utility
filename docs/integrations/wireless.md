@@ -160,3 +160,13 @@ window — so gear nobody is looking at is not polled hard all week. Opening the
 Wireless Gear panel overrides that: while you are watching, retries stay brisk
 regardless of the window, so a pack you are waiting on comes back promptly rather
 than on the dormant schedule.
+
+A failed link is logged once per outage rather than once per retry, tagged by
+driver and naming the device's address: a refused Spectera password
+(`[spectera] 192.168.1.130:443 refused the API password (HTTP 401) ...`), a
+Sennheiser receiver that stops answering for 8 s, a Shure socket error or
+timeout. A run of the same failure stays quiet, with a reminder every 15
+minutes, and a different failure is logged when it starts. Once the device has
+answered steadily for two minutes, `[<driver>] working again after N failed
+attempts` closes the run. Raw protocol traffic is logged only with
+`SHURE_DEBUG=1`, `SENNHEISER_DEBUG=1` or `SPECTERA_DEBUG=1` set.

@@ -16,6 +16,7 @@
 // is shared here. Set SENNHEISER_DEBUG=1 to log every raw datagram in/out.
 
 import { clamp } from "../../services/clamp.js";
+import { scrub } from "../../services/scrub.js";
 import * as dgram from "node:dgram";
 
 import type { DeviceChannel, DeviceProvider } from "../../types/devices.js";
@@ -54,6 +55,15 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
 
   protected channels = new Map<string, ChannelState>();
 
+  protected logTag(): string {
+    return `[sennheiser:${this.id}]`;
+  }
+
+  /** The receiver as a log line names it. */
+  private where(): string {
+    return `${scrub(this.host ?? "?")}:${this.port}`;
+  }
+
   async connect(cfg: Record<string, unknown>): Promise<void> {
     this.host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
     this.port = numOr(cfg.port, SSC_DEFAULT_PORT);
@@ -61,6 +71,7 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
     const rate = numOr(cfg.meterRateMs, POLL_INTERVAL_MS);
     this.meterRateMs = rate >= 500 ? rate : POLL_INTERVAL_MS;
     this.initChannels();
+    this.forgetFailures();
     this.running = true;
     this.open();
   }
@@ -137,8 +148,8 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
     this.socket = sock;
 
     sock.on("message", (msg: Buffer) => this.onDatagram(msg.toString("utf8")));
-    sock.on("error", (err: Error) => {
-      if (SSC_DEBUG) console.log(`[sennheiser:${this.id}] socket error: ${err.message}`);
+    sock.on("error", (err: NodeJS.ErrnoException) => {
+      this.reportFailure(`socket ${err.code ?? err.message}`, `${this.where()} socket error: ${scrub(err.message)}`);
       this.closeSocket();
       this.markAllOffline();
       if (this.running) {
@@ -157,7 +168,7 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
     try {
       sock.bind();
     } catch (err) {
-      if (SSC_DEBUG) console.log(`[sennheiser:${this.id}] bind failed: ${String(err)}`);
+      this.reportFailure("bind", `could not open a UDP socket for ${this.where()}: ${scrub(String(err))}`);
       this.setState("error");
       this.scheduleReconnect();
     }
@@ -179,11 +190,15 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
       // Any valid frame proves the device is alive → connected + reset watchdog.
       this.reconnectMs = RECONNECT_BASE_MS;
       this.setState("connected");
+      this.reportWorking();
       this.armSilenceWatchdog();
       try {
         this.handleFrame(msg as Record<string, unknown>);
+        this.reportWorking("frame");
       } catch (err) {
-        if (SSC_DEBUG) console.log(`[sennheiser:${this.id}] parse error: ${String(err)}`);
+        // Not a link failure — the receiver answered — so on its own key, where
+        // it can neither end an outage nor be hidden by one.
+        this.reportFailure("parse", `${this.where()} sent a frame this driver could not read: ${scrub(String(err))}`, "frame");
       }
     }
   }
@@ -203,6 +218,11 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
   private armSilenceWatchdog(): void {
     this.armWatchdog(RESPONSE_TIMEOUT_MS, () => {
       if (!this.running) return;
+      this.reportFailure(
+        "silent",
+        `${this.where()} has not answered for ${RESPONSE_TIMEOUT_MS / 1000}s; marking its channels offline. ` +
+          "Check the address, and that the receiver's network control is on.",
+      );
       this.markAllOffline();
       this.setState("error");
     });
