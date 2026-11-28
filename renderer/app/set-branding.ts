@@ -9,6 +9,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import type { AppIconInput } from "@main/services/app-icon";
 
 import { invoke } from "../lib/api";
+import { QUERY_KEYS } from "./queries";
 import { writeTo } from "../lib/optimistic";
 
 /** Where a logo, empty-slot image or avatar is cropped from its upload. */
@@ -41,7 +42,7 @@ export interface BrandingPatch {
  * nothing to the dialog.
  */
 export async function setBranding(queryClient: QueryClient, partial: BrandingPatch): Promise<boolean> {
-  const next = await writeTo<StageState>(queryClient, ["stage:getState"], () => invoke<StageState>("stage:setBranding", { ...partial }), {
+  const next = await writeTo<StageState>(queryClient, QUERY_KEYS.stageState, () => invoke<StageState>("stage:setBranding", { ...partial }), {
     fail: "Failed to update branding",
     ok: "Branding updated.",
   });

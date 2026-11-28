@@ -10,6 +10,7 @@
 import type { QueryClient } from "@tanstack/react-query";
 
 import { invoke } from "../lib/api";
+import { QUERY_KEYS } from "./queries";
 import { revisionOf, type Revised, type SavedListIo } from "./use-saved-list";
 import { hasMobileBar, normalizeBarRows, visibleBarItems, type BarRowId } from "./bar-items";
 
@@ -47,7 +48,7 @@ export function barRowsOf(state: Pick<StageState, "barItems" | "barMobileItems">
  */
 export async function saveBarSet(queryClient: QueryClient, set: BarSet, items: string[]): Promise<StageState> {
   const next = await invoke<StageState>("barItems:set", set === "mobile" ? { mobileItems: items } : { items });
-  queryClient.setQueryData(["stage:getState"], next);
+  queryClient.setQueryData(QUERY_KEYS.stageState, next);
   return next;
 }
 
@@ -67,7 +68,7 @@ export function barListIo(queryClient: QueryClient, set: BarSet, nextKey: () => 
     },
     read: async () => {
       const next = await invoke<StageState>("stage:getState");
-      queryClient.setQueryData(["stage:getState"], next);
+      queryClient.setQueryData(QUERY_KEYS.stageState, next);
       return barAnswerOf(next, set, nextKey);
     },
   };

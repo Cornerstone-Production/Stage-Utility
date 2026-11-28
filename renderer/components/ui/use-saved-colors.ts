@@ -12,6 +12,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 
 import { invoke } from "../../lib/api";
+import { QUERY_KEYS } from "../../app/queries";
 import { writeOptimistic } from "../../lib/optimistic";
 import { useStageState } from "../../main/use-stage-state";
 import { toast } from "./toast";
@@ -39,7 +40,7 @@ export function useSavedColors(): SavedColors {
       // it.
       const next = await writeOptimistic<StageState>(
         queryClient,
-        ["stage:getState"],
+        QUERY_KEYS.stageState,
         (cur) => ({
           ...cur,
           savedColors: keep
