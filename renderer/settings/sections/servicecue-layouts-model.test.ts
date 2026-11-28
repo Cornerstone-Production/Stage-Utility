@@ -8,7 +8,7 @@ import { describe, test } from "node:test";
 import type { ServiceCueLayout } from "../../../main/types/pco.js";
 import type { CategoryRole } from "../../../main/types/servicecue-roles.js";
 import { insertIndex, stackIndex, type Rect } from "./servicecue-drag.js";
-import { columnPatch, copyName, duplicateLayout, moveTo, noticeText, placeDrawn, reorderLayouts, trayItems, unassignedByType } from "./servicecue-layouts-model.js";
+import { columnPatch, copyName, duplicateLayout, moveTo, noticeGroups, noticeText, placeDrawn, reorderLayouts, trayItems, unassignedByType } from "./servicecue-layouts-model.js";
 
 const box = (left: number, top: number, w = 80, h = 30): Rect => ({ left, top, right: left + w, bottom: top + h });
 
@@ -123,6 +123,33 @@ describe("the notice's words", () => {
     const t = noticeText([{ typeName: "Sunday", cats: ["Graphics", "Lyrics", "Props"] }, { typeName: "Youth", cats: ["Games"] }]);
     assert.equal(t.lead, "Graphics, Lyrics and Props from Sunday, and Games from Youth are in no role");
     assert.equal(t.still, "They still appear under All columns.");
+  });
+});
+
+describe("the notice's groups", () => {
+  const names: Record<string, string> = { w: "Weekend", g: "The Gathering", y: "Youth Night" };
+  const name = (id: string) => names[id] ?? id;
+
+  test("a category several landing types share is named once, under every type it is in", () => {
+    const cats = new Map([["w", ["Lights", "Audio"]], ["g", ["Lights", "Audio"]], ["y", ["Lights", "Games"]]]);
+    const groups = noticeGroups([{ id: "r", name: "Other", members: ["Other"] }], ["w", "g", "y"], cats, name);
+    assert.deepEqual(groups, [
+      { typeName: "Weekend, The Gathering and Youth Night", cats: ["Lights"] },
+      { typeName: "Weekend and The Gathering", cats: ["Audio"] },
+      { typeName: "Youth Night", cats: ["Games"] },
+    ]);
+    assert.equal(
+      noticeText(groups).lead,
+      "Lights from Weekend, The Gathering and Youth Night, and Audio from Weekend and The Gathering, and Games from Youth Night are in no role",
+    );
+  });
+
+  test("categories with no overlap stay one group per type", () => {
+    const cats = new Map([["w", ["Lights"]], ["y", ["Games"]]]);
+    assert.deepEqual(noticeGroups([{ id: "r", name: "Other", members: ["Other"] }], ["w", "y"], cats, name), [
+      { typeName: "Weekend", cats: ["Lights"] },
+      { typeName: "Youth Night", cats: ["Games"] },
+    ]);
   });
 });
 

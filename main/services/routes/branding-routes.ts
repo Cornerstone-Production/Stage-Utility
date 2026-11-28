@@ -5,7 +5,7 @@
 // Extracted verbatim from remote-server.ts's route chain; a bare `return` still
 // means "handled, stop" (see RouteCtx). Ordering within this module is preserved.
 
-import { type RouteCtx, json, error, readBody, MAX_IMAGE_BODY_BYTES } from "./context.js";
+import { type RouteCtx, json, error, MAX_IMAGE_BODY_BYTES, readJsonObject } from "./context.js";
 import { stageController } from "../stage-controller.js";
 import { parseAppIcon, parseCrop } from "../app-icon.js";
 import { brandingImageProblem, isStoredBrandingImage, looksLikeStoredRef } from "../branding-image-store.js";
@@ -24,7 +24,7 @@ export async function brandingRoutes(c: RouteCtx): Promise<void> {
 
     if (method === "POST" && pathname === "/api/branding") {
       // Carries data-URL logos, so it needs headroom over the plain-JSON cap.
-      const body = await readBody(req, MAX_IMAGE_BODY_BYTES) as Record<string, unknown>;
+      const body = await readJsonObject(req, MAX_IMAGE_BODY_BYTES);
       const partial: Record<string, unknown> = {};
       if (typeof body.name === "string") {
         const problem = appNameProblem(body.name);

@@ -13,6 +13,8 @@ import writeXlsxFile, { type Cell, type Row } from "write-excel-file/node";
 
 import { tableFeature, type TableSpec } from "./xlsx-table.js";
 import { appTimeZone, zonedDateKey } from "./app-timezone.js";
+import { isCalendarDate } from "./calendar-date.js";
+import { safeFilename } from "./export-filename.js";
 
 import { attendanceStore } from "./attendance-store.js";
 import { serviceTimelineStore } from "./service-timeline-store.js";
@@ -32,6 +34,31 @@ export interface HistoryExportOptions {
    *  A spreadsheet handed to someone outside Production must never carry a
    *  relative path that only resolves inside the app. */
   host?: string | null;
+}
+
+/**
+ * A `from` or `to` that is not a real `YYYY-MM-DD` day. `status` 400: the caller
+ * sent a bound that is not a date, which the route layer answers as a 400.
+ *
+ * The bounds arrive as raw query values and name the download, so they reach a
+ * quoted Content-Disposition header: a quote broke the header open and a CR/LF
+ * made writeHead throw after the whole workbook had been built.
+ */
+export class HistoryExportRangeRefused extends Error {
+  readonly status = 400;
+  constructor(message: string) {
+    super(message);
+    this.name = "HistoryExportRangeRefused";
+  }
+}
+
+/** Throws unless each bound is absent (null or "", as the History page omits
+ *  it) or a real calendar day. The value itself is never echoed: it is the
+ *  untrusted text being refused. */
+function checkRange(from: string | null | undefined, to: string | null | undefined): void {
+  for (const [name, value] of [["from", from], ["to", to]] as const) {
+    if (value && !isCalendarDate(value)) throw new HistoryExportRangeRefused(`${name} must be a date as YYYY-MM-DD`);
+  }
 }
 
 const inRange = (date: string, from?: string | null, to?: string | null): boolean =>
@@ -122,13 +149,19 @@ function sheet<T>(name: string, columns: Column<T>[], rows: T[]) {
  * indistinguishable once saved.
  */
 export function historyFileName(from?: string | null, to?: string | null): string {
+  checkRange(from, to);
   const span = from && to ? (from === to ? from : `${from}_to_${to}`) : from ? `from-${from}` : to ? `through-${to}` : "all-dates";
-  return `stage-utility-history-${span}.xlsx`;
+  // Through the shared check as well: its header is written in remote-server.ts,
+  // which builds the Content-Disposition value itself.
+  return safeFilename(`stage-utility-history-${span}.xlsx`);
 }
 
 /** Assemble the workbook and return its bytes. */
 export async function buildHistoryWorkbook(opts: HistoryExportOptions): Promise<Buffer> {
   const { from, to, include, host } = opts;
+  // Before any store is read: a refused bound is the caller's mistake, never a
+  // workbook built and then thrown away.
+  checkRange(from, to);
   // Strict: a workbook missing the services whose files could not be read
   // reads as a complete report of what happened.
   const [attendance, timelines, spls, baptismSessions] = await Promise.all([

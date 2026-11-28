@@ -7,7 +7,7 @@
 import { buildPlanBundle, planExportPreview } from "../plan-export.js";
 import { errorMessage } from "../errors.js";
 import { zonedDateKey } from "../app-timezone.js";
-import { filenameSlug } from "../export-filename.js";
+import { attachmentDisposition, filenameSlug } from "../export-filename.js";
 import { PcoUrlRefused } from "../pco-path.js";
 import { type RouteCtx, json, error, queryFlag } from "./context.js";
 
@@ -91,7 +91,7 @@ export async function planRoutes(c: RouteCtx): Promise<void> {
       const bundle = await buildPlanBundle({ serviceTypeId, slots, patch, presets });
       res.writeHead(200, {
         "content-type": "application/json; charset=utf-8",
-        "content-disposition": `attachment; filename="${planExportFilename(bundle.plan!.serviceTypeName, new Date())}"`,
+        "content-disposition": attachmentDisposition(planExportFilename(bundle.plan!.serviceTypeName, new Date())),
         "cache-control": "no-store",
       });
       res.end(JSON.stringify(bundle, null, 2));

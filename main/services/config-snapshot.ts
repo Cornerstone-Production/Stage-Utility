@@ -22,7 +22,6 @@ import { getUserDataPath } from "./app-paths.js";
 import { BRANDING_IMAGE_DIR } from "./branding-image-store.js";
 import { listImages, readImage, restoreImage, storedImageProblem, type ContentRule } from "./image-files.js";
 import { LAYOUT_IMAGE_DIR, LAYOUT_IMAGE_RULE } from "./layout-image-store.js";
-import { PHOTO_THEME_IMAGE_DIR } from "./photo-themes/service.js";
 import {
   STAGEPLOT_IMAGE_DIR,
   STAGEPLOT_IMAGE_RULE,
@@ -73,7 +72,7 @@ export function runtimeFiles(): string[] {
 
 /** Image directories carried in a snapshot. Allowlisted for the same reason
  *  CONFIG_FILES is: it bounds what an applied bundle can write. */
-const IMAGE_DIRS = [BRANDING_IMAGE_DIR, LAYOUT_IMAGE_DIR, STAGEPLOT_IMAGE_DIR, PHOTO_THEME_IMAGE_DIR] as const;
+const IMAGE_DIRS = [BRANDING_IMAGE_DIR, LAYOUT_IMAGE_DIR, STAGEPLOT_IMAGE_DIR] as const;
 
 /** What saving an image into each folder checks, which is what a restore holds
  *  that folder's images to: branding uploads check content, layout uploads never
@@ -82,8 +81,6 @@ const IMAGE_RULES: Record<(typeof IMAGE_DIRS)[number], ContentRule> = {
   [BRANDING_IMAGE_DIR]: { checkContent: true },
   [LAYOUT_IMAGE_DIR]: LAYOUT_IMAGE_RULE,
   [STAGEPLOT_IMAGE_DIR]: STAGEPLOT_IMAGE_RULE,
-  // Edits OpenAI made, checked by their magic when saved.
-  [PHOTO_THEME_IMAGE_DIR]: { checkContent: true },
 };
 
 /** Folders of uploaded originals that are not images (stage-plot PDFs), carried
@@ -635,9 +632,6 @@ async function pauseBackgroundWriters(): Promise<() => void> {
     // Waits for any publish in flight, then holds every stage plots write until a refused
     // restore resumes it: a debounced republish must not write over the restored file.
     ["the stage plots publisher", () => import("./stageplots-publish-instance.js").then((m) => m.stageplotsPublisher.pause())],
-    // Holds its queue's results and its retention sweep: a finished edit or a
-    // sweep must not write over the restored photo themes.
-    ["theme photos", () => import("./photo-themes/service.js").then((m) => m.photoThemes.pause())],
     // Holds every write to the screen bindings: a probe or heartbeat would write the
     // store's cached, pre-restore bindings back over the restored kiosk-devices.json.
     ["the screen bindings", () => import("./kiosk-devices-store.js").then((m) => m.pauseBindingWrites())],

@@ -25,21 +25,8 @@
 
 import { Tooltip } from "./ui/tooltip";
 import { Status } from "./ui";
-import type { ReactNode } from "react";
 import { Loader2Icon, CheckCircle2Icon, XCircleIcon } from "lucide-react";
 import { cn } from "../lib/cn";
-
-export type BadgeTone = "ok" | "warn" | "bad" | "off";
-
-/** How each tone is dressed: the icon and the word's colour. ConnectionBadge draws its
- *  states from this, and so does anything that has to look like it (OpenAI's tile), so
- *  a change here reaches both. */
-export const TONE_FACE: Record<BadgeTone, { icon: ReactNode; tone: string }> = {
-  ok: { icon: <CheckCircle2Icon className="size-3.5 text-green-10 shrink-0" />, tone: "text-green-10" },
-  bad: { icon: <XCircleIcon className="size-3.5 text-red-10 shrink-0" />, tone: "text-red-10" },
-  warn: { icon: <Status variant="warning" />, tone: "text-fg-muted" },
-  off: { icon: <Status variant="neutral" />, tone: "text-fg-muted" },
-};
 
 export function ConnectionBadge({
   connection,
@@ -60,7 +47,11 @@ export function ConnectionBadge({
 
   const face =
     connection === "connected"
-      ? { ...TONE_FACE.ok, word: "Connected" }
+      ? {
+          icon: <CheckCircle2Icon className="size-3.5 text-green-10 shrink-0" />,
+          word: "Connected",
+          tone: "text-green-10",
+        }
       : connection === "connecting"
         ? {
             icon: <Loader2Icon className="size-3.5 text-accent animate-spin shrink-0" />,
@@ -68,10 +59,15 @@ export function ConnectionBadge({
             tone: "text-accent",
           }
         : connection === "error"
-          ? { ...TONE_FACE.bad, word: text ?? "Error" }
+          ? {
+              icon: <XCircleIcon className="size-3.5 text-red-10 shrink-0" />,
+              word: text ?? "Error",
+              tone: "text-red-10",
+            }
           : {
-              ...TONE_FACE[inbound ? "off" : "warn"],
+              icon: <Status variant={inbound ? "neutral" : "warning"} />,
               word: inbound ? "No clients yet" : "Disconnected",
+              tone: "text-fg-muted",
             };
 
   const full = detail ? `${face.word} — ${detail}` : face.word;

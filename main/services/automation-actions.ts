@@ -30,6 +30,7 @@ import { signalStore } from "./signal-store.js";
 // page of comment that belongs beside the thing it governs.
 import { PVP_ACTIONS } from "./pvp-actions.js";
 import { externKeyed } from "../types/extern-keyed.js";
+import { isRecord } from "../types/is-record.js";
 
 const ok = (detail: string): ActionResult => ({ ok: true, detail });
 const fail = (detail: string): ActionResult => ({ ok: false, detail });
@@ -45,9 +46,9 @@ function parseRows(raw: unknown): Record<string, string> {
   if (!text) return {};
   try {
     const parsed: unknown = JSON.parse(text);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    if (!isRecord(parsed)) return {};
     return Object.fromEntries(
-      Object.entries(parsed as Record<string, unknown>).map(([k, v]) => [String(k).trim(), String(v ?? "").trim()]),
+      Object.entries(parsed).map(([k, v]) => [String(k).trim(), String(v ?? "").trim()]),
     );
   } catch {
     return {};
