@@ -190,20 +190,57 @@ describe("a wireless failure reaches /log without a debug variable", () => {
   it("a silent SSC receiver is reminded about, not mentioned once and forgotten", async () => {
     mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
     const p = new SennheiserEwDx();
+    let offline = 0;
     try {
       const lines = await captured(async () => {
         await p.connect({ host: "127.0.0.1", port: 9, model: "EM2" });
         const sock = (p as unknown as { socket: dgram.Socket | null }).socket;
         assert.ok(sock, "connect() built no socket, so this case proves nothing");
         await once(sock, "listening");
+        p.onStatus((s) => {
+          if (!s.online) offline++;
+        });
         // In watchdog-sized steps, so the outage log sees the clock move between reports.
         for (let t = 0; t < 16 * 60 * 1000; t += 8_000) mock.timers.tick(8_000);
       });
       const silent = lines.filter((l) => l.includes("has not answered"));
       assert.equal(silent.length, 2, `expected the first line and one 15-minute reminder. Saw: ${JSON.stringify(silent)}`);
       assert.match(silent[1], /still failing/);
+      // Two channels (EM2), offline once — not re-sent on every 8 s trip.
+      assert.equal(offline, 2, `the channels were re-emitted offline ${offline} times across one silence`);
     } finally {
       await p.disconnect();
+      mock.timers.reset();
+    }
+  });
+
+  it("a refused Spectera subscription is closed by the telemetry that follows", async () => {
+    // The subscription goes out once per stream, so its own success can land
+    // inside the outage log's settle window and leave the run open; the next
+    // refusal, days later, would then be silenced or read "still failing".
+    // Telemetry recurs, so it is what closes the run.
+    mock.timers.enable({ apis: ["Date"] });
+    const p = new SennheiserSpectera();
+    try {
+      const inner = p as unknown as {
+        sessionUuid: string | null;
+        reportFailure(kind: string, message: string, key: string): void;
+        handleEvent(e: { event: string | null; data: string }): void;
+      };
+      const lines = await captured(async () => {
+        inner.reportFailure("subscribe 403", "refused the telemetry subscription", "subscribe");
+        inner.sessionUuid = "session";
+        mock.timers.tick(3 * 60 * 1000);
+        inner.handleEvent({
+          event: null,
+          data: JSON.stringify({ address: "/api/mts/paired/all/sek1", value: { state: "Connected" } }),
+        });
+      });
+      assert.ok(
+        lines.some((l) => l.startsWith("[spectera] working again")),
+        `telemetry arrived and the subscription's outage never closed. Saw: ${JSON.stringify(lines)}`,
+      );
+    } finally {
       mock.timers.reset();
     }
   });

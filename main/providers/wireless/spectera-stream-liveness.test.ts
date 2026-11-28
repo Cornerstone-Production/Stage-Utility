@@ -27,7 +27,8 @@ const SESSION = "0f0e0d0c-test";
 type Mode =
   | "dead" // stream goes silent and the check is never answered: power cut
   | "quiet" // stream goes silent but the box answers the check: idle, alive
-  | "mute"; // accepts the stream request and never answers it at all
+  | "mute" // accepts the stream request and never answers it at all
+  | "notfound"; // answers the stream request 404: a wrong port, or API access off
 
 let mode: Mode = "dead";
 let server: SelfSignedServer;
@@ -39,6 +40,10 @@ before(async () => {
     if (req.method === "GET" && url === "/api/ssc/state/subscriptions") {
       if (mode === "mute") {
         held.add(res);
+        return;
+      }
+      if (mode === "notfound") {
+        res.writeHead(404).end();
         return;
       }
       res.writeHead(200, { "Content-Type": "text/event-stream" });
@@ -147,6 +152,18 @@ describe("a Spectera stream that goes silent", () => {
       await p.disconnect();
       assert.equal(probe.destroyed, true, "the check outlived the connection it was checking");
       assert.equal(probe.listenerCount("response"), 0, "the check's response handler survived the teardown");
+    } finally {
+      await p.disconnect();
+    }
+  });
+
+  it("reads error, not connecting, when the base station answers the stream with a 404", async () => {
+    const { p, states } = await watch("notfound");
+    try {
+      assert.ok(
+        await until(() => states.includes("error"), 2_500),
+        `a base station answering 404 left the connection at: ${states.join(" → ")}`,
+      );
     } finally {
       await p.disconnect();
     }

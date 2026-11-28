@@ -163,6 +163,7 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
           this.reportFailure(`status ${res.statusCode}`, `${this.where()} answered the telemetry stream with HTTP ${res.statusCode}`);
           res.resume();
           this.abortStream();
+          this.setState("error");
           this.scheduleReconnect();
           return;
         }
@@ -314,6 +315,10 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
       return;
     }
     this.setState("connected");
+    // Telemetry flowing is what proves the subscription worked: the PUT goes
+    // out once per stream, so its own 2xx can land inside the outage log's
+    // settle window and leave a refusal's run open.
+    this.reportWorking("subscribe");
     this.applyData(data);
   }
 
