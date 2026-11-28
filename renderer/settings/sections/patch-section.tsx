@@ -5,6 +5,7 @@ import { UploadIcon, PlusIcon, Trash2Icon, PrinterIcon } from "lucide-react";
 import { errorMessage } from "@main/services/errors";
 import { invoke, onNotification, type ApiError } from "../../lib/api";
 import { useFailedReads } from "../../lib/use-failed-reads";
+import { LeaveGuard } from "../../components/leave-guard";
 import { Button, ErrorNote, Input, SkeletonRows, toast, confirm , UnsavedBanner, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../../components/ui";
 import { mergeOverrides, diffEndpoints } from "../../lib/patch-resolve";
 import { uid } from "../../lib/uid";
@@ -223,6 +224,8 @@ export function PatchSection() {
 
   return (
     <div className="flex flex-col gap-4">
+      {/* The editor is a route of its own, so a sidebar link or Back unmounts it and the draft with it. */}
+      <LeaveGuard dirty={dirty} message="The patch has changes that are not saved. Leaving loses them." />
       {dirty && (
         // pointer-events-none on the full-width wrapper so its transparent area
         // doesn't swallow clicks meant for the sticky ripple bar beneath it; only

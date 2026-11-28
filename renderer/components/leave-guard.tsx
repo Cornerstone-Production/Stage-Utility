@@ -1,6 +1,7 @@
 // leave-guard.tsx — leaving a page with unsaved work asks first, for a link,
-// Back and a closing tab alike. Mic slots and the stage plot editor use it.
-// Rendered only under a router: useBlocker needs one.
+// Back and a closing tab alike. Mic slots, the stage plot editor and the patch
+// editor use it. useBlocker needs a router, so with none (a page mounted on its
+// own in a component test) it renders nothing rather than throwing.
 //
 // `flush`, when given, is tried before asking on a link or Back: it stores the work
 // somewhere safe (the plot editor's kept draft) and, when it does, the page is left
@@ -11,8 +12,19 @@ import { useEffect, useRef } from "react";
 import { useBlocker } from "@tanstack/react-router";
 
 import { confirm } from "./ui";
+import { useRouterHandle } from "../lib/use-search-param";
 
-export function LeaveGuard({ dirty, message, flush }: { dirty: boolean; message: string; flush?: () => Promise<boolean> }) {
+interface LeaveGuardProps {
+  dirty: boolean;
+  message: string;
+  flush?: () => Promise<boolean>;
+}
+
+export function LeaveGuard(props: LeaveGuardProps) {
+  return useRouterHandle() ? <RoutedLeaveGuard {...props} /> : null;
+}
+
+function RoutedLeaveGuard({ dirty, message, flush }: LeaveGuardProps) {
   const blocker = useBlocker({
     shouldBlockFn: async () => dirty && !(flush && (await flush())),
     enableBeforeUnload: () => dirty,

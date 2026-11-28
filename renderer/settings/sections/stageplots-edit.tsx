@@ -45,7 +45,7 @@ import { uid } from "../../lib/uid";
 import { useElementSize } from "../../lib/use-element-size";
 import { useLatestRef } from "../../lib/use-latest-ref";
 import { useResyncOn } from "../../lib/use-resync-on";
-import { useInAppLink, useRouterHandle } from "../../lib/use-search-param";
+import { useInAppLink } from "../../lib/use-search-param";
 import { PLOT_PARAM, VENUE_PARAM, backgroundOf, plotsOf, selectedPlot } from "../../main/stageplots/doc-helpers";
 import { editorReducer, initialEditorState, isDirty, sameItems, type AddKind, type EditorAction, type EditorState } from "../../main/stageplots/editor-state";
 import { round1 } from "../../main/stageplots/geometry";
@@ -515,7 +515,6 @@ function EditorBody({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const draftRef = useLatestRef(draft);
-  const router = useRouterHandle();
   const dirty = isDirty(draft);
   // The banner pushes the page down when it appears. Shown mid-drag, it would
   // move the canvas under the pointer and the item would jump across the plot,
@@ -677,13 +676,11 @@ function EditorBody({
     <div className="pt-5 pb-[50vh] max-sm:pt-4">
       {header}
       {/* Asks only while the newest change has not reached the server; a link or Back stores it first. */}
-      {router && (
-        <LeaveGuard
-          dirty={keeper.unstored}
-          flush={keeper.flush}
-          message={`Your latest changes to ${where} have not reached the server, so they are not kept. Leaving loses them.`}
-        />
-      )}
+      <LeaveGuard
+        dirty={keeper.unstored}
+        flush={keeper.flush}
+        message={`Your latest changes to ${where} have not reached the server, so they are not kept. Leaving loses them.`}
+      />
       {conflict ? (
         <UnsavedBanner
           className="mb-3"

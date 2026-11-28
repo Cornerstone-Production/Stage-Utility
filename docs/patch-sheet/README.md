@@ -32,7 +32,8 @@ follows the live or next Planning Center plan on its own.
   color of the first hop's device.
 
 An unsaved-changes banner with **Save** and **Discard** floats at the top while the
-draft differs from the saved patch.
+draft differs from the saved patch. Leaving the editor then (a sidebar link, Back,
+or closing the tab) asks first.
 
 ## Sheets
 

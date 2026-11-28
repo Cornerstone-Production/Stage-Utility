@@ -201,3 +201,83 @@ test("a patch saved while the stage plot points could not follow it says so, and
     f.restore();
   }
 });
+
+// ---- leaving with unsaved edits ---------------------------------------------
+//
+// The editor is its own route (/patch/edit), so a sidebar link unmounts it and its
+// draft with it. Mounted here under a real router over a memory history, with a
+// link to another route standing in for the sidebar. A closing tab is the browser's
+// own beforeunload dialog, which jsdom does not draw; that was checked in Chrome.
+
+const { RouterProvider, createMemoryHistory, createRootRoute, createRoute, createRouter, Link, Outlet } = await import("@tanstack/react-router");
+const { within } = await import("@testing-library/react");
+
+async function mountRouted() {
+  const root = createRootRoute({
+    component: () =>
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(Link, { to: "/elsewhere" as never }, "go elsewhere"),
+        React.createElement(Outlet),
+        React.createElement(ConfirmHost),
+        React.createElement(Toaster),
+      ),
+  });
+  const edit = createRoute({ getParentRoute: () => root, path: "/patch/edit", component: PatchSection });
+  const there = createRoute({ getParentRoute: () => root, path: "/elsewhere", component: () => React.createElement("span", null, "elsewhere") });
+  const router = createRouter({ routeTree: root.addChildren([edit, there]), history: createMemoryHistory({ initialEntries: ["/patch/edit"] }) });
+  render(React.createElement(RouterProvider, { router } as never));
+  await settle();
+  await settle();
+  await eventually(() => assert.equal(!!screen.queryByRole("tab", { name: "Stage left" }), true));
+  return router;
+}
+
+/** Click the link and let the guard decide; never awaits the navigation, which a question holds. */
+const leave = async () => {
+  await press(screen.getByRole("link", { name: "go elsewhere" }));
+  await settle();
+};
+
+/** Answer an open question, so a held navigation does not outlive the test. */
+async function answer(label: "Cancel" | "Leave") {
+  const dialog = screen.queryByRole("alertdialog");
+  if (!dialog) return;
+  await press(within(dialog).getByRole("button", { name: label }));
+  await settle();
+}
+
+test("leaving with unsaved edits asks, and Cancel keeps the draft", async () => {
+  const f = stubEditable(FILE, { status: 200, json: FILE });
+  try {
+    const router = await mountRouted();
+    await press(screen.getByRole("button", { name: /New variant/ }));
+    await leave();
+    const dialog = screen.queryByRole("alertdialog");
+    assert.equal(dialog === null, false, "left the patch editor with unsaved edits without asking");
+    assert.match(dialog?.textContent ?? "", /patch/i);
+    await answer("Cancel");
+    assert.equal(router.state.location.pathname, "/patch/edit");
+    assert.equal(!!screen.queryByRole("button", { name: "Save" }), true, "Cancel must keep the unsaved draft");
+  } finally {
+    await answer("Cancel");
+    f.restore();
+  }
+});
+
+test("leaving with nothing unsaved, or after Save, does not ask", async () => {
+  const f = stubEditable(FILE, { status: 200, json: { ...FILE, updatedAt: "2026-09-21T12:00:00.000Z" } });
+  try {
+    const router = await mountRouted();
+    await press(screen.getByRole("button", { name: /New variant/ }));
+    await press(screen.getByRole("button", { name: "Save" }));
+    await eventually(() => assert.equal(!!screen.queryByRole("button", { name: "Save" }), false, "the save never landed"));
+    await leave();
+    assert.equal(screen.queryByRole("alertdialog") === null, true, "asked although everything was saved");
+    await eventually(() => assert.equal(router.state.location.pathname, "/elsewhere"));
+  } finally {
+    await answer("Cancel");
+    f.restore();
+  }
+});
