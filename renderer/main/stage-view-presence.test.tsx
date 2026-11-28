@@ -6,7 +6,7 @@
 // renders the real component, fakes the clock, and asserts on the actual
 // POST bodies fetch received.
 //
-// Modeled on stage-view-paths.test.tsx's own harness (StubEventSource, a
+// Modeled on stage-view-paths.test.tsx's own harness (a
 // stubbed fetch, the two providers renderer/main/index.tsx wraps the view
 // in), narrowed to the one effect this file is about. `mock.timers` is
 // enabled here, which stage-view-paths.test.tsx's shared `settle()` (a REAL
@@ -16,20 +16,9 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, mock, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installRenderDom } from "../test-dom.js";
 
-const teardown = installDom();
-
-class StubEventSource {
-  static readonly CONNECTING = 0;
-  readyState = 0;
-  onmessage: unknown = null;
-  onerror: unknown = null;
-  addEventListener(): void {}
-  removeEventListener(): void {}
-  close(): void {}
-}
-(globalThis as unknown as { EventSource: unknown }).EventSource = StubEventSource;
+const teardown = installRenderDom();
 
 /** Every presence POST, with the fake clock's time when fetch received it. */
 const presencePosts: { at: number; body: Record<string, unknown> }[] = [];

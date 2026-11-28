@@ -39,18 +39,10 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { installRenderDom } from "../../test-dom.js";
 
-const teardown = installRenderDom();
+import type { Rule } from "@main/types/automation";
+import { rule as ruleOf } from "../../test-fixtures/automation-rules.js";
 
-interface StubRule {
-  id: string;
-  name: string;
-  enabled: boolean;
-  trigger: { id: string; params: Record<string, string | number> };
-  conditions: never[];
-  action: { id: string; params: Record<string, string | number> };
-  cooldownSec: number;
-  oncePerService: boolean;
-}
+const teardown = installRenderDom();
 
 const CALL_TRIGGER_ID = "call.by-name";
 
@@ -74,30 +66,24 @@ const REGISTRY = {
   ],
 };
 
-const cue = (name: string, params: Record<string, string | number> = {}): StubRule => ({
+const cue = (name: string, params: Record<string, string | number> = {}): Rule => ruleOf({
   id: `rule-${name}`,
   name: `Rule ${name}`,
   enabled: true,
   trigger: { id: CALL_TRIGGER_ID, params: { name, ...params } },
-  conditions: [],
   action: { id: "companion.press", params: { page: 1, row: 0, col: 1 } },
-  cooldownSec: 0,
-  oncePerService: false,
 });
 
 /** A rule that is not a cue at all — the other half of "Everything else". */
-const planRule = (name: string): StubRule => ({
+const planRule = (name: string): Rule => ruleOf({
   id: `rule-${name}`,
   name,
   enabled: true,
   trigger: { id: "pco.plan-item", params: {} },
-  conditions: [],
   action: { id: "log.message", params: {} },
-  cooldownSec: 0,
-  oncePerService: false,
 });
 
-let RULES: StubRule[] = [];
+let RULES: Rule[] = [];
 let requests: { url: string; body: string | null }[] = [];
 
 (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: RequestInit) => {
@@ -109,7 +95,7 @@ let requests: { url: string; body: string | null }[] = [];
     // the old rules would make every "it moved" assertion pass or fail on the
     // refetch rather than on the write.
     const id = url.split("/").pop() ?? "";
-    const patch = JSON.parse(init.body as string) as { trigger?: StubRule["trigger"] };
+    const patch = JSON.parse(init.body as string) as { trigger?: Rule["trigger"] };
     RULES = RULES.map((r) => (r.id === id ? { ...r, ...patch } : r));
     if (init.method === "PATCH") {
       // The real route's shape: the rule's own fields, flat, plus `issues` —

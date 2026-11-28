@@ -17,7 +17,7 @@ import { after, afterEach, describe, test } from "node:test";
 
 import { installDom, settle, unmountAndTeardown } from "../../test-dom.js";
 
-const teardown = installDom();
+const teardown = installDom(undefined, { intersectionObserver: true });
 
 /** api.ts opens an SSE stream on first use; nothing here pushes on it. */
 class FakeEventSource {
@@ -27,11 +27,6 @@ class FakeEventSource {
   close(): void {}
 }
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
-(globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
-  observe(): void {}
-  disconnect(): void {}
-  unobserve(): void {}
-};
 
 const DAY = "2026-09-20";
 const KEY = "weekend:plan-1:1100";

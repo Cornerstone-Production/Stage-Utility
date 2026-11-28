@@ -23,20 +23,11 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { installRenderDom } from "../../test-dom.js";
 
+import type { Rule } from "@main/types/automation";
+import { rule as ruleOf } from "../../test-fixtures/automation-rules.js";
+
 const teardown = installRenderDom();
 
-interface StubRule {
-  id: string;
-  name: string;
-  enabled: boolean;
-  trigger: { id: string; params: Record<string, string | number> };
-  conditions: never[];
-  action: { id: string; params: Record<string, string | number> };
-  cooldownSec: number;
-  oncePerService: boolean;
-  ownedBy?: { viewId: string; objectId: string };
-  ownerMissing?: boolean;
-}
 type Use = { viewId: string; viewName: string; objectId: string; label: string; home: boolean };
 
 const CALL = "call.by-name";
@@ -49,7 +40,8 @@ const REGISTRY = {
   ],
 };
 
-let RULES: StubRule[] = [];
+// ownerMissing is computed by the rules list route, never stored, so it is not on Rule.
+let RULES: (Rule & { ownerMissing?: boolean })[] = [];
 let USAGE: Record<string, Use[]> | "fail" = {};
 let requests: { method: string; url: string; body: string | null }[] = [];
 /** The lines the page sent to /api/log/client. */
@@ -116,15 +108,12 @@ async function press(el: Element | null | undefined, what: string) {
 const button = (text: string): HTMLButtonElement | null =>
   [...document.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim() === text) ?? null;
 
-const cue = (name: string, over: Partial<StubRule> = {}, params: Record<string, string | number> = {}): StubRule => ({
+const cue = (name: string, over: Partial<Rule> = {}, params: Record<string, string | number> = {}): Rule => ruleOf({
   id: `rule-${name}`,
   name: `Rule ${name}`,
   enabled: true,
   trigger: { id: CALL, params: { name, ...params } },
-  conditions: [],
   action: { id: "log.message", params: {} },
-  cooldownSec: 0,
-  oncePerService: false,
   ...over,
 });
 const use = (viewName: string, objectId = "o1", label = ""): Use => ({ viewId: `v-${viewName}`, viewName, objectId, label, home: viewName === "Home" });

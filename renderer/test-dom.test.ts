@@ -11,7 +11,7 @@
 import { strict as assert } from "node:assert";
 import { after, describe, test } from "node:test";
 
-import { eventually, installDom, isPlumbing, readLedger } from "./test-dom.js";
+import { eventually, installDom, installRenderDom, isPlumbing, readLedger } from "./test-dom.js";
 
 // The client build reads `window`, as it would in a browser.
 const teardown = installDom();
@@ -187,5 +187,47 @@ describe("installDom and the React act environment", () => {
     assert.notEqual(console.error, before, "the recorder is not installed");
     inner();
     assert.equal(console.error, before, "the teardown left its recorder behind");
+  });
+});
+
+// IntersectionObserver and matchMedia are opt-in because production branches on
+// their ABSENCE (lazy-preview.tsx, history-service-header.tsx, use-media-query.ts,
+// apply-favicon.ts). A default stub would silently flip those branches in every DOM
+// test, so the default leaves both undefined and the opt-in installs and removes them.
+describe("the opt-in platform stubs", () => {
+  const g = globalThis as unknown as { IntersectionObserver?: unknown; matchMedia?: unknown };
+  const win = () => window as unknown as { matchMedia?: (q: string) => { matches: boolean } };
+
+  test("a plain DOM has neither, so the absent-branches stay testable", () => {
+    const off = installDom();
+    try {
+      assert.equal(typeof g.IntersectionObserver, "undefined", "IntersectionObserver was installed by default");
+      assert.equal(typeof win().matchMedia, "undefined", "matchMedia was installed by default");
+    } finally {
+      off();
+    }
+  });
+
+  test("asking for them installs both, and the teardown takes them away again", () => {
+    const off = installDom(undefined, { intersectionObserver: true, matchMedia: true });
+    try {
+      const observer = new (g.IntersectionObserver as new (cb: () => void) => { observe: (el: unknown) => void; disconnect: () => void })(() => {});
+      observer.observe({});
+      observer.disconnect();
+      assert.equal(win().matchMedia?.("(prefers-color-scheme: dark)").matches, false);
+    } finally {
+      off();
+    }
+    assert.equal(typeof g.IntersectionObserver, "undefined", "IntersectionObserver outlived its teardown");
+  });
+
+  test("each is asked for on its own, and installRenderDom passes the request on", () => {
+    const off = installRenderDom({ intersectionObserver: true });
+    try {
+      assert.equal(typeof g.IntersectionObserver, "function");
+      assert.equal(typeof win().matchMedia, "undefined", "matchMedia came along with IntersectionObserver");
+    } finally {
+      off();
+    }
   });
 });

@@ -10,9 +10,9 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installDom, mountInAct, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installDom, mountInAct, resetClientCaches, unmountAndTeardown } from "../test-dom.js";
 
-const teardown = installDom();
+const teardown = installDom(undefined, { intersectionObserver: true, matchMedia: true });
 
 const listeners = new Map<string, Set<(e: { data: string }) => void>>();
 class StubEventSource {
@@ -33,14 +33,6 @@ class StubEventSource {
   }
 }
 (globalThis as unknown as { EventSource: unknown }).EventSource = StubEventSource;
-(globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
-  observe(): void {}
-  disconnect(): void {}
-  unobserve(): void {}
-};
-(window as unknown as { matchMedia: unknown }).matchMedia = () => ({
-  matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
-});
 
 
 type Bar = { barItems: string[]; barMobileItems: string[] };
@@ -120,8 +112,6 @@ const { CustomizeProvider, useCustomize } = await import("./customize-mode.js");
 const { CustomizeTray } = await import("./sidebar-tray.js");
 const { PageActionsProvider } = await import("./page-actions.js");
 const { Toaster, TooltipProvider } = await import("../components/ui/index.js");
-const { __resetForTests: resetStageState } = await import("../main/use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 const { DEFAULT_BAR_ORDER, normalizeBarRows } = await import("./bar-items.js");
 const { narrowWarning } = await import("./bar-editor.js");
 
@@ -145,12 +135,11 @@ beforeEach(() => {
   releaseHold = null;
   saves.length = 0;
 });
-afterEach(() => {
+afterEach(async () => {
   // A save a failed test left waiting must not keep the run open.
   releaseHold?.();
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
   listeners.clear();
 });
 

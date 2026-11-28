@@ -18,7 +18,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, mock, test } from "node:test";
 
-import { eventually, installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installRenderDom, resetClientCaches, settle, unmountAndTeardown } from "../test-dom.js";
 import { alerts, ok, reply, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -29,16 +29,13 @@ const { PeopleGraphInspector, PlanAttachmentConfig, RossTalkButtonConfig } = awa
 const { formatCommand } = await import("@main/services/rosstalk-commands.js");
 const { TooltipProvider } = await import("../components/ui/index.js");
 const { toast } = await import("../components/ui/toast.js");
-const { __resetForTests: resetStageState } = await import("../main/use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
 // The attachment picker reads the page's one stage state, which is cached for
 // the whole page; the resets keep one case's state out of the next.
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 
 type Answer = { status: number; body: unknown } | "throw";

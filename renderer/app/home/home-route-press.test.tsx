@@ -10,7 +10,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
-import { eventually, installRenderDom, settle, unmountAndTeardown, mountInAct } from "../../test-dom.js";
+import { eventually, installRenderDom, mountInAct, resetClientCaches, settle, unmountAndTeardown } from "../../test-dom.js";
 import { NoStream } from "../../test-fixtures/no-stream.js";
 import { serve } from "../../test-fixtures/button-server.js";
 
@@ -24,14 +24,11 @@ const { RouterContextProvider, createRouter, createRootRoute, createMemoryHistor
 const { TooltipProvider } = await import("../../components/ui/index.js");
 const { HomeRoute } = await import("./home-route.js");
 const { DEFAULT_STAGE_STATE } = await import("../../main/test-render-ctx.js");
-const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../../lib/api.js");
 
 after(() => unmountAndTeardown(cleanup, teardown));
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 
 const router = createRouter({ routeTree: createRootRoute({}), history: createMemoryHistory({ initialEntries: ["/"] }) });

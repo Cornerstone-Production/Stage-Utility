@@ -19,19 +19,10 @@ import { after, afterEach, beforeEach, describe, mock, test } from "node:test";
 
 import { installRenderDom } from "../../test-dom.js";
 
-const teardown = installRenderDom();
+import type { Rule } from "@main/types/automation";
+import { rule as ruleOf } from "../../test-fixtures/automation-rules.js";
 
-interface StubRule {
-  id: string;
-  name: string;
-  enabled: boolean;
-  trigger: { id: string; params: Record<string, string | number> };
-  conditions: never[];
-  action: { id: string; params: Record<string, string | number> };
-  cooldownSec: number;
-  oncePerService: boolean;
-  confirmRequired?: boolean;
-}
+const teardown = installRenderDom();
 
 const REGISTRY = {
   triggers: [{ id: "pco.service-started", label: "A service starts", channel: "pco:live", params: [] }],
@@ -39,19 +30,16 @@ const REGISTRY = {
   actions: [{ id: "log.message", label: "Write a log message", params: [] }],
 };
 
-const rule = (over: Partial<StubRule> = {}): StubRule => ({
+const rule = (over: Partial<Rule> = {}): Rule => ruleOf({
   id: "rule-1",
   name: "Doors",
   enabled: true,
   trigger: { id: "pco.service-started", params: {} },
-  conditions: [],
   action: { id: "log.message", params: { message: "x" } },
-  cooldownSec: 0,
-  oncePerService: false,
   ...over,
 });
 
-let RULES: StubRule[] = [];
+let RULES: Rule[] = [];
 let DISARMED = false;
 let requests: { method: string; url: string; body: string | null }[] = [];
 /** What POST .../run answers with. */
@@ -258,7 +246,7 @@ describe("a rule marked confirm before running", () => {
 });
 
 describe("a pair's row", () => {
-  const half = (which: "on" | "off", over: Partial<StubRule> = {}): StubRule =>
+  const half = (which: "on" | "off", over: Partial<Rule> = {}): Rule =>
     rule({
       id: `rule-${which}`,
       name: `Projectors ${which.toUpperCase()}`,

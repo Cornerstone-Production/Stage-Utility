@@ -32,18 +32,10 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { installRenderDom } from "../../test-dom.js";
 
-const teardown = installRenderDom();
+import type { Rule } from "@main/types/automation";
+import { rule as ruleOf } from "../../test-fixtures/automation-rules.js";
 
-interface StubRule {
-  id: string;
-  name: string;
-  enabled: boolean;
-  trigger: { id: string; params: Record<string, string | number> };
-  conditions: never[];
-  action: { id: string; params: Record<string, string | number> };
-  cooldownSec: number;
-  oncePerService: boolean;
-}
+const teardown = installRenderDom();
 
 const CALL_TRIGGER_ID = "call.by-name";
 
@@ -69,18 +61,15 @@ const REGISTRY = {
   ],
 };
 
-const cue = (name: string, params: Record<string, string | number> = {}): StubRule => ({
+const cue = (name: string, params: Record<string, string | number> = {}): Rule => ruleOf({
   id: `rule-${name}`,
   name,
   enabled: true,
   trigger: { id: CALL_TRIGGER_ID, params: { name, says: name, ...params } },
-  conditions: [],
   action: { id: "companion.press", params: { page: 1, row: 0, col: 1 } },
-  cooldownSec: 0,
-  oncePerService: false,
 });
 
-let RULES: StubRule[] = [];
+let RULES: Rule[] = [];
 let STATES: Record<string, unknown> = {};
 let CUSTOM_VARIABLES: string[] = [];
 /** When set, /api/cues/states answers this status with this `error` body. */

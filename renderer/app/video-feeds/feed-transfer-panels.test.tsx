@@ -10,7 +10,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, test } from "node:test";
 
-import { eventually, installRenderDom, settle, unmountAndTeardown } from "../../test-dom.js";
+import { eventually, installRenderDom, resetClientCaches, settle, unmountAndTeardown } from "../../test-dom.js";
 import { DEFAULT_VIDEO_PORTS } from "@main/types/video";
 
 const teardown = installRenderDom();
@@ -19,8 +19,6 @@ const { render, screen, cleanup, fireEvent } = await import("@testing-library/re
 const React = await import("react");
 const { VideoFeedsRoute } = await import("./video-feeds-route.js");
 const { exportHref, groupLabel } = await import("./feed-transfer-panels.js");
-const { __resetReplayCacheForTests } = await import("../../lib/api.js");
-const { __resetForTests: resetStageState } = await import("../../main/use-stage-state.js");
 const { serverZoneApartFromBrowser } = await import("../../test-fixtures/zones.js");
 const { zonedDateKey } = await import("@main/services/app-timezone");
 const { createMemoryHistory, createRootRoute, createRouter, RouterProvider } = await import("@tanstack/react-router");
@@ -144,10 +142,9 @@ async function pageReady(): Promise<void> {
   await eventually(() => assert.ok(screen.getByRole("heading", { name: "Video feeds" }), "the page never left its spinner"));
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   cleanup();
-  __resetReplayCacheForTests();
-  resetStageState();
+  await resetClientCaches();
   stageState = {};
 });
 afterEach(() => cleanup());

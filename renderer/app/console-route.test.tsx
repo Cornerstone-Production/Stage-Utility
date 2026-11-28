@@ -14,10 +14,10 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
-import { installDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { installDom, resetClientCaches, settle, unmountAndTeardown } from "../test-dom.js";
 import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 
-const teardown = installDom();
+const teardown = installDom(undefined, { intersectionObserver: true, matchMedia: true });
 
 /** api.ts opens an SSE stream on first use; nothing here pushes on it. */
 class FakeEventSource {
@@ -27,27 +27,16 @@ class FakeEventSource {
   close(): void {}
 }
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
-(globalThis as unknown as { IntersectionObserver: unknown }).IntersectionObserver = class {
-  observe(): void {}
-  disconnect(): void {}
-  unobserve(): void {}
-};
-(window as unknown as { matchMedia: unknown }).matchMedia = () => ({
-  matches: false, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
-});
 
 const { render, cleanup, screen } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { createRootRoute, createRoute, createRouter, createMemoryHistory, RouterProvider } = await import("@tanstack/react-router");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { ConsoleRoute } = await import("./console-route.js");
-const { __resetForTests: resetStageState } = await import("../main/use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 after(() => unmountAndTeardown(cleanup, teardown));
 

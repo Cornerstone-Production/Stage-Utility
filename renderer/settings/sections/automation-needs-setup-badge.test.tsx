@@ -20,18 +20,10 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { installRenderDom } from "../../test-dom.js";
 
-const teardown = installRenderDom();
+import type { Rule } from "@main/types/automation";
+import { rule as ruleOf } from "../../test-fixtures/automation-rules.js";
 
-interface StubRule {
-  id: string;
-  name: string;
-  enabled: boolean;
-  trigger: { id: string; params: Record<string, string | number> };
-  conditions: never[];
-  action: { id: string; params: Record<string, string | number> };
-  cooldownSec: number;
-  oncePerService: boolean;
-}
+const teardown = installRenderDom();
 
 const CALL_TRIGGER_ID = "call.by-name";
 
@@ -62,7 +54,7 @@ const REGISTRY = {
   ],
 };
 
-let RULES: StubRule[] = [];
+let RULES: Rule[] = [];
 let requests: { method: string; url: string }[] = [];
 
 (globalThis as unknown as { fetch: unknown }).fetch = async (input: unknown, init?: RequestInit) => {
@@ -87,7 +79,7 @@ let requests: { method: string; url: string }[] = [];
  *  real validator's own correctness is proven in
  *  automation-param-validation.test.ts. This just has to agree with what a
  *  real server would say about these two specific rules. */
-function issuesFor(r: StubRule): { key: string; message: string; step: string; label: string }[] {
+function issuesFor(r: Rule): { key: string; message: string; step: string; label: string }[] {
   const out: { key: string; message: string; step: string; label: string }[] = [];
   if (r.trigger.id === "spl.crossed-above") {
     if (!String(r.trigger.params.meter ?? "").trim()) {
@@ -102,34 +94,28 @@ function issuesFor(r: StubRule): { key: string; message: string; step: string; l
   return out;
 }
 
-const needsSetup = (over: Partial<StubRule> = {}): StubRule => ({
+const needsSetup = (over: Partial<Rule> = {}): Rule => ruleOf({
   id: "rule-spl",
   name: "SPL alarm cue",
   enabled: false,
   trigger: { id: "spl.crossed-above", params: { threshold: 95 } }, // meter missing
-  conditions: [],
   action: { id: "rosstalk.command", params: {} }, // targetId missing
-  cooldownSec: 0,
-  oncePerService: false,
   ...over,
 });
 
-const clean = (over: Partial<StubRule> = {}): StubRule => ({
+const clean = (over: Partial<Rule> = {}): Rule => ruleOf({
   id: "rule-clean",
   name: "Walk-in music",
   enabled: true,
   trigger: { id: CALL_TRIGGER_ID, params: { name: "walk_in" } },
-  conditions: [],
   action: { id: "log.message", params: { message: "cue" } },
-  cooldownSec: 0,
-  oncePerService: false,
   ...over,
 });
 
 /** A cue pair — `<base>_on` / `<base>_off`, matched by cuePairs.ts on that
  *  naming convention alone. The OFF half's action is left unpicked
  *  (targetId missing), the one issue in the pair. */
-const pair = (base: string): StubRule[] => [
+const pair = (base: string): Rule[] => [
   {
     id: `rule-${base}_on`,
     name: `Rule ${base}_on`,

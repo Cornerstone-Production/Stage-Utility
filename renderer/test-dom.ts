@@ -90,6 +90,14 @@ const EXPOSED = [
   "sessionStorage",
 ] as const;
 
+/** The browser APIs jsdom lacks that a test may ask installDom to stub. Both are opt-in; see installDom. */
+export interface PlatformStubs {
+  /** A do-nothing IntersectionObserver: nothing ever intersects. */
+  intersectionObserver?: boolean;
+  /** A matchMedia whose queries never match. */
+  matchMedia?: boolean;
+}
+
 /** What React says when an update lands outside act(), or act() runs without the flag. */
 const ACT_WARNING = /not wrapped in act|not configured to support act/;
 
@@ -100,7 +108,10 @@ const ACT_WARNING = /not wrapped in act|not configured to support act/;
  * differently depending on what ran before it, which is the worst kind of flake
  * to chase.
  */
-export function installDom(html = "<!doctype html><html><body></body></html>"): () => void {
+export function installDom(
+  html = "<!doctype html><html><body></body></html>",
+  { intersectionObserver = false, matchMedia = false }: PlatformStubs = {},
+): () => void {
   const dom = new JSDOM(html, { pretendToBeVisual: true, url: "http://localhost:8788/" });
   const g = globalThis as unknown as Record<string, unknown>;
 
@@ -120,6 +131,35 @@ export function installDom(html = "<!doctype html><html><body></body></html>"): 
     };
   }
 
+  // IntersectionObserver and matchMedia are OPT-IN, unlike ResizeObserver above.
+  // Production branches on their absence (`typeof IntersectionObserver ===
+  // "undefined"` in lazy-preview.tsx and history-service-header.tsx, `typeof
+  // window.matchMedia !== "function"` in use-media-query.ts, apply-favicon.ts and
+  // reduced-motion.ts), and those absent-branches are what several tests drive. A
+  // default stub would flip every one of them in every DOM test. The no-op shapes
+  // are what a component that merely CONSTRUCTS one needs: nothing ever
+  // intersects, and the media query never matches. A test that drives either
+  // keeps its own, installed after this.
+  const exposed: string[] = [...EXPOSED];
+  if (intersectionObserver) {
+    win.IntersectionObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+    exposed.push("IntersectionObserver");
+  }
+  if (matchMedia) {
+    win.matchMedia = (query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener() {},
+      removeEventListener() {},
+      addListener() {},
+      removeListener() {},
+    });
+  }
+
   // jsdom's window.scrollTo only reports "not implemented" through the virtual
   // console. The same reasoning as ResizeObserver: there is no layout, so there
   // is nothing to scroll, and the router's scroll restoration calls it on every
@@ -132,7 +172,7 @@ export function installDom(html = "<!doctype html><html><body></body></html>"): 
   // there is no playback to refuse.
   (win.HTMLMediaElement as { prototype: { play: () => Promise<void> } }).prototype.play = () => Promise.resolve();
 
-  for (const key of EXPOSED) {
+  for (const key of exposed) {
     // defineProperty rather than assignment: some of these — `navigator` on
     // Node 26 — are getter-only on globalThis, and a plain `g[key] = …` throws
     // "Cannot set property navigator of #<Object> which has only a getter".
@@ -199,9 +239,13 @@ export function installDom(html = "<!doctype html><html><body></body></html>"): 
  *   enough: nothing here asserts a computed size — that is readout-size's job,
  *   and it is arithmetic with no DOM at all — only that a measurement was used
  *   instead of a fraction of the canvas.
+ * @param intersectionObserver, matchMedia the opt-in stubs installDom takes.
  */
-export function installRenderDom({ clientHeight }: { clientHeight?: number } = {}): () => void {
-  const teardown = installDom();
+export function installRenderDom({
+  clientHeight,
+  ...platformStubs
+}: { clientHeight?: number } & PlatformStubs = {}): () => void {
+  const teardown = installDom(undefined, platformStubs);
   const g = globalThis as unknown as Record<string, unknown>;
 
   if (clientHeight !== undefined) {
@@ -488,4 +532,30 @@ export async function unmountAndTeardown(
   cleanup();
   await settle();
   teardown();
+}
+
+/**
+ * Forget everything the renderer's two module-level caches learned in the last case.
+ *
+ * Both outlive a test case, because a test file shares one module registry across
+ * every case in it. The stage state (`use-stage-state.ts`) keeps its snapshot and its
+ * subscribers; the SSE client (`lib/api.ts`) keeps the last frame of every hydrated
+ * channel and replays it into the next subscriber, and any read still in flight.
+ * Clearing one without the other is the half-reset a file fails on only when its
+ * cases run in the wrong order: the next case starts with a stage state that is
+ * already loaded, or a frame it never sent. Call it in `afterEach`:
+ *
+ *   afterEach(async () => {
+ *     cleanup();
+ *     await resetClientCaches();
+ *   });
+ *
+ * Both modules are imported here, when called, not at the top: they bind to the
+ * DOM global when they load, and this module is imported before installDom has run.
+ */
+export async function resetClientCaches(): Promise<void> {
+  const { __resetForTests } = await import("./main/use-stage-state.js");
+  const { __resetReplayCacheForTests } = await import("./lib/api.js");
+  __resetForTests();
+  __resetReplayCacheForTests();
 }

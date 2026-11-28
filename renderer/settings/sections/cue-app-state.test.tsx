@@ -25,18 +25,10 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { installRenderDom } from "../../test-dom.js";
 
-const teardown = installRenderDom();
+import type { Rule } from "@main/types/automation";
+import { rule as ruleOf } from "../../test-fixtures/automation-rules.js";
 
-interface StubRule {
-  id: string;
-  name: string;
-  enabled: boolean;
-  trigger: { id: string; params: Record<string, string | number> };
-  conditions: never[];
-  action: { id: string; params: Record<string, string | number> };
-  cooldownSec: number;
-  oncePerService: boolean;
-}
+const teardown = installRenderDom();
 
 const CALL_TRIGGER_ID = "call.by-name";
 
@@ -88,30 +80,24 @@ const REGISTRY = {
 };
 
 /** A cue running a REAPER transport command. */
-const transport = (name: string, command: string, params: Record<string, string> = {}): StubRule => ({
+const transport = (name: string, command: string, params: Record<string, string> = {}): Rule => ruleOf({
   id: `rule-${name}`,
   name,
   enabled: true,
   trigger: { id: CALL_TRIGGER_ID, params: { name, says: name, ...params } },
-  conditions: [],
   action: { id: "reaper.transport", params: { command } },
-  cooldownSec: 0,
-  oncePerService: false,
 });
 
 /** A cue hiding or unhiding a ProVideoPlayer layer. */
-const pvpCue = (name: string, action: string, layer: string, params: Record<string, string> = {}): StubRule => ({
+const pvpCue = (name: string, action: string, layer: string, params: Record<string, string> = {}): Rule => ruleOf({
   id: `rule-${name}`,
   name,
   enabled: true,
   trigger: { id: CALL_TRIGGER_ID, params: { name, says: name, ...params } },
-  conditions: [],
   action: { id: action, params: { layer } },
-  cooldownSec: 0,
-  oncePerService: false,
 });
 
-let RULES: StubRule[] = [];
+let RULES: Rule[] = [];
 /** What `GET /api/pvp/status` says PVP currently has. */
 let PVP_LAYERS: string[] = [];
 /** What `integrations:list` says is set up. */

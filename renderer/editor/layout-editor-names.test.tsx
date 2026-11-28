@@ -10,7 +10,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { installRenderDom, settle, unmountAndTeardown } from "../test-dom.js";
+import { installRenderDom, resetClientCaches, settle, unmountAndTeardown } from "../test-dom.js";
 import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 import { NoStream } from "../test-fixtures/no-stream.js";
 
@@ -23,8 +23,6 @@ const React = await import("react");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { TooltipProvider } = await import("../components/ui/index.js");
 const { LayoutEditor } = await import("./layout-editor.js");
-const { __resetForTests: resetStageState } = await import("../main/use-stage-state.js");
-const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 // The editor calls useBlocker, which needs a router in context even when
 // nothing navigates.
 const { RouterContextProvider, createRouter, createRootRoute, createMemoryHistory } =
@@ -35,10 +33,9 @@ const testRouter = createRouter({
 });
 
 after(() => unmountAndTeardown(cleanup, teardown));
-afterEach(() => {
+afterEach(async () => {
   cleanup();
-  resetStageState();
-  resetReplayCache();
+  await resetClientCaches();
 });
 
 const VIEW: View = {

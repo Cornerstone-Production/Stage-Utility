@@ -23,6 +23,7 @@ const teardown = installDom();
 const { act, render, cleanup, screen } = await import("@testing-library/react");
 const React = await import("react");
 const { SplDetailOnPage } = await import("../../test-fixtures/spl-detail.js");
+const { unmountAndTeardown } = await import("../../test-dom.js");
 
 const T0 = Date.parse("2026-09-17T20:15:00.000Z");
 const MIN = 60_000;
@@ -154,11 +155,7 @@ beforeEach(() => {
   KEY = `svc${++keyN}:1:1`;
 });
 afterEach(cleanup);
-after(async () => {
-  cleanup();
-  for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve));
-  teardown();
-});
+after(() => unmountAndTeardown(cleanup, teardown));
 
 describe("switching records", () => {
   test("the previous service's line is gone before the new one arrives", async () => {

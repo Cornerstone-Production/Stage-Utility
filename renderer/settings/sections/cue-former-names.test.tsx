@@ -28,18 +28,10 @@ import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { installRenderDom } from "../../test-dom.js";
 
-const teardown = installRenderDom();
+import type { Rule } from "@main/types/automation";
+import { rule as ruleOf } from "../../test-fixtures/automation-rules.js";
 
-interface StubRule {
-  id: string;
-  name: string;
-  enabled: boolean;
-  trigger: { id: string; params: Record<string, string | number> };
-  conditions: never[];
-  action: { id: string; params: Record<string, string | number> };
-  cooldownSec: number;
-  oncePerService: boolean;
-}
+const teardown = installRenderDom();
 
 const CALL_TRIGGER_ID = "call.by-name";
 
@@ -61,7 +53,7 @@ const REGISTRY = {
   actions: [{ id: "log.message", label: "Write a log message", params: [] }],
 };
 
-let RULES: StubRule[] = [];
+let RULES: Rule[] = [];
 /** Every request the stub was handed, so a PATCH body can be read back. */
 let requests: { url: string; method: string; body: string | null }[] = [];
 
@@ -119,15 +111,12 @@ async function mount() {
 }
 
 /** A renamed cue: it answers to `screens_on` and still to `projectors_on`. */
-const renamed = (aliases = "projectors_on"): StubRule => ({
+const renamed = (aliases = "projectors_on"): Rule => ruleOf({
   id: "rule-1",
   name: "Screens ON",
   enabled: true,
   trigger: { id: CALL_TRIGGER_ID, params: { name: "screens_on", says: "the screens", aliases } },
-  conditions: [],
   action: { id: "log.message", params: { message: "x" } },
-  cooldownSec: 0,
-  oncePerService: false,
 });
 
 /** The former names the row says, as one string. */
