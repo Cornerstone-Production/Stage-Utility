@@ -2475,7 +2475,8 @@ describe("a patch that could not be read, read again", () => {
     return (JSON.parse((await visit(h.page, secret, "plot/p-0")).body) as PublishedPlot).items.find((it) => it.id === "c-sb1")!;
   };
   const RETRY = { firstMs: 20, maxMs: 80 };
-    test("is retried on a backoff with no event at all; once it reads, said once, and the venue that links it is sent again", async () => {
+
+  test("is retried on a backoff with no event at all; once it reads, said once, and the venue that links it is sent again", async () => {
     const lines: string[] = [];
     const spies = (["log", "warn", "error"] as const).map((level) => mock.method(console, level, (...a: unknown[]) => void lines.push(a.map(String).join(" "))));
     try {

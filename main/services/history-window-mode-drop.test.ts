@@ -26,7 +26,6 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
-
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-history-window-drop-"));
 process.env.STAGE_UTILITY_DATA = TMP;
 process.env.HOME = path.join(TMP, "home");
