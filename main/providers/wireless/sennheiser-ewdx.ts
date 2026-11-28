@@ -12,7 +12,6 @@
 // the base's device/name ping + watchdog handle liveness. SENNHEISER_DEBUG=1 logs frames.
 
 import { SennheiserSscBase, buildQuery, clampBars, formatSscFrequency, numOrNull, readPath } from "./sennheiser-ssc.js";
-import type { ConfigField } from "../../types/integrations.js";
 
 type EwdxModel = "EM2" | "EM4" | "CHG70N";
 const SUBSCRIBE_LIFETIME_S = 15; // renewed each poll tick (default 3s) — well within lifetime
@@ -20,24 +19,6 @@ const SUBSCRIBE_LIFETIME_S = 15; // renewed each poll tick (default 3s) — well
 export class SennheiserEwDx extends SennheiserSscBase {
   readonly id = "sennheiser-ewdx";
   readonly label = "Sennheiser EW-DX";
-  readonly configSchema: ConfigField[] = [
-    {
-      key: "host",
-      label: "Device IP / Hostname",
-      type: "text",
-      placeholder: "192.168.1.120",
-    },
-    {
-      key: "model",
-      label: "Model",
-      type: "select",
-      options: [
-        { value: "EM4", label: "EW-DX EM4 (4 channels)" },
-        { value: "EM2", label: "EW-DX EM2 (2 channels)" },
-        { value: "CHG70N", label: "CHG 70N charger (2 bays)" },
-      ],
-    },
-  ];
   protected readonly defaultChannels = 4;
   protected readonly defaultDeviceType = "receiver" as const;
 

@@ -4,7 +4,6 @@
 // online = socket connected && channel not RF-muted.
 // Audio metering arrives as periodic REP {ch} AUDIO_IN_LVL {value} messages.
 
-import type { ConfigField } from "../../types/integrations.js";
 import {
   ShureBaseProvider,
   clamp,
@@ -16,26 +15,6 @@ import {
 export class ShurePsm extends ShureBaseProvider {
   readonly id = "shure-psm";
   readonly label = "Shure PSM (In-Ear)";
-  readonly configSchema: ConfigField[] = [
-    {
-      key: "host",
-      label: "Device IP / Hostname",
-      type: "text",
-      placeholder: "192.168.1.101",
-    },
-    {
-      key: "port",
-      label: "TCP Port",
-      type: "number",
-      placeholder: "2202",
-    },
-    {
-      key: "channels",
-      label: "Number of Channels",
-      type: "number",
-      placeholder: "2",
-    },
-  ];
 
   protected readonly defaultChannels = 2;
   protected readonly defaultDeviceType = "iem" as const;

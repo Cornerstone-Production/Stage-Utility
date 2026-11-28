@@ -28,6 +28,8 @@ const RAMP_MS = 120_000;
 const RAMP_WINDOW_MS = 3_600_000;
 /** Nothing to watch today. Wake up occasionally and re-read the schedule. */
 const DORMANT_MS = 1_800_000;
+/** The longest nextPoll ever waits. */
+export const SLOWEST_POLL_MS = DORMANT_MS;
 
 export interface PollDecision {
   /** How long until the next wake-up. Always finite and positive. */

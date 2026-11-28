@@ -2,12 +2,11 @@
 // no data emitted. Selecting it leaves the connection in "disconnected" state.
 
 import type { DeviceChannel, DeviceProvider, DeviceStatus } from "../../types/devices.js";
-import type { ConfigField, ConnectionState } from "../../types/integrations.js";
+import type { ConnectionState } from "../../types/integrations.js";
 
 export class NoneProvider implements DeviceProvider {
   readonly id = "none";
   readonly label = "None";
-  readonly configSchema: ConfigField[] = [];
 
   async connect(_cfg: Record<string, unknown>): Promise<void> {
     // No-op: NoneProvider never connects.

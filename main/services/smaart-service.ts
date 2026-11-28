@@ -12,7 +12,12 @@ import { errorMessage } from "./errors.js";
 import type { SplMetricsDTO } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 import { StatusIntegration } from "./integration-base.js";
-import { ModernSmaartAdapter, type SmaartInput, type SplReading } from "./smaart-protocol.js";
+import { ModernSmaartAdapter, type SmaartAdapter, type SmaartInput, type SplReading } from "./smaart-protocol.js";
+
+/** The one seam: tests drive the connect path without a Smaart. */
+export const smaartDeps: { adapter: (host: string, port: number) => SmaartAdapter } = {
+  adapter: (host, port) => new ModernSmaartAdapter(host, port),
+};
 /** Trailing throttle for broadcasts — 4 Hz is smooth for a numeric readout. */
 const BROADCAST_THROTTLE_MS = 250;
 /** Per-stream frame rate requested from Smaart (≤ 8). */
@@ -29,7 +34,7 @@ class SmaartService extends StatusIntegration<SplMetricsDTO> {
   private port: number | null = null;
   private password: string | null = null;
 
-  private adapter: ModernSmaartAdapter | null = null;
+  private adapter: SmaartAdapter | null = null;
   private streamClosers: (() => void)[] = [];
 
   private dirty = false;
@@ -88,12 +93,15 @@ class SmaartService extends StatusIntegration<SplMetricsDTO> {
 
   protected async connect(): Promise<void> {
     if (!this.running || !this.host || !this.port) return;
-    const adapter = new ModernSmaartAdapter(this.host, this.port);
+    const run = this.run;
+    const adapter = smaartDeps.adapter(this.host, this.port);
     this.adapter = adapter;
     try {
       await adapter.connect({ password: this.password });
       const inputs = await adapter.listInputs();
-      if (!this.running) {
+      // The run, not `running`: a reconfigure restarts inside these awaits, and
+      // this adapter belongs to the host the operator moved away from.
+      if (!this.current(run)) {
         adapter.close();
         return;
       }
@@ -116,17 +124,26 @@ class SmaartService extends StatusIntegration<SplMetricsDTO> {
       );
       this.publish(this.last, true);
     } catch (err) {
+      // teardown() closes the old adapter on a reconfigure, so its read rejects
+      // here. That is not the new host's failure: report, blank and reschedule
+      // nothing, or the reconnect would later replace the live adapter unclosed.
+      if (!this.current(run)) {
+        adapter.close();
+        return;
+      }
       const msg = errorMessage(err);
-      if (this.attempt === 0) console.warn(`[smaart] ${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);
+      this.noteOutage(`${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);
       this.report("error", `Can't reach ${this.host}:${this.port} — ${msg}`);
-      adapter.close();
+      // Let go of the adapter before closing it, so a stream close it fires is
+      // read as superseded (onStreamClose) rather than as a second drop.
       if (this.adapter === adapter) this.adapter = null;
+      adapter.close();
       this.goOffline();
       this.scheduleReconnect();
     }
   }
 
-  private openStreams(adapter: ModernSmaartAdapter, inputs: SmaartInput[]): void {
+  private openStreams(adapter: SmaartAdapter, inputs: SmaartInput[]): void {
     this.teardownStreams();
     for (const inp of inputs) {
       const id = meterId(inp.deviceName, inp.channelName);
@@ -157,12 +174,12 @@ class SmaartService extends StatusIntegration<SplMetricsDTO> {
   }
 
   /** A stream dropped — if we're still meant to be running, reconnect the lot. */
-  private onStreamClose(adapter: ModernSmaartAdapter): void {
+  private onStreamClose(adapter: SmaartAdapter): void {
     if (!this.running || this.adapter !== adapter) return;
-    if (this.attempt === 0) console.warn("[smaart] stream closed — reconnecting");
+    this.noteOutage("stream closed — reconnecting");
     this.teardownStreams();
-    adapter.close();
     if (this.adapter === adapter) this.adapter = null;
+    adapter.close();
     this.report("error", "Smaart stream dropped — reconnecting");
     this.goOffline();
     this.scheduleReconnect();

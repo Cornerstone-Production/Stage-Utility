@@ -44,10 +44,13 @@ Where a driver needs a password — Spectera's base-station API password — it 
 kept in the encrypted `secrets.bin`, not in `wireless-connections.json`, so it is
 excluded from config snapshots like every other credential. The API and the SSE
 channel report it as `••••` when set and `""` when not; saving the mask back
-leaves it unchanged, and saving an empty value clears it. It is only sent to the
+leaves it unchanged, and saving an empty value clears it, which `/log` records
+as `[wireless] cleared the stored password on <connection>`. A value that is not
+a string is ignored, with a line saying so. It is only sent to the
 address it was entered for: changing the connection's host, port or provider
 clears it unless the same change types it again, the panel says so, and `/log`
-records `[wireless] cleared the stored password on <connection>`.
+records `[wireless] cleared the stored password on <connection>: its address
+changed from ... to ...`.
 
 ## Setup
 
@@ -58,7 +61,8 @@ control / telemetry (Shure networked gear uses TCP 2202).
 
 **In Stage:** Settings → Integrations → **Wireless Gear** → enable the master
 toggle → **Add connection** → pick the provider, name it, and enter Device IP,
-TCP Port, and Number of Channels → enable it → **Test connection**. The global
+TCP Port, and Number of Channels (Number of Bays for an SBC charger: two per
+SBC220, up to four linked behind one IP) → enable it → **Test connection**. The global
 meter rate is set once and applies to all wireless gear.
 
 **On a layout:** add object → wireless:
@@ -160,3 +164,23 @@ window — so gear nobody is looking at is not polled hard all week. Opening the
 Wireless Gear panel overrides that: while you are watching, retries stay brisk
 regardless of the window, so a pack you are waiting on comes back promptly rather
 than on the dormant schedule.
+
+A device that goes away without closing its connection is noticed rather than
+left reading its last figures. Shure links send a heartbeat every minute on top
+of TCP keep-alive; Sennheiser SSC receivers are marked offline after 8 s with no
+reply. Spectera's telemetry arrives on a receive-only stream, so a stream that
+carries nothing for 20 s is followed by one request to the base station: any
+answer means it is idle and stays connected, no answer within 10 s marks its
+packs offline and starts the retries. How often a quiet Spectera base station
+sends on its own has not been measured on hardware, which is why silence alone
+never marks it offline.
+
+A failed link is logged once per outage rather than once per retry, tagged by
+driver and naming the device's address: a refused Spectera password
+(`[spectera] 192.168.1.130:443 refused the API password (HTTP 401) ...`), a
+Sennheiser receiver that stops answering for 8 s, a Shure socket error or
+timeout. A run of the same failure stays quiet, with a reminder every 15
+minutes, and a different failure is logged when it starts. Once the device has
+answered steadily for two minutes, `[<driver>] working again after N failed
+attempts` closes the run. Raw protocol traffic is logged only with
+`SHURE_DEBUG=1`, `SENNHEISER_DEBUG=1` or `SPECTERA_DEBUG=1` set.

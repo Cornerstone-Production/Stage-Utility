@@ -16,10 +16,10 @@
 // is shared here. Set SENNHEISER_DEBUG=1 to log every raw datagram in/out.
 
 import { clamp } from "../../services/clamp.js";
+import { scrub } from "../../services/scrub.js";
 import * as dgram from "node:dgram";
 
 import type { DeviceChannel, DeviceProvider } from "../../types/devices.js";
-import type { ConfigField } from "../../types/integrations.js";
 import { DeviceProviderBase, blankChannel, type ChannelState } from "./device-provider-base.js";
 
 export const SSC_DEFAULT_PORT = 45;
@@ -36,7 +36,6 @@ export const SSC_DEBUG = !!process.env.SENNHEISER_DEBUG;
 export abstract class SennheiserSscBase extends DeviceProviderBase implements DeviceProvider {
   abstract readonly id: string;
   abstract readonly label: string;
-  abstract readonly configSchema: ConfigField[];
   /** Default channel count when cfg.channels is not supplied. */
   protected abstract readonly defaultChannels: number;
   /** Default device type for channels; charger subclasses override per-channel. */
@@ -50,12 +49,18 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
   private socket: dgram.Socket | null = null;
   private running = false;
 
-  private pingTimer: ReturnType<typeof setInterval> | null = null;
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
-  private watchdog: ReturnType<typeof setTimeout> | null = null;
   private reconnectMs = RECONNECT_BASE_MS;
 
   protected channels = new Map<string, ChannelState>();
+
+  protected logTag(): string {
+    return `[sennheiser:${this.id}]`;
+  }
+
+  /** The receiver as a log line names it. */
+  private where(): string {
+    return `${scrub(this.host ?? "?")}:${this.port}`;
+  }
 
   async connect(cfg: Record<string, unknown>): Promise<void> {
     this.host = typeof cfg.host === "string" && cfg.host.trim() ? cfg.host.trim() : null;
@@ -64,13 +69,14 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
     const rate = numOr(cfg.meterRateMs, POLL_INTERVAL_MS);
     this.meterRateMs = rate >= 500 ? rate : POLL_INTERVAL_MS;
     this.initChannels();
+    this.forgetFailures();
     this.running = true;
     this.open();
   }
 
   async disconnect(): Promise<void> {
     this.running = false;
-    this.clearTimers();
+    this.stopAllTimers();
     this.markAllOffline();
     this.closeSocket();
     this.setState("disconnected");
@@ -140,8 +146,12 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
     this.socket = sock;
 
     sock.on("message", (msg: Buffer) => this.onDatagram(msg.toString("utf8")));
-    sock.on("error", (err: Error) => {
-      if (SSC_DEBUG) console.log(`[sennheiser:${this.id}] socket error: ${err.message}`);
+    sock.on("error", (err: NodeJS.ErrnoException) => {
+      this.reportFailure(`socket ${err.code ?? err.message}`, `${this.where()} socket error: ${scrub(err.message)}`);
+      // The link's ping, poll and watchdog go with its socket; the retry brings
+      // new ones. Left running, the watchdog reported the same outage again as
+      // "has not answered".
+      this.stopLinkTimers();
       this.closeSocket();
       this.markAllOffline();
       if (this.running) {
@@ -160,7 +170,7 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
     try {
       sock.bind();
     } catch (err) {
-      if (SSC_DEBUG) console.log(`[sennheiser:${this.id}] bind failed: ${String(err)}`);
+      this.reportFailure("bind", `could not open a UDP socket for ${this.where()}: ${scrub(String(err))}`);
       this.setState("error");
       this.scheduleReconnect();
     }
@@ -182,34 +192,47 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
       // Any valid frame proves the device is alive → connected + reset watchdog.
       this.reconnectMs = RECONNECT_BASE_MS;
       this.setState("connected");
-      this.armWatchdog();
+      this.reportWorking();
+      this.armSilenceWatchdog();
       try {
         this.handleFrame(msg as Record<string, unknown>);
+        this.reportWorking("frame");
       } catch (err) {
-        if (SSC_DEBUG) console.log(`[sennheiser:${this.id}] parse error: ${String(err)}`);
+        // Not a link failure — the receiver answered — so on its own key, where
+        // it can neither end an outage nor be hidden by one.
+        this.reportFailure("parse", `${this.where()} sent a frame this driver could not read: ${scrub(String(err))}`, "frame");
       }
     }
   }
 
   private startTimers(): void {
-    this.clearTimers();
+    this.stopLinkTimers();
     // Liveness probe: a GET on the device name is harmless and universally answered.
-    this.pingTimer = setInterval(() => this.send({ device: { name: null } }), PING_INTERVAL_MS);
-    this.pollTimer = setInterval(() => this.onPoll(), this.meterRateMs);
-    this.armWatchdog();
+    this.every("ping", PING_INTERVAL_MS, () => this.send({ device: { name: null } }));
+    this.every("poll", this.meterRateMs, () => this.onPoll());
+    this.armSilenceWatchdog();
     // Prime immediately.
     this.send({ device: { name: null } });
     this.onPoll();
   }
 
   // Silence for RESPONSE_TIMEOUT_MS ⇒ treat as offline (device unplugged / wrong IP).
-  private armWatchdog(): void {
-    if (this.watchdog) clearTimeout(this.watchdog);
-    this.watchdog = setTimeout(() => {
+  private armSilenceWatchdog(): void {
+    this.armWatchdog(RESPONSE_TIMEOUT_MS, () => {
       if (!this.running) return;
-      this.markAllOffline();
-      this.setState("error");
-    }, RESPONSE_TIMEOUT_MS);
+      this.reportFailure(
+        "silent",
+        `${this.where()} has not answered for ${RESPONSE_TIMEOUT_MS / 1000}s; marking its channels offline. ` +
+          "Check the address, and that the receiver's network control is on.",
+      );
+      // Channels go offline once per silence; the report repeats so the outage
+      // log can remind (it stays quiet between reminders).
+      if (this.getConnectionState() !== "error") {
+        this.markAllOffline();
+        this.setState("error");
+      }
+      this.armSilenceWatchdog();
+    });
   }
 
   private scheduleReconnect(): void {
@@ -220,14 +243,6 @@ export abstract class SennheiserSscBase extends DeviceProviderBase implements De
       this.initChannels();
       this.open();
     });
-  }
-
-  private clearTimers(): void {
-    for (const t of [this.pingTimer, this.pollTimer]) if (t) clearInterval(t);
-    if (this.watchdog) clearTimeout(this.watchdog);
-    this.pingTimer = this.pollTimer = null;
-    this.watchdog = null;
-    this.clearReconnect();
   }
 
   private closeSocket(): void {

@@ -22,7 +22,7 @@ import {
   sortGames,
   type ScoreBaseline,
 } from "./scores-parse.js";
-import { nextPoll } from "./scores-schedule.js";
+import { SLOWEST_POLL_MS, nextPoll } from "./scores-schedule.js";
 import { scoresStore } from "./scores-store.js";
 import {
   LEAGUES,
@@ -99,6 +99,12 @@ class ScoresService extends StatusIntegration<ScoresStatusDTO> {
     return this.favourites.length > 0;
   }
 
+  /** Outlasts the slowest poll (half an hour between games), so an ESPN failing
+   *  on alternate polls is one outage. A recovery is said up to an hour late. */
+  protected override get outageSettleMs(): number {
+    return 2 * SLOWEST_POLL_MS;
+  }
+
   configure(favourites: ScoreFavourite[]): void {
     this.favourites = favourites;
     // The baseline is keyed by game and team, so a favourites change invalidates
@@ -133,6 +139,7 @@ class ScoresService extends StatusIntegration<ScoresStatusDTO> {
 
   protected async connect(): Promise<void> {
     if (!this.running || !this.configured) return;
+    const run = this.run;
 
     // WHICH DAYS TO ASK FOR.
     //
@@ -186,7 +193,9 @@ class ScoresService extends StatusIntegration<ScoresStatusDTO> {
         }
       }
     }
-    if (!this.running) return;
+    // The run, not `running`: a change to the followed teams restarts inside
+    // these awaits, and the old list's games must not become the new baseline.
+    if (!this.current(run)) return;
 
     // A slate we could not read this time keeps whatever it last said about
     // being live. Otherwise one failed request would end the carry and drop the
@@ -253,9 +262,7 @@ class ScoresService extends StatusIntegration<ScoresStatusDTO> {
   }
 
   private fail(message: string): void {
-    if (this.attempt === 0) {
-      console.warn(`[scores] ESPN unreachable (${message}) — backing off quietly`);
-    }
+    this.noteOutage(`ESPN unreachable (${message}) — backing off quietly`);
     this.report("error", message);
     // The scores we last had are kept and marked stale rather than blanked:
     // a display going empty reads as "no games", which is a different and wrong
