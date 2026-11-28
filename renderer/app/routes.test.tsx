@@ -9,11 +9,37 @@ const teardown = installDom();
 
 const { DESTINATIONS, SETTINGS_DESTINATIONS, ALL_DESTINATIONS, destinationsById } = await import("./destinations.js");
 const { DEFAULT_SIDEBAR, SIDEBAR_PAGE_IDS, resolveSidebar } = await import("@main/services/sidebar-arrangement");
+const { PlanRoute } = await import("./settings-routes.js");
+const { readinessChecks } = await import("./home/readiness.js");
 const { isOperatorPath } = await import("../../main/services/routes/operator-paths.js");
 const { OPERATOR_PATHS } = await import("../../main/services/routes/operator-paths.js");
 
 after(() => {
   teardown();
+});
+
+describe("readiness checks point at a page that can flash their target", () => {
+  // Home's "What is not ready" list sends the operator to `route` and then flashes
+  // `flash` there. Home itself is the grid, so a check that routes to "/" has no
+  // target to find: the flash gives up quietly and the operator lands on a page
+  // that never answers. "A plan selected" did exactly this after the plan picker
+  // moved out to /plan.
+  const failing = readinessChecks({ pcoConfigured: false, planId: null, views: [], outputs: [] } as unknown as StageState, []);
+
+  test("every failing check names a destination that is not Home", () => {
+    for (const c of failing) {
+      const dest = ALL_DESTINATIONS.find((d) => d.path === c.route);
+      assert.ok(dest, `${c.id} sends the operator to ${c.route}, which is not a destination`);
+      assert.notEqual(dest.path, "/", `${c.id} sends the operator to Home, which carries no flash target`);
+    }
+  });
+
+  test("A plan selected goes to the page that draws the plan picker", () => {
+    const route = failing.find((c) => c.id === "plan")?.route;
+    const planPage = ALL_DESTINATIONS.find((d) => d.Component === PlanRoute);
+    assert.ok(planPage, "no destination draws PlanRoute");
+    assert.equal(route, planPage.path);
+  });
 });
 
 describe("operator destinations", () => {

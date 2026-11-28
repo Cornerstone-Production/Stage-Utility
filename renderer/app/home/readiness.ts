@@ -88,7 +88,8 @@ export function readinessChecks(
       // and that is the only time anyone sees this list.
       detail: state.planTitle ?? (state.pcoConfigured ? "no plan chosen" : "connect Planning Center first"),
       ok: !!state.planId,
-      route: "/",
+      // The plan picker has its own page; Home is the grid and has no such control.
+      route: "/plan",
       flash: "plan-selection",
     },
     {

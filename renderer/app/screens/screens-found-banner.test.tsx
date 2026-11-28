@@ -183,6 +183,18 @@ describe("the gap under the cards", () => {
   });
 });
 
+describe("the flash targets other pages point at", () => {
+  test("A view of your own: Home's readiness check and Getting Started land on the New view row", async () => {
+    // Both flash "views-list". It named the Views tab's list until the views were
+    // folded into this page; nothing carried the id after that, so the flash gave
+    // up quietly. The target is the row holding the control that fixes it.
+    await mountScreens();
+    const target = document.querySelector('[data-flash-id="views-list"]');
+    assert.ok(target, "nothing on the Screens page carries data-flash-id=views-list");
+    assert.ok(within(target as HTMLElement).getByRole("button", { name: "New view" }), "the target does not hold the New view button");
+  });
+});
+
 describe("the found-screens banner", () => {
   test("names one screen found, with what it is and where", async () => {
     seen = [PI];
