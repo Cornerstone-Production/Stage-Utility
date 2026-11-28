@@ -84,11 +84,24 @@ test("OBS: the replaced host's handshake failing is not the new host's failure",
   const reports: { state: string; message: string | null }[] = [];
   obsService.setConnectionListener((state, message) => reports.push({ state, message }));
   const gone = await refusingPort();
+  // Seen when the old handshake's failure reaches the catch and asks whether
+  // its run is still current — or, with that check gone, when it reports.
+  let staleHandled = false;
+  const svc = obsService as unknown as { current(run: number): boolean };
+  const realCurrent = svc.current.bind(obsService);
+  svc.current = (run: number) => {
+    const now = realCurrent(run);
+    if (!now) staleHandled = true;
+    return now;
+  };
+  t.after(() => {
+    delete (svc as { current?: unknown }).current;
+  });
 
   obsService.configure("127.0.0.1", gone, null);
   obsService.configure("127.0.0.1", fake.port, null); // before the first handshake can finish
   await until(() => obsService.getLatest().connected, "the new host to connect");
-  await new Promise((r) => setTimeout(r, 100)); // the old handshake's rejection lands
+  await until(() => staleHandled || reports.some((r) => r.state === "error"), "the old handshake's failure to land");
 
   assert.deepEqual(
     reports.filter((r) => r.state === "error"),
@@ -109,7 +122,9 @@ test("OBS: a failure after the handshake is one line and one retry", async (t) =
 
   obsService.configure("127.0.0.1", fake.port, null);
   await until(() => delays.length > 0, "the retry");
-  await new Promise((r) => setTimeout(r, 50));
+  // A second line and retry, when there is one, come from the same catch in the
+  // same tick; a few turns is margin, not a wait for something in flight.
+  for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
 
   assert.equal(lines.length, 1, `one failure wrote ${lines.length} lines:\n${lines.join("\n")}`);
   assert.equal(delays.length, 1, `one failure queued ${delays.length} retries`);

@@ -244,11 +244,12 @@ test("YouTube: a channel failing on alternate idle polls is one outage", async (
     if (!ytUp) throw new Error("fetch failed");
     return { ok: true, status: 200, json: async () => ({ items: [] }) } as unknown as Response;
   }) as typeof fetch;
+  const quietLog = console.log;
   t.after(() => {
+    console.log = quietLog;
     globalThis.fetch = realGlobalFetch;
     youtubeService.stop();
   });
-  const quietLog = console.log;
   console.log = () => {};
   youtubeService.configure({ mode: "key", apiKey: "k", channel: "UCaaaaaaaaaaaaaaaaaaaaaa", clientId: "", clientSecret: "", refreshToken: "" });
   await settle(); // the first poll fails
@@ -273,11 +274,13 @@ test("Scores: an ESPN failing on alternate dormant polls is one outage", async (
     if (!espnUp) throw new Error("fetch failed");
     return { ok: true, status: 200, json: async () => ({ events: [] }) } as unknown as Response;
   }) as typeof fetch;
+  const { warn, log } = console;
   t.after(() => {
+    console.warn = warn;
+    console.log = log;
     globalThis.fetch = realGlobalFetch;
     scoresService.stop();
   });
-  const { warn, log } = console;
   console.warn = () => {};
   console.log = () => {};
   scoresService.configure([{ league: "mlb", teamId: "1", displayName: "1", abbreviation: "1", logo: null, color: null }]);
