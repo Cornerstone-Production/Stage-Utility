@@ -531,7 +531,7 @@ same dispatcher.
 | POST | `/api/update/apply` \| `/api/update/track` | Install / switch tracks (`{branch: "main" \| "beta"}`; `400` without a string `branch`). Either takes `{override: true}`, below |
 | GET | `/api/update/lock` | `{active, reasons}` — why an update would be refused right now |
 | GET | `/api/update/release-notes` | The running release's notes, for What's new. Always `200`. Found: `{ok: true, version, releaseUrl, source, notes, lines, intro}`, where `source` is `kept` (the notes kept after a Dismiss or an earlier fetch), `notice` (the post-update notice not yet dismissed) or `fetched` (the GitHub release for the running tag, read now and kept), and `keepFailed` (a reason) appears when fetched notes could not be kept, so the next read fetches again. Never the release an update would install. Not found: `{ok: false, version, releaseUrl, reason}`, the reason also logged on `[updater]`; a release whose notes list no changes answers this way too. Reading never dismisses or brings back the post-update dialog |
-| POST | `/api/update/notices/dismiss` \| `/api/update/restart` \| `/api/update/auto` | Dismiss the post-update dialog (`{ok: true}`); its notes stay for What's new / restart (the reply is the update status, plus `relaunchFailure` when this server could not arrange its own relaunch on launchd) / set the automatic-update mode and window (see Settings above) |
+| POST | `/api/update/notices/dismiss` \| `/api/update/restart` \| `/api/update/auto` | Dismiss the post-update dialog (`{ok: true}`); its notes stay for What's new / restart (takes `{override: true}`, below; the reply is the update status, plus `relaunchFailure` when this server could not arrange its own relaunch on launchd) / set the automatic-update mode and window (see Settings above) |
 | GET | `/api/config/export` | The config snapshot as a download, `stage-utility-config-<date>.json`, the date in the app time zone. Credentials are excluded |
 | POST | `/api/config/import` | Apply a snapshot (the bundle itself, or `{bundle, replacesOriginal?}`), then **restart**. This server keeps its own `serverId` and screen bindings unless `replacesOriginal` is `true` in the `{bundle}` wrapper; any other value, and a bare bundle whatever it carries, keeps them ([Restoring a config snapshot](../ops/reliability.md#restoring-a-config-snapshot)). Every file and image is checked first, with the rules its settings routes apply on a save; if any fails, the reply is `400` with `error` naming each and the reason, and nothing is written or cleared ([Restoring a config snapshot](../ops/reliability.md#restoring-a-config-snapshot)). A snapshot carries no credentials, so before writing anything the restore clears each stored one it would send to a new address (an integration, a wireless connection or a pull feed moved, removed, or turned into another kind), logged on `[config-snapshot]`. The reply is `{ok, applied, restarting}`, plus `relaunchFailure` (a reason) when this server could not arrange its own relaunch on launchd |
 | GET / POST | `/api/config/snapshots` | List / save a named snapshot on this machine (`{name}`; saving answers `201`). Each is `{id, name, createdAt, appVersion, fileCount, serverId, carriesScreens, carriesBindings}`: `serverId` is the id of the server it was saved on, or `null`, and the two booleans say whether it holds `settings.json` and `kiosk-devices.json` |
@@ -548,9 +548,10 @@ The import answers what it did and, separately, what it could not do:
 lost the merge — the local run wins, so the correction describing the run that
 did not survive goes with it. Both are empty on a clean import.
 
-**`/api/update/apply` and `/api/update/track` answer `409`** —
-`{error: "locked", locked: true, reasons}` — while a service is live or any
-recorder is running. Pass `{override: true}` to go anyway.
+**`/api/update/apply`, `/api/update/track` and `/api/update/restart` answer `409`** —
+`{error: "locked", locked: true, reasons}` — while a service is under way, as
+`GET /api/update/lock` reports it. Pass `{override: true}` to go anyway; an
+override that goes ahead is logged on `[updater]`.
 
 **Kiosk devices** — see [Kiosk devices](../kiosk-devices.md).
 

@@ -97,15 +97,17 @@ Advanced prints the reasons above them.
 
 Guarded is not disabled. A live service can go wrong and the operator may need to
 restart in the middle of one, so each control still opens a confirm dialog whose
-only way forward is an explicit override. `POST /api/update/apply` and
-`/api/update/track` enforce that on the server too, refusing with `409 locked`
-unless the body carries `override: true`; the two restart controls are guarded by
-the dialog alone.
+only way forward is an explicit override. `POST /api/update/apply`,
+`/api/update/track` and `/api/update/restart` enforce that on the server too,
+refusing with `409 locked` and the reasons unless the body carries
+`override: true`, and an override that goes ahead is logged on `[updater]`. The
+dialog sends the override only once it has been confirmed; a lock that began after
+the page read it is refused by the server, and the dialog asks then.
 
-For that reason a lock that could not be read counts as held for the two restart
-controls: Advanced says it couldn't read the lock, both take the guarded look, and
-pressing one asks first. **Update now** and the track switch keep the server's
-`409` as their check. The failed read is logged on the `[updater]` tag.
+A lock that could not be read counts as held for the two restart controls:
+Advanced says it couldn't read the lock, both take the guarded look, and pressing
+one asks first. **Update now** and the track switch keep the server's `409` as
+their check. The failed read is logged on the `[updater]` tag.
 
 What the lock changes is how the controls read: an amber lock in place of the
 action's own icon, a label saying that pressing it now is an override, and — for
@@ -353,7 +355,7 @@ a path or a credential. If you see one, report it.
 | `[stream-starts]` | The first-seen live timestamp for a streaming platform failing to persist or clear |
 | `[surface-migration]` | A one-time pass that makes a view holding a button a console, and so the screens showing it control surfaces, on an install that predates surfaces: [Upgrading an existing install](../reference/data-model.md#upgrading-an-existing-install) |
 | `[tsl]` | Connection state to a Ross multiviewer over TSL UMD: [Ross MultiViewer](../integrations/ross-tsl.md) |
-| `[updater]` | The update flow described above; a tag held back until its release is published, and the releases being unreadable so none is; What's new failing to read the running release's notes (`could not load the release notes for v<version>: <why>`), or reading them and failing to keep them (`fetched the release notes for v<version> but could not keep them: <why>`); a file `.gitattributes` pins (`-text`) checked out again because, with every CRLF made LF, it was byte for byte the committed file, before the dirty-tree check, and each such file it could not check (`could not check <file> for line ends .gitattributes pins`, with why); and (browser side) the update lock failing to read, and What's new's request for the notes failing (`could not read the release notes for What's new: <why>`) |
+| `[updater]` | The update flow described above; an update, track switch or restart that went ahead of a service under way by override (`… went ahead while a service is under way (…): the update lock was overridden, as asked`); a tag held back until its release is published, and the releases being unreadable so none is; What's new failing to read the running release's notes (`could not load the release notes for v<version>: <why>`), or reading them and failing to keep them (`fetched the release notes for v<version> but could not keep them: <why>`); a file `.gitattributes` pins (`-text`) checked out again because, with every CRLF made LF, it was byte for byte the committed file, before the dirty-tree check, and each such file it could not check (`could not check <file> for line ends .gitattributes pins`, with why); and (browser side) the update lock failing to read, and What's new's request for the notes failing (`could not read the release notes for What's new: <why>`) |
 | `[video-export]` | Exporting video feeds: the count, and whether passwords or relay ports were included: [Moving feeds between servers](../integrations/video-feeds.md#moving-feeds-between-servers) |
 | `[video-import]` | Importing video feeds: how many were added, replaced, kept, already the same or skipped (with the reason), and whether passwords or relay ports were applied: [Moving feeds between servers](../integrations/video-feeds.md#moving-feeds-between-servers) |
 | `[video]` | Relay starts (once per process), exits and restarts, downloads and checksums, port conflicts, a relay left over from the last run, the relay not answering, reconcile and proxy failures, feeds going live, delayed or offline, a pull feed's device not answering the relay's dial or the page's camera check, B-frames detected, a push feed's password rotating, a pull feed's stored password cleared because its address moved to another camera or off an encrypted scheme, or because a new feed landed on the slot of an earlier one, a screen struggling with a feed or playing it smoothly again, and a screen lagging on a feed (holding the delay in its own browser) or no longer; browser-side, a Video widget's feed failing on a screen (once per failing streak: the first failure, a reminder at most every 5 minutes, the recovery), a feed falling back to HLS on a screen and back to WebRTC, a feed refused by a screen's own HLS switch and allowed again, a screen's playback stats failing to read and reading again, and a widget crashing: [Video feeds](../integrations/video-feeds.md#logging) |

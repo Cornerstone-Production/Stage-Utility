@@ -3,7 +3,7 @@ import { availableCount } from "@main/services/update/availability";
 import { useEffect, useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2Icon, RefreshCwIcon, DownloadIcon, CheckCircle2Icon, AlertTriangleIcon, XIcon, RotateCwIcon, LockIcon, FileTextIcon } from "lucide-react";
-import { invoke, onNotification } from "../../lib/api";
+import { invoke, onNotification, type ApiError } from "../../lib/api";
 import { useServerNow } from "../../lib/server-clock";
 import { useFailedReads } from "../../lib/use-failed-reads";
 import {
@@ -362,25 +362,34 @@ export function UpdatesPanel({
   }
 
   async function onRestart() {
-    const doRestart = () =>
-      void invoke<RestartAnswer>("update:restart")
+    /** What the operator is asked before a restart overrides a service under way. */
+    const confirmOverride = (reasons: string[]) =>
+      confirm({
+        title: "Service in progress",
+        message: `Restarting the server would interrupt: ${reasons.join(", ")}. It's safest to wait until the service is over.`,
+        confirmLabel: "Override & restart anyway",
+        destructive: true,
+      });
+    // `override` is sent only after a confirm said so. A lock that started after it was read is refused by the
+    // server with its reasons, and asked about then; asked once, never in a loop.
+    const doRestart = (override = false): void =>
+      void invoke<RestartAnswer>("update:restart", override ? { override: true } : undefined)
         .then((r) => {
           if (r?.relaunchFailure) window.alert(restartOutcome(s?.selfRecovers, "Restarting.", r.relaunchFailure));
         })
-        .catch((e) => window.alert(`Restart failed: ${errorMessage(e)}`));
+        .catch(async (e: unknown) => {
+          const refused = e as Partial<ApiError>;
+          const reasons = refused.status === 409 && Array.isArray(refused.body?.reasons) ? refused.body.reasons.map(String) : null;
+          if (reasons && !override) {
+            if (await confirmOverride(reasons)) doRestart(true);
+            return;
+          }
+          window.alert(`Restart failed: ${errorMessage(e)}`);
+        });
     // Locked during a live service / recording, same as self-update — a manual
     // restart interrupts displays too. Overridable for a genuine emergency.
     if (lock?.active) {
-      if (
-        await confirm({
-          title: "Service in progress",
-          message: `Restarting the server would interrupt: ${lock.reasons.join(", ")}. It's safest to wait until the service is over.`,
-          confirmLabel: "Override & restart anyway",
-          destructive: true,
-        })
-      ) {
-        doRestart();
-      }
+      if (await confirmOverride(lock.reasons)) doRestart(true);
       return;
     }
     if (lockUnread) {
@@ -392,7 +401,7 @@ export function UpdatesPanel({
           destructive: true,
         })
       ) {
-        doRestart();
+        doRestart(true);
       }
       return;
     }

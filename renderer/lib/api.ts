@@ -1221,7 +1221,7 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
       return post<T>("/api/update/track", p);
 
     case "update:restart":
-      return post<T>("/api/update/restart");
+      return post<T>("/api/update/restart", p);
 
     // ── Config snapshot (backup / restore) ───────────────────────────────
     case "backup:getSchedule":
