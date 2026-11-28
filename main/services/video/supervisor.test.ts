@@ -2,13 +2,12 @@ import { strict as assert } from "node:assert";
 import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, beforeEach, describe, it, type TestContext } from "node:test";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-supervisor-"));
-process.env.STAGE_UTILITY_DATA = TMP;
+tempDataDir("stage-video-supervisor-");
 // A generous cap for a file that builds many short-lived supervisors and
 // fake children across its cases — the default is a heuristic tuned for a
 // long-lived server process, not this. RelaySupervisor itself registers only

@@ -14,12 +14,10 @@
 import assert from "node:assert/strict";
 import { describe, it, beforeEach } from "node:test";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-arcmerge-"));
-process.env.STAGE_UTILITY_DATA = TMP;
-process.env.HOME = path.join(TMP, "home");
+tempDataDir("stage-arcmerge-", { home: true });
 
 const { sampleArchive } = await import("./sample-archive.js");
 const { serviceDirPath } = await import("./archive-paths.js");

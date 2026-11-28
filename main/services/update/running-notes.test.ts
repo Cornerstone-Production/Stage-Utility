@@ -9,20 +9,18 @@
 // Every version and change line below is INVENTED. This is a public repository.
 
 import assert from "node:assert/strict";
-import { after, beforeEach, describe, test } from "node:test";
+import { beforeEach, describe, test } from "node:test";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "su-running-notes-"));
-process.env.STAGE_UTILITY_DATA = TMP;
+const TMP = tempDataDir("su-running-notes-");
 
 const { updateNoticesStore } = await import("../update-notices-store.js");
 const { runningReleaseNotes, dismissJustUpdated, sameVersion } = await import("./running-notes.js");
 import type { JustUpdated, UpdateNotices } from "../update-notices-store.js";
 import type { ReleaseInfo } from "./release-check.js";
 
-after(() => fs.rm(TMP, { recursive: true, force: true }).catch(() => {}));
 
 const FILE = path.join(TMP, "update-notices.json");
 

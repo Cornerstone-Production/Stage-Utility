@@ -1,13 +1,10 @@
 import { strict as assert } from "node:assert";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
 import { test } from "node:test";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
 // Before any store is constructed: every import below builds its stores against
 // this directory, never the default data folder.
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-audio-"));
-process.env.STAGE_UTILITY_DATA = TMP;
+tempDataDir("stage-video-audio-");
 const { videoService } = await import("./video-service.js");
 const { loadFeedsFile } = await import("./feed-store.js");
 

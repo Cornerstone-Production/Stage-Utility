@@ -1,11 +1,10 @@
 import { strict as assert } from "node:assert";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), "archive-svc-"));
-process.env.STAGE_UTILITY_DATA = dataDir;
+const dataDir = tempDataDir("archive-svc-");
 
 const { sampleArchive } = await import("./sample-archive.js");
 const { parseRows } = await import("../csv.js");

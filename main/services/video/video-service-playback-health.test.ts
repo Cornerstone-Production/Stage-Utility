@@ -12,16 +12,13 @@
 // video-service.test.ts guard is.
 
 import { strict as assert } from "node:assert";
-import * as fs from "node:fs/promises";
-import * as os from "node:os";
-import * as path from "node:path";
 import { test, type TestContext } from "node:test";
 
 import { captureConsole } from "../fixtures/capture-console.js";
 import { addRelayFeed, report, settle, settleUntil } from "../fixtures/video-playback.js";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-video-playback-health-"));
-process.env.STAGE_UTILITY_DATA = TMP;
+tempDataDir("stage-video-playback-health-");
 
 const { videoService } = await import("./video-service.js");
 const { stageController } = await import("../stage-controller.js");

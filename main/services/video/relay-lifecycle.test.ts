@@ -8,14 +8,13 @@
 import { strict as assert } from "node:assert";
 import { EventEmitter } from "node:events";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, test, type TestContext } from "node:test";
 import { captureConsole } from "../fixtures/capture-console.js";
 import { within } from "../fixtures/within.js";
+import { tempDataDir } from "../fixtures/temp-data-dir.js";
 
-const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-relay-lifecycle-"));
-process.env.STAGE_UTILITY_DATA = TMP;
+const TMP = tempDataDir("stage-relay-lifecycle-");
 
 const { RelayLifecycle, relayConnectionState } = await import("./relay-lifecycle.js");
 const { videoService } = await import("./video-service.js");
