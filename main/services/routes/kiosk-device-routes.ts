@@ -4,7 +4,7 @@
 // redirects to the display it is bound to, or shows the holding screen — so the
 // SD card holds no display number and the server decides what a screen shows.
 
-import { type RouteCtx, json, error, readBody, readBodyOrEmpty } from "./context.js";
+import { type RouteCtx, json, error, readBody, readBodyOrEmpty, readJsonObject } from "./context.js";
 import { BindingsRestoring, bindingWritesHeld, kioskDevicesStore, authorise, claim, release, findById, findByOutput, matchByMac, withoutTokens, pinSecret, setEnabled, updateDevices } from "../kiosk-devices-store.js";
 import { seenDevices, startScan, stopScan, scanning, forgetSeen, rememberSecret, secretFor, rememberScreen, recordHealth, noteSwitchAnswer, takeChange, forgetChange, healthList, forgetHealth, firstSecretMismatch, forgetSecretMismatch, forgetSecret, announceDevices } from "../kiosk-presence.js";
 import { MachineUpdates, minutes, parseCheck, REPORT_TTL_MS } from "../machine-updates.js";
@@ -419,7 +419,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "POST" && pathname === "/api/machine-updates/request") {
-    const body = (await readBody(req)) as Record<string, unknown>;
+    const body = await readJsonObject(req);
     const machine = typeof body.machine === "string" ? body.machine : "";
     if (!machine) {
       error(res, "body.machine is required");
@@ -434,7 +434,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "POST" && pathname === "/api/devices/scan") {
-    const body = (await readBody(req)) as Record<string, unknown>;
+    const body = await readJsonObject(req);
     const holder = typeof body.holder === "string" ? body.holder.slice(0, 64) : "manual";
     if (body.stop === true) stopScan(holder);
     else startScan(holder);
@@ -447,7 +447,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
       const screen = stageController.getOutputs().find((o) => o.id === on);
       return `This device was set up as "${screen?.name ?? on}" meanwhile, so it is not made a new screen. Release it from that screen first.`;
     };
-    const body = (await readBody(req)) as Record<string, unknown>;
+    const body = await readJsonObject(req);
     const id = typeof body.deviceId === "string" ? body.deviceId : "";
     let outputId = typeof body.outputId === "string" ? body.outputId : "";
     if (!id) {
@@ -573,7 +573,7 @@ export async function kioskDeviceRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "POST" && pathname === "/api/devices/release") {
-    const body = (await readBody(req)) as Record<string, unknown>;
+    const body = await readJsonObject(req);
     const id = typeof body.deviceId === "string" ? body.deviceId : "";
     if (!id) {
       error(res, "body.deviceId is required");

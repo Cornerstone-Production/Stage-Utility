@@ -2,7 +2,7 @@
 //
 // Every route must finish responding before it returns (see RouteCtx).
 
-import { type RouteCtx, json, error, readBody, queryFlag, MAX_CONFIG_BODY_BYTES } from "./context.js";
+import { type RouteCtx, json, error, readJsonObject, queryFlag, MAX_CONFIG_BODY_BYTES } from "./context.js";
 import { attachmentDisposition, datedExportFilename } from "../export-filename.js";
 import { isCrossOrigin } from "../http-origin.js";
 import { scrub } from "../scrub.js";
@@ -66,13 +66,13 @@ export async function videoRoutes(c: RouteCtx): Promise<void> {
   // The file's own size is small, but it is the config ceiling every import
   // route here shares, and a file can be edited by hand.
   if (method === "POST" && pathname === "/api/video/import/preview") {
-    const r = await videoService.previewImport(await readBody(req, MAX_CONFIG_BODY_BYTES));
+    const r = await videoService.previewImport(await readJsonObject(req, MAX_CONFIG_BODY_BYTES));
     if (r.ok) json(res, r.preview);
     else error(res, r.error);
     return;
   }
   if (method === "POST" && pathname === "/api/video/import") {
-    const r = await videoService.importFeeds(await readBody(req, MAX_CONFIG_BODY_BYTES));
+    const r = await videoService.importFeeds(await readJsonObject(req, MAX_CONFIG_BODY_BYTES));
     if (r.ok) json(res, r.report);
     else error(res, r.error);
     return;
@@ -85,7 +85,7 @@ export async function videoRoutes(c: RouteCtx): Promise<void> {
   // Saves the path (empty finds it automatically) and checks again; the same
   // value saved twice is "check again".
   if (method === "PATCH" && pathname === "/api/video/ffmpeg") {
-    const r = await setFfmpegPath(await readBody(req));
+    const r = await setFfmpegPath(await readJsonObject(req));
     if (r.ok) {
       // A `-listen` path appears or goes with ffmpeg, and the relay's RTSP
       // listener with it.
@@ -95,13 +95,13 @@ export async function videoRoutes(c: RouteCtx): Promise<void> {
     return;
   }
   if (method === "PATCH" && pathname === "/api/video/ports") {
-    const r = await videoService.setPorts(await readBody(req));
+    const r = await videoService.setPorts(await readJsonObject(req));
     if (r.ok) json(res, { ports: r.ports });
     else error(res, r.error);
     return;
   }
   if (method === "POST" && pathname === "/api/video/feeds") {
-    const r = await videoService.addFeed(await readBody(req));
+    const r = await videoService.addFeed(await readJsonObject(req));
     if (r.ok) json(res, { feed: r.feed }, 201);
     else error(res, r.error);
     return;
@@ -151,7 +151,7 @@ export async function videoRoutes(c: RouteCtx): Promise<void> {
       else error(res, "No such feed", 404);
       return;
     }
-    const r = await videoService.updateFeed(id, await readBody(req));
+    const r = await videoService.updateFeed(id, await readJsonObject(req));
     if (r.ok) json(res, { feed: r.feed });
     else if (r.error === "not-found") error(res, "No such feed", 404);
     else error(res, r.error);

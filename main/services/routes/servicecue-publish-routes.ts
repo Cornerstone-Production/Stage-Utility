@@ -40,7 +40,7 @@ import {
   DEPLOY_SECRET_SLOT,
 } from "../servicecue-deploy-store.js";
 import type { PublishSettingsDTO, PublishTestResult } from "../../types/servicecue-publish-status.js";
-import { type RouteCtx, json, error, readBody } from "./context.js";
+import { type RouteCtx, json, error, readJsonObject } from "./context.js";
 
 /** The token stored for the page at `url`, masked. */
 async function maskedToken(url: string): Promise<string> {
@@ -115,7 +115,7 @@ export async function serviceCuePublishRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "POST" && pathname === "/api/servicecue/publish") {
-    const body = (await readBody(req)) as Record<string, unknown>;
+    const body = await readJsonObject(req);
     const wrong = wrongType(body, [["enabled", "boolean"], ["url", "string"], ["token", "string"]]);
     if (wrong) {
       error(res, wrong);
@@ -126,7 +126,7 @@ export async function serviceCuePublishRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "POST" && pathname === "/api/servicecue/publish/deploy-credentials") {
-    const body = (await readBody(req)) as Record<string, unknown>;
+    const body = await readJsonObject(req);
     const wrong = wrongType(body, [["accountId", "string"], ["token", "string"]]);
     if (wrong) {
       error(res, wrong);
@@ -137,7 +137,7 @@ export async function serviceCuePublishRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "POST" && pathname === "/api/servicecue/publish/deploy") {
-    const body = (await readBody(req)) as Record<string, unknown>;
+    const body = await readJsonObject(req);
     const wrong = wrongType(body, [["confirmDowngrade", "boolean"]]);
     if (wrong) {
       error(res, wrong);
@@ -148,7 +148,7 @@ export async function serviceCuePublishRoutes(c: RouteCtx): Promise<void> {
   }
 
   if (method === "POST" && pathname === "/api/servicecue/publish/test") {
-    const body = (await readBody(req)) as Record<string, unknown>;
+    const body = await readJsonObject(req);
     const saved = await servicecuePublishStore.load();
     const parsed = parsePublishUrl(typeof body.url === "string" && body.url.trim() !== "" ? body.url : saved.url);
     if (!parsed.ok) {

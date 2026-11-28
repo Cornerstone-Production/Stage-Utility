@@ -8,7 +8,7 @@
 
 import { errorMessage } from "../errors.js";
 import { isStringList } from "../../types/is-record.js";
-import { type RouteCtx, json, error, readBody, readJsonObject } from "./context.js";
+import { type RouteCtx, json, error, readJsonObject } from "./context.js";
 import { hostNames } from "../host-names.js";
 import { refuseUnansweredHost } from "./host-name-routes.js";
 import { stageController } from "../stage-controller.js";
@@ -52,7 +52,7 @@ export async function displaySettingsRoutes(c: RouteCtx): Promise<void> {
     // every operator reads the same sidebar. Refused whole, with the reason, when
     // any part breaks a rule: a half-applied arrangement is one nobody made.
     if (method === "POST" && pathname === "/api/sidebar") {
-      const body = await readBody(req);
+      const body = await readJsonObject(req);
       let next;
       try {
         next = validateSidebarArrangement(body);

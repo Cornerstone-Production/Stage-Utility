@@ -13,7 +13,9 @@ browser does; one that does not ask gets it plain.
 
 Failures answer `{error}` with the status that says whose problem it is: `400`
 for a body or query the caller got wrong (a body that is not JSON is a `400` on every route that
-requires one), `409` for something the server cannot
+requires one, `Invalid JSON body`, and so is JSON that is not an object, `null`, an array or a
+string, on every route that reads fields from one, `the body must be a JSON object`; an empty body
+reads as `{}`), `409` for something the server cannot
 do right now (editing a service that is recording), `413` for an over-limit
 body, and `502` for a read that only failed because Planning Center could not be
 reached — every `/api/pco/*` read, plus `/api/service-types`, `/api/plans`,
