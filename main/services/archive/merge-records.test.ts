@@ -449,3 +449,43 @@ test("an incoming recording placed onto an empty record of this box keeps its ow
   const b = { ...boxRecord(5, 10, 7, () => 300), attendanceBaseline: null };
   assert.equal(mergeAttendanceRecord(a, b).record.attendanceBaseline, null);
 });
+
+// ── A baseline that does not fit its own record ─────────────────────────────
+//
+// Recalculate, Edit times and History's merge in v1.9.3 and v1.9.4 (fixed in
+// v1.10.0) wrote an already-baselined value into attendanceBaseline, normally
+// 0, and left the samples alone. Such a record says it counts from 0 while its
+// samples count from wherever the service began, so aligning on it shifts the
+// other recording by the whole morning's entries. The record's own
+// totalAttendance (the raw counter at its last reading, which nothing rewrote)
+// is the evidence: baseline + the last sample should land on it.
+
+test("an import over a record whose baseline does not fit its counts is not shifted, and says why", () => {
+  // This box's 11am: really baselined at raw 500, but a v1.9.3 Recalculate
+  // left attendanceBaseline 0. Its total still reads the raw 520.
+  const corrupted = { ...boxRecord(0, 10, 0, () => 300), attendanceBaseline: 0 };
+  const b = boxRecord(5, 15, 7, () => 300); // the archive's box, honestly baselined at 510
+
+  const { record, frames, implausible } = mergeAttendanceRecord(corrupted, b);
+
+  const series = record.samples!.map((s) => (s as { attendance: number }).attendance);
+  assert.ok(Math.max(...series) < 100, `the archive's samples were shifted by the whole morning: ${series.join(", ")}`);
+  assert.equal(frames, "implausible");
+  assert.match(implausible ?? "", /this box/);
+  assert.equal(record.attendanceBaseline, 0, "this box's baseline is kept as it was");
+});
+
+test("the archive's record can be the implausible one too", () => {
+  const a = boxRecord(0, 10, 0, () => 300);
+  const corrupted = { ...boxRecord(5, 15, 7, () => 300), attendanceBaseline: 0 };
+  const { frames, implausible } = mergeAttendanceRecord(a, corrupted);
+  assert.equal(frames, "implausible");
+  assert.match(implausible ?? "", /archive/);
+});
+
+test("a record a few entries past its last sample still aligns: the last 30 seconds are slack", () => {
+  const a = { ...boxRecord(0, 25, 0, () => 300), totalAttendance: rawAt(25) + 6 };
+  const b = boxRecord(10, 30, 7, () => 300);
+  assert.equal(mergeAttendanceRecord(a, b).frames, "aligned");
+  assert.equal(mergeAttendanceRecord({ ...a, totalAttendance: rawAt(25) + 40 }, b).frames, "implausible");
+});

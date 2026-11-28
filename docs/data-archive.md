@@ -80,9 +80,12 @@ rather than two interleaved twenty people apart. The service figures are
 recomputed over the filled gap: a peak never falls below, and the lowest room
 count never rises above, what either machine recorded itself, and the last
 reading is the later machine's own. A recording too old to carry its start
-count is joined as it stands, an archive sample that is not a reading is left
-out, and the import logs an `[archive]` line for each. Records imported before
-this alignment existed are left as they are.
+count is joined as it stands, and so is one whose start count does not fit
+its own counts (a record last edited on v1.9.3 or v1.9.4 can carry a start
+count of 0 that is not true, or a trimmed record can miss its daily total). An
+archive sample that is not a reading is left out. The import logs an
+`[archive]` line for each. Records imported before this alignment existed are
+left as they are.
 
 Merge deliberately does not combine per-item sound levels where both sides recorded
 the same item — those combine correctly only across disjoint time, and two machines

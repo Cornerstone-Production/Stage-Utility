@@ -110,13 +110,75 @@ interface AttendanceRecord {
 /** What an attendance merge produced, and what it could not do. */
 export interface MergedAttendanceRecord {
   record: AttendanceRecord;
-  /** "unknown" when one side had no usable baseline, so the two series were
-   *  joined as they stood. Returned so the import can say so; see
-   *  alignAttendance. */
-  frames: "aligned" | "unknown";
+  /** "unknown" when one side had no usable baseline, and "implausible" when
+   *  one side's baseline does not fit its own counts (see implausibleBaseline):
+   *  either way the two series were joined as they stood, unshifted. Returned
+   *  so the import can say so. */
+  frames: "aligned" | "unknown" | "implausible";
+  /** For "implausible": which record, and the numbers that gave it away. */
+  implausible?: string;
   /** Incoming samples left out because they were not readings: no string
    *  stamp, or an attendance or occupancy that is not a number. */
   skippedSamples: number;
+}
+
+/**
+ * Why a record's baseline cannot be aligned on, or null when it fits or there is
+ * nothing to judge it by.
+ *
+ * Recalculate, Edit times and History's merge in v1.9.3 and v1.9.4 (fixed in
+ * v1.10.0) wrote an already-baselined value (normally 0) into
+ * attendanceBaseline and left the samples alone. Such a record claims to count
+ * from 0 while its samples count from wherever its service began, and aligning
+ * on it shifts the other recording by every entry before that service.
+ *
+ * The record's own totalAttendance is the evidence. It is the raw counter at
+ * the record's last reading, nothing rewrote it, and the recorder stores each
+ * sample as raw − baseline, so baseline + the latest sample lands on it, give
+ * or take the entries in the last 30 seconds. A record that misses by more
+ * than 10 people or 2% is not aligned on.
+ *
+ * It can also flag a record that is fine: one whose tail a window trim cut
+ * off, so its last sample is older than its total. That costs only what every
+ * import did before this alignment existed (the series joined unshifted) plus
+ * a line on the log, where a wrong shift would have cost a curve off by
+ * hundreds and no word about it. A record with no total, or no readings,
+ * is not judged.
+ */
+export function implausibleBaseline(r: AttendanceRecord): string | null {
+  const base = finiteOrNull(r.attendanceBaseline);
+  const total = finiteOrNull(r.totalAttendance);
+  if (base == null || total == null || total <= 0) return null;
+  const readings = (Array.isArray(r.samples) ? r.samples : []).filter(isReading);
+  const latest = readings.reduce<AttendanceSample | null>(
+    (m, x) => (m == null || Date.parse(x.t) > Date.parse(m.t) ? x : m),
+    null,
+  );
+  if (!latest) return null;
+  const raw = base + latest.attendance;
+  if (Math.abs(total - raw) <= Math.max(10, Math.round(total * 0.02))) return null;
+  return `baseline ${base} + latest sample ${latest.attendance} is ${raw}, but its daily total reads ${total}`;
+}
+
+/**
+ * The merge as it was before frames were aligned, for a record whose baseline
+ * cannot be trusted: samples unioned unshifted (this box's on a clash), the
+ * peaks recomputed over in-service samples and never lowered, everything else
+ * filled, never overwritten. This box's baseline is kept, never filled from
+ * the archive's.
+ */
+function fillOnlyAttendance(mine: AttendanceRecord, theirs: AttendanceRecord, readings: AttendanceSample[]): AttendanceRecord {
+  const own = Array.isArray(mine.samples) ? mine.samples : [];
+  const samples = mergeByKey(own, readings, (x) => x.t).sort((a, b) => a.t.localeCompare(b.t));
+  const out: AttendanceRecord = { ...fillMissingFields(mine, theirs, ["samples", "attendanceBaseline"]), samples };
+  const svc = inServiceSamples(samples);
+  if (svc.length) {
+    const peakOf = (field: "attendance" | "occupancy") =>
+      svc.reduce((m, x) => Math.max(m, finiteOrNull(x[field]) ?? 0), 0);
+    out.peakAttendance = Math.max(finiteOrNull(mine.peakAttendance) ?? 0, peakOf("attendance"));
+    out.peakOccupancy = Math.max(finiteOrNull(mine.peakOccupancy) ?? 0, peakOf("occupancy"));
+  }
+  return out;
 }
 
 /** A sample an import can take: a stamp and two numbers. */
@@ -165,6 +227,18 @@ export function mergeAttendanceRecord(mine: AttendanceRecord, theirs: Attendance
   const incoming: unknown[] = Array.isArray(theirs.samples) ? theirs.samples : [];
   const readings = incoming.filter(isReading);
   const skippedSamples = incoming.length - readings.length;
+  const suspect = [
+    { who: "this box's record", why: implausibleBaseline(mine) },
+    { who: "the archive's record", why: implausibleBaseline({ ...theirs, samples: readings }) },
+  ].filter((x) => x.why != null);
+  if (suspect.length) {
+    return {
+      record: fillOnlyAttendance(mine, theirs, readings),
+      frames: "implausible",
+      implausible: suspect.map((x) => `${x.who}: ${x.why}`).join("; "),
+      skippedSamples,
+    };
+  }
   const aligned = alignAttendance(mine, { ...theirs, samples: readings });
   const out: AttendanceRecord = {
     ...fillMissingFields(mine, theirs, ["samples", "attendanceBaseline"]),

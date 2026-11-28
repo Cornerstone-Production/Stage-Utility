@@ -86,11 +86,13 @@ export interface AlignedAttendance {
  * A sample whose attendance is not a number is carried as it is, never shifted:
  * the stored records are the operator's, and this deletes nothing from them.
  *
- * A baseline that is a finite number is trusted. Records a Recalculate, window
- * edit or merge touched in v1.9.3 or v1.9.4 (fixed in v1.10.0) may carry an
- * already-baselined value there (normally 0), and those shift wrongly. Nothing
- * on the record tells such a baseline from a real 0 — a window trim leaves the
- * same gap to totalAttendance — so it is not guessed at here.
+ * A baseline that is a finite number is trusted here. Records a Recalculate,
+ * window edit or merge touched in v1.9.3 or v1.9.4 (fixed in v1.10.0) may
+ * carry an already-baselined value there (normally 0), which shifts wrongly.
+ * The archive import checks for that first (implausibleBaseline in
+ * archive/merge-records.ts) and does not align such a record. History's merge
+ * does not: a window trim leaves the same gap to totalAttendance as that bug,
+ * and History's merge is the repair tool, which has always trusted it.
  */
 export function alignAttendance(into: AttendanceFrame, from: AttendanceFrame): AlignedAttendance {
   const intoBase = finiteOrNull(into.attendanceBaseline);

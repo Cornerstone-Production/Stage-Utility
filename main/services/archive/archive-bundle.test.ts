@@ -343,6 +343,40 @@ test("an attendance merge it could not align, or that left samples out, says so 
   assert.ok(warned.some((w) => w.startsWith("[archive]") && w.includes("left out 1 attendance sample")), warned.join("\n"));
 });
 
+test("an import over a record whose baseline does not fit its counts is joined unshifted, and says why", async () => {
+  // This box's record carries the already-baselined 0 a v1.9.3 Recalculate
+  // wrote; its samples and total still say the service began at raw 500.
+  const { attendanceStore } = await import("../attendance-store.js");
+  const key = "st1:pAttOld:t1";
+  const box = (from: number, to: number, skewSec: number, baseline: number) => ({
+    ...(record(key, "2026-10-20") as unknown as Record<string, unknown>),
+    items: undefined,
+    attendanceBaseline: baseline,
+    totalAttendance: 500 + 2 * to,
+    samples: Array.from({ length: to - from + 1 }, (_, i) => ({
+      t: new Date(Date.parse("2026-10-20T09:00:00.000Z") + (from + i) * 60_000 + skewSec * 1000).toISOString(),
+      attendance: 2 * (from + i) - 2 * from,
+      occupancy: 300,
+    })),
+    peakAttendance: 2 * (to - from), peakOccupancy: 300, minOccupancy: 300, lastAttendance: 2 * (to - from), lastOccupancy: 300,
+  });
+  await attendanceStore.upsert(box(5, 15, 7, 510) as never); // the archive's honest copy
+  const zip = await buildArchive();
+  await attendanceStore.upsert(box(0, 10, 0, 0) as never); // this box, baseline rewritten to 0
+
+  const warned: string[] = [];
+  const orig = console.warn;
+  console.warn = (...a: unknown[]) => { warned.push(a.join(" ")); };
+  try {
+    await importArchive(zip, { merge: [key] });
+  } finally {
+    console.warn = orig;
+  }
+  const after = (await attendanceStore.get(key))!;
+  assert.ok(Math.max(...after.samples.map((x) => x.attendance)) < 100, "the archive's samples were shifted by the whole morning");
+  assert.ok(warned.some((w) => w.startsWith("[archive]") && w.includes("this box's record") && w.includes("daily total")), warned.join("\n"));
+});
+
 test("replace wins over merge when a key is somehow in both lists", async () => {
   const res = await importArchive(await buildArchive(), {
     merge: ["st1:pMerge:t1"],

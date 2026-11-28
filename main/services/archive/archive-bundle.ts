@@ -436,10 +436,16 @@ export async function importArchive(
     (k) => attendanceStore.get(k) as never,
     (r) => attendanceStore.upsert(r as never),
     (a, b) => {
-      const { record, frames, skippedSamples } = mergeAttendanceRecord(a as never, b as never);
+      const { record, frames, implausible, skippedSamples } = mergeAttendanceRecord(a as never, b as never);
       const key = scrub((a as { serviceKey: string }).serviceKey);
       // Without both baselines the two series cannot be put in one frame, so
       // they were joined as they stood: the curve may step where they meet.
+      if (frames === "implausible") {
+        console.warn(
+          `[archive] import into ${key}: merged the attendance without aligning it, because ` +
+            `${scrub(implausible ?? "a baseline does not fit its counts")}.`,
+        );
+      }
       if (frames === "unknown") {
         console.warn(
           `[archive] import into ${key}: one side's attendance has no baseline, ` +
