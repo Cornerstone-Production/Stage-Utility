@@ -1610,16 +1610,18 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
               End
               <input type="time" value={editEnd} onChange={(e) => setEditEnd(e.target.value)} className="rounded-md border border-line-strong bg-field px-2 py-1 font-mono tabular-nums text-caption1 text-fg" />
             </label>
-            {/* Said only when it differs: the rundown's read-only times are still
-                in this browser's zone, and two columns of times an hour or a
-                day apart with nothing to say why reads as a fault. */}
-            {editZone !== hostTimeZone() && (
-              <span className="self-center text-caption2 text-fg-muted">Times in {editZone}</span>
-            )}
             <Button variant="accent" size="small" onClick={() => void saveTimes()}>Save</Button>
             <Button variant="transparent" size="small" onClick={() => setEditingTimes(false)}>Cancel</Button>
             <Button variant="transparent" size="small" onClick={recalc} tooltip="Re-derive peak/min from samples without changing the window">Recalculate</Button>
             <span className="text-caption2 text-fg-muted flex-1 min-w-[14rem]">
+              {/* The zone, said only when it differs from this browser's: the
+                  rundown's read-only times are still in the browser's zone, and
+                  two columns of times an hour or a day apart with nothing to say
+                  why reads as a fault. In the hint, not beside the fields, so it
+                  takes the hint's own type and place. */}
+              {editZone !== hostTimeZone() && (
+                <>Times are in <strong className="font-medium text-fg">{editZone}</strong>, the app's time zone. </>
+              )}
               Trims attendance samples + SPL/timing items outside the window and recomputes peak, min, and durations — asking first when that would delete any. Applies to all three records for this service. Each item's own Started and Ended are editable in the table below — save a row to correct it, Reset to put the recorded times back; neighbouring items do not move. <strong className="font-medium text-fg">Rebuild from raw</strong>, in the header above, goes further: it discards the stored timing/sound/attendance summaries and derives them again from the archived rows, keeping your item corrections — and merges this service's baptism sessions in from their own raw rows, updating or adding but never deleting.
             </span>
           </div>

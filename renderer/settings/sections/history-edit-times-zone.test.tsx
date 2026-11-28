@@ -216,7 +216,7 @@ describe("History: Edit times in the app's zone, from a browser in another", () 
     assert.equal(item?.value, "18:00:00", "an item's Started reads in the browser's zone");
     // The rundown's read-only times are still this browser's, so the form says
     // which zone it is in.
-    assert.match(text(view.container), /Times in America\/Chicago/);
+    assert.match(text(view.container), /Times are in America\/Chicago, the app's time zone\./);
   });
 
   test("Save with nothing changed sends nothing", async () => {

@@ -700,8 +700,8 @@ copyable (**Copy report**).
 
 The Start and End fields, and each item's own, read in the app's
 [time zone](../ops/install-and-config.md#time-zone) (the server's clock when
-none is set), whatever zone the browser is in. When the two differ the form says
-**Times in** *zone*; the rundown's read-only times stay in the browser's. Save
+none is set), whatever zone the browser is in. When the two differ the form's
+hint names the zone; the rundown's read-only times stay in the browser's. Save
 sends only the fields that changed, so saving an untouched form changes
 nothing. A time is put on the day nearest the one it replaces, and the End on
 the first such time after the Start, so a service that ran past midnight keeps
