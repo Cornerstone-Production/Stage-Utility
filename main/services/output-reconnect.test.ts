@@ -46,13 +46,6 @@ async function until(cond: () => boolean, what: string): Promise<void> {
   }
 }
 
-/** The back-off as the integration arms it: every delay handed to scheduleIn,
- *  and how many times a failure asked for one. */
-interface Probe {
-  delays: number[];
-  stop(): void;
-}
-
 /** Capture console.warn lines tagged `[tag]` for the life of the test. */
 function warnsTagged(t: TestContext, tag: string): string[] {
   const lines: string[] = [];
@@ -67,11 +60,12 @@ function warnsTagged(t: TestContext, tag: string): string[] {
   return lines;
 }
 
-/** Walk `failures` refused connects, firing each queued retry by hand. */
-async function walk(t: TestContext, probe: Probe, failures: number): Promise<void> {
+/** Walk `failures` refused connects, firing each queued retry by hand.
+ *  `delays` is every delay the integration handed to scheduleIn. */
+async function walk(t: TestContext, delays: number[], failures: number): Promise<void> {
   for (let i = 1; i <= failures; i++) {
-    await until(() => probe.delays.length >= i, `failure ${i} to queue a retry`);
-    if (i < failures) t.mock.timers.tick(probe.delays[i - 1]);
+    await until(() => delays.length >= i, `failure ${i} to queue a retry`);
+    if (i < failures) t.mock.timers.tick(delays[i - 1]);
   }
 }
 
@@ -93,7 +87,7 @@ test("RossTalk: an unreachable switcher is logged once per outage, not on every 
   t.after(() => conn.stop());
   conn.configure("127.0.0.1", port);
 
-  await walk(t, { delays, stop: () => conn.stop() }, CEILING_STEPS.length);
+  await walk(t, delays, CEILING_STEPS.length);
 
   assert.deepEqual(delays, CEILING_STEPS, "the fixed 30 s ceiling is deliberate and must survive");
   assert.equal(
@@ -121,11 +115,45 @@ test("TSL: the same fixed 30 s ceiling, and the outage reaches the log once", as
   });
   tslService.configure("127.0.0.1", port, []);
 
-  await walk(t, { delays, stop: () => tslService.stop() }, CEILING_STEPS.length);
+  await walk(t, delays, CEILING_STEPS.length);
 
   assert.deepEqual(delays, CEILING_STEPS);
   // TSL only reported the state, and the integration manager stores it without
   // logging, so a dark tally output said nothing at all in /log.
   assert.equal(warns.length, 1, `${CEILING_STEPS.length} refused connects wrote ${warns.length} lines:\n${warns.join("\n")}`);
   assert.match(warns[0], /unreachable/);
+});
+
+// A restart destroys the old socket, and its `close` arrives AFTER start() has
+// set `running` back to true — so it took the "dropped, reconnect" path on the
+// new run, and the reconnect opened a second socket over the live one, held
+// for the life of the process. The read-after-await guard's event-handler twin.
+
+test("RossTalk: a restart leaves one socket open, not two", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const open = new Set<net.Socket>();
+  const server = net.createServer((s) => {
+    open.add(s);
+    s.on("close", () => open.delete(s));
+    s.on("error", () => {});
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const { port } = server.address() as net.AddressInfo;
+  const states: string[] = [];
+  const conn = new RossTalkConnection("restart", (s) => states.push(s));
+  t.after(async () => {
+    conn.stop();
+    for (const s of open) s.destroy();
+    await new Promise<void>((r) => server.close(() => r()));
+  });
+
+  conn.configure("127.0.0.1", port);
+  await until(() => open.size === 1 && states.includes("connected"), "the first socket");
+  conn.configure("127.0.0.1", port); // a settings save: restart
+  await until(() => states.filter((s) => s === "connected").length >= 1 && open.size >= 1, "the second connect");
+  for (let i = 0; i < 20; i++) await new Promise((r) => setImmediate(r));
+  t.mock.timers.tick(30_000); // any reconnect the stale close queued
+  for (let i = 0; i < 50; i++) await new Promise((r) => setImmediate(r));
+
+  assert.equal(open.size, 1, `one restart left ${open.size} sockets open on the switcher`);
 });

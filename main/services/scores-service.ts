@@ -22,7 +22,7 @@ import {
   sortGames,
   type ScoreBaseline,
 } from "./scores-parse.js";
-import { nextPoll } from "./scores-schedule.js";
+import { SLOWEST_POLL_MS, nextPoll } from "./scores-schedule.js";
 import { scoresStore } from "./scores-store.js";
 import {
   LEAGUES,
@@ -97,6 +97,12 @@ class ScoresService extends StatusIntegration<ScoresStatusDTO> {
 
   protected get configured(): boolean {
     return this.favourites.length > 0;
+  }
+
+  /** Outlasts the slowest poll (half an hour between games), so an ESPN failing
+   *  on alternate polls is one outage. A recovery is said up to an hour late. */
+  protected override get outageSettleMs(): number {
+    return 2 * SLOWEST_POLL_MS;
   }
 
   configure(favourites: ScoreFavourite[]): void {

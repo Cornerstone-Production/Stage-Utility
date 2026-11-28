@@ -314,6 +314,11 @@ class ResiService extends StatusIntegration<StreamStatusDTO> {
     return !!this.username && !!this.password;
   }
 
+  /** Outlasts the idle poll, so a box failing on alternate polls is one outage. */
+  protected override get outageSettleMs(): number {
+    return 2 * IDLE_POLL_MS;
+  }
+
   configure(username: string, password: string, encoderIds: string[] = []): void {
     const nextUser = username?.trim() || null;
     const nextPass = password || null;

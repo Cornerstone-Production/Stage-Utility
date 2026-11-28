@@ -213,8 +213,9 @@ read against a service that happened at a wall-clock time in the building.
 
 ### Connection outages
 
-The LAN integrations (OBS, ProPresenter, ProVideoPlayer, REAPER, Resi, RossTalk,
-Scores, Smaart, Ross TSL and YouTube) log a connection outage on one rule:
+The integrations that hold a connection or poll for one (OBS, ProPresenter,
+ProVideoPlayer, REAPER, RossTalk, Smaart and Ross TSL on the LAN; Resi, Scores
+and YouTube over the internet) log an outage on one rule:
 
 - The first failure of an outage is a warning: `[reaper] Can't reach
   192.168.1.50:8080 — … — backing off quietly`.
@@ -222,12 +223,14 @@ Scores, Smaart, Ross TSL and YouTube) log a connection outage on one rule:
   outage (refused, then timing out) is.
 - An outage that goes on is reminded every 15 minutes, with
   `— still failing after N attempts (M min)` on the end of the line.
-- A recovery is logged once it has held for two minutes:
-  `[reaper] reachable again after N failed attempts (M min)`. A box that answers
-  and fails in turn inside that window stays one outage, so a flapping device
-  writes one line rather than one per flap.
-- Starting the integration again, which every settings save does, starts a fresh
-  outage, so the first failure after a save is logged again.
+- A recovery is logged once no failure has followed it for two minutes:
+  `[reaper] reachable again after N failed attempts (M min)`. Integrations that
+  poll slower wait longer: four minutes for Resi, ten for YouTube, an hour for
+  Scores. A box that answers and fails in turn inside that window stays one
+  outage, so a flapping device writes one line rather than one per flap.
+- Starting an integration again, which saving its settings does, starts a fresh
+  outage, so the first failure after a save is logged again. ProPresenter is
+  started again only when its host or port changes.
 
 ### Log tags
 

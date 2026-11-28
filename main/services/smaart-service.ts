@@ -129,8 +129,10 @@ class SmaartService extends StatusIntegration<SplMetricsDTO> {
       const msg = errorMessage(err);
       this.noteOutage(`${this.host}:${this.port} unreachable (${msg}) — backing off quietly`);
       this.report("error", `Can't reach ${this.host}:${this.port} — ${msg}`);
-      adapter.close();
+      // Let go of the adapter before closing it, so a stream close it fires is
+      // read as superseded (onStreamClose) rather than as a second drop.
       if (this.adapter === adapter) this.adapter = null;
+      adapter.close();
       this.goOffline();
       this.scheduleReconnect();
     }
@@ -171,8 +173,8 @@ class SmaartService extends StatusIntegration<SplMetricsDTO> {
     if (!this.running || this.adapter !== adapter) return;
     this.noteOutage("stream closed — reconnecting");
     this.teardownStreams();
-    adapter.close();
     if (this.adapter === adapter) this.adapter = null;
+    adapter.close();
     this.report("error", "Smaart stream dropped — reconnecting");
     this.goOffline();
     this.scheduleReconnect();

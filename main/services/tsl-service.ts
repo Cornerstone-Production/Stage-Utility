@@ -16,11 +16,10 @@ import { clamp } from "./clamp.js";
 import * as net from "node:net";
 
 import type { PeopleCountDTO } from "../types/stage.js";
-import { ConnectionLifecycle } from "./integration-base.js";
+import { ConnectionLifecycle, OUTPUT_RECONNECT_CEILING_MS } from "./integration-base.js";
 import { sensourceService } from "./sensource-service.js";
 
 
-const RECONNECT_MAX_MS = 30000;
 /** Re-send the current labels on this cadence so a tile never goes stale/blank. */
 const REFRESH_MS = 5000;
 const TSL_FULL_BRIGHTNESS = 0x30;
@@ -168,24 +167,32 @@ class TslService extends ConnectionLifecycle {
 
   protected async connect(): Promise<void> {
     if (!this.running || !this.host || !this.port) return;
+    // Every handler below asks whether its socket's run is still current: a
+    // restart destroys this socket, and its `close` lands after start() has set
+    // `running` back to true. A `running` check marked the NEW socket
+    // disconnected and queued a reconnect that opened a second one over it.
+    const run = this.run;
     const sock = net.connect({ host: this.host, port: this.port });
     this.socket = sock;
     sock.on("connect", () => {
+      if (!this.current(run)) return;
       this.connected = true;
       this.resetBackoff();
       this.report("connected", `Sending to ${this.host}:${this.port}`);
       this.sendAll(sensourceService.getLatest());
     });
     sock.on("error", (err) => {
+      if (!this.current(run)) return;
       // Said here as well as reported: the manager stores the state without
       // logging it, so a dark tally output was silent in /log.
       this.noteOutage(`${this.host}:${this.port} unreachable (${err.message})`);
       this.report("error", `Can't reach ${this.host}:${this.port} — ${err.message}`);
     });
     sock.on("close", () => {
-      this.connected = false;
       if (this.socket === sock) this.socket = null;
-      if (this.running) this.scheduleReconnect();
+      if (!this.current(run)) return;
+      this.connected = false;
+      this.scheduleReconnect();
     });
   }
 
@@ -209,7 +216,7 @@ class TslService extends ConnectionLifecycle {
    * could sit dark for half an hour. Deliberate divergence.
    */
   protected override get reconnectCeilingMs(): number {
-    return RECONNECT_MAX_MS;
+    return OUTPUT_RECONNECT_CEILING_MS;
   }
 }
 

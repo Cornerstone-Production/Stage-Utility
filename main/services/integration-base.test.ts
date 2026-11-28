@@ -6,7 +6,7 @@
 // powered off). The properties pinned below are the ones the services rely on.
 
 import assert from "node:assert/strict";
-import { test, describe, beforeEach, afterEach } from "node:test";
+import { test, describe, beforeEach, afterEach, type TestContext } from "node:test";
 
 import { addBroadcastListener, setSubscriberCheck } from "./broadcaster.js";
 import { StatusIntegration, type ConnState } from "./integration-base.js";
@@ -44,6 +44,8 @@ class Fake extends StatusIntegration<Dto> {
   get runNow(): number { return this.run; }
   isCurrent(run: number): boolean { return this.current(run); }
   callRestart(): void { this.restart(); }
+  say(line: string, kind?: string): void { this.noteOutage(line, kind); }
+  healthy(): void { this.resetBackoff(); }
   callScheduleIn(ms: number): void { this.scheduleIn(ms); }
   nextDelay(): number { return this.nextReconnectDelayMs(); }
   stopTimers(): void { this.clearReconnect(); }
@@ -137,13 +139,16 @@ describe("ConnectionLifecycle", () => {
     // read started before it from one started after. The run can.
     const f = new Fake();
     f.shouldFail = true;
-    f.start();
-    const before = f.runNow;
-    assert.equal(f.isCurrent(before), true);
-    f.callRestart();
-    assert.equal(f.isCurrent(before), false, "a read from before the restart still counted as current");
-    assert.equal(f.isCurrent(f.runNow), true);
-    f.stop();
+    try {
+      f.start();
+      const before = f.runNow;
+      assert.equal(f.isCurrent(before), true);
+      f.callRestart();
+      assert.equal(f.isCurrent(before), false, "a read from before the restart still counted as current");
+      assert.equal(f.isCurrent(f.runNow), true);
+    } finally {
+      f.stop();
+    }
     assert.equal(f.isCurrent(f.runNow), false, "a stopped integration has no current run");
   });
 
@@ -279,5 +284,56 @@ describe("StatusIntegration", () => {
 
     assert.equal(sent.length, 2, "expected a connected snapshot then an offline one");
     assert.deepEqual(sent[1], { ...OFFLINE, rev: 2 });
+  });
+});
+
+describe("the outage log the base keeps", () => {
+  /** A started Fake whose own connect() stays out of the way, and its [fake] lines. */
+  function started(t: TestContext): { f: Fake; lines: string[] } {
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+    const lines: string[] = [];
+    const { warn, log } = console;
+    const keep = (...a: unknown[]) => {
+      const line = a.map(String).join(" ");
+      if (line.startsWith("[fake]")) lines.push(line);
+    };
+    console.warn = keep;
+    console.log = keep;
+    const f = new Fake();
+    f.start();
+    t.after(() => {
+      console.warn = warn;
+      console.log = log;
+      f.stop();
+    });
+    lines.length = 0;
+    return { f, lines };
+  }
+
+  test("a different failure inside one outage is news; the same one again is not", (t) => {
+    const { f, lines } = started(t);
+    f.say("refused", "refused");
+    f.say("refused", "refused");
+    f.say("timed out", "timeout");
+    f.say("refused", "refused");
+    assert.deepEqual(lines, ["[fake] refused", "[fake] timed out"]);
+  });
+
+  test("stop() cancels a recovery that has not been said yet", (t) => {
+    const { f, lines } = started(t);
+    f.say("refused");
+    f.healthy(); // arms the settle check
+    f.stop();
+    t.mock.timers.tick(10 * 60_000);
+    assert.deepEqual(lines, ["[fake] refused"], "a stopped integration announced a recovery");
+  });
+
+  test("start() forgets the outage, so the first failure after a restart is said again", (t) => {
+    const { f, lines } = started(t);
+    f.say("refused");
+    f.say("refused");
+    f.callRestart();
+    f.say("refused");
+    assert.deepEqual(lines, ["[fake] refused", "[fake] refused"]);
   });
 });

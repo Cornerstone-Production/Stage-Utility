@@ -132,3 +132,49 @@ test("Resi: a sign-in for the replaced account does not leave its token behind",
     "the replaced account's token was cached for the new one",
   );
 });
+
+// ── YouTube: the same two halves, on the cloud path ──────────────────────────
+
+test("YouTube: the replaced channel's failure is not reported, and its answer is not cached", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { youtubeService } = await import("./youtube-service.js");
+  const realGlobalFetch = globalThis.fetch;
+  const held: { resolve: (r: Response) => void; reject: (e: Error) => void }[] = [];
+  const json = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as unknown as Response;
+  globalThis.fetch = ((input: unknown, init?: RequestInit) => {
+    const key = (init?.headers as Record<string, string> | undefined)?.["X-Goog-Api-Key"];
+    if (key === "old-key") return new Promise<Response>((resolve, reject) => held.push({ resolve, reject }));
+    const url = String(input);
+    if (url.includes("/channels?")) return Promise.resolve(json({ items: [{ contentDetails: { relatedPlaylists: { uploads: "UUnew" } } }] }));
+    return Promise.resolve(json({ items: [] }));
+  }) as typeof fetch;
+  const reports: { state: string; message: string | null }[] = [];
+  youtubeService.setConnectionListener((state, message) => reports.push({ state, message }));
+  t.after(() => {
+    globalThis.fetch = realGlobalFetch;
+    youtubeService.setConnectionListener(() => {});
+    youtubeService.stop();
+  });
+  const cfg = { mode: "key" as const, clientId: "", clientSecret: "", refreshToken: "" };
+
+  youtubeService.configure({ ...cfg, apiKey: "old-key", channel: "@old" });
+  await settle();
+  youtubeService.configure({ ...cfg, apiKey: "new-key", channel: "@new" });
+  await settle();
+  assert.equal(youtubeService.getLatest().connected, true, "the new channel answered");
+
+  // The old channel's lookup answers late: its playlist must not be cached.
+  held[0].resolve(json({ items: [{ contentDetails: { relatedPlaylists: { uploads: "UUold" } } }] }));
+  await settle();
+  assert.equal(
+    (youtubeService as unknown as { uploadsPlaylist: string | null }).uploadsPlaylist,
+    "UUnew",
+    "the replaced channel's uploads playlist was cached for the new one",
+  );
+
+  // A later read of the old channel fails: not the new channel's failure.
+  for (const h of held.slice(1)) h.reject(new Error("YouTube returned HTTP 500"));
+  await settle();
+  assert.deepEqual(reports.filter((r) => r.state === "error"), [], "the old channel's failure was reported on the new one");
+  assert.equal(youtubeService.getLatest().connected, true, "the old channel's failure blanked the new one");
+});

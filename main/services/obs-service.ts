@@ -237,9 +237,16 @@ class ObsService extends StatusIntegration<ObsStatusDTO> {
     const adapter = new ObsWebSocketAdapter(this.host, this.port);
     this.adapter = adapter;
     adapter.onEvent((e) => this.onEvent(adapter, e));
-    adapter.onClose((close) => this.onClose(adapter, close));
+    // A close before the handshake completes is this attempt FAILING, and the
+    // rejected connect() below handles it (4009 and 4010 included). Taken by
+    // onClose as well, one refused connect was two lines and two retries.
+    let identified = false;
+    adapter.onClose((close) => {
+      if (identified) this.onClose(adapter, close);
+    });
     try {
       await adapter.connect({ password: this.password });
+      identified = true;
       if (!this.running) {
         adapter.close();
         return;
@@ -273,6 +280,11 @@ class ObsService extends StatusIntegration<ObsStatusDTO> {
       this.startKeepalive();
     } catch (err) {
       const msg = errorMessage(err);
+      // Let go of the adapter BEFORE closing it: close() fires onClose
+      // synchronously, and while this was still `this.adapter` that took the
+      // "connection dropped" path too — a second line and a second retry for
+      // one refused connect.
+      if (this.adapter === adapter) this.adapter = null;
       adapter.close();
       // teardown() closes the old adapter on a reconfigure, so its handshake
       // rejects here. The success side has always checked for a superseded
@@ -280,7 +292,6 @@ class ObsService extends StatusIntegration<ObsStatusDTO> {
       // the new host's row, blanked it, and queued a reconnect that later built
       // a second adapter over the live one without closing it.
       if (!this.current(run)) return;
-      if (this.adapter === adapter) this.adapter = null;
       this.goOffline();
 
       // 4009 and 4010 arrive here rather than in onClose(): they close the

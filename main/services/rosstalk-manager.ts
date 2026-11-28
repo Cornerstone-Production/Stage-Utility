@@ -10,12 +10,11 @@ import * as net from "node:net";
 
 import type { RossTalkFamily, RossTalkTarget, RossTalkTargetConfig } from "../types/rosstalk.js";
 import { broadcast } from "./broadcaster.js";
-import { ConnectionLifecycle } from "./integration-base.js";
+import { ConnectionLifecycle, OUTPUT_RECONNECT_CEILING_MS } from "./integration-base.js";
 import { ROSSTALK_COMMANDS, formatCommand, sanitiseRaw } from "./rosstalk-commands.js";
 import { rosstalkStore } from "./rosstalk-store.js";
 
 const DEFAULT_PORT = 7788;
-const RECONNECT_MAX_MS = 30000;
 
 /** One target's socket. */
 export class RossTalkConnection extends ConnectionLifecycle {
@@ -54,22 +53,29 @@ export class RossTalkConnection extends ConnectionLifecycle {
 
   protected async connect(): Promise<void> {
     if (!this.running || !this.host) return;
+    // Every handler below asks whether its socket's run is still current: a
+    // restart destroys this socket, and its `close` lands after start() has set
+    // `running` back to true, so a `running` check queued a reconnect that
+    // opened a second socket over the live one.
+    const run = this.run;
     const sock = net.connect({ host: this.host, port: this.port });
     sock.unref(); // an idle output socket must not hold the process open
     this.socket = sock;
     sock.on("connect", () => {
+      if (!this.current(run)) return;
       this.resetBackoff();
       this.report("connected", `Connected to ${this.host}:${this.port}`);
     });
     // Send-only protocol: drain anything the device sends so the buffer can't grow.
     sock.on("data", () => {});
     sock.on("error", (err) => {
+      if (!this.current(run)) return;
       this.noteOutage(`${this.host}:${this.port} unreachable (${err.message})`);
       this.report("error", `Can't reach ${this.host}:${this.port} — ${err.message}`);
     });
     sock.on("close", () => {
       if (this.socket === sock) this.socket = null;
-      if (this.running) this.scheduleReconnect();
+      if (this.current(run)) this.scheduleReconnect();
     });
   }
 
@@ -80,7 +86,7 @@ export class RossTalkConnection extends ConnectionLifecycle {
    * unreachable that long. Same reasoning as tsl-service.
    */
   protected override get reconnectCeilingMs(): number {
-    return RECONNECT_MAX_MS;
+    return OUTPUT_RECONNECT_CEILING_MS;
   }
 
   /** A waiting reconnect must not keep the process alive — otherwise a shutdown

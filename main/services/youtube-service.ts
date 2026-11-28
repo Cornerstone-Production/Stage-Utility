@@ -269,6 +269,11 @@ class YouTubeService extends StatusIntegration<YouTubeStatusDTO> {
     return configComplete(this.cfg);
   }
 
+  /** Outlasts the idle poll, so a box failing on alternate polls is one outage. */
+  protected override get outageSettleMs(): number {
+    return 2 * IDLE_POLL_MS;
+  }
+
   /** Is `cfg` what this instance is configured with now, field for field? */
   private isConfig(cfg: YouTubeConfig): boolean {
     return (Object.keys(EMPTY) as (keyof YouTubeConfig)[]).every((k) => cfg[k] === this.cfg[k]);

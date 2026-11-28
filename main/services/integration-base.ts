@@ -22,7 +22,7 @@ import {
 } from "./broadcaster.js";
 import { DEFAULT_SETTLE_MS, OutageLog } from "./repeat-log.js";
 import { serviceWindow } from "./service-window.js";
-import { backoffMs } from "./timers.js";
+import { backoffMs, cleared } from "./timers.js";
 
 /** Connection state as reported to the Integrations panel. */
 export type ConnState = "connected" | "error" | "disconnected";
@@ -30,6 +30,9 @@ export type ConnState = "connected" | "error" | "disconnected";
 /** Default first retry delay; doubles per attempt, then clamped by serviceWindow.
  *  A subclass can raise it via `reconnectBaseMs` (ProPresenter waits 5s). */
 const RECONNECT_BASE_MS = 3000;
+
+/** The fixed reconnect ceiling of an OUTPUT (RossTalk, TSL); see reconnectCeilingMs. */
+export const OUTPUT_RECONNECT_CEILING_MS = 30_000;
 
 /** The one key this integration's outage log keeps its run under. */
 const OUTAGE_KEY = "connection";
@@ -130,6 +133,7 @@ export abstract class ConnectionLifecycle {
     // credentials is true of the new ones, and a run carried across would
     // swallow the first line of the next outage.
     this.connectionOutages.forget();
+    this.connectionOutages.settleAfter(this.outageSettleMs);
     this.begin();
   }
 
@@ -247,13 +251,13 @@ export abstract class ConnectionLifecycle {
   }
 
   /**
-   * A success, for the outage log. Ends the run once a success has held for the
-   * settle window, which is what keeps a flapping upstream one outage.
+   * A success, for the outage log. Ends the run once no failure has followed it
+   * for the settle window, which is what keeps a flapping upstream one outage.
    *
-   * A poller calls this on every good poll and would get there on its own; a
-   * socket succeeds ONCE and then stays up, so nothing would ever ask again and
-   * the run would never close. The timer asks again when the window has passed;
-   * any failure in between cancels it (noteOutage), and so does stop().
+   * Every integration calls resetBackoff() only on the success that ends a run
+   * of failures (a poller on its first good poll, a socket on connect), so
+   * nothing asks again after it. The timer does, when the window has passed;
+   * a failure in between cancels it (noteOutage), and so do a retry and stop().
    */
   private noteHealthy(): void {
     if (!this.connectionOutages.failing(OUTAGE_KEY)) return;
@@ -262,9 +266,21 @@ export abstract class ConnectionLifecycle {
     this.settleTimer = setTimeout(() => {
       this.settleTimer = null;
       if (this.running) this.sayRecovered();
-    }, DEFAULT_SETTLE_MS);
+    }, this.outageSettleMs);
     // A recovery line must not hold the process open.
     this.settleTimer.unref();
+  }
+
+  /**
+   * How long a recovery must go without a failure before the outage is over.
+   *
+   * Longer than the slowest interval this integration polls at, or every flap
+   * is a recovery and a fresh outage, two lines where the old gate wrote one.
+   * The default is two minutes; an integration that can poll slower than a
+   * minute (Resi and YouTube when idle, Scores between games) says so.
+   */
+  protected get outageSettleMs(): number {
+    return DEFAULT_SETTLE_MS;
   }
 
   /** Ask the outage log whether the run is over, and say so if it is. */
@@ -275,10 +291,7 @@ export abstract class ConnectionLifecycle {
   }
 
   private clearSettle(): void {
-    if (this.settleTimer) {
-      clearTimeout(this.settleTimer);
-      this.settleTimer = null;
-    }
+    this.settleTimer = cleared(this.settleTimer);
   }
 
   // NOTE: there is deliberately no `hasSubscribers` here any more.
@@ -312,6 +325,9 @@ export abstract class ConnectionLifecycle {
    */
   protected scheduleReconnect(): void {
     if (!this.running) return;
+    // A retry means the connection did not hold, whether or not a failure was
+    // said first (a socket the far end closes cleanly says none).
+    this.clearSettle();
     this.scheduleIn(this.nextReconnectDelayMs());
   }
 
@@ -326,8 +342,11 @@ export abstract class ConnectionLifecycle {
    */
   protected nextReconnectDelayMs(): number {
     const ceiling = this.reconnectCeilingMs;
-    const raw = backoffMs(this.reconnectAttempt + 1, this.reconnectBaseMs, ceiling ?? Infinity);
-    const delay = ceiling === null ? serviceWindow.capDelayMs(raw, channelHasSubscribers(this.channel)) : raw;
+    const failures = this.reconnectAttempt + 1;
+    const delay =
+      ceiling === null
+        ? serviceWindow.capDelayMs(backoffMs(failures, this.reconnectBaseMs), channelHasSubscribers(this.channel))
+        : backoffMs(failures, this.reconnectBaseMs, ceiling);
     this.reconnectAttempt++;
     return delay;
   }
@@ -345,10 +364,7 @@ export abstract class ConnectionLifecycle {
   }
 
   protected clearReconnect(): void {
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
+    this.reconnectTimer = cleared(this.reconnectTimer);
   }
 }
 
