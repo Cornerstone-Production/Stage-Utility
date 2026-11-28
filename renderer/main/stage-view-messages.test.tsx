@@ -14,7 +14,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installDom } from "../test-dom.js";
+import { eventually, installDom, settle } from "../test-dom.js";
 import { EVERYONE, type MessagesState, type StageMessage } from "@main/types/messages";
 
 const teardown = installDom();
@@ -45,7 +45,6 @@ const { TooltipProvider } = await import("../components/ui/tooltip-provider.js")
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-const settle = () => new Promise((r) => setTimeout(r, 0));
 after(async () => {
   cleanup();
   await settle();

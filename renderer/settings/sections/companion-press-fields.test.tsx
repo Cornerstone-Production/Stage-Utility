@@ -26,7 +26,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installRenderDom } from "../../test-dom.js";
+import { installRenderDom, settle as sharedSettle } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -50,19 +50,13 @@ let BUTTONS: StubButton[] = [];
   return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
 };
 
-const { render, cleanup, act, fireEvent, screen } = await import("@testing-library/react");
+const { render, cleanup, fireEvent, screen } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { CompanionPressFields, typedCoordinate } = await import("./companion-cues.js");
 
 /** Several macrotasks: the query, its re-render and the portal are separate turns. */
-const settle = async () => {
-  for (let i = 0; i < 6; i++) {
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
-    });
-  }
-};
+const settle = () => sharedSettle({ turns: 6 });
 
 /** A cue whose button the last reconcile could not find. */
 const MISSING_PARAMS: Record<string, string | number> = {

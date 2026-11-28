@@ -13,7 +13,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, before, describe, test } from "node:test";
 
-import { eventually, installRenderDom } from "../../test-dom.js";
+import { eventually, installRenderDom, settle } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 const { render, screen, cleanup, fireEvent, act, within } = await import("@testing-library/react");
@@ -22,7 +22,6 @@ const { TooltipProvider } = await import("../../components/ui/tooltip-provider.j
 const { BrandingSection } = await import("./branding-section.js");
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 after(() => {
   cleanup();
   teardown();

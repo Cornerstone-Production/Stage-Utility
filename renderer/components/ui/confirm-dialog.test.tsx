@@ -4,7 +4,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
-import { installRenderDom } from "../../test-dom.js";
+import { installRenderDom, settle } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -12,7 +12,6 @@ const { render, screen, cleanup, fireEvent, act, within } = await import("@testi
 const React = (await import("react")).default;
 const { ConfirmHost, confirm, confirmWith } = await import("./confirm-dialog.js");
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 after(() => {
   cleanup();
   teardown();

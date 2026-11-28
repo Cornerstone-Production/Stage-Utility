@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, describe, test } from "node:test";
 
-import { installRenderDom } from "../../test-dom.js";
+import { installRenderDom, settle as sharedSettle } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -43,19 +43,13 @@ const REGISTRY = { triggers: [], conditions: [], actions: [] };
   };
 };
 
-const { render, cleanup, act, fireEvent, screen } = await import("@testing-library/react");
+const { render, cleanup, fireEvent, screen } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { TooltipProvider, Toaster } = await import("../../components/ui/index.js");
 const { AutomationSection } = await import("./automation-section.js");
 
-const settle = async () => {
-  for (let i = 0; i < 6; i++) {
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
-    });
-  }
-};
+const settle = () => sharedSettle({ turns: 6 });
 
 let client: InstanceType<typeof QueryClient> | null = null;
 

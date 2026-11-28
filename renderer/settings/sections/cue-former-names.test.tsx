@@ -26,7 +26,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installRenderDom } from "../../test-dom.js";
+import { installRenderDom, settle as sharedSettle } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -86,20 +86,14 @@ let requests: { url: string; method: string; body: string | null }[] = [];
   return { ok: true, status: 200, json: async () => body, text: async () => JSON.stringify(body) };
 };
 
-const { render, cleanup, act, fireEvent, screen } = await import("@testing-library/react");
+const { render, cleanup, fireEvent, screen } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const { TooltipProvider } = await import("../../components/ui/tooltip-provider.js");
 const { AutomationSection } = await import("./automation-section.js");
 
 /** Several macrotasks: the queries, their re-renders and the portals are turns. */
-const settle = async () => {
-  for (let i = 0; i < 6; i++) {
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
-    });
-  }
-};
+const settle = () => sharedSettle({ turns: 6 });
 
 let client: InstanceType<typeof QueryClient> | null = null;
 

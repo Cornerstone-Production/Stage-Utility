@@ -7,14 +7,13 @@
 import assert from "node:assert/strict";
 import { after, afterEach, describe, test } from "node:test";
 
-import { installRenderDom } from "../../test-dom.js";
+import { installRenderDom, settle } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 const { render, screen, cleanup, act } = await import("@testing-library/react");
 const React = (await import("react")).default;
 const { LogoCropper } = await import("./logo-cropper.js");
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 after(() => {
   cleanup();
   teardown();

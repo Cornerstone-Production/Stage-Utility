@@ -22,7 +22,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installRenderDom, isPlumbing, mountInAct } from "../../test-dom.js";
+import { installRenderDom, isPlumbing, mountInAct, settle as sharedSettle } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -252,13 +252,7 @@ const { ConfirmHost } = await import("../../components/ui/confirm-dialog.js");
 const { Toaster } = await import("../../components/ui/toast.js");
 const { PageActionsProvider, PageActionsSlot } = await import("../page-actions.js");
 
-const settle = async () => {
-  for (let i = 0; i < 8; i++) {
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
-    });
-  }
-};
+const settle = () => sharedSettle({ turns: 8 });
 
 let client: InstanceType<typeof QueryClient> | null = null;
 async function mount() {

@@ -23,7 +23,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, settle } from "../test-dom.js";
 
 const teardown = installDom();
 
@@ -42,7 +42,6 @@ const React = (await import("react")).default;
 const { ObjectContent } = await import("./layout-renderer.js");
 const { makeRenderCtx } = await import("./test-render-ctx.js");
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 after(async () => { await settle(); teardown(); });
 beforeEach(() => cleanup());
 afterEach(async () => { cleanup(); await settle(); });

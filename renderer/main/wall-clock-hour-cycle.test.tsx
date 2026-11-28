@@ -14,7 +14,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installDom } from "../test-dom.js";
+import { eventually, installDom, settle } from "../test-dom.js";
 
 const teardown = installDom();
 
@@ -51,7 +51,6 @@ const { TooltipProvider } = await import("../components/ui/index.js");
 /** A day period right after a digit; the views put the seconds and the period in separate spans, so there is no word boundary to match. */
 const DAY_PERIOD = /\d\s?[AP]M/;
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 const realNow = Date.now;
 
 beforeEach(() => {

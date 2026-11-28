@@ -23,7 +23,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installDom } from "../../test-dom.js";
+import { eventually, installDom, settle } from "../../test-dom.js";
 import { KIND_DRAWS_TOP_BAR, type ViewKind } from "@main/types/views";
 
 const teardown = installDom();
@@ -64,7 +64,6 @@ type Actions = import("./screen-settings-panel.js").ScreenPanelActions;
 const { ConfirmHost } = await import("../../components/ui/confirm-dialog.js");
 const { TooltipProvider } = await import("../../components/ui/tooltip-provider.js");
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 after(async () => { await settle(); teardown(); });
 beforeEach(() => {
   cleanup();

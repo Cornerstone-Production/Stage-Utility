@@ -14,7 +14,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom, mountInAct } from "../../test-dom.js";
+import { installDom, mountInAct, settle } from "../../test-dom.js";
 
 const teardown = installDom();
 
@@ -42,7 +42,6 @@ const { TooltipProvider } = await import("../../components/ui/tooltip-provider.j
 const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query");
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 after(async () => { await settle(); teardown(); });
 beforeEach(() => { cleanup(); });
 afterEach(async () => { cleanup(); await settle(); });

@@ -37,7 +37,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installRenderDom } from "../../test-dom.js";
+import { installRenderDom, settle as sharedSettle } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -142,13 +142,7 @@ const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query
 const { TooltipProvider } = await import("../../components/ui/tooltip-provider.js");
 const { AutomationSection } = await import("./automation-section.js");
 
-const settle = async () => {
-  for (let i = 0; i < 6; i++) {
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 0));
-    });
-  }
-};
+const settle = () => sharedSettle({ turns: 6 });
 
 let client: InstanceType<typeof QueryClient> | null = null;
 

@@ -261,11 +261,19 @@ export function installRenderDom({ clientHeight }: { clientHeight?: number } = {
  *
  * and once more in the hook that tears the DOM down — which is what
  * unmountAndTeardown below is for.
+ *
+ * `turns` is for a chain where each step starts the next (a fetch whose result
+ * triggers another fetch): every turn is its own act scope, so each one is
+ * drained, not guessed at. `ms` is for a component that waits on a real timer
+ * (a debounce) which a zero-delay turn would never outlast.
  */
-export async function settle(): Promise<void> {
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  });
+export async function settle(options: { turns?: number; ms?: number } = {}): Promise<void> {
+  const { turns = 1, ms = 0 } = options;
+  for (let turn = 0; turn < turns; turn++) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, ms));
+    });
+  }
 }
 
 /**

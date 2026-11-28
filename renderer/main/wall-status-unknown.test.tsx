@@ -22,7 +22,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installRenderDom, isPlumbing, readLedger } from "../test-dom.js";
+import { eventually, installRenderDom, isPlumbing, readLedger, settle } from "../test-dom.js";
 
 const BOX_PX = 240;
 const teardown = installRenderDom({ clientHeight: BOX_PX });
@@ -149,7 +149,6 @@ const { SplRundownView } = await import("./spl-rundown-view.js");
 const { ObsLiveLabel, ReaperLiveLabel } = await import("../editor/inspector.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 /**
  * Let everything that is on its way land: every read begun and not held has been
  * received, and React has drawn what it caused. Done twice, because the widgets

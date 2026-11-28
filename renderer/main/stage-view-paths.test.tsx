@@ -21,7 +21,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installDom } from "../test-dom.js";
+import { eventually, installDom, settle } from "../test-dom.js";
 import { KIND_DRAWS_TOP_BAR, everyViewKind, viewCanBeControlSurface, type ViewKind } from "@main/types/views";
 
 const teardown = installDom();
@@ -104,7 +104,6 @@ const { QueryClient, QueryClientProvider } = await import("@tanstack/react-query
 // four different screens all say "Display error".
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 after(async () => { cleanup(); await settle(); teardown(); });
 // `useStageState` caches the StageState at MODULE level and deliberately keeps
 // it after the last consumer unmounts, so without this drop a case would

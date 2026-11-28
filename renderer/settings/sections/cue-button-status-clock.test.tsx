@@ -16,7 +16,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../../test-dom.js";
+import { installDom, settle } from "../../test-dom.js";
 
 const teardown = installDom();
 
@@ -32,7 +32,6 @@ const { CueButtonStatus } = await import("./companion-cues.js");
 const { serverClock } = await import("../../lib/server-clock.js");
 
 const realNow = Date.now;
-const settle = () => new Promise((r) => setTimeout(r, 0));
 
 beforeEach(() => {
   cleanup();

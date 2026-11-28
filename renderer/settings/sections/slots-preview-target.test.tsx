@@ -25,7 +25,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installRenderDom } from "../../test-dom.js";
+import { installRenderDom, settle as sharedSettle } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -130,13 +130,7 @@ const BOARD = [slot("s1", "Vocals", null), slot("s2", "Guitar", null)];
 
 /** Several macrotasks — the hydrate, the queries and their re-renders are
  *  separate turns. Long enough to clear the hook's 250 ms debounce. */
-const settle = async () => {
-  for (let i = 0; i < 8; i++) {
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 45));
-    });
-  }
-};
+const settle = () => sharedSettle({ turns: 8, ms: 45 });
 
 /** Which side of the plan the page is on: false asks for the type's default. */
 let planSide = true;

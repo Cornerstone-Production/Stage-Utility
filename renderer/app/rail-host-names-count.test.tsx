@@ -7,7 +7,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installDom, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 
@@ -32,7 +32,6 @@ const { __resetHostNamesForTests: resetHostNamesLog } = await import("./host-nam
 const { __resetForTests: resetStageState } = await import("../main/use-stage-state.js");
 const { __resetReplayCacheForTests: resetReplayCache } = await import("../lib/api.js");
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 const APP = "Rail host names test app";
 const waitingName = (name: string) => ({ name, firstSeen: "", lastSeen: "", count: 1, lastFrom: "192.0.2.10", client: "Chrome" });
 

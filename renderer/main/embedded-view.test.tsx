@@ -16,7 +16,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installRenderDom } from "../test-dom.js";
+import { eventually, installRenderDom, settle } from "../test-dom.js";
 
 // The act flag, one clientHeight for every element, and a do-nothing
 // EventSource — all three were written out verbatim here and in two neighbouring
@@ -80,7 +80,6 @@ const { TooltipProvider } = await import("../components/ui/tooltip-provider.js")
 const { EmbeddedView } = await import("./embedded-view.js");
 const { RenderObject, LayoutRenderer } = await import("./layout-renderer.js");
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 after(async () => { await settle(); teardown(); });
 beforeEach(() => cleanup());
 afterEach(async () => { cleanup(); await settle(); });

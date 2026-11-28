@@ -10,7 +10,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installDom, unmountAndTeardown } from "../test-dom.js";
+import { eventually, installDom, settle, unmountAndTeardown } from "../test-dom.js";
 import { ok, stubFetchWithLog } from "../test-fixtures/fetch-log.js";
 import { FakeEventSource } from "../test-fixtures/fake-event-source.js";
 
@@ -40,7 +40,6 @@ type SeenDevice = import("@main/types/kiosk").SeenDevice;
 const device = (id: string, over: Partial<SeenDevice> = {}): SeenDevice => ({
   id, macs: [], hostname: id, os: "Linux", ip: "192.0.2.10", firstSeen: 1, lastSeen: 2, ...over,
 });
-const settle = () => new Promise((r) => setTimeout(r, 0));
 
 const APP = "Rail count test app";
 let seen: SeenDevice[];

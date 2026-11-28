@@ -16,7 +16,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installRenderDom } from "../../test-dom.js";
+import { eventually, installRenderDom, settle } from "../../test-dom.js";
 import { ok, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -49,7 +49,6 @@ type SeenDevice = import("@main/types/kiosk").SeenDevice;
 type Output = import("@main/types/views").Output;
 
 const NOW = "2026-01-01T00:00:00.000Z";
-const settle = () => new Promise((r) => setTimeout(r, 0));
 
 const PI: SeenDevice = { id: "kiosk-aaaa", macs: [], hostname: "lobby-pi", os: "Linux", ip: "192.0.2.10", firstSeen: 1, lastSeen: 2 };
 const SDI: SeenDevice = {

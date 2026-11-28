@@ -10,13 +10,13 @@
 import { strict as assert } from "node:assert";
 import { after, describe, test } from "node:test";
 
-import { installDom, unmountAndTeardown } from "../test-dom.js";
+import { installDom, settle as sharedSettle, unmountAndTeardown } from "../test-dom.js";
 import { NoStream } from "../test-fixtures/no-stream.js";
 
 const teardown = installDom();
 (globalThis as { EventSource?: unknown }).EventSource = NoStream;
 
-const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
+const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const React = await import("react");
 const { ObjectContent } = await import("./layout-renderer.js");
 const { makeRenderCtx } = await import("./test-render-ctx.js");
@@ -69,18 +69,12 @@ function mount(cues: CuesLive | null, cue: string, interactive = true, choosePre
 
 /**
  * Let the press settle: the call promise, React's state update, and the render
- * it schedules. Two macrotasks rather than one — with a single tick the last
- * setState landed after the test had ended, and node:test reported the render
- * as "asynchronous activity after the test ended" once the dom was torn down.
- *
- * act()-wrapped so that setState lands on React's own queue instead of the
- * scheduler — without it, the same race can land the flush after teardown
- * instead of merely after the test.
+ * it schedules. One act turn that waits 20 ms rather than a single tick — with
+ * a single tick the last setState landed after the test had ended, and node:test
+ * reported the render as "asynchronous activity after the test ended" once the
+ * dom was torn down.
  */
-const settle = () =>
-  act(async () => {
-    await new Promise((r) => setTimeout(r, 20));
-  });
+const settle = () => sharedSettle({ ms: 20 });
 
 const stateOf = (container: HTMLElement) =>
   container.querySelector("[data-state]")?.getAttribute("data-state");

@@ -15,7 +15,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, describe, test } from "node:test";
 
-import { installRenderDom } from "../test-dom.js";
+import { installRenderDom, settle } from "../test-dom.js";
 
 const BOX_PX = 270;
 const teardown = installRenderDom({ clientHeight: BOX_PX });
@@ -33,7 +33,6 @@ const { TooltipProvider } = await import("../components/ui/tooltip-provider.js")
 const { makeRenderCtx } = await import("./test-render-ctx.js");
 const { ObjectContent } = await import("./layout-renderer.js");
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 after(async () => { await settle(); teardown(); });
 afterEach(async () => { cleanup(); await settle(); });
 

@@ -26,7 +26,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installDom } from "../test-dom.js";
+import { installDom, settle } from "../test-dom.js";
 
 const teardown = installDom();
 
@@ -43,7 +43,6 @@ const { HistoryCalendar } = await import("./history-calendar.js");
 const { serverClock } = await import("../lib/server-clock.js");
 
 const realNow = Date.now;
-const settle = () => new Promise((r) => setTimeout(r, 0));
 
 /** The local day a given instant falls on, in this host's zone — which is what
  *  the component builds its grid in. */

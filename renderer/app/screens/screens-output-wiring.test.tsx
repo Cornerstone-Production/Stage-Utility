@@ -20,7 +20,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { installRenderDom } from "../../test-dom.js";
+import { installRenderDom, settle } from "../../test-dom.js";
 import { ok, stubFetchWithLog } from "../../test-fixtures/fetch-log.js";
 
 const teardown = installRenderDom();
@@ -52,7 +52,6 @@ type View = import("@main/types/views").View;
 const NOW = "2026-01-01T00:00:00.000Z";
 const WALL: View = { id: "wall-a", name: "Lobby loop", kind: "custom", surface: "display", createdAt: NOW };
 
-const settle = () => new Promise((r) => setTimeout(r, 0));
 after(async () => {
   cleanup();
   await settle();

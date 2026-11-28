@@ -23,7 +23,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, test } from "node:test";
 
-import { eventually, installRenderDom, mountInAct } from "../../test-dom.js";
+import { eventually, installRenderDom, mountInAct, settle as sharedSettle } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -31,9 +31,7 @@ const { render, screen, cleanup, act, fireEvent, within } = await import("@testi
 const React = await import("react");
 const { SplDetailOnPage } = await import("../../test-fixtures/spl-detail.js");
 
-async function flushReact(): Promise<void> {
-  for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve));
-}
+const flushReact = () => sharedSettle({ turns: 10 });
 
 const STORE = "spl:visibleMetrics";
 

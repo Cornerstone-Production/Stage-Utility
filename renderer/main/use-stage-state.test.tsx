@@ -17,7 +17,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installDom } from "../test-dom.js";
+import { eventually, installDom, settle } from "../test-dom.js";
 
 const teardown = installDom();
 
@@ -84,21 +84,6 @@ const React = (await import("react")).default;
 const { useStageState, __resetForTests } = await import("./use-stage-state.js");
 const { __resetReplayCacheForTests } = await import("../lib/api.js");
 const { __resetForTests: __resetFavicon, STOCK_FAVICON, STOCK_FAVICON_TYPE } = await import("../lib/apply-favicon.js");
-
-/**
- * Let everything in flight settle BEFORE anything is asserted or torn down.
- *
- * Wrapped in `act` because the hydrate resolves outside React's knowledge and
- * the store notifies its subscribers from there; unwrapped, every case would
- * pass while printing an act warning. And run before `teardown()` for the reason
- * this repo has hit twice: a promise that settles after `window` is gone throws
- * from inside React and fails the FILE while every test in it passes.
- */
-const settle = async () => {
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 0));
-  });
-};
 
 /** Deliver a `stage:state-changed` frame to whatever subscribed to it. */
 function emitStateChanged(next: unknown): void {
