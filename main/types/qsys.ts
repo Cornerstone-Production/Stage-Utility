@@ -97,7 +97,7 @@ export function isOn(v: unknown): boolean {
  * Which rules a control's writes follow. Fails closed: anything not positively a
  * boolean, trigger or text control is numeric, so it is range-checked. A Core
  * reports Type `Boolean`, `Float`, `Integer`, `Text`, `Trigger` and `State Trigger`
- * (a snapshot's `load.N`, whose Value is 0, or 2 for the loaded snapshot): any
+ * (a snapshot's `load.N`, whose Value is 0 idle, 1 ramping, 2 loaded): any
  * Type naming a trigger is one, whatever its value. A Boolean's value may come as
  * true/false (GetControls) or 1/0 (Component.Get, change groups); before the Type
  * is known, a true/false value says Boolean. The writer and the editor's Core

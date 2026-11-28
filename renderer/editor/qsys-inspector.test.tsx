@@ -60,6 +60,18 @@ const CATALOG = {
         { Name: "input.4.mute", Type: "Boolean" },
       ],
     },
+    // A Snapshot Controller: load.N is a State Trigger, match.N its Boolean lamp. load.3 has no match.3.
+    {
+      name: "Snap_Controller",
+      type: "snapshot_controller",
+      controls: [
+        { Name: "load.1", Type: "State Trigger" },
+        { Name: "load.2", Type: "State Trigger" },
+        { Name: "load.3", Type: "State Trigger" },
+        { Name: "match.1", Type: "Boolean", Direction: "Read Only" },
+        { Name: "match.2", Type: "Boolean", Direction: "Read Only" },
+      ],
+    },
     // A Gain block: one channel with no number, its level `gain` and its mute `mute`.
     {
       name: "Zone_Gain",
@@ -86,7 +98,8 @@ let withChoices = false;
 const allow = (control: string, min: number | null = null, max: number | null = null) => ({ component: MIX, control, label: "", min, max, confirm: "none" });
 const bank = (control: string, min: number | null = null, max: number | null = null) => ({ component: "Input_Bank", control, label: "", min, max, confirm: "none" });
 // input.4.mute is deliberately not allowlisted.
-const ALLOW = { entries: [allow("gain", -100, 0), allow("mute"), allow("load.1"), allow("load.2"), allow("Button 2"), bank("input.3.gain", -100, 0), bank("input.3.mute"), bank("input.4.gain", -100, 0), { component: "Gain_Plus", control: "gain", label: "", min: -100, max: 0, confirm: "none" }, { component: "Gain_Plus", control: "input.1.gain", label: "", min: -100, max: 0, confirm: "none" }, { component: "Zone_Gain", control: "gain", label: "", min: -100, max: 0, confirm: "none" }, { component: "Zone_Gain", control: "mute", label: "", min: null, max: null, confirm: "none" }] };
+const snap = (control: string) => ({ component: "Snap_Controller", control, label: "", min: null, max: null, confirm: "none" });
+const ALLOW = { entries: [snap("load.1"), snap("load.2"), snap("load.3"), allow("gain", -100, 0), allow("mute"), allow("load.1"), allow("load.2"), allow("Button 2"), bank("input.3.gain", -100, 0), bank("input.3.mute"), bank("input.4.gain", -100, 0), { component: "Gain_Plus", control: "gain", label: "", min: -100, max: 0, confirm: "none" }, { component: "Gain_Plus", control: "input.1.gain", label: "", min: -100, max: 0, confirm: "none" }, { component: "Zone_Gain", control: "gain", label: "", min: -100, max: 0, confirm: "none" }, { component: "Zone_Gain", control: "mute", label: "", min: null, max: null, confirm: "none" }] };
 
 const f = stubFetchWithLog((url) => {
   if (url === "/api/qsys/catalog") {
@@ -115,10 +128,10 @@ function mount(initial: QsysConfig) {
   return { ...r, latest: () => current as never as Record<string, unknown> };
 }
 
-async function choose(r: ReturnType<typeof mount>, opener: string | RegExp, control: string, index = 0) {
+async function choose(r: ReturnType<typeof mount>, opener: string | RegExp, control: string, index = 0, component = MIX) {
   fireEvent.click(r.getAllByRole("button", { name: opener })[index]!);
   await wait();
-  fireEvent.click(r.getByRole("button", { name: new RegExp(`^${MIX}`) }));
+  fireEvent.click(r.getByRole("button", { name: new RegExp(`^${component}`) }));
   await wait();
   // A level row also says its range, after the name.
   fireEvent.click(r.getByRole("button", { name: new RegExp(`^${control}( |$)`) }));
@@ -126,6 +139,8 @@ async function choose(r: ReturnType<typeof mount>, opener: string | RegExp, cont
 }
 
 const b = (control: string) => ({ component: MIX, control });
+/** load.1 on Lobby_Mixer, which carries match.1: filled with its lamp. */
+const lit1 = { ...b("load.1"), indicator: b("match.1") };
 
 describe("the Q-SYS inspector", () => {
   test("every object type draws an inspector, the status object having nothing to set", () => {
@@ -177,7 +192,7 @@ describe("the Q-SYS inspector", () => {
     fireEvent.click(r.getByRole("button", { name: "Add preset" }));
     assert.deepEqual(r.latest().items, [], "opening and closing added a row");
     await choose(r, "Add preset", "load.1");
-    assert.deepEqual(r.latest().items, [{ label: "load.1", binding: b("load.1") }]);
+    assert.deepEqual(r.latest().items, [{ label: "load.1", binding: lit1 }]);
     await choose(r, "Add preset", "load.2");
     assert.deepEqual((r.latest().items as { label: string }[]).map((i) => i.label), ["load.1", "load.2"]);
     // A preset's label is the operator's to rename.
@@ -188,9 +203,42 @@ describe("the Q-SYS inspector", () => {
   });
 
   test("a preset's lamp control is kept when its control is changed", async () => {
-    const r = mount({ type: "qsys-presets", items: [{ label: "One", binding: { ...b("load.1"), indicator: b("match.1") } }] });
+    // A lamp the operator chose (not the control's own match.N) goes with the preset, not the snapshot.
+    const r = mount({ type: "qsys-presets", items: [{ label: "One", binding: { ...b("load.1"), indicator: b("mute") } }] });
     await choose(r, "Control", "load.2");
-    assert.deepEqual((r.latest().items as { binding: unknown }[])[0]!.binding, { ...b("load.2"), indicator: b("match.1") });
+    assert.deepEqual((r.latest().items as { binding: unknown }[])[0]!.binding, { ...b("load.2"), indicator: b("mute") });
+  });
+
+  const SNAP = (control: string) => ({ component: "Snap_Controller", control });
+
+  test("a preset bound to a snapshot's load.N is lit by its match.N, without setup", async () => {
+    const r = mount({ type: "qsys-presets", items: [] });
+    await choose(r, "Add preset", "load.2", 0, "Snap_Controller");
+    assert.deepEqual((r.latest().items as { binding: unknown }[])[0]!.binding, { ...SNAP("load.2"), indicator: SNAP("match.2") });
+  });
+
+  test("a button bound to a snapshot's load.N is lit by its match.N, and the lamp can be cleared", async () => {
+    const r = mount({ type: "qsys-button", binding: null, label: "", hold: false });
+    await choose(r, "Control", "load.1", 0, "Snap_Controller");
+    assert.deepEqual(r.latest().binding, { ...SNAP("load.1"), indicator: SNAP("match.1") });
+    fireEvent.click(r.getByRole("button", { name: "Clear Lit by" }));
+    await wait();
+    assert.deepEqual(r.latest().binding, SNAP("load.1"), "clearing the lamp left it behind");
+  });
+
+  test("a snapshot's own lamp follows the control when the control changes; a chosen lamp is kept", async () => {
+    const r = mount({ type: "qsys-presets", items: [{ label: "One", binding: { ...SNAP("load.1"), indicator: SNAP("match.1") } }] });
+    await choose(r, "Control", "load.2", 0, "Snap_Controller");
+    assert.deepEqual((r.latest().items as { binding: unknown }[])[0]!.binding, { ...SNAP("load.2"), indicator: SNAP("match.2") }, "match.1 stayed on load.2");
+    await choose(r, "Control", "load.3", 0, "Snap_Controller");
+    assert.deepEqual((r.latest().items as { binding: unknown }[])[0]!.binding, SNAP("load.3"), "no match.3 on the component, so no lamp");
+  });
+
+  test("a load.N with no match.N of the same number gets no lamp", async () => {
+    // Lobby_Mixer carries match.1 but no match.2.
+    const r = mount({ type: "qsys-presets", items: [] });
+    await choose(r, "Add preset", "load.2");
+    assert.deepEqual((r.latest().items as { binding: unknown }[])[0]!.binding, b("load.2"));
   });
 
   test("a switch changing mode clears the other mode's controls", async () => {
@@ -201,7 +249,7 @@ describe("the Q-SYS inspector", () => {
     assert.equal(s.binding, null, "the single control would shadow the pair");
     await choose(r, "On trigger", "load.1");
     await choose(r, "Off trigger", "load.2");
-    assert.deepEqual([r.latest().onBinding, r.latest().offBinding], [b("load.1"), b("load.2")]);
+    assert.deepEqual([r.latest().onBinding, r.latest().offBinding], [lit1, b("load.2")]);
     fireEvent.click(r.getByRole("button", { name: "One control" }));
     await wait();
     assert.deepEqual([r.latest().onBinding, r.latest().offBinding], [null, null]);
@@ -210,7 +258,7 @@ describe("the Q-SYS inspector", () => {
   test("a button's control type decides which controls it is offered", async () => {
     const r = mount({ type: "qsys-button", binding: null, label: "", hold: false });
     await choose(r, "Control", "load.1");
-    assert.deepEqual(r.latest().binding, b("load.1"));
+    assert.deepEqual(r.latest().binding, lit1);
   });
 
   test("a label's text control and its own text are separate fields", async () => {

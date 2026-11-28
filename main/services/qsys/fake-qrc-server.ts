@@ -71,6 +71,8 @@ export class FakeQrcServer {
   maxGroups = 0;
   /** When true, an Invalidate is answered but the values it resends are held until releaseInvalidatePushes(). */
   holdInvalidatePushes = false;
+  /** A snapshot controller's ramp, in ms, by component (see addSnapshotController). */
+  private ramps = new Map<string, { ms: number; timer: NodeJS.Timeout | null }>();
   private held: { session: Session; text: string }[] = [];
   private heldPushes: (() => void)[] = [];
 
@@ -90,6 +92,7 @@ export class FakeQrcServer {
   }
 
   async stop(): Promise<void> {
+    for (const r of this.ramps.values()) if (r.timer) clearTimeout(r.timer);
     await this.dropClients();
     const server = this.server;
     this.server = null;
@@ -120,6 +123,27 @@ export class FakeQrcServer {
     const queue = this.failures.get(method) ?? [];
     queue.push(code);
     this.failures.set(method, queue);
+  }
+
+  /**
+   * A Snapshot Controller with `count` snapshots, as Designer 10.0.1 Emulate reports
+   * one: load.N a "State Trigger" (0 idle, 1 ramping, 2 loaded), match.N and last.N
+   * Booleans reported "Read Only", and a Set of load.N to 1 loads snapshot N. The
+   * load.N goes 1 at once and 2 after `rampMs` (the controller's ramp.time), and
+   * match.N goes true then; last.N goes true at once. Another snapshot's load.M goes
+   * to 0, and the snapshot that was matched stops matching, when a load starts.
+   * A Set's ResponseValues answer for load.N is the value BEFORE the write.
+   */
+  addSnapshotController(component: string, count: number, rampMs = 20): void {
+    const controls: QrcControl[] = [];
+    for (let n = 1; n <= count; n++) {
+      controls.push({ Name: `load.${n}`, Type: "State Trigger", Value: 0, String: "0", Position: 0, Direction: "Read/Write" });
+      controls.push({ Name: `match.${n}`, Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read Only" });
+      controls.push({ Name: `last.${n}`, Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read Only" });
+    }
+    this.components.set(component, controls);
+    this.componentTypes.set(component, "snapshot_controller");
+    this.ramps.set(component, { ms: rampMs, timer: null });
   }
 
   /** Simulates a change made at the Core (a UCI, a script): updates and pushes to change groups. */
@@ -168,11 +192,44 @@ export class FakeQrcServer {
    * a selector plugin's Button N is a radio, so turning one on turns its siblings off.
    */
   private land(component: string, control: QrcControl, value: number | boolean | string): QrcControl[] {
+    const snapshot = /^load\.(\d+)$/.exec(control.Name)?.[1];
+    if (snapshot && this.ramps.has(component) && isOn(value)) return this.loadSnapshot(component, snapshot);
     this.apply(component, control, value);
     if (!isSelectorButton(control.Name) || !isOn(control.Value)) return [control];
     const cleared = (this.components.get(component) ?? []).filter((c) => c !== control && isSelectorButton(c.Name) && isOn(c.Value));
     for (const c of cleared) this.apply(component, c, false);
     return [control, ...cleared];
+  }
+
+  /** Start loading snapshot `n`: every control that changed now; match.n and load.n = 2 follow the ramp. */
+  private loadSnapshot(component: string, n: string): QrcControl[] {
+    const all = this.components.get(component) ?? [];
+    const ramp = this.ramps.get(component)!;
+    const changed: QrcControl[] = [];
+    const set = (c: QrcControl, value: number | boolean) => {
+      if (c.Value === value) return;
+      this.apply(component, c, value);
+      changed.push(c);
+    };
+    for (const c of all) {
+      const m = /^(load|match|last)\.(\d+)$/.exec(c.Name);
+      if (!m) continue;
+      const mine = m[2] === n;
+      if (m[1] === "load") set(c, mine ? 1 : 0);
+      else if (m[1] === "last") set(c, mine);
+      else if (!mine) set(c, false);
+    }
+    if (ramp.timer) clearTimeout(ramp.timer);
+    ramp.timer = setTimeout(() => {
+      ramp.timer = null;
+      for (const c of all) {
+        if (c.Name === `load.${n}` || c.Name === `match.${n}`) {
+          this.apply(component, c, c.Name.startsWith("load") ? 2 : true);
+          this.pushChange(component, c);
+        }
+      }
+    }, ramp.ms);
+    return changed;
   }
 
   private apply(component: string, control: QrcControl, value: number | boolean | string): void {
@@ -366,13 +423,15 @@ export class FakeQrcServer {
       if (!control) return this.fail(session, id, 8, "Unknown control");
       targets.push(control);
     }
+    // A State Trigger answers a Set with its value before the write.
+    const before = targets.map((c) => this.change(name, c));
     const changed = new Set<QrcControl>();
     requested.forEach((r, i) => {
       for (const c of this.land(name, targets[i], this.coerceSet ? this.coerceSet(name, r.Name, r.Value) : r.Value)) changed.add(c);
     });
     // A Core answers ResponseValues with a bare list, one entry per control set,
     // each naming its component (Designer 10.0.1 Emulate); without it, `true`.
-    const values = targets.map((c) => this.change(name, c));
+    const values = targets.map((c, i) => (c.Type === "State Trigger" ? before[i]! : this.change(name, c)));
     this.reply(session, id, !p.ResponseValues ? true : this.setReplyForm === "array" ? values : { Name: name, Controls: values });
     for (const c of changed) this.pushChange(name, c);
   }

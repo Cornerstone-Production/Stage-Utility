@@ -108,3 +108,45 @@ test("a selector plugin's Button N is a radio: pressing one, by Set or at the Co
   fake.setControl("Source_Select", "Button 2", true);
   assert.deepEqual(await on(), ["Button 2"], "a press at the Core left another button on");
 });
+
+test("a Snapshot Controller loads on Set load.N=1: the echo is the old value, load.N goes 1 then 2, match.N follows the ramp, the rest settle", async () => {
+  fake.addSnapshotController("Snap_Controller", 2, 30);
+  const listed = (await client.send("Component.GetControls", { Name: "Snap_Controller" })) as { Controls: { Name: string; Type: string; Direction: string }[] };
+  const by = (n: string) => listed.Controls.find((c) => c.Name === n)!;
+  assert.equal(by("load.1").Type, "State Trigger");
+  assert.equal(by("match.1").Type, "Boolean");
+  assert.equal(by("match.1").Direction, "Read Only", "a Core spells a read-only control's Direction exactly so");
+  assert.equal(by("last.2").Direction, "Read Only");
+
+  const pushes: { Changes: { Name: string; Value: unknown }[] }[] = [];
+  client.onNotification((method, params) => {
+    if (method === "ChangeGroup.Poll") pushes.push(params as never);
+  });
+  const names = ["load.1", "load.2", "match.1", "match.2", "last.1", "last.2"];
+  await client.send("ChangeGroup.AddComponentControl", { Id: "g", Component: { Name: "Snap_Controller", Controls: names.map((Name) => ({ Name })) } });
+  await client.send("ChangeGroup.AutoPoll", { Id: "g", Rate: 0.03 });
+  const read = async () => {
+    const got = (await client.send("Component.Get", { Name: "Snap_Controller", Controls: names.map((Name) => ({ Name })) })) as { Controls: { Name: string; Value: unknown }[] };
+    return Object.fromEntries(got.Controls.map((c) => [c.Name, c.Value]));
+  };
+  const settle = async (n: number) => {
+    for (let i = 0; i < 200 && pushes.flatMap((p) => p.Changes).length < n; i++) await new Promise((r) => setTimeout(r, 5));
+  };
+  await settle(6); // the group's initial state
+  pushes.length = 0;
+
+  const echo = (await client.send("Component.Set", { Name: "Snap_Controller", Controls: [{ Name: "load.1", Value: 1 }], ResponseValues: true })) as { Name: string; Value: unknown }[];
+  assert.equal(echo[0]!.Value, 0, "the Set's echo is the value before the write");
+  assert.deepEqual(await read(), { "load.1": 1, "load.2": 0, "match.1": 0, "match.2": 0, "last.1": 1, "last.2": 0 }, "loading: ramping, last at once, not yet matched");
+  await settle(3); // load.1=1, last.1=1, then load.1=2, match.1=1 after the ramp
+  await new Promise((r) => setTimeout(r, 60));
+  assert.deepEqual(await read(), { "load.1": 2, "load.2": 0, "match.1": 1, "match.2": 0, "last.1": 1, "last.2": 0 }, "loaded: match.1 true after the ramp");
+
+  pushes.length = 0;
+  await client.send("Component.Set", { Name: "Snap_Controller", Controls: [{ Name: "load.2", Value: 1 }] });
+  assert.deepEqual(await read(), { "load.1": 0, "load.2": 1, "match.1": 0, "match.2": 0, "last.1": 0, "last.2": 1 }, "the other snapshot went idle and stopped matching");
+  await new Promise((r) => setTimeout(r, 60));
+  assert.deepEqual(await read(), { "load.1": 0, "load.2": 2, "match.1": 0, "match.2": 1, "last.1": 0, "last.2": 1 });
+  const seen = pushes.flatMap((p) => p.Changes.map((c) => `${c.Name}=${String(c.Value)}`));
+  assert.deepEqual([...seen].sort(), ["last.1=0", "last.2=1", "load.1=0", "load.2=1", "load.2=2", "match.1=0", "match.2=1"], "each change was pushed");
+});

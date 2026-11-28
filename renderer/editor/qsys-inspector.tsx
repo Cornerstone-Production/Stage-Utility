@@ -10,7 +10,7 @@
 import { useState } from "react";
 import { ArrowDownIcon, ArrowUpIcon, Trash2Icon } from "lucide-react";
 
-import { addressOf, isWritable, type QsysBinding, type QsysDensity } from "@main/types/qsys";
+import { addressOf, isWritable, kindOf, type QsysBinding, type QsysDensity } from "@main/types/qsys";
 import type { LayoutObjectConfig } from "@main/types/views";
 import { Button } from "../components/ui";
 import {
@@ -34,9 +34,35 @@ type Item = { label: string; binding: QsysBinding };
 
 export const isQsysConfig = (c: LayoutObjectConfig): c is QsysConfig => c.type.startsWith("qsys-");
 
-/** A new binding keeps the control that lights it: choosing another target is not choosing another lamp. */
-const rebind = (old: QsysBinding | null | undefined, next: QsysBinding | null): QsysBinding | null =>
-  next && old?.indicator ? { ...next, indicator: old.indicator } : next;
+/** A snapshot's `match.N` for its `load.N`, else null. */
+const matchOf = (loadControl: string): string | null => {
+  const n = /^load\.(\d+)$/.exec(loadControl)?.[1];
+  return n ? `match.${n}` : null;
+};
+
+/**
+ * A snapshot's load.N lit by its match.N: a Core turns match.N on when the ramp
+ * ends, and the load.N control itself is a State Trigger that reports no on or off.
+ * Only when the same component carries a Boolean match.N; otherwise unchanged.
+ */
+function litByMatch(next: QsysBinding, siblings: CatalogControl[] | undefined): QsysBinding {
+  const match = matchOf(next.control);
+  if (!match || !siblings?.some((s) => s.Name === match && kindOf(s) === "boolean")) return next;
+  return { ...next, indicator: { component: next.component, control: match } };
+}
+
+/**
+ * A new binding keeps the control that lights it: choosing another target is not
+ * choosing another lamp. Except a lamp that was only filled in from the old load.N
+ * (its own match.N): that went with the old snapshot, so the new control is
+ * filled afresh. A lamp the operator chose is theirs and stays.
+ */
+function rebind(old: QsysBinding | null | undefined, next: QsysBinding | null, siblings?: CatalogControl[]): QsysBinding | null {
+  if (!next) return null;
+  const filled = !!old?.indicator && old.indicator.component === old.component && old.indicator.control === matchOf(old.control);
+  if (old?.indicator && !filled) return { ...next, indicator: old.indicator };
+  return litByMatch(next, siblings);
+}
 
 function Bind({
   label,
@@ -57,7 +83,7 @@ function Bind({
 }) {
   return (
     <Row label={label} hint={hint} stacked>
-      <QsysCoreBrowser kind={kind} writable={writable} value={value ?? null} onChange={(b) => onChange(rebind(value, b))} label={label} clearable={clearable} />
+      <QsysCoreBrowser kind={kind} writable={writable} value={value ?? null} onChange={(b, _legend, _control, siblings) => onChange(rebind(value, b, kind === "trigger" || kind === "press" ? siblings : undefined))} label={label} clearable={clearable} />
     </Row>
   );
 }
@@ -132,7 +158,7 @@ function Items({
         label={addLabel}
         placeholder={addLabel}
         value={null}
-        onChange={(b, legend) => b && onChange([...items, { label: legend ?? b.control, binding: b }])}
+        onChange={(b, legend, _control, siblings) => b && onChange([...items, { label: legend ?? b.control, binding: litByMatch(b, siblings) }])}
       />
     </div>
   );
