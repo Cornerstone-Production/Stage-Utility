@@ -30,7 +30,7 @@ import { asObject, checked } from "../restore-check.js";
 import { hasControlChars, scrub } from "../scrub.js";
 import { WriteQueue } from "../write-queue.js";
 import { addressKey, type AllowEntry } from "../../types/qsys.js";
-import type { QrcControl } from "./qrc-types.js";
+import { MAX_LABEL } from "../../types/qsys-allow-entry.js";
 
 export type { AllowEntry };
 
@@ -46,7 +46,6 @@ export interface AllowlistFile {
 
 export const MAX_ALLOW_ENTRIES = 1000;
 const MAX_NAME = 256;
-const MAX_LABEL = 120;
 
 /** A list, or a single entry, that breaks a rule. The message says which and why. */
 export class AllowlistRefused extends Error {
@@ -119,22 +118,6 @@ export function parseAllowlistFile(raw: unknown): AllowEntry[] {
   if (raw.format !== ALLOWLIST_FILE_FORMAT) refuse("this is not a Q-SYS allowlist file");
   if (raw.version !== ALLOWLIST_FILE_VERSION) refuse(`this allowlist file is version ${scrub(raw.version)}; this server reads version ${ALLOWLIST_FILE_VERSION}`);
   return parseAllowEntries(raw.entries);
-}
-
-/**
- * The entry a control gets when it is added from the catalog: the Core's own range
- * as its limits (null when the Core reports none, or only half of one), no confirm.
- */
-export function allowEntryFromCatalog(c: QrcControl, component: string): AllowEntry {
-  const ranged = Number.isFinite(c.ValueMin) && Number.isFinite(c.ValueMax) && c.ValueMin! <= c.ValueMax!;
-  return {
-    component,
-    control: c.Name,
-    label: `${component} ${c.Name}`.slice(0, MAX_LABEL),
-    min: ranged ? c.ValueMin! : null,
-    max: ranged ? c.ValueMax! : null,
-    confirm: "none",
-  };
 }
 
 const restoreCheck = checked((raw) => ({ entries: parseAllowEntries(asObject(raw, "the Q-SYS allowlist").entries) }));

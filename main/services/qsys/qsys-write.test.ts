@@ -15,7 +15,7 @@ const { FakeQrcServer } = await import("./fake-qrc-server.js");
 const { QsysService } = await import("./qsys-service.js");
 const { QsysWatch, watchChannel } = await import("./qsys-watch.js");
 const { QsysWriter, REFUSAL_LINE_INTERVAL_MS, GESTURE_TIMEOUT_MS, OWED_MAX_ATTEMPTS, OWED_RETRY_MS, isWritable, unwritableReason } = await import("./qsys-write.js");
-const { qsysAllowlist, allowEntryFromCatalog } = await import("./qsys-allowlist-store.js");
+const { qsysAllowlist } = await import("./qsys-allowlist-store.js");
 const { qsysWriteLog, WRITE_LOG_CAP } = await import("./qsys-write-log.js");
 type QsysSettings = import("./qsys-settings.js").QsysSettings;
 type AllowEntry = import("./qsys-allowlist-store.js").AllowEntry;
@@ -823,24 +823,6 @@ describe("review round 2", () => {
     clock += GESTURE_TIMEOUT_MS;
     await timed.write(req({ value: -5, remote: "2001:db8::c" }));
     assert.equal(await fromOf("2001:db8::c"), -7, "a gesture abandoned past the timeout was still open");
-  });
-});
-
-describe("allowEntryFromCatalog", () => {
-  test("takes the Core's range, and none when the Core reports none", () => {
-    const gain = fake.components.get("Lobby_Mixer")![0];
-    assert.deepEqual(allowEntryFromCatalog(gain, "Lobby_Mixer"), {
-      component: "Lobby_Mixer",
-      control: "output.1.gain",
-      label: "Lobby_Mixer output.1.gain",
-      min: -100,
-      max: 20,
-      confirm: "none",
-    });
-    const level = fake.components.get("Zone 1")![0];
-    const e = allowEntryFromCatalog(level, "Zone 1");
-    assert.equal(e.min, null);
-    assert.equal(e.max, null);
   });
 });
 

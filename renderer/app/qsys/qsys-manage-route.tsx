@@ -35,6 +35,7 @@ import {
 } from "@main/types/qsys";
 import type { View } from "@main/types/views";
 import { walkLayoutObjects } from "@main/types/views";
+import { allowEntryFor } from "@main/types/qsys-allow-entry";
 import { kindText, untaperedRanges, type TaperCatalog, type UntaperedRange } from "@main/types/qsys-taper";
 import { errorMessage } from "@main/services/errors";
 import { Button, Callout, Checkbox, DialogContent, DialogDescription, DialogRoot, DialogTitle, Input, NumberInput, Radio, RadioGroup, Switch, confirm } from "../../components/ui";
@@ -791,8 +792,7 @@ function AllowlistSection({
   /** One control picked from the Core: an unsaved row at the Core's own range, to tighten before saving. */
   function addControl(b: { component: string; control: string } | null, _legend?: string, c?: { ValueMin?: number; ValueMax?: number }) {
     if (!b) return;
-    const ranged = Number.isFinite(c?.ValueMin) && Number.isFinite(c?.ValueMax) && c!.ValueMin! <= c!.ValueMax!;
-    editTo([...entries, { component: b.component, control: b.control, label: b.control, min: ranged ? c!.ValueMin! : null, max: ranged ? c!.ValueMax! : null, confirm: "none" }]);
+    editTo([...entries, allowEntryFor(b.component, { Name: b.control, ...c })]);
     setMessage(null);
   }
 

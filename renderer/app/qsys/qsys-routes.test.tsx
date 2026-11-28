@@ -802,7 +802,7 @@ describe("/qsys/manage", () => {
     assert.deepEqual(server.puts.at(-1)!.entries, [
       { component: MIX, control: "gain", label: "", min: -100, max: 20, confirm: "none" },
       { component: MIX, control: "mute", label: "", min: null, max: null, confirm: "none" },
-      { component: MIX, control: "output.1.gain", label: "output.1.gain", min: -100, max: 10, confirm: "none" },
+      { component: MIX, control: "output.1.gain", label: `${MIX} output.1.gain`, min: -100, max: 10, confirm: "none" },
     ]);
     // Now on the list, it is not offered again.
     act(() => {
