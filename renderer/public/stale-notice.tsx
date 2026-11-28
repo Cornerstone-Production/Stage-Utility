@@ -7,30 +7,21 @@
 // What it reads is public-live.ts's PublicFreshness, all of it on this page's own
 // monotonic clock. The threshold is a parameter so a case need not wait two minutes.
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 
 import { PUBLIC_STALE_AFTER_MS } from "@main/types/servicecue-publish";
 import { formatClock } from "../lib/clock-format";
 import { edgeTimeOf, getPublicFreshness, subscribePublicFreshness } from "../lib/public-live";
 import { monotonicNow } from "../lib/server-clock";
+import { useNow } from "../lib/use-now";
 import { useStageState } from "../main/use-stage-state";
 
 /** How often the notice looks at the clock. It needs to be right to the half-minute. */
 const CHECK_EVERY_MS = 5_000;
 
-/** The monotonic clock as state, so one render reads a moment and a later one a later moment. */
-function useMonotonicNow(everyMs: number): number {
-  const [now, setNow] = useState(monotonicNow);
-  useEffect(() => {
-    const timer = setInterval(() => setNow(monotonicNow()), everyMs);
-    return () => clearInterval(timer);
-  }, [everyMs]);
-  return now;
-}
-
 export function StaleNotice({ staleAfterMs = PUBLIC_STALE_AFTER_MS }: { staleAfterMs?: number }) {
   const { heardAtMono, watchingSinceMono } = useSyncExternalStore(subscribePublicFreshness, getPublicFreshness, getPublicFreshness);
-  const now = useMonotonicNow(CHECK_EVERY_MS);
+  const now = useNow(CHECK_EVERY_MS, monotonicNow);
   // The app's time zone, which the page's header clock reads in, and not the rundown's:
   // the notice sits outside the page and cannot see which rundown it shows.
   const { state } = useStageState();
