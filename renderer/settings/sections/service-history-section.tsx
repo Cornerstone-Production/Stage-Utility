@@ -13,6 +13,7 @@ import { ClockIcon, ChevronRightIcon, DownloadIcon, DropletIcon } from "lucide-r
 import { invoke, onNotification, type ApiError } from "../../lib/api";
 import { logToServer } from "../../lib/client-log";
 import { useFailedReads } from "../../lib/use-failed-reads";
+import { useHistoryLists } from "../../lib/use-history-lists";
 import { useServerNow } from "@renderer/lib/server-clock";
 import { Popover as PopoverPrimitive } from "radix-ui";
 
@@ -502,7 +503,24 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // What this page showed last time it was open, drawn from at once and
   // replaced when the reads below land. See history-shown.tsx.
   const shown = useHistoryShown();
-  const [list, setList] = useState<ServiceTimeline[] | null>(() => shown?.last.timeline ?? null);
+  // The three lists the page is built from, read once and kept current by the
+  // live pushes — the same hook Home's headline cards read through. Seeded
+  // from the last visit's lists; a seeded list counts as settled.
+  const {
+    list,
+    setList,
+    attList,
+    setAttList,
+    splList,
+    attSettled,
+    splSettled,
+    failed: listsFailed,
+    reload,
+    reloadAttendance,
+  } = useHistoryLists({
+    spl: true,
+    seed: { timeline: shown?.last.timeline, attendance: shown?.last.attendance, spl: shown?.last.spl },
+  });
   const [selectedKey, setSelectedKey] = useSelectedServiceKey();
   // The open service's record and sound as its own reads (or a live push)
   // answered them. The page draws `detail` and `spl`, below, which fall back
@@ -525,17 +543,10 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   // tells the two apart; nothing here may treat "not answered yet" or "the
   // read failed" as "there is nothing to report".
   const [baptisms, setBaptisms] = useState<BaptismSession[] | null>(null);
-  // Attendance records for all services — the day rows and the Trends card are
-  // both built from these.
-  const [attList, setAttList] = useState<ServiceAttendanceSummary[]>(() => shown?.last.attendance ?? []);
-  // Whether the attendance list and the SPL summary have come back at all, well
-  // or not: an empty array cannot tell "none recorded" from "not read yet", and
-  // the Trends card must not say the first while it is the second.
-  const [attSettled, setAttSettled] = useState(() => shown?.last.attendance != null);
-  const [splSettled, setSplSettled] = useState(() => shown?.last.spl != null);
-  /** One level per service — the sound measure on Trends, and each day row's
-   *  peak. A summary, not the archive: see splHistoryStore.summary(). */
-  const [splList, setSplList] = useState<SplServiceSummary[]>(() => shown?.last.spl ?? []);
+  // attList (attendance for every service) builds the day rows and the Trends
+  // card; splList is one level per service, the sound measure on Trends. The
+  // settled flags tell "none recorded" from "not read yet", which the Trends
+  // card must not confuse. All from useHistoryLists, above.
 
   /**
    * The SPL record behind each of the VISIBLE MONTH's rows, so a row's peak
@@ -611,59 +622,26 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
   }
 
   /**
-   * Which of the three history loads FAILED, as opposed to came back empty.
+   * Which of the page's loads FAILED, as opposed to came back empty.
    *
-   * All three used to `.catch(() => set…([]))`, which is the same shape three
-   * times and the same lie three times: a server that was down, or a request
-   * that timed out, read as "No service timings recorded yet" and "No sound
-   * recorded yet". Three found, three changed. Each failure now names itself on
-   * a `[history]` line AND is visible on the surface it starved:
+   * All of them used to `.catch(() => set…([]))`, the same lie each time: a
+   * server that was down, or a request that timed out, read as "No service
+   * timings recorded yet" and "No sound recorded yet". Each failure now names
+   * itself on a `[history]` line AND is visible on the surface it starved:
    *
    *   timeline / attendance   the empty state says the history could not be read
    *   spl                     the Trends card says the sound summary is missing
+   *   baptisms                the list and the Baptisms card say so
    *
-   * `noteLoaded` is the other half: a load that came back clears its own
-   * failure, so a retry that works stops the page saying otherwise. Both are
-   * stable, which matters — `reload` closes over them and the mount effect
-   * closes over `reload`, so anything rebuilt per render would reload the whole
-   * history on every one.
+   * The three list reads are useHistoryLists'; baptisms are this page's own.
+   * Both callbacks below are stable, which matters: the baptisms effect closes
+   * over them, and anything rebuilt per render would refetch on every one.
    */
-  const { failed: loadFailed, fail: noteFailure, clear: noteLoaded } = useFailedReads<HistoryLoad>("history");
-
-  const reload = useCallback(() => {
-    invoke<ServiceTimeline[]>("serviceTimeline:list")
-      .then((l) => {
-        setList(l);
-        noteLoaded("timeline");
-      })
-      .catch((e) => {
-        setList([]);
-        noteFailure("timeline", "the service timings", e);
-      });
-  }, [noteFailure, noteLoaded]);
-  useEffect(() => {
-    reload();
-    invoke<ServiceAttendanceSummary[]>("attendance:listSummaries")
-      .then((a) => {
-        setAttList(a ?? []);
-        noteLoaded("attendance");
-      })
-      .catch((e) => {
-        setAttList([]);
-        noteFailure("attendance", "the attendance history", e);
-      })
-      .finally(() => setAttSettled(true));
-    invoke<SplServiceSummary[]>("spl:getSummary")
-      .then((r) => {
-        setSplList(r ?? []);
-        noteLoaded("spl");
-      })
-      .catch((e) => {
-        setSplList([]);
-        noteFailure("spl", "the sound summary", e);
-      })
-      .finally(() => setSplSettled(true));
-  }, [reload, noteFailure, noteLoaded]);
+  const { failed: baptismsFailed, fail: noteFailure, clear: noteLoaded } = useFailedReads<"baptisms">("history");
+  const loadFailed = useMemo<ReadonlySet<HistoryLoad>>(
+    () => new Set<HistoryLoad>([...listsFailed, ...baptismsFailed]),
+    [listsFailed, baptismsFailed],
+  );
 
   // Keep what the page shows for its next visit: the lists as they stand, so
   // a live push or a delete on this page is what the next visit draws, not the
@@ -679,20 +657,13 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     });
   }, [shown, list, attList, attSettled, splList, splSettled, splByKey, loadFailed]);
 
-  // Live updates while a service is recording — refresh the open detail/list, the
-  // attendance chart (samples), and SPL, all without a page reload.
+  // Live updates while a service is recording — refresh the open detail, the
+  // attendance chart (samples), and SPL, all without a page reload. The lists
+  // take the same pushes inside useHistoryLists.
   useEffect(() => {
     const offTl = onNotification("service-timeline:history", (p) => {
       const rec = p as ServiceTimeline | null;
       if (!rec) return;
-      setList((prev) => {
-        if (!prev) return prev;
-        const i = prev.findIndex((s) => s.serviceKey === rec.serviceKey);
-        if (i === -1) return [rec, ...prev];
-        const next = prev.slice();
-        next[i] = rec;
-        return next;
-      });
       setDetail((d) => {
         if (d && d.serviceKey === rec.serviceKey) return rec;
         // The service just went live — its timeline record now exists where a
@@ -707,13 +678,6 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
     const offAtt = onNotification("attendance:history", (p) => {
       const rec = p as ServiceAttendance | null;
       if (!rec) return;
-      setAttList((prev) => {
-        const i = prev.findIndex((a) => a.serviceKey === rec.serviceKey);
-        if (i === -1) return [rec, ...prev];
-        const next = prev.slice();
-        next[i] = rec;
-        return next;
-      });
       // As the record's handler above does: a push for the OPEN service is its
       // record even when nothing is loaded yet — including when the read
       // failed, so a live service's note gives way to the data streaming in.
@@ -1188,11 +1152,8 @@ export function ServiceHistorySection({ readOnly = false }: { readOnly?: boolean
       // reads as a glitch, and the most likely reason for a refusal is one the
       // operator can act on: the service is still recording.
       reload();
-      invoke<ServiceAttendanceSummary[]>("attendance:listSummaries")
-        .then((a) => setAttList(a ?? []))
-        .catch(() => {
-          /* the optimistic removal above just stays applied */
-        });
+      // A failed re-read keeps the optimistic removal above applied, and logs.
+      reloadAttendance();
       toast.error(`Couldn't delete that recording: ${errorMessage(e)}`);
     }
   }
