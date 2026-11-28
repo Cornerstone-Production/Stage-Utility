@@ -83,8 +83,14 @@ imported as an allowlist file. Every write is checked by the server.
 - Booleans (mute, switch) and triggers (buttons) carry no range. A trigger is fired
   with `true`, which reaches the Core as `1`. A control whose Core Type names a
   trigger is one: `Trigger`, and a snapshot's `load.N`, which a Core reports as
-  `State Trigger`. A snapshot's lit state is its `match.N` (a read-only Boolean),
-  bound as the preset's **Lit by**.
+  `State Trigger`. A `1` written to `load.N` loads snapshot N. `load.N` reads 0
+  idle, 1 while the snapshot ramps (over the controller's `ramp.time`) and 2 once
+  loaded, so it is not an on or off state. The Core answers a trigger's write with
+  the value from before it, so the writer never compares a trigger's read-back. A
+  snapshot's lit state is its `match.N` (a read-only Boolean), which turns on when
+  the ramp ends and off when another snapshot loads; it is the preset's **Lit by**.
+  Choosing a `load.N` in the editor fills **Lit by** with `match.N` when the
+  component has one; an operator's own choice is kept, and it can be cleared.
 - A Core reports a Boolean as `true`/`false` in its control list and as `1`/`0` in
   the values it pushes and reads back; either is on or off alike, on a panel and on
   the server. Any other number is on unless it is 0; a text value is on only as
@@ -151,7 +157,8 @@ writer would accept: not read-only, and a number needs write limits. A field tha
 reads is offered every control of the right kind. A list (presets, selector buttons)
 adds a row only once a control is chosen. A binding made in the browser is an address
 (component and control); a **Lit by** control is a second address that says whether
-the object is on, such as a snapshot's match.
+the object is on, such as a snapshot's match (filled in for a snapshot's `load.N`;
+see above).
 
 A selector's choice list is written by choice, not by range: for a write from a
 panel with a selector on that control, the writer accepts only a value that is one of

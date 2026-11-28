@@ -97,11 +97,8 @@ beforeEach(async () => {
   fake.components.set("Sign", [{ Name: "message", Type: "Text", Value: "hello", String: "hello", Position: 0, Direction: "Read/Write" }]);
   fake.components.set("Router", [{ Name: "source", Type: "Float", Value: 0, String: "Mic", Position: 0, Direction: "Read/Write", Choices: ["Mic", "Laptop"] } as never]);
   fake.components.set("Paging", [{ Name: "chime", Type: "Trigger", Value: 0, String: "", Position: 0, Direction: "Read/Write" }]);
-  // A snapshot controller as a Core reports it: load.N is a State Trigger, 0 (2 when loaded).
-  fake.components.set("Lobby_Snapshots", [
-    { Name: "load.1", Type: "State Trigger", Value: 0, String: "0", Position: 0, Direction: "Read/Write" },
-    { Name: "match.1", Type: "Boolean", Value: false, String: "false", Position: 0, Direction: "Read" },
-  ]);
+  // A snapshot controller as a Core reports it: load.N is a State Trigger, loading then loaded over a short ramp.
+  fake.addSnapshotController("Lobby_Snapshots", 1, 200);
   port = await fake.start();
   svc = new QsysService();
   subscriptionListeners = [];
@@ -351,11 +348,21 @@ describe("writeControl", () => {
     assert.equal(sets().length, 1, "a refused write was retried");
   });
 
-  test("a snapshot's load.N, a State Trigger, is a trigger: no range, true sent as 1", async () => {
+  test("a snapshot's load.N, a State Trigger, is a trigger: no range, true sent as 1, loads the snapshot, and its stale echo is no mismatch", async () => {
     await connect();
-    const r = await writer.write(req({ component: "Lobby_Snapshots", control: "load.1", value: true }));
+    const warn = capture("warn");
+    let r;
+    try {
+      r = await writer.write(req({ component: "Lobby_Snapshots", control: "load.1", value: true }));
+      assert.deepEqual(warn.lines, [], "the Core echoes load.1's value before the write (0), and a trigger's read-back is never compared");
+    } finally {
+      warn.restore();
+    }
     assert.ok(r.ok, `a State Trigger was refused: ${JSON.stringify(r)}`);
     assert.deepEqual((sets()[0].params as { Controls: unknown }).Controls, [{ Name: "load.1", Value: 1 }]);
+    assert.equal(r.value, 0, "the Core's answer is the value before the write");
+    const held = (name: string) => fake.components.get("Lobby_Snapshots")!.find((c) => c.Name === name)!.Value;
+    assert.deepEqual([held("load.1"), held("match.1")], [1, false], "a Set of 1 loads the snapshot: ramping, not yet matched");
   });
 
   test("a trigger takes no range and is sent as 1", async () => {
