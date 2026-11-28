@@ -16,6 +16,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { MAX_DATAGRAM, MAX_MACS, MAX_MODE_LEN, MAX_MODES, MAX_STR, MAX_URL } from "../main/services/kiosk-discovery.js";
+import { DEFAULT_DISCOVERY_PORT } from "../main/types/kiosk.js";
 import { MAX_LATENCY_MS, REPEATED_BAD_PERCENT } from "../main/services/output-health.js";
 import { VIDEO_MODES } from "../main/types/output-format.js";
 
@@ -63,6 +64,16 @@ describe("the helper's copies of the server's values", () => {
 describe("the helper's last copies of server caps", () => {
   it("HealthPost.maxLatencyMs is MAX_LATENCY_MS in output-health.ts", () => {
     assert.equal(swiftNumber(read("Health.swift"), "maxLatencyMs"), MAX_LATENCY_MS);
+  });
+
+  it("DeviceIdentity.maxLength is MAX_STR in kiosk-discovery.ts", () => {
+    assert.equal(swiftNumber(read("DeviceIdentity.swift"), "maxLength"), MAX_STR);
+  });
+
+  it("Options.discoveryPort defaults to DEFAULT_DISCOVERY_PORT", () => {
+    const found = [...read("Options.swift").matchAll(/^[ \t]*public var discoveryPort: UInt16 = (\d+)[ \t]*$/gm)];
+    assert.equal(found.length, 1, `exactly one default for discoveryPort, found ${found.length}`);
+    assert.equal(Number(found[0][1]), DEFAULT_DISCOVERY_PORT);
   });
 
   it("Reply.swift takes its address cap from Probe.maxURL, not a literal", () => {
