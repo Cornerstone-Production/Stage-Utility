@@ -1352,11 +1352,7 @@ class IntegrationManager {
       });
     }
 
-    // Apply PCO credentials to stage controller if already configured. This
-    // leaves the badge on "connecting" and kicks the real check off in the
-    // background — startup must not block on a round-trip to PCO over the
-    // internet (a slow or down link would delay every display coming up).
-    if (await this.reconcilePco()) void this.verifyPcoCredentials();
+    await this.startPco();
 
     // Start auto-refresh with the persisted interval (defaults to 60 min).
     stageController.startAutoRefresh(this.getPcoRefreshIntervalMs());
@@ -2620,9 +2616,7 @@ class IntegrationManager {
    * @returns whether it is on, so the caller can decide whether to check it.
    */
   private reconcilePco(): Promise<boolean> {
-    const run = this.pcoReconcile.then(async () => {
-      const settings = await settingsStore.load();
-      const on = enabledFor(PCO_DESCRIPTOR, settings.integrationEnabled);
+    return this.onPcoQueue(async (on) => {
       if (on) {
         await this.applyPcoCredentials();
       } else {
@@ -2630,6 +2624,28 @@ class IntegrationManager {
         this.setConnectionState("planning-center", "disconnected", null);
       }
       return on;
+    });
+  }
+
+  /**
+   * Boot's Planning Center step: apply the stored credentials if it is switched on.
+   * This leaves the badge on "connecting" and kicks the real check off in the
+   * background — startup must not block on a round-trip to PCO over the internet
+   * (a slow or down link would delay every display coming up). Its own method so a
+   * test can run it; init() cannot be run in one.
+   */
+  private async startPco(): Promise<void> {
+    if (await this.reconcilePco()) void this.verifyPcoCredentials();
+  }
+
+  /**
+   * Run `work` on the Planning Center queue, after every reconcile queued before it,
+   * with the switch as saved on disk at that moment.
+   */
+  private onPcoQueue<T>(work: (on: boolean) => Promise<T>): Promise<T> {
+    const run = this.pcoReconcile.then(async () => {
+      const settings = await settingsStore.load();
+      return work(enabledFor(PCO_DESCRIPTOR, settings.integrationEnabled));
     });
     this.pcoReconcile = run.then(
       () => undefined,
@@ -2639,14 +2655,9 @@ class IntegrationManager {
   }
 
   // Background: the caller has already answered. verifyPcoCredentials() puts its own
-  // failure on the tile, so what can still throw here is the refresh, and the log
-  // line is the only place left to report it.
+  // failure on the tile and starts the refresh, so this only says the check was wanted.
   private verifyPcoThenRefresh(): void {
-    void this.verifyPcoCredentials()
-      .then((ok) => (ok ? stageController.refresh() : undefined))
-      .catch((err: unknown) => {
-        console.error("[integration-manager] Planning Center refresh after its check failed", scrubError(err));
-      });
+    void this.verifyPcoCredentials({ refresh: true });
   }
 
   /**
@@ -2654,9 +2665,14 @@ class IntegrationManager {
    * Never throws — a failure is a reported state, not an exception, so it can be
    * called at startup without risking init.
    *
-   * @returns true when PCO accepted the credentials.
+   * The request runs off the queue (a save must not wait on PCO), but what it
+   * found lands on it, and only while Planning Center is still switched on: an off
+   * that landed while PCO was answering has the last word, so the tile is not put
+   * back to "connected" and nothing is started for an integration that is off.
+   *
+   * @returns true when PCO accepted the credentials and they were acted on.
    */
-  private async verifyPcoCredentials(): Promise<boolean> {
+  private async verifyPcoCredentials(opts: { refresh?: boolean } = {}): Promise<boolean> {
     const appId = await this.getPcoAppId();
     const secret = await this.getPcoSecret();
     if (!appId || !secret) {
@@ -2664,29 +2680,46 @@ class IntegrationManager {
       this.broadcastStates();
       return false;
     }
+    let answer: { ok: true; types: number } | { ok: false; message: string };
     try {
       const { pcoService } = await import("./pco-service.js");
-      const types = await pcoService.listServiceTypes(appId, secret);
-      this.setConnectionState("planning-center", "connected", `Connected — ${types.length} service type(s)`);
+      answer = { ok: true, types: (await pcoService.listServiceTypes(appId, secret)).length };
+    } catch (err) {
+      answer = { ok: false, message: errorMessage(err) };
+    }
+    return this.onPcoQueue(async (on) => {
+      if (!on) {
+        console.log("[integration-manager] Planning Center's credential check answered after it was switched off; ignored");
+        return false;
+      }
+      if (!answer.ok) {
+        console.warn(`[integration-manager] PCO credential check failed: ${scrub(answer.message)}`);
+        this.setConnectionState("planning-center", "error", answer.message);
+        this.broadcastStates();
+        return false;
+      }
+      this.setConnectionState("planning-center", "connected", `Connected — ${answer.types} service type(s)`);
       this.broadcastStates();
       // The poller backs off for five minutes after an auth failure, so without
       // this, fixing the credentials would leave the countdown frozen until the
       // backoff ran out. start() on a running poller polls at once with the new
       // credentials; a tick still waiting on the old ones is dropped, never a
-      // second poll chain.
-      void import("./live-poller.js")
-        .then((m) => m.livePoller.start())
-        .catch((err) =>
-          console.error("[integration-manager] could not restart the live poller:", scrubError(err)),
-        );
+      // second poll chain. Awaited here, on the queue, so an off cannot land
+      // between the check and the start.
+      try {
+        const { livePoller } = await import("./live-poller.js");
+        livePoller.start();
+      } catch (err) {
+        console.error("[integration-manager] could not restart the live poller:", scrubError(err));
+      }
+      // Started, not awaited: a full lineup fetch must not hold the queue a save waits on.
+      if (opts.refresh) {
+        void stageController.refresh().catch((err: unknown) => {
+          console.error("[integration-manager] Planning Center refresh after its check failed", scrubError(err));
+        });
+      }
       return true;
-    } catch (err) {
-      const msg = errorMessage(err);
-      console.warn(`[integration-manager] PCO credential check failed: ${scrub(msg)}`);
-      this.setConnectionState("planning-center", "error", msg);
-      this.broadcastStates();
-      return false;
-    }
+    });
   }
 
   /**
