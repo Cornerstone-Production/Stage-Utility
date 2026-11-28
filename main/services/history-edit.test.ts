@@ -1038,12 +1038,76 @@ describe("window edits and merges end every kind of record alike", () => {
     assert.equal((await serviceTimelineStore.get("end-tgt"))!.endedAt, iso(90), "the timeline's end was pulled back to its last item");
   });
 
-  it("a merge takes the later end, from either side", async () => {
+  it("a merge takes the later end, from either side, for all three kinds", async () => {
+    const att = (key: string, startMin: number, endMin: number) => ({
+      ...ident(key, startMin, endMin), samples: [{ t: iso(startMin + 1), attendance: 0, occupancy: 10 }],
+      attendanceBaseline: 0, totalAttendance: 0, peakAttendance: 0, peakOccupancy: 10, minOccupancy: 10, lastAttendance: 0, lastOccupancy: 10,
+    });
     await serviceTimelineStore.upsert({ ...ident("end-tgt", 0, 60), items: [tlItem("song", 0, 0, 60)] } as never);
     await serviceTimelineStore.upsert({ ...ident("end-src", 60, 95), items: [tlItem("sermon", 0, 60, 90)] } as never);
+    await attendanceStore.upsert(att("end-tgt", 0, 60) as never);
+    await attendanceStore.upsert(att("end-src", 60, 95) as never);
+    await splHistoryStore.upsert({ ...ident("end-tgt", 0, 60), meterId: "m1", metricKey: "SPL A Slow", items: [splItem("song", 0, 0, 60)] } as never);
+    await splHistoryStore.upsert({ ...ident("end-src", 60, 95), meterId: "m1", metricKey: "SPL A Slow", items: [splItem("sermon", 0, 60, 90)] } as never);
 
     await mergeServiceRecords("end-src", "end-tgt");
 
-    assert.equal((await serviceTimelineStore.get("end-tgt"))!.endedAt, iso(95));
+    assert.equal((await serviceTimelineStore.get("end-tgt"))!.endedAt, iso(95), "timeline");
+    assert.equal((await attendanceStore.get("end-tgt"))!.endedAt, iso(95), "attendance");
+    assert.equal((await splHistoryStore.get("end-tgt"))!.endedAt, iso(95), "spl");
+  });
+
+  it("a leading fragment's runs are numbered first, in the order they ran", async () => {
+    await splHistoryStore.upsert({ ...ident("end-tgt", 10, 60), meterId: "m1", metricKey: "SPL A Slow", items: [splItem("sermon", 0, 10, 60)] } as never);
+    await splHistoryStore.upsert({ ...ident("end-src", 0, 10), meterId: "m1", metricKey: "SPL A Slow", items: [splItem("doors", 0, 0, 10)] } as never);
+    await serviceTimelineStore.upsert({ ...ident("end-tgt", 10, 60), items: [tlItem("sermon", 0, 10, 60)] } as never);
+
+    await mergeServiceRecords("end-src", "end-tgt");
+
+    const items = (await splHistoryStore.get("end-tgt"))!.items;
+    assert.deepEqual(items.map((i) => [i.itemId, i.sequence]), [["doors", 0], ["sermon", 1]]);
+  });
+});
+
+describe("merging attendance the frames cannot align", () => {
+  const T = Date.parse("2026-10-11T15:00:00.000Z");
+  const at = (min: number) => new Date(T + min * 60_000).toISOString();
+  const rec = (key: string, baseline: number | null, mins: number[]) => ({
+    serviceKey: key, serviceTypeId: "st1", serviceTypeName: null, planId: "p1", planTitle: "Sunday",
+    seriesTitle: null, serviceDate: "2026-10-11", serviceTimeId: key, serviceTimeStartsAt: at(0),
+    startedAt: at(mins[0]!), endedAt: at(mins[mins.length - 1]!),
+    samples: mins.map((m) => ({ t: at(m), attendance: m, occupancy: 100 })),
+    attendanceBaseline: baseline, totalAttendance: 0, peakAttendance: 0, peakOccupancy: 100,
+    minOccupancy: 100, lastAttendance: 0, lastOccupancy: 100,
+  });
+
+  beforeEach(async () => {
+    idle();
+    for (const k of ["nf-src", "nf-tgt"]) {
+      await serviceTimelineStore.delete(k);
+      await attendanceStore.delete(k);
+    }
+  });
+
+  it("says so on a [history-edit] line", async () => {
+    await attendanceStore.upsert(rec("nf-tgt", 500, [0, 1, 2]) as never);
+    await attendanceStore.upsert(rec("nf-src", null, [3, 4]) as never);
+    const warned: string[] = [];
+    const orig = console.warn;
+    console.warn = (...a: unknown[]) => { warned.push(a.join(" ")); };
+    try {
+      await mergeServiceRecords("nf-src", "nf-tgt");
+    } finally {
+      console.warn = orig;
+    }
+    assert.ok(warned.some((w) => w.startsWith("[history-edit]") && w.includes("without aligning")), warned.join("\n"));
+  });
+
+  it("keeps one copy of a sample both records hold at the same instant", async () => {
+    await attendanceStore.upsert(rec("nf-tgt", 500, [0, 1, 2]) as never);
+    await attendanceStore.upsert(rec("nf-src", 500, [2, 3]) as never);
+    await mergeServiceRecords("nf-src", "nf-tgt");
+    const ts = (await attendanceStore.get("nf-tgt"))!.samples.map((s) => s.t);
+    assert.deepEqual(ts, [at(0), at(1), at(2), at(3)]);
   });
 });

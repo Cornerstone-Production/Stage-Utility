@@ -5,9 +5,11 @@
 // them are saw-toothed: two boxes' series interleaved twenty people apart. They
 // stay exactly as they are until an operator edits or merges them. Re-aligning
 // them is a repair, and a repair of an operator's data is an explicit, logged
-// action with a kept copy, never a side effect of opening History. Every read
-// path a page or an export takes is walked here, and the bytes on disk must not
-// move.
+// action with a kept copy, never a side effect of opening History. The read
+// paths a page, an archive export and a spreadsheet export take are walked
+// here, and the bytes on disk must not move. (No boot path touches attendance
+// frames: reconcile-records.ts closes open records and does not import
+// attendance-aggregate.ts.)
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
@@ -25,6 +27,7 @@ const { attendanceStore } = await import("./attendance-store.js");
 const { historyRoutes } = await import("./routes/history-routes.js");
 const { callRoute } = await import("./routes/route-harness.js");
 const { buildArchive, inspectArchive } = await import("./archive/archive-bundle.js");
+const { buildHistoryWorkbook } = await import("./history-export.js");
 
 const KEY = "st1:p1:9am";
 const T9 = Date.parse("2026-10-18T09:00:00.000Z");
@@ -83,9 +86,16 @@ describe("a saw-toothed attendance record already on disk", () => {
     attendanceStore.invalidate();
     assert.equal((await attendanceStore.get(KEY))?.samples.length, 32);
     await attendanceStore.list();
-    await callRoute(historyRoutes, "/api/attendance/history?summary=1");
-    await callRoute(historyRoutes, "/api/attendance/history");
+    for (const route of [
+      "/api/attendance/history?summary=1",
+      "/api/attendance/history",
+      `/api/attendance/history/${encodeURIComponent(KEY)}`,
+    ]) {
+      const out = await callRoute(historyRoutes, route);
+      assert.equal(out.status, 200, `${route} answered ${out.status}`);
+    }
     await inspectArchive(await buildArchive());
+    await buildHistoryWorkbook({ include: ["services", "attendance"] });
 
     assert.deepEqual(await snapshot(), before);
   });

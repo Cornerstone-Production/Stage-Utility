@@ -263,3 +263,35 @@ describe("ServiceRecorder.ensureRecord: back-to-back services on one plan", () =
     assert.equal(recorderLogs().length, 0);
   });
 });
+
+describe("laterEnd and clampItemsToWindow", async () => {
+  const { clampItemsToWindow, laterEnd } = await import("./service-recorder.js");
+
+  it("takes the later of two ends, and passes over one that will not parse", () => {
+    const a = "2026-10-04T16:00:00.000Z";
+    const b = "2026-10-04T16:30:00.000Z";
+    assert.equal(laterEnd(a, b), b);
+    assert.equal(laterEnd(b, a), b);
+    assert.equal(laterEnd(a, null), a);
+    assert.equal(laterEnd(null, b), b);
+    assert.equal(laterEnd("not a time", a), a, "an unreadable end beat a real one");
+    assert.equal(laterEnd(a, "not a time"), a);
+    assert.equal(laterEnd("not a time", null), "not a time", "with nothing better, the stored end stands");
+  });
+
+  it("drops what starts after the end, closes what runs past it or never closed, and leaves the rest", () => {
+    const end = Date.parse("2026-10-04T16:00:00.000Z");
+    const items = [
+      { id: "inside", startedAt: "2026-10-04T15:00:00.000Z", endedAt: "2026-10-04T15:30:00.000Z" },
+      { id: "past", startedAt: "2026-10-04T15:30:00.000Z", endedAt: "2026-10-04T16:10:00.000Z" },
+      { id: "open", startedAt: "2026-10-04T15:50:00.000Z", endedAt: null as string | null },
+      { id: "after", startedAt: "2026-10-04T16:05:00.000Z", endedAt: "2026-10-04T16:20:00.000Z" },
+    ];
+    const closed: string[] = [];
+    const { kept, dropped } = clampItemsToWindow(items, end, (it, iso) => { closed.push(it.id); it.endedAt = iso; });
+    assert.deepEqual(kept.map((i) => i.id), ["inside", "past", "open"]);
+    assert.equal(dropped, 1);
+    assert.deepEqual(closed, ["past", "open"]);
+    assert.equal(kept[0]!.endedAt, "2026-10-04T15:30:00.000Z");
+  });
+});
