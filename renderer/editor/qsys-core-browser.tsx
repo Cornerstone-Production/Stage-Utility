@@ -209,10 +209,11 @@ export function QsysCoreBrowser({
   const [query, setQuery] = useState("");
 
   // A binding filled from elsewhere (the strip's Bind a channel) leaves no picker open over it.
-  const boundKey = value ? keyOf(value.component, value.control) : null;
-  const [seenKey, setSeenKey] = useState(boundKey);
-  if (seenKey !== boundKey) {
-    setSeenKey(boundKey);
+  // Watched by identity, not by the control's address: filling the same channel again hands
+  // this field a new binding that names the same control, and it closes then too.
+  const [seen, setSeen] = useState(value);
+  if (seen !== value) {
+    setSeen(value);
     setOpen(false);
   }
 

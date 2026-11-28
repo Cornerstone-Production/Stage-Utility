@@ -312,6 +312,25 @@ describe("the Q-SYS inspector", () => {
     assert.equal(r.getByRole("button", { name: /^Level$/ }).getAttribute("aria-expanded"), "false", "the Level picker stayed open over the filled field");
   });
 
+  test("Bind a channel closes a field's open picker even when it fills the same channel again", async () => {
+    const same = { component: "Input_Bank", control: "input.3.gain" };
+    const r = mount({ type: "qsys-strip", name: null, label: "", gain: same, mute: null, meter: null });
+    fireEvent.click(r.getByRole("button", { name: "Bind a channel" }));
+    await wait();
+    fireEvent.change(r.getByLabelText("Component"), { target: { value: "Input_Bank" } });
+    await wait();
+    fireEvent.click(r.getByRole("button", { name: "Input 3" }));
+    await wait();
+    // Open the Level picker over the filled field, then fill the same channel once more.
+    fireEvent.click(r.getByRole("button", { name: "Level" }));
+    await wait();
+    assert.equal(r.getByRole("button", { name: "Level" }).getAttribute("aria-expanded"), "true");
+    fireEvent.click(r.getByRole("button", { name: "Input 3" }));
+    await wait();
+    assert.deepEqual(r.latest().gain, same);
+    assert.equal(r.getByRole("button", { name: "Level" }).getAttribute("aria-expanded"), "false", "the Level picker stayed open after the same channel was filled again");
+  });
+
   test("Break apart is offered on a strip and calls the editor's action", () => {
     let called = 0;
     const r = render(
