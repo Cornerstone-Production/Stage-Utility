@@ -1110,6 +1110,19 @@ describe("merging attendance the frames cannot align", () => {
     assert.equal((await attendanceStore.get("nf-tgt"))!.attendanceUnaligned, true);
   });
 
+  it("marks a merge it could not align, so a later archive import does not align on it", async () => {
+    await attendanceStore.upsert(rec("nf-tgt", 500, [0, 1, 2]) as never);
+    await attendanceStore.upsert(rec("nf-src", null, [3, 4]) as never);
+    const orig = console.warn;
+    console.warn = () => {};
+    try {
+      await mergeServiceRecords("nf-src", "nf-tgt");
+    } finally {
+      console.warn = orig;
+    }
+    assert.equal((await attendanceStore.get("nf-tgt"))!.attendanceUnaligned, true);
+  });
+
   it("keeps one copy of a sample both records hold at the same instant", async () => {
     await attendanceStore.upsert(rec("nf-tgt", 500, [0, 1, 2]) as never);
     await attendanceStore.upsert(rec("nf-src", 500, [2, 3]) as never);

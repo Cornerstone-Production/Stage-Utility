@@ -90,7 +90,8 @@ the archive's own readings, taken by an earlier import, are not counted as
 agreement. Where they do not overlap, a record whose start count is 0 while
 its daily total sits well above its counts is not aligned on; that also
 catches a genuine 0 whose tail was trimmed. A wrong start count that a later
-edit re-based is not caught without an overlap. A record joined unshifted is
+edit re-based is not caught without an overlap. A record joined unshifted (by
+an import, or by History's **Merge** when one side has no start count) is
 marked, and no later import aligns on it, so importing an archive twice, or
 passing archives back and forth between machines, changes nothing more. A
 third machine's archive can show a disagreement the first two did not; the

@@ -199,11 +199,6 @@ export function framesDisagree(mine: AttendanceRecord, theirs: AttendanceRecord)
     }
     return null;
   }
-  // Shared instants with no overlap left to judge: an earlier import between
-  // these two aligned them (a fallback would have marked the record and never
-  // reached here). The signature below reads totals that merge moved, so it
-  // is not asked again; the earlier decision stands.
-  if (own.length < a.length) return null;
 
   const signature = (r: AttendanceRecord, base: number, series: [number, number][], who: string): string | null => {
     const total = finiteOrNull(r.totalAttendance);
