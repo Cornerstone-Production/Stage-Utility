@@ -14,6 +14,13 @@
 // `numberFieldValue` instead of carrying the older expression by hand.
 
 import { FORM_MASK } from "@main/services/mask";
+import type { ConfigField } from "@main/types/integrations";
+
+/** A field whose stored value is a secret shown as the mask: a password, or the token behind YouTube's
+ *  "oauth-device" connect row. The one place that says which field types those are. */
+export function isSecretField(field: Pick<ConfigField, "type">): boolean {
+  return field.type === "password" || field.type === "oauth-device";
+}
 
 /**
  * What NumberInput is handed for one `type: "number"` field.
@@ -65,7 +72,7 @@ export function initialConfig(
     // behind its "Paste a token instead" disclosure and is masked the same
     // way — this was the one enumeration of field.type that still read
     // "password" alone after that type was added.
-    if ((field.type === "password" || field.type === "oauth-device") && typeof raw === "string" && raw !== "") {
+    if (isSecretField(field) && typeof raw === "string" && raw !== "") {
       out[field.key] = FORM_MASK;
     } else if (field.type === "number") {
       // Unset numeric fields (e.g. an API port) prefill the integration's
