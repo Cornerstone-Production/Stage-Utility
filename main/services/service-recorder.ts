@@ -241,6 +241,10 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
   protected currentKey: string | null = null;
   /** Last live-item tick, for measuring the gap between services. */
   protected lastLiveAt = 0;
+  /** Last tick that saw the service NOT running (Planning Center left item
+   *  mode, or sat past SERVICE END). Later than lastLiveAt means the service
+   *  stopped, which silence alone (no ticks at all) does not. */
+  private lastStoppedAt = 0;
   /** Re-entrancy latch: the poller fires every tick and onLiveTick awaits I/O. */
   protected busy = false;
   private dirty = false;
@@ -434,6 +438,7 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
     const now = Date.now();
     const gap = this.lastLiveAt === 0 ? Infinity : now - this.lastLiveAt;
     if (running) this.lastLiveAt = now;
+    else this.lastStoppedAt = now;
     return gap;
   }
 
@@ -579,6 +584,21 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
    * service's first item mid-overrun, but the next service always starts with
    * one. A reprise of any OTHER item (a song, a step back) is not evidence of
    * that and keeps holding. See openingItemId / captureOpeningItem.
+   *
+   * And a service that has ENDED is held only for itself. Once Planning Center
+   * has left the service (the record closed, or a tick saw it not running) and
+   * nothing has run for SERVICE_GAP_MS, an item put on air after the service
+   * last ran (a walk-in loop half an hour before the next service, a slide
+   * check) is the next service's, however far away that starts: holding
+   * reopened the finished record and filed the item there. What still holds is
+   * a brief lull (a mode drop mid-service, back within the gap, on any item),
+   * the airing the service stopped on coming back (it went live before the
+   * service stopped), and silence: no ticks at all, a Planning Center outage
+   * mid-overrun, is no evidence the service ended. Judged by the ticks rather
+   * than by the record's end alone, because attendance can still hold the
+   * record open on the next service's arrival ramp; and by Planning Center's
+   * live_start_at rather than the item id, because back-to-back services share
+   * a plan, so the next service's items carry the same ids.
    */
   private shouldHoldThroughServiceTimeChange(
     live: PcoLiveDTO,
@@ -592,6 +612,17 @@ export abstract class ServiceRecorder<T extends ServiceRecord> {
 
     const untilMs = startsAtMs - Date.now();
     const hold = untilMs > SERVICE_GAP_MS;
+
+    // An ended service is held only for itself. Logged unconditionally, like
+    // the opening item below, and for the same reason.
+    const lastRanMs = Date.now() - gapSinceLive;
+    const stopped = this.current?.endedAt != null || this.lastStoppedAt > lastRanMs;
+    if (hold && stopped && gapSinceLive >= SERVICE_GAP_MS && live.currentItemId && itemLiveSinceMs(live) > lastRanMs) {
+      console.log(
+        `[service-recorder] ${this.label}: "${scrub(live.label ?? live.currentItemTitle ?? live.currentItemId)}" went live after the service in ${this.current?.serviceKey ?? "the open record"} stopped, ${Math.round(untilMs / 60_000)} min before service time ${serviceTimeId} — the next service's, closing ${this.current?.serviceKey ?? "the open record"} and opening a new record`,
+      );
+      return false;
+    }
 
     // The opening item overrides a hold outright. Logged unconditionally, not
     // through loggedServiceTimeChange: the split below changes currentKey on
