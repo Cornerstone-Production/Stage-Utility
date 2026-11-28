@@ -13,7 +13,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, test } from "node:test";
+import { afterEach, beforeEach, describe, mock, test } from "node:test";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-wireless-credential-log-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -73,5 +73,21 @@ describe("a Spectera password", () => {
       `a junk password value was dropped in silence. Saw: ${JSON.stringify(lines)}`,
     );
     assert.ok(!lines.join("\n").includes(SECRET));
+  });
+
+  test("a clear that fails to save is not reported as done", async () => {
+    const id = await connection("Base station failed save");
+    const save = mock.method(secretsStore, "setManySecrets", async () => {
+      throw new Error("disk full");
+    });
+    try {
+      await assert.rejects(
+        wirelessManager.updateConnection({ id, patch: { config: { host: "spectera.example", password: "" } } }),
+        /disk full/,
+      );
+    } finally {
+      save.mock.restore();
+    }
+    assert.ok(!lines.some((l) => l.includes("cleared")), `the log says the password was cleared, and the save failed. Saw: ${JSON.stringify(lines)}`);
   });
 });

@@ -160,6 +160,7 @@ class WirelessManager {
 
     const conn = this.connections[idx];
     const patch = params.patch;
+    let cleared: string[] = [];
     // Where its credential goes now, before the patch moves anything.
     const targetBefore = wirelessCredentialTarget(conn.providerId, conn.config);
 
@@ -172,12 +173,11 @@ class WirelessManager {
       // would hand the driver the mask as its password. foldSecrets resolves it
       // against what is stored: mask keeps, "" clears, anything else replaces.
       const stored = await secretsStore.getSecrets(wirelessSecretSlot(conn.id));
-      const { next: merged, cleared, ignored } = foldSecrets(conn.providerId, patch.config, stored);
+      const fold = foldSecrets(conn.providerId, patch.config, stored);
+      const merged = fold.next;
+      cleared = fold.cleared;
       // Key names and types, never values: these are credential slots.
-      if (cleared.length > 0) {
-        console.log(`[wireless] cleared the stored ${scrub(cleared.join(", "))} on ${scrub(conn.name)}`);
-      }
-      for (const { key, type } of ignored) {
+      for (const { key, type } of fold.ignored) {
         console.warn(
           `[wireless] ignoring a non-string credential on ${scrub(conn.name)}: ${scrub(key)} arrived as ${scrub(type)}. ` +
             "The stored value is unchanged.",
@@ -219,6 +219,10 @@ class WirelessManager {
     // otherwise write a second, forged line to /log.
     console.log(`[wireless] updateConnection — ${scrub(conn.id)} patch keys: ${scrub(Object.keys(patch).join(", "))}`);
     await this.persist();
+    // After the save, so a failed write cannot leave /log saying it was cleared.
+    if (cleared.length > 0) {
+      console.log(`[wireless] cleared the stored ${scrub(cleared.join(", "))} on ${scrub(conn.name)}`);
+    }
     await deviceManager.applyConnections(this.connections);
     this.broadcast();
     return this.listConnections();

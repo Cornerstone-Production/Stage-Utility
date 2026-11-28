@@ -49,7 +49,8 @@ as `[wireless] cleared the stored password on <connection>`. A value that is not
 a string is ignored, with a line saying so. It is only sent to the
 address it was entered for: changing the connection's host, port or provider
 clears it unless the same change types it again, the panel says so, and `/log`
-records `[wireless] cleared the stored password on <connection>`.
+records `[wireless] cleared the stored password on <connection>: its address
+changed from ... to ...`.
 
 ## Setup
 
