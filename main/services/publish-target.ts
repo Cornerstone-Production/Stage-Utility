@@ -1,9 +1,10 @@
 // publish-target.ts — where a publisher sends, and what may be said about it.
 //
 // ServiceCue and StagePlots publish to the same public page, with the same address and the same
-// token. Each used to work out "is there a page, and may it be used" for itself, and each hid the
-// token from its logs and replies for itself; the copies had already drifted (one named a bad
-// token, the other said "set up the public link first" for every failure).
+// token. This is the one place that works out "is there a page, and may it be used", and hides
+// the token. StagePlots uses it; servicecue-publisher.ts still carries its own copy of the ladder
+// (servicecue-publisher.ts "parsePublishUrl ... checkPublishToken") and moves here once that file
+// is free to change.
 //
 // This file imports only the pure rules (servicecue-publish-rules.ts), and takes what it reads as
 // seams, so it pulls in neither a store nor the secrets file.

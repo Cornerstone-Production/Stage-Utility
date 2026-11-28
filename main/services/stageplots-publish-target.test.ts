@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { after, test } from "node:test";
+import { after, mock, test } from "node:test";
 
 import type { PublishOrigin } from "./servicecue-publish-rules.js";
 
@@ -70,4 +70,15 @@ test("an address and a good token is the target", async () => {
   const token = "t".repeat(PUBLISH_MIN_TOKEN_LENGTH);
   await savePublishToken(ORIGIN, `  ${token}  `);
   assert.deepEqual(await publishTarget(), { ok: true, origin: ORIGIN, token });
+});
+
+test("a settings read that fails is thrown, not read as no page: the publisher refuses actions on it", async () => {
+  const load = mock.method(servicecuePublishStore, "load", async () => {
+    throw new Error("settings EIO");
+  });
+  try {
+    await assert.rejects(publishTarget(), { message: "settings EIO" });
+  } finally {
+    load.mock.restore();
+  }
 });
