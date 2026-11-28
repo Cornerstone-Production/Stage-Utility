@@ -32,6 +32,7 @@ import "./patch-store.js";
 import "./photo-themes/service.js";
 import "./presets-store.js";
 import "./qsys/qsys-allowlist-store.js";
+import "./qsys/qsys-pin.js";
 import "./qsys/qsys-write-log.js";
 import "./rosstalk-store.js";
 import "./bar-config-store.js";

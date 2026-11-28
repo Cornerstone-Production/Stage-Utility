@@ -38,7 +38,7 @@ outside `a-z`, `0-9` and `-`.
 
 Reserved: the empty path, `settings`, `log`, `logs`, `photos`, `enroll`, and every
 operator page below — `history`, `baptism`, `patch`, `servicecue`, `scriptview`, `automation`,
-`plan`, `screens`, `mic-slots`, `video-feeds`, `consoles`, `views`, `displays` — plus the
+`plan`, `screens`, `mic-slots`, `video-feeds`, `stageplots`, `consoles`, `qsys`, `views`, `displays` — plus the
 `preview-` prefix.
 These are pages in their own right: a display slugged `history` would render the
 History page rather than the display.
@@ -113,8 +113,19 @@ They follow the light/dark theme, unlike the always-dark display URLs above.
 
 Plus the pages reached from those: `/screens/<view id>/edit` (the layout
 editor), `/consoles/<view id>` (a console you built), `/patch/edit`,
-`/servicecue/presets`, `/servicecue/<service type>/<layout>`, and
-`/history/manage`.
+`/servicecue/presets`, `/servicecue/<service type>/<layout>`,
+`/history/manage`, and `/qsys/manage` with a Q-SYS panel inside it at
+`/qsys/manage/<slug>`.
+
+`/qsys/<slug>` is a [Q-SYS panel](integrations/qsys.md#panels) full screen, with none
+of the app's sidebar or header: the address an iPad opens and saves to its home
+screen. It draws its own header (the panel's name and the connection to the sound
+system), and an address no panel has says so rather than showing a blank page. A
+panel's old address, from before its address was changed, still opens it and the
+page corrects the URL. `manage` is never a panel's slug. A volunteer panel's cog opens its sibling panels as
+`/qsys/<slug>?return=<home slug>`, which goes back to the home panel after a few
+minutes without a touch ([auto-return](integrations/qsys.md#auto-return)); save the
+address without `?return=` to the home screen.
 
 Moving between them does not reload the page, so the event stream and cached
 plan data survive a navigation.

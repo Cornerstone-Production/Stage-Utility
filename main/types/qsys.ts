@@ -1,6 +1,8 @@
 // qsys.ts — shapes shared by the Q-SYS server code and the panels that read it.
 
-import { walkLayoutObjects, type LayoutObject, type LayoutObjectConfig, type View } from "./views.js";
+import { HOME_VIEW_ID } from "../services/home-view.js";
+import { slugCore } from "./slug.js";
+import { viewSurface, walkLayoutObjects, type LayoutObject, type LayoutObjectConfig, type View, type ViewSurface } from "./views.js";
 
 /** The objects of panel `panelId` (a View), containers' children included; none when there is no such view. */
 function panelObjects(views: View[], panelId: string | null): LayoutObject[] {
@@ -187,3 +189,207 @@ export function qsysAddressesOf(config: LayoutObjectConfig): QsysAddress[] {
   }
   return out;
 }
+
+// ── Panels ─────────────────────────────────────────────────────────────────
+
+/**
+ * What makes a console View a Q-SYS panel: who it is for, the URL it opens at
+ * (`/qsys/<slug>`), the panels its cog menu lists, and how long it waits without
+ * a touch before going back to the device's home panel.
+ */
+export interface QsysPanelBlock {
+  kind: PanelKind;
+  /** Lowercase a-z, 0-9 and single hyphens; unique across the views; never "manage". */
+  slug: string;
+  /** Other panels' slugs, for the cog menu. One that does not exist is kept and
+   *  dropped from the menu where it is drawn, never refused here. */
+  siblings: string[];
+  /** Minutes without a touch before returning home; 0 never returns. */
+  returnAfterMin: number;
+  /** Addresses this panel had before it was renamed, oldest first. `/qsys/<alias>`
+   *  redirects to the panel, and no other panel may take one. Kept by the server
+   *  on a rename (setViewQsys); absent when there are none. */
+  aliases?: string[];
+}
+
+export const QSYS_SLUG_MAX = 64;
+export const QSYS_RETURN_DEFAULT_MIN = 5;
+export const QSYS_RETURN_MAX_MIN = 1440;
+const QSYS_SIBLINGS_MAX = 50;
+/** Old addresses one panel keeps. A rename past this forgets the oldest, logged. */
+export const QSYS_ALIASES_MAX = 20;
+/** `/qsys/manage` is the operator's page, so no panel may take its name. */
+const RESERVED_QSYS_SLUGS: ReadonlySet<string> = new Set(["manage"]);
+const SLUG_SHAPE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/** What each kind is called wherever a panel's kind is shown. */
+export const QSYS_KIND_TEXT: Readonly<Record<PanelKind, string>> = { volunteer: "Volunteer panel", staff: "Staff panel" };
+
+/**
+ * Whether a view may carry a panel block: a custom console, and never Home (it is
+ * a console with its own page at /). The one rule; every write path, the load
+ * repair, the import and the pages ask here.
+ */
+export function canBeQsysPanel(v: { id: string; kind: string; surface?: ViewSurface }): boolean {
+  return v.id !== HOME_VIEW_ID && v.kind === "custom" && viewSurface(v) === "console";
+}
+
+/** Is this a slug a panel may have? Shape only; whether it is free is {@link findPanelBySlug}'s. */
+export function isQsysSlug(v: unknown): v is string {
+  return typeof v === "string" && v.length <= QSYS_SLUG_MAX && SLUG_SHAPE.test(v) && !RESERVED_QSYS_SLUGS.has(v);
+}
+
+/** A panel's name as a slug: accents dropped, then the shared slug rule
+ *  (slugCore). "panel" for a name with nothing left, and a reserved word gets "-panel". */
+export function qsysSlugFromName(name: string): string {
+  const base = slugCore(name.normalize("NFKD").replace(/[̀-ͯ]/g, ""))
+    .slice(0, QSYS_SLUG_MAX)
+    .replace(/-+$/, "");
+  if (!base) return "panel";
+  return RESERVED_QSYS_SLUGS.has(base) ? `${base}-panel` : base;
+}
+
+/** `base`, or `base-2`, `base-3`... : the first that is not in `taken`. */
+export function uniqueQsysSlug(base: string, taken: ReadonlySet<string>): string {
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n++) {
+    const suffix = `-${n}`;
+    const slug = `${base.slice(0, QSYS_SLUG_MAX - suffix.length).replace(/-+$/, "")}${suffix}`;
+    if (!taken.has(slug)) return slug;
+  }
+}
+
+/** Every address one block holds: its slug, then its aliases. */
+export function addressesOf(block: QsysPanelBlock): string[] {
+  return [block.slug, ...(block.aliases ?? [])];
+}
+
+/** Every address the views' panels hold, slugs and aliases alike: what a new or
+ *  renamed panel may not take. */
+export function qsysSlugsOf(views: readonly { qsys?: QsysPanelBlock | null }[]): Set<string> {
+  return new Set(views.flatMap((v) => (v.qsys ? addressesOf(v.qsys) : [])));
+}
+
+/** The kind a view's Q-SYS objects poll their meters as: its panel block's, else
+ *  staff (a console with Q-SYS objects and no block, or no view at all). The
+ *  server's watch and every page ask here, so they name the same meter channel. */
+export function panelKindOf(view: { qsys?: QsysPanelBlock | null } | null | undefined): PanelKind {
+  return view?.qsys?.kind ?? "staff";
+}
+
+/** Is this View a Q-SYS panel: one with a `qsys` block. */
+export function isQsysPanel(v: { qsys?: QsysPanelBlock | null }): boolean {
+  return !!v.qsys;
+}
+
+/**
+ * The panel holding `slug`, other than `exceptId`: the one whose address it is,
+ * else the one that had it before a rename (an alias). Null when it is free. The
+ * one lookup behind `/qsys/<slug>` (an alias redirects), a cog's siblings and
+ * every uniqueness check. The first in view order if two ever share one.
+ */
+export function findPanelBySlug<V extends { id: string; qsys?: QsysPanelBlock | null }>(views: readonly V[], slug: string, exceptId: string | null = null): V | null {
+  const others = exceptId === null ? views : views.filter((v) => v.id !== exceptId);
+  return others.find((v) => v.qsys?.slug === slug) ?? others.find((v) => v.qsys?.aliases?.includes(slug)) ?? null;
+}
+
+/** A list of up to `max` slugs, each once and none `self`, or null when it is not one. */
+function slugList(raw: unknown, max: number, self: string): string[] | null {
+  if (!Array.isArray(raw) || raw.length > max || !raw.every(isQsysSlug)) return null;
+  return [...new Set(raw as string[])].filter((s) => s !== self);
+}
+
+/**
+ * A `qsys` block as a request or a file gives it, checked: the block, or why it is
+ * refused. `siblings` defaults to none and `returnAfterMin` to 5. Shape only:
+ * whether the slug is free is decided against the views at the write.
+ */
+export function parseQsysPanelBlock(raw: unknown): { block: QsysPanelBlock } | { error: string } {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return { error: "qsys must be an object or null" };
+  const r = raw as Record<string, unknown>;
+  for (const k of Object.keys(r)) {
+    if (k !== "kind" && k !== "slug" && k !== "siblings" && k !== "returnAfterMin" && k !== "aliases") return { error: `qsys has a field this app does not have: ${k.slice(0, 40)}` };
+  }
+  if (r.kind !== "volunteer" && r.kind !== "staff") return { error: "qsys.kind must be volunteer or staff" };
+  if (!isQsysSlug(r.slug)) {
+    return { error: `qsys.slug must be lowercase letters, digits and single hyphens, up to ${QSYS_SLUG_MAX} characters, and not "manage"` };
+  }
+  const siblings = slugList(r.siblings ?? [], QSYS_SIBLINGS_MAX, r.slug);
+  if (!siblings) return { error: `qsys.siblings must be a list of up to ${QSYS_SIBLINGS_MAX} panel slugs` };
+  const aliases = slugList(r.aliases ?? [], QSYS_ALIASES_MAX, r.slug);
+  if (!aliases) return { error: `qsys.aliases must be a list of up to ${QSYS_ALIASES_MAX} panel slugs` };
+  const returnAfterMin = r.returnAfterMin ?? QSYS_RETURN_DEFAULT_MIN;
+  if (typeof returnAfterMin !== "number" || !Number.isInteger(returnAfterMin) || returnAfterMin < 0 || returnAfterMin > QSYS_RETURN_MAX_MIN) {
+    return { error: `qsys.returnAfterMin must be a whole number of minutes from 0 to ${QSYS_RETURN_MAX_MIN}` };
+  }
+  return { block: { kind: r.kind, slug: r.slug, siblings, returnAfterMin, ...(aliases.length > 0 ? { aliases } : {}) } };
+}
+
+/** What a duplicate slug is refused with. */
+export function slugTakenMessage(slug: string, owner: { name: string; qsys?: QsysPanelBlock | null }): string {
+  const was = owner.qsys && owner.qsys.slug !== slug ? ` (it was that panel's address before a rename, and still leads there)` : "";
+  return `the panel address /qsys/${slug} is already used by "${owner.name}"${was}; pick another`;
+}
+
+/**
+ * The panels a panel's cog menu lists, and the siblings it names that no panel
+ * has. A missing one is not an error: it is dropped from the menu where the menu
+ * is drawn, and /qsys/manage lists it so somebody can fix the list. The one place
+ * that decides which is which. A sibling named by an old address (an alias) is the
+ * panel that has it now.
+ */
+export function siblingsOf<V extends { id: string; qsys?: QsysPanelBlock | null }>(
+  panel: { qsys?: QsysPanelBlock | null },
+  views: readonly V[],
+): { present: V[]; missing: string[] } {
+  const present: V[] = [];
+  const missing: string[] = [];
+  for (const slug of panel.qsys?.siblings ?? []) {
+    const found = findPanelBySlug(views, slug);
+    if (!found) missing.push(slug);
+    else if (found.qsys?.slug !== panel.qsys?.slug && !present.includes(found)) present.push(found);
+  }
+  return { present, missing };
+}
+
+// ── Shapes the panels' routes answer with ───────────────────────────────────
+
+/** One change a load made to a panel block. `to` null: the block was moved aside, whole. */
+export interface QsysSlugRepair {
+  viewId: string;
+  name: string;
+  /** The slug the file gave, when it had a usable one. */
+  from: string | null;
+  to: string | null;
+  why: "shared" | "not-a-console" | "malformed";
+}
+
+/** One imported panel, for the import report. */
+export interface ImportedQsysPanel {
+  /** The view's id on this install. */
+  id: string;
+  name: string;
+  slug: string;
+  /** The slug the file named, when it was taken here and this one was given instead. */
+  renamedFrom?: string;
+  /** Old addresses the file kept for it that are taken here, so it does not keep them. */
+  droppedAliases?: string[];
+  /** Siblings that name no panel here after the import. Kept in the block (the cog
+   *  menu draws only those that exist) and listed on /qsys/manage. */
+  missingSiblings: string[];
+}
+
+/** One control a panel may write, and its limits (qsys-allowlist-store.ts). */
+export interface AllowEntry {
+  component: string;
+  control: string;
+  label: string;
+  /** The value limits enforced on a numeric write; both null when no range is set. */
+  min: number | null;
+  max: number | null;
+  /** `hold`: every object bound to it asks for hold-to-confirm. */
+  confirm: "none" | "hold";
+}
+
+/** What POST /api/qsys/pin/check answers. */
+export type PinCheck = { ok: true } | { ok: false; lockedForMs: number; notSet?: true };

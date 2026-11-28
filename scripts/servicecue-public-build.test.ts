@@ -249,6 +249,8 @@ describe("what is in the bundle", () => {
       // numbers, and types the build erases.
       "main/types/servicecue-deploy.ts",
       "main/types/servicecue-publish.ts",
+      // The one slug rule servicecue-slug.ts (and the Q-SYS panels) wrap: one pure function.
+      "main/types/slug.ts",
       // The event stream's heartbeat name and silence deadline, which api.ts's own
       // stream reads: three constants.
       "main/types/sse.ts",

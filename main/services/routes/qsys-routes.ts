@@ -5,33 +5,47 @@
 //   GET  /api/qsys/status              the connection, plus `writable`: connected and re-read
 //   GET  /api/qsys/catalog             { designCode, components }; 503 while not connected
 //   POST /api/qsys/catalog/refresh     reads the catalog again; 503 while not connected, 502 on failure
-//   GET  /api/qsys/allowlist           { entries, invalid }: invalid says why a stored file is refused, else null
-//   PUT  /api/qsys/allowlist           { entries, replaceInvalid? } -> { entries }; 400 naming the first broken
-//                                      entry; 409 over an invalid stored file unless replaceInvalid is true
+//   GET  /api/qsys/allowlist           { entries, invalid, rev }: invalid says why a stored file is refused, else null
+//   PUT  /api/qsys/allowlist           { entries, rev?, replaceInvalid? } -> { entries, rev }; 400 naming the first broken
+//                                      entry; 409 over an invalid stored file unless replaceInvalid is true;
+//                                      409 code "rev-changed" when rev is not the stored list's revision
 //   POST /api/qsys/allowlist/export    the allowlist file
-//   POST /api/qsys/allowlist/import    an allowlist file (+ replaceInvalid?) -> { entries }; 400 keeps the old list; 409 as PUT
+//   POST /api/qsys/allowlist/import    an allowlist file (+ replaceInvalid?, rev?) -> { entries, rev }; 400 keeps the old list; 409 as PUT
+//   POST /api/qsys/allowlist/add-panel { panelId } -> { entries, added, skipped }: every control the panel writes
+//                                      and the list lacks, at the Core's range; 503 while not connected,
+//                                      404 unknown view, 409 over an invalid stored file
 //   POST /api/qsys/write               { component, control, value, panelId?, final?, lease?, cid? } -> WriteResult;
 //                                      body capped at 16 KB (413)
 //   POST /api/qsys/lease               { component, control, cid? } -> { held }: renew a held momentary
 //   GET  /api/qsys/values?panel=<id>   { ready, values, catalogAt }: the panel's values as last read; 404 unknown panel
 //   GET  /api/qsys/bindings            the binding check: [{ panelId, objectId, address, problem }]; 503 while not
-//                                      connected, or while the check cannot read the views or the allowlist
+//                                      connected (code not-connected), or while the check cannot read the views
+//                                      or the allowlist (code check-failed)
+//   GET  /api/qsys/panel-repairs       [{ viewId, name, from, to, why }]: panel blocks the last load of the views repaired
 //   GET  /api/qsys/write-log           { entries, saveError }
+//   GET  /api/qsys/pin                 { set }: whether a staff PIN is set; never the hash
+//   PUT  /api/qsys/pin                 { pin: "<4 digits>" | null } -> { set }; 400 for anything else; 500 when it could not be saved
+//   POST /api/qsys/pin/check           { pin } -> { ok: true } | { ok: false, lockedForMs, notSet? }:
+//                                      5 wrong tries in a row from one address lock it for 60 s
 //
-// Not PIN-gated: the allowlist and its limits are open like every other
-// settings route (the PIN guards only a volunteer panel's way out). Every field
-// is checked here, and again by the writer.
+// Not PIN-gated: the allowlist, its limits and the PIN itself are open like every
+// other settings route (the PIN guards only a volunteer panel's way out to the
+// app). Every field is checked here, and again by the writer.
 
 import type * as http from "node:http";
 import { errorMessage } from "../errors.js";
 import { oneLine, scrub } from "../scrub.js";
-import { AllowlistRefused, AllowlistStoredInvalid, isLine, qsysAllowlist } from "../qsys/qsys-allowlist-store.js";
-import { qsysBindings } from "../qsys/qsys-bindings.js";
+import { AllowlistRefused, AllowlistRevChanged, AllowlistStoredInvalid, type ChangeOptions, type Saved, allowEntryFromCatalog, isLine, qsysAllowlist, type AllowEntry } from "../qsys/qsys-allowlist-store.js";
+import { viewsStore } from "../views-store.js";
+import { qsysSlugRepairs } from "../qsys/qsys-slug-repair.js";
+import { isReadOnlyDirection } from "../../types/qsys.js";
+import { qsysBindings, writeAddressesOf } from "../qsys/qsys-bindings.js";
 import { qsysService } from "../qsys/qsys-service.js";
 import { qsysWatch } from "../qsys/qsys-watch.js";
 import { qsysWriter, writeControl } from "../qsys/qsys-write.js";
 import { usableCid } from "../channel-reports.js";
 import { qsysWriteLog } from "../qsys/qsys-write-log.js";
+import { PIN_DIGITS, checkPin, isPin, pinState, setPin } from "../qsys/qsys-pin.js";
 import { type RouteCtx, error, json, readObjectBody, remoteAddressOf } from "./context.js";
 
 const MAX_DEVICE = 200;
@@ -50,16 +64,23 @@ export function deviceOf(req: http.IncomingMessage): string {
   return oneLine(`${remoteOf(req)} ${agent}`).trim().slice(0, MAX_DEVICE);
 }
 
-async function allowlistChange(c: RouteCtx, change: (body: Record<string, unknown>, opts: { replaceInvalid: boolean }) => Promise<unknown>): Promise<void> {
+/** Answer a change to the allowlist that the store refused, as its status says; rethrow anything else. */
+function answerAllowlistRefusal(res: http.ServerResponse, err: unknown): void {
+  if (err instanceof AllowlistRevChanged) return error(res, err.message, 409, "rev-changed");
+  if (err instanceof AllowlistStoredInvalid) return error(res, err.message, 409);
+  if (err instanceof AllowlistRefused) return error(res, err.message);
+  throw err;
+}
+
+async function allowlistChange(c: RouteCtx, change: (body: Record<string, unknown>, opts: ChangeOptions) => Promise<Saved>): Promise<void> {
   const body = await readObjectBody(c.req, c.res);
   if (!body) return;
   if (body.replaceInvalid !== undefined && typeof body.replaceInvalid !== "boolean") return error(c.res, "replaceInvalid must be true or false");
+  if (body.rev !== undefined && !isLine(body.rev, 64)) return error(c.res, "rev must be the revision GET /api/qsys/allowlist answered");
   try {
-    json(c.res, { entries: await change(body, { replaceInvalid: body.replaceInvalid === true }) });
+    json(c.res, await change(body, { replaceInvalid: body.replaceInvalid === true, ...(typeof body.rev === "string" ? { expectRev: body.rev } : {}) }));
   } catch (err) {
-    if (err instanceof AllowlistStoredInvalid) return error(c.res, err.message, 409);
-    if (!(err instanceof AllowlistRefused)) throw err;
-    error(c.res, err.message);
+    answerAllowlistRefusal(c.res, err);
   }
 }
 
@@ -107,6 +128,32 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
 
   if (method === "POST" && pathname === "/api/qsys/allowlist/import") {
     return allowlistChange(c, (body, opts) => qsysAllowlist.importFile(body, opts));
+  }
+
+  if (method === "POST" && pathname === "/api/qsys/allowlist/add-panel") {
+    // "Add all controls this panel uses": every control the panel WRITES, at the Core's own range.
+    const body = await readObjectBody(req, res);
+    if (!body) return;
+    if (!isLine(body.panelId, MAX_PANEL_ID)) return error(res, `panelId must be text of up to ${MAX_PANEL_ID} characters on one line`);
+    const catalog = qsysService.getCatalog();
+    if (!catalog) return error(res, "the Q-SYS Core is not connected, so its ranges are not known", 503);
+    const view = (await viewsStore.loadStrict()).find((v) => v.id === body.panelId);
+    if (!view) return error(res, "no view has that id", 404);
+    const components = new Map(catalog.components.map((c) => [c.name, new Map(c.controls.map((x) => [x.Name, x]))]));
+    const candidates: AllowEntry[] = [];
+    const skipped: { component: string; control: string; reason: "not-in-design" | "read-only" }[] = [];
+    for (const a of writeAddressesOf(view)) {
+      const control = components.get(a.component)?.get(a.control);
+      if (!control) skipped.push({ ...a, reason: "not-in-design" });
+      else if (isReadOnlyDirection(control.Direction)) skipped.push({ ...a, reason: "read-only" });
+      else candidates.push(allowEntryFromCatalog(control, a.component));
+    }
+    try {
+      json(res, { ...(await qsysAllowlist.addMissing(candidates)), skipped });
+    } catch (err) {
+      answerAllowlistRefusal(res, err);
+    }
+    return;
   }
 
   if (method === "POST" && pathname === "/api/qsys/write") {
@@ -165,12 +212,48 @@ export async function qsysRoutes(c: RouteCtx): Promise<void> {
     const answer = qsysBindings.current();
     if ("report" in answer) return json(res, answer.report);
     // Never an empty report in place of a check that could not run: empty means every binding resolves.
-    error(res, answer.error === "not-connected" ? "the Q-SYS Core is not connected" : "the binding check could not run: the saved views or the allowlist could not be read; see /log", 503);
+    // The code says which of the two a 503 is.
+    error(res, answer.error === "not-connected" ? "the Q-SYS Core is not connected" : "the binding check could not run: the saved views or the allowlist could not be read; see /log", 503, answer.error);
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/qsys/panel-repairs") {
+    // What the last load of the views changed in panel blocks (a shared address, a
+    // block on a view that cannot be a panel). Read only.
+    json(res, qsysSlugRepairs());
     return;
   }
 
   if (method === "GET" && pathname === "/api/qsys/write-log") {
     json(res, await qsysWriteLog.list());
+    return;
+  }
+
+  if (method === "GET" && pathname === "/api/qsys/pin") {
+    json(res, await pinState());
+    return;
+  }
+
+  if (method === "PUT" && pathname === "/api/qsys/pin") {
+    const body = await readObjectBody(req, res);
+    if (!body) return;
+    if (body.pin !== null && !isPin(body.pin)) return error(res, `pin must be ${PIN_DIGITS} digits, or null to remove it`);
+    try {
+      await setPin(body.pin, remoteOf(req));
+    } catch (err) {
+      // The reason (a disk error) goes to /log; the page gets a sentence it can show.
+      console.warn(`[qsys] the staff PIN could not be saved: ${scrub(errorMessage(err))}`);
+      return error(res, "the staff PIN could not be saved, so it is unchanged; see /log", 500);
+    }
+    json(res, await pinState());
+    return;
+  }
+
+  if (method === "POST" && pathname === "/api/qsys/pin/check") {
+    const body = await readObjectBody(req, res);
+    if (!body) return;
+    if (typeof body.pin !== "string" || body.pin.length > 16) return error(res, "pin must be text");
+    json(res, await checkPin(body.pin, remoteOf(req)));
     return;
   }
 }

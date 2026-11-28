@@ -83,6 +83,7 @@ one of yours is never silent.
 |---|---|
 | The layout, and any view it embeds | An embed whose target is missing renders an error, so dependencies come automatically |
 | Slot boards | Every board the view and its widgets show, with its name and column width, and its layout for every service type, not just the active one. A board shown twice is carried once and shared on arrival, as it was. Each arrives as a new board (`<name> (imported)` when the name is taken) |
+| Q-SYS panel settings | A panel's kind, address, sibling panels, return time and old addresses, and any panel settings the view keeps aside. An address already taken here gets a numeric suffix, an old address taken here is dropped, and the result says so; see [Moving a panel between installs](integrations/qsys.md#moving-a-panel-between-installs). The Q-SYS allowlist does not travel |
 | Notes and checklists | Keyed to their objects, so they follow them |
 | Images | Stored by content hash, so a logo you already have is shared, not duplicated |
 | OSC and RossTalk targets | Definition only. A target you already have with the same id is kept as yours |

@@ -21,6 +21,7 @@ import { PageActionsProvider, PageActionsSlot } from "./page-actions";
 import { ContextBar } from "./context-bar";
 import {
   consolePages,
+  qsysPanelPages,
   hidesChrome,
   isFullBleedPath,
   isSharedChromelessPath,
@@ -53,7 +54,7 @@ function ShellFrame() {
   // operator's to change, and the rail entry and the page title must not be able
   // to disagree about what it is.
   const { state: liveState } = useStageState();
-  const consoles = useMemo(() => consolePages(liveState?.views), [liveState?.views]);
+  const consoles = useMemo(() => [...consolePages(liveState?.views), ...qsysPanelPages(liveState?.views)], [liveState?.views]);
   const active = useMemo(() => resolvePage(pathname, consoles), [pathname, consoles]);
   // A route that paints its own surface edge to edge has no page to give air to,
   // so it does not get the gutter under the strip. A console, and the ServiceCue

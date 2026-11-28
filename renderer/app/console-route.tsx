@@ -8,7 +8,7 @@
 // is what a panel shows. The only difference is the context: `shell` means
 // controls fire, drill-down works, and the layout can be edited in place.
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useParams, useRouter } from "@tanstack/react-router";
 import { PencilIcon } from "lucide-react";
 import { HOME_VIEW_ID } from "@main/services/home-view";
@@ -41,7 +41,6 @@ export function ConsoleRoute() {
   // straight into the editor, and the only way back to a live console was to
   // leave for Home and return.
   const [editingFor, setEditingFor] = useState<string | null>(null);
-  const [nearCorner, setNearCorner] = useState(false);
   const editing = !!viewId && editingFor === viewId;
 
   const view = s.stageState?.views?.find((v) => v.id === viewId) ?? null;
@@ -91,32 +90,7 @@ export function ConsoleRoute() {
   }
 
   return (
-    // FULL BLEED. The shell gutters its content, so the console sat inset with a
-    // hard edge on all four sides — a slab of stage-black in the middle of a
-    // themed page, which is what made it read as an embedded viewer rather than
-    // a page of the app. The negative margins cancel that gutter so the console
-    // simply IS the content area.
-    //
-    // The TOP of that gutter is not cancelled here. It was, with `sm:-mt-4`, and
-    // that was wrong: a negative margin moves the box without giving it the
-    // height back, so `h-full` still measured the padded area and the console
-    // ended 16px short — the white band simply moved from above the console to
-    // below it. The shell does not apply the padding to a console at all now.
-    <div
-      className="relative flex h-full min-h-0 flex-col -mx-2 max-sm:-mx-3"
-      // Proximity, not a hover region. A region big enough to aim at is also a
-      // region that swallows every click inside it, and the top-right corner of
-      // a console is a perfectly reasonable place to put a control. This watches
-      // the distance instead, so nothing is covered until the button is actually
-      // there to be pressed.
-      onPointerMove={(e) => {
-        const r = e.currentTarget.getBoundingClientRect();
-        const dx = r.right - e.clientX;
-        const dy = e.clientY - r.top;
-        setNearCorner(Math.hypot(Math.max(0, dx), Math.max(0, dy)) < CORNER_RADIUS_PX);
-      }}
-      onPointerLeave={() => setNearCorner(false)}
-    >
+    <InPlaceEditFrame editable={editable} onEdit={() => setEditingFor(view.id)}>
       {/* The live console. `shell` context: controls fire, drill-down works.
           The canvas brings its own ground — see LayoutRenderer. */}
       <div className="min-h-0 flex-1">
@@ -146,7 +120,44 @@ export function ConsoleRoute() {
           />
         )}
       </div>
+    </InPlaceEditFrame>
+  );
+}
 
+/**
+ * A console's page, full bleed, with Edit in its top-right corner. Shared with a
+ * Q-SYS panel in the shell (/qsys/manage/<slug>), which edits in place the same way.
+ */
+export function InPlaceEditFrame({ editable, onEdit, children }: { editable: boolean; onEdit: () => void; children: ReactNode }) {
+  const [nearCorner, setNearCorner] = useState(false);
+  return (
+    // FULL BLEED. The shell gutters its content, so the console sat inset with a
+    // hard edge on all four sides — a slab of stage-black in the middle of a
+    // themed page, which is what made it read as an embedded viewer rather than
+    // a page of the app. The negative margins cancel that gutter so the console
+    // simply IS the content area.
+    //
+    // The TOP of that gutter is not cancelled here. It was, with `sm:-mt-4`, and
+    // that was wrong: a negative margin moves the box without giving it the
+    // height back, so `h-full` still measured the padded area and the console
+    // ended 16px short — the white band simply moved from above the console to
+    // below it. The shell does not apply the padding to a console at all now.
+    <div
+      className="relative flex h-full min-h-0 flex-col -mx-2 max-sm:-mx-3"
+      // Proximity, not a hover region. A region big enough to aim at is also a
+      // region that swallows every click inside it, and the top-right corner of
+      // a console is a perfectly reasonable place to put a control. This watches
+      // the distance instead, so nothing is covered until the button is actually
+      // there to be pressed.
+      onPointerMove={(e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        const dx = r.right - e.clientX;
+        const dy = e.clientY - r.top;
+        setNearCorner(Math.hypot(Math.max(0, dx), Math.max(0, dy)) < CORNER_RADIUS_PX);
+      }}
+      onPointerLeave={() => setNearCorner(false)}
+    >
+      {children}
       {/* Over the canvas, not above it. A row of its own pushed the console down
           and framed it, which is the framing this page was trying to lose. */}
       {editable && (
@@ -174,7 +185,7 @@ export function ConsoleRoute() {
               "border border-line-strong bg-popover/95 shadow-lg backdrop-blur-xl",
             )}
           >
-            <Button variant="transparent" size="small" onClick={() => setEditingFor(view.id)}>
+            <Button variant="transparent" size="small" onClick={onEdit}>
               <PencilIcon className="size-3.5" />
               Edit
             </Button>
@@ -191,7 +202,7 @@ export function ConsoleRoute() {
  * Its own component so `key={view.id}` resets everything it holds when the
  * operator moves to another console — the revision it opened on above all.
  */
-function ConsoleEditor({
+export function ConsoleEditor({
   view,
   settings,
   onExit,

@@ -76,6 +76,14 @@ describe("operator destinations", () => {
     );
   });
 
+  test("the server routes every Q-SYS page to the app, so an iPad's direct load of a panel is not the kiosk", () => {
+    // A panel is only ever opened by a direct load (an iPad's home-screen link), the
+    // exact case the /consoles exemption once hid.
+    for (const p of ["/qsys/zone-1", "/qsys/zone-1/", "/qsys/manage", "/qsys/manage/zone-1"]) {
+      assert.ok(isOperatorPath(p), `${p} would be served the kiosk bundle`);
+    }
+  });
+
   test("Mic slots is a Screens destination the server routes, so a deep link to a board loads the app", () => {
     // A slots screen's Edit goes to /mic-slots?board=<id>. A path the server does not
     // claim serves the kiosk bundle on a reload or a pasted link, which only shows up

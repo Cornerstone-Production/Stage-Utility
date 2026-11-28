@@ -20,7 +20,6 @@ import {
   Sidebar,
   SidebarGroupLabel,
   SidebarList,
-  SidebarListItem,
   useSidebarChrome,
 } from "../components/ui/sidebar";
 import { BrandHeader } from "../settings/brand-header";
@@ -28,7 +27,7 @@ import { BrandLogo } from "../components/brand-logo";
 import { Tooltip } from "../components/ui/tooltip";
 import { ThemeTogglePill } from "../components/ui/theme-toggle-pill";
 import { ContextMenu, type ContextMenuItem } from "../components/ui/context-menu";
-import { useContextMenuState, useContextMenuTrigger } from "../components/ui/context-menu-trigger";
+import { useContextMenuTrigger } from "../components/ui/context-menu-trigger";
 import { useTheme } from "../lib/use-theme";
 import { plural } from "@main/services/plural";
 import { buildLabel } from "../lib/build-label";
@@ -46,9 +45,15 @@ import { useCustomize, useResolvedSidebar } from "./customize-mode";
 import { movePage, sectionOf } from "./sidebar-edits";
 import { RailEditor } from "./rail-editor";
 import { cn } from "../lib/cn";
+import { isQsysPanel } from "@main/types/qsys";
+import { QsysRailRow } from "./qsys/qsys-rail-row";
+import { RailRow } from "./rail-row";
+import { useQsysStatus } from "./qsys/use-qsys-status";
 
 /** The Screens page's route: the row that carries the count of screens not set up. */
 const SCREENS_PATH = "/screens";
+/** The sidebar id of the Q-SYS row, drawn by QsysRailRow rather than as a link. */
+const QSYS_ID = "qsys";
 /** The Advanced destination's route, whose row carries the update dot and the host names count. */
 const ADVANCED_PATH = "/settings/advanced";
 
@@ -159,7 +164,14 @@ export function Rail({
 
   // Every row the sidebar can draw, by its id: a page's route, a console's path.
   // A Map, because the ids come from a saved arrangement.
-  const byId = destinationsById([...ALL_DESTINATIONS, ...consoles]);
+  // The Q-SYS row exists once there is a panel or a Core is set up. Decided here, at
+  // draw time, never in the sidebar's validation, which must give the same answer
+  // whatever views the server holds.
+  const qsysPanels = (state?.views ?? []).filter(isQsysPanel);
+  const qsys = useQsysStatus();
+  // A read that failed shows the row: /qsys/manage is where it says so.
+  const qsysShown = qsysPanels.length > 0 || qsys.status?.configured === true || qsys.failed;
+  const byId = destinationsById([...ALL_DESTINATIONS, ...consoles].filter((d) => d.id !== QSYS_ID || qsysShown));
   const customize = useCustomize();
   const resolved = useResolvedSidebar();
 
@@ -325,9 +337,21 @@ export function Rail({
           return (
             <Fragment key={section.id}>
               {section.kind !== "top" && <SidebarGroupLabel>{section.label}</SidebarGroupLabel>}
-              {rows.map((d) => (
-                <RailRow key={d.id} d={d} {...marksFor(d)} menuItems={() => rowMenuItems(d)} />
-              ))}
+              {rows.map((d) =>
+                d.id === QSYS_ID ? (
+                  <QsysRailRow
+                    key={d.id}
+                    panels={qsysPanels}
+                    pathname={pathname}
+                    railed={railed}
+                    onNavigate={(to) => withViewTransition(() => router.navigate({ to }))}
+                    d={d}
+                    menuItems={() => rowMenuItems(d)}
+                  />
+                ) : (
+                  <RailRow key={d.id} d={d} {...marksFor(d)} menuItems={() => rowMenuItems(d)} />
+                ),
+              )}
             </Fragment>
           );
         })}
@@ -393,53 +417,6 @@ export function Rail({
         <ContextMenu x={railMenu.x} y={railMenu.y} items={railMenuItems} onClose={() => setRailMenu(null)} />
       )}
     </Sidebar>
-  );
-}
-
-/**
- * One page or console in the sidebar, with its own right-click and long-press
- * menu.
- *
- * Its own trigger, on the ROW: the row is a <button>, and a trigger on the rail
- * around it treats a press on a control inside as that control's own (see
- * context-menu-trigger.ts), so the rail's menu would never open from a row on a
- * phone. A console's glyph keeps its own menu for the icon: a press there is
- * left to it.
- */
-function RailRow({
-  d,
-  badge,
-  ariaLabel,
-  menuItems,
-}: {
-  d: Destination;
-  badge?: ReactNode;
-  ariaLabel?: string;
-  menuItems: () => ContextMenuItem[];
-}) {
-  const { menu, open, close } = useContextMenuState();
-  const trigger = useContextMenuTrigger((point) => open(point, menuItems()));
-  return (
-    <>
-      <SidebarListItem
-        item={d}
-        icon={d.icon}
-        title={d.label}
-        ariaLabel={ariaLabel}
-        badge={badge}
-        // The row's trigger claims the press or right-click, so the rail around it
-        // does not open its own menu as well; a console's glyph claims it first, so
-        // its icon menu is the only one that opens there.
-        onContextMenu={trigger.onContextMenu}
-        onPointerDown={trigger.onPointerDown}
-        onPointerMove={trigger.onPointerMove}
-        onPointerUp={trigger.onPointerUp}
-        onPointerCancel={trigger.onPointerCancel}
-        onClickCapture={trigger.onClickCapture}
-        style={trigger.style}
-      />
-      {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={close} />}
-    </>
   );
 }
 

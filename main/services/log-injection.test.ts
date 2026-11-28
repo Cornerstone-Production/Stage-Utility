@@ -170,6 +170,12 @@ const REQUEST_FACING = [
   // Its binding lines name a view id, an object id and a control address, all saved into
   // a View over HTTP.
   "qsys/qsys-bindings.ts",
+  // Its lock line names the remote address of a client that sent five wrong PINs
+  // to POST /api/qsys/pin/check, and its set line the address that sent PUT /api/qsys/pin.
+  "qsys/qsys-pin.ts",
+  // Its repair lines name a view's name and id and its panel address, all saved
+  // into a View over HTTP or carried by a restored backup.
+  "qsys/qsys-slug-repair.ts",
   // Its skip line names a panel id and a control address, both saved into a View
   // over HTTP; the rest is fixed group names, counts and what the Core said back.
   "qsys/qsys-watch.ts",
@@ -612,6 +618,10 @@ function requestFacingFiles(): string[] {
     path.join(HERE, "qsys/qsys-allowlist-store.ts"),
     // View, object and control names saved into a View over HTTP.
     path.join(HERE, "qsys/qsys-bindings.ts"),
+    // The remote address of a PIN check or a PIN change; see REQUEST_FACING.
+    path.join(HERE, "qsys/qsys-pin.ts"),
+    // A view's name, id and panel address, saved over HTTP or restored from a backup.
+    path.join(HERE, "qsys/qsys-slug-repair.ts"),
     path.join(HERE, "qsys/qsys-watch.ts"),
     // Only its own file's failures; scanned rather than excused, so a later line naming an entry is held to scrub().
     path.join(HERE, "qsys/qsys-write-log.ts"),

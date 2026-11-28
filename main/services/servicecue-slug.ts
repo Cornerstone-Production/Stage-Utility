@@ -7,6 +7,7 @@
 // guards slugs) and the renderer (which resolves and builds addresses).
 
 import type { ServiceCueLayout } from "../types/pco.js";
+import { slugCore } from "../types/slug.js";
 import { firstFree } from "./first-free.js";
 
 /** The implicit layout showing every column; its slug is not a layout's to take. */
@@ -19,7 +20,7 @@ export const ALL_COLUMNS_SLUG = "all-columns";
  * pinned before slugs were stored was built by exactly this function.
  */
 export function slugify(s: string): string {
-  return s.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "x";
+  return slugCore(s) || "x";
 }
 
 /** A value fit to be a stored slug: a string slugify leaves as it is. */

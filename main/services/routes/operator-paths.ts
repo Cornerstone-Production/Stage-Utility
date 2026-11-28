@@ -21,6 +21,8 @@ export const OPERATOR_PATHS = [
   // a direct load of /consoles/…, which only shows up on a reload or a pasted
   // link — client-side navigation from the rail works either way, so it hides.
   "/consoles",
+  // Q-SYS panels: /qsys/<slug> full screen (what an iPad opens), /qsys/manage in the shell.
+  "/qsys",
   // Kept so the paths they replaced still redirect rather than 404.
   "/views",
   "/displays",

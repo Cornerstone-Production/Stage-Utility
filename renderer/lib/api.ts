@@ -572,10 +572,17 @@ export type IpcChannel =
   | "propresenter:getInstances"
   | "propresenter:getStatus"
   | "pvp:getStatus"
+  | "qsys:addPanelControls"
   | "qsys:allowlist"
+  | "qsys:bindings"
   | "qsys:catalog"
+  | "qsys:checkPin"
   | "qsys:lease"
+  | "qsys:panelRepairs"
   | "qsys:panelValues"
+  | "qsys:pin"
+  | "qsys:setAllowlist"
+  | "qsys:setPin"
   | "qsys:status"
   | "qsys:write"
   | "reaper:getStatus"
@@ -714,6 +721,8 @@ export type IpcChannel =
   | "views:setBoard"
   | "views:setCalendarFilters"
   | "views:setHideChrome"
+  | "views:setQsys"
+  | "views:dismissQsysInactive"
   | "views:setKind"
   | "views:setLayout"
   | "views:setServiceCueLayout"
@@ -1010,14 +1019,30 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
 
     // Q-SYS panels. The values read is a panel's hydration (its pushes carry only
     // changes); a write is one control, checked again on the server.
+    case "qsys:addPanelControls":
+      return post<T>("/api/qsys/allowlist/add-panel", { panelId: p.panelId });
     case "qsys:allowlist":
       return apiFetch<T>("/api/qsys/allowlist");
+    case "qsys:bindings":
+      return apiFetch<T>("/api/qsys/bindings");
+    case "qsys:setAllowlist":
+      return put<T>("/api/qsys/allowlist", { entries: p.entries, ...(typeof p.rev === "string" ? { rev: p.rev } : {}), ...(p.replaceInvalid === true ? { replaceInvalid: true } : {}) });
     case "qsys:catalog":
       return apiFetch<T>("/api/qsys/catalog");
     case "qsys:lease":
       return post<T>("/api/qsys/lease", p);
+    case "qsys:panelRepairs":
+      return apiFetch<T>("/api/qsys/panel-repairs");
     case "qsys:panelValues":
       return apiFetch<T>(`/api/qsys/values?panel=${encodeURIComponent(String(p.panel ?? ""))}`);
+    // The staff PIN: whether one is set, setting it (or null to remove it), and a
+    // volunteer panel's check. The server holds the hash and the lock.
+    case "qsys:pin":
+      return apiFetch<T>("/api/qsys/pin");
+    case "qsys:setPin":
+      return put<T>("/api/qsys/pin", { pin: p.pin ?? null });
+    case "qsys:checkPin":
+      return post<T>("/api/qsys/pin/check", { pin: p.pin });
     case "qsys:status":
       return apiFetch<T>("/api/qsys/status");
     case "qsys:write":
@@ -1469,6 +1494,16 @@ export async function invoke<T>(channel: IpcChannel, params?: Params): Promise<T
     case "views:setShowInSidebar": {
       const id = p.id as string;
       return patch<T>(`/api/views/${encodeURIComponent(id)}`, { showInSidebar: p.showInSidebar });
+    }
+
+    case "views:setQsys": {
+      const id = p.id as string;
+      return patch<T>(`/api/views/${encodeURIComponent(id)}`, { qsys: p.qsys });
+    }
+
+    case "views:dismissQsysInactive": {
+      const id = p.id as string;
+      return post<T>(`/api/views/${encodeURIComponent(id)}/qsys-inactive/dismiss`, { entry: p.entry });
     }
 
     case "views:setHideChrome": {

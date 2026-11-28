@@ -5,6 +5,7 @@
 // resolves anyway, needs rebinding — so no caller has to re-derive them.
 
 import type { View } from "./views.js";
+import type { ImportedQsysPanel } from "./qsys.js";
 import type { Slot, ServiceCueLayout, SlotPreset } from "./pco.js";
 import type { PatchVariant } from "./patch.js";
 import type { OscTargetConfig } from "./osc.js";
@@ -108,6 +109,10 @@ export interface ImportReport {
    *  importer landed the boards under a different service type than the file
    *  named — the id they came from, so the report can say so. */
   plan?: { serviceTypeId: string; serviceTypeName: string; retypedFrom?: string };
+  /** Every Q-SYS panel the file brought: the address it landed under, the one the
+   *  file named when that was taken here, and the siblings it names that no panel
+   *  here has. */
+  qsysPanels: ImportedQsysPanel[];
   /** How many slot boards the import made (each a new board, so none clash —
    *  see the note in view-import.ts), and how many rows landed across them. */
   slotBoards: number;

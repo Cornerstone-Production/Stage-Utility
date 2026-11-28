@@ -53,6 +53,12 @@ const fieldLabels = (root: HTMLElement) =>
   [...root.querySelectorAll("[data-config-field]")].map((f) => [f.getAttribute("data-config-field"), f.querySelector("input")?.getAttribute("aria-label")]);
 
 describe("the Q-SYS dialog", () => {
+  test("links to the Q-SYS page with a real anchor, the way in to panels and the allowlist", async () => {
+    const content = await openQsys();
+    const link = [...content.querySelectorAll("a")].find((a) => a.textContent === "Open Q-SYS panels");
+    assert.equal(link?.getAttribute("href"), "/qsys/manage");
+  });
+
   test("lists Core host, Port, User, Password and the two meter rates, in that order", async () => {
     const content = await openQsys();
     assert.deepEqual(fieldLabels(content), [

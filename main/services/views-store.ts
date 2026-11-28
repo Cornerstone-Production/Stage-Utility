@@ -12,6 +12,7 @@ import { isDisplayKind, isLayoutShape, isSlotsLayoutValue } from "../types/views
 import { DataStore } from "./data-store.js";
 import { asArray, checked, namedEntries, optional, refuse, textOrNull, uniqueIds } from "./restore-check.js";
 import { adoptLegacyViewFields } from "./servicecue-legacy-names.js";
+import { repairQsysBlocks } from "./qsys/qsys-slug-repair.js";
 import { isSafeKey } from "./safe-key.js";
 
 /**
@@ -38,6 +39,12 @@ const restoreCheck = checked((raw) => {
     textOrNull(v.ndiSource, `${what}'s NDI source`);
     optional(v.hideChrome, "boolean", `${what}'s hideChrome`);
     optional(v.showInSidebar, "boolean", `${what}'s showInSidebar`);
+    // A Q-SYS panel block, and the settings kept aside beside one, are never refused
+    // here, whatever their shape: the load after the restore keeps a block it cannot
+    // read (or one on a view that cannot be a panel) aside whole, suffixes a shared
+    // address, and wraps a kept-aside value that is not a list (qsys-slug-repair.ts).
+    // A backup that fails to restore over one is worse, and the views a backup
+    // carries are read raw from disk, repairs not yet saved included.
     for (const k of ["calendarSources", "calendarTags"] as const) {
       if (v[k] !== undefined && !isSelectionList(v[k])) refuse(`${what}'s ${k} must be a list of { id, name }`);
     }
@@ -60,5 +67,7 @@ export const viewsStore = new DataStore<View[]>("views.json", [], "config", {
   restoreCheck,
   // A view saved before ServiceCue was renamed names its layout with the old
   // field; it is read as the new one and written as the new one on the next save.
-  normalize: adoptLegacyViewFields,
+  // Q-SYS panel blocks that share an address or sit on a view that cannot be a
+  // panel are repaired the same way (qsys-slug-repair.ts).
+  normalize: (raw) => repairQsysBlocks(adoptLegacyViewFields(raw)),
 });

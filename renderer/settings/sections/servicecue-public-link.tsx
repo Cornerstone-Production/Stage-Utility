@@ -46,14 +46,13 @@ import type {
   PublishSettingsDTO,
   PublishTestResult,
 } from "../../../main/types/servicecue-publish-status.js";
+import { INTEGRATIONS_ROUTE } from "../../app/legacy-hash";
 
 /** How often the card asks how it is going while the page is open. */
 const POLL_MS = 5_000;
 
 const QUERY_KEY = ["servicecue:getPublish"] as const;
 
-/** Where Planning Center's credentials are set. */
-const INTEGRATIONS_ROUTE = "/settings/integrations";
 
 /** The line under the setup fields that says why the switch is off; the switch is described by it. */
 const TOKEN_LINE_ID = "pl-tokline";

@@ -20,7 +20,7 @@
 
 import { useEffect, useEffectEvent, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
-import { kindOf, type QsysAddress, type QsysBinding, type QsysDensity } from "@main/types/qsys";
+import { kindOf, type PanelKind, type QsysAddress, type QsysBinding, type QsysDensity } from "@main/types/qsys";
 import type { LayoutObjectConfig } from "@main/types/views";
 import { bindGesture, type GestureHandle } from "../../lib/pointer-gesture";
 import { LEASE_EXPIRE_MS, LEASE_RENEW_MS } from "@main/services/qsys/qsys-leases";
@@ -1348,12 +1348,12 @@ function Body({ config, interactive, ts }: { config: QsysConfig; interactive: bo
 }
 
 /**
- * A Q-SYS object on the panel `panelId` (the View that holds it). Writes only
+ * A Q-SYS object on panel `panel.id` (the View that holds it), whose kind picks the meter channel. Writes only
  * where `interactive` (a live display route), never in the editor or a preview.
  * With no panel (Home, a bare preview) it reads Unavailable and watches nothing.
  */
-export function QsysObject({ config, panelId, interactive, ts }: { config: QsysConfig; panelId: string | null; interactive: boolean; ts: CSSProperties }) {
-  const panel = useQsysPanel(panelId);
+export function QsysObject({ config, panel: on, interactive, ts }: { config: QsysConfig; panel: { id: string | null; kind: PanelKind }; interactive: boolean; ts: CSSProperties }) {
+  const panel = useQsysPanel(on.id, on.kind);
   return (
     <QsysPanelContext.Provider value={panel}>
       <Body config={config} interactive={interactive} ts={ts} />

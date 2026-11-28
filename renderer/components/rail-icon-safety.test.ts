@@ -19,6 +19,7 @@ import { readFileSync } from "node:fs";
 import { describe, test } from "node:test";
 
 const RAIL = readFileSync(new URL("../app/rail.tsx", import.meta.url), "utf8");
+const ROW = readFileSync(new URL("../app/rail-row.tsx", import.meta.url), "utf8");
 const ICON = readFileSync(new URL("./console-rail-icon.tsx", import.meta.url), "utf8");
 const MENU = readFileSync(new URL("./icon-menu.tsx", import.meta.url), "utf8");
 
@@ -78,12 +79,12 @@ describe("the console rail's icon", () => {
       /import\s*\{[^}]*\buseContextMenuTrigger\b[^}]*\}\s*from\s*["']\.\.\/components\/ui\/context-menu-trigger["']/,
       "rail.tsx no longer imports useContextMenuTrigger — its menus must ride it, not a raw onContextMenu",
     );
-    // Every right-click handler in rail.tsx, by the trigger it hands to: the
+    // Every right-click handler in rail.tsx and rail-row.tsx, by the trigger it hands to: the
     // rail's own menu, the resize handle's one-item menu, and each row's. A
     // sorted list, one per line: a new raw handler, or one of these lost into a
     // spread, changes it. An EXACT list, because a loop over whatever matched
     // once passed having checked nothing.
-    const uses = (RAIL.match(/onContextMenu=\{[^}]*\}/g) ?? []).map((u) => /(\w+)\.onContextMenu/.exec(u)?.[1] ?? u);
+    const uses = ((RAIL + ROW).match(/onContextMenu=\{[^}]*\}/g) ?? []).map((u) => /(\w+)\.onContextMenu/.exec(u)?.[1] ?? u);
     assert.deepEqual(uses.sort(), [
       "railTrigger",
       "resizeTrigger",

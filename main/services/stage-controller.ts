@@ -34,11 +34,13 @@ import {
 } from "./plan-note-checklist.js";
 import { barConfigStore } from "./bar-config-store.js";
 import { sidebarConfigStore } from "./sidebar-config-store.js";
-import { keepKnownConsoles, resolveSidebar, sidebarConsolesOf, type SidebarArrangement } from "./sidebar-arrangement.js";
+import { keepHeldPlacements, keepKnownConsoles, resolveSidebar, sidebarConsolesOf, type SidebarArrangement } from "./sidebar-arrangement.js";
 import { savedColorsStore } from "./saved-colors-store.js";
 import { historyMilestonesStore } from "./history-milestones-store.js";
 import { isDisplayKind, screenIsControlSurface, screenName, screensShowing, viewIsConsole, viewSurface, viewShownInSidebar, viewCanBeControlSurface, type CreateScreenInput, type ViewSurface } from "../types/views.js";
+import { QSYS_ALIASES_MAX, canBeQsysPanel, findPanelBySlug, parseQsysPanelBlock, qsysSlugsOf, slugTakenMessage, uniqueQsysSlug, type QsysPanelBlock } from "../types/qsys.js";
 import { isSafeKey } from "./safe-key.js";
+import { KEPT_BLOCK_LOG_MAX } from "./qsys/qsys-slug-repair.js";
 import {
   CAPTION_COLOR,
   ICON_COLOR,
@@ -370,6 +372,34 @@ export class NoDuplicateServerError extends Error {
     super("New server id is offered only while another server answers with this server's id.");
     this.name = "NoDuplicateServerError";
   }
+}
+
+/** A Q-SYS panel block refused: a slug another view has, or a view that cannot be a
+ *  panel (400), or kept-aside settings that are not there (404). With the reason. */
+export class QsysPanelRefused extends Error {
+  constructor(
+    message: string,
+    readonly status: 400 | 404 = 400,
+  ) {
+    super(message);
+  }
+}
+
+/** The block without the old addresses: a new panel, or a copy, has none of its own yet. */
+function withoutAliases(block: QsysPanelBlock): QsysPanelBlock {
+  const { aliases: _none, ...rest } = block;
+  return rest;
+}
+
+/** Whether kept-aside settings `raw` read as exactly `block`. */
+function sameBlock(raw: unknown, block: QsysPanelBlock): boolean {
+  const p = parseQsysPanelBlock(raw);
+  return "block" in p && JSON.stringify(p.block) === JSON.stringify(block);
+}
+
+/** Why a Q-SYS panel cannot become a display or another kind. */
+function stillPanelMessage(view: View): string {
+  return `"${view.name}" is a Q-SYS panel; make it an ordinary console on the Q-SYS page first`;
 }
 
 export class LayoutConflictError extends Error {
@@ -4186,8 +4216,9 @@ export class StageController {
     name: string,
     kind: ViewKind = "slots",
     surface: ViewSurface = "display",
+    qsys: QsysPanelBlock | null = null,
   ): Promise<StageState> {
-    await this.createViewRecord(name, kind, surface);
+    await this.createViewRecord(name, kind, surface, undefined, qsys);
     return this.state;
   }
 
@@ -4204,7 +4235,11 @@ export class StageController {
     /** Told the view in the same synchronous turn it enters the state, BEFORE the
      *  write that can fail. See addOutput's `onAssigned`. */
     onAssigned?: (view: View) => void,
+    /** A new Q-SYS panel: a custom console with this block, its slug checked in the
+     *  same turn the view enters the state. */
+    qsys: QsysPanelBlock | null = null,
   ): Promise<View> {
+    if (qsys && !canBeQsysPanel({ id: "", kind, surface })) throw new QsysPanelRefused("a Q-SYS panel is a custom console");
     const id = await this.allocateViewId();
     // A kind with nothing to operate asked for as a console would be a console
     // that cannot carry a control: a promise the screen could not keep.
@@ -4224,8 +4259,17 @@ export class StageController {
       createdAt: new Date().toISOString(),
       layout: kind === "custom" ? defaultCustomLayout() : null,
       ...(boardId ? { boardId } : {}),
+      ...(qsys ? { qsys: withoutAliases(qsys) } : {}),
     };
-    console.log(`[stage-controller] createView id=${scrub(id)} name="${scrub(view.name)}" kind=${scrub(kind)}`);
+    // After the await above, so a panel saved meanwhile is seen. An address another
+    // panel had before a rename is taken too: it still leads there.
+    const slugOwner = qsys && findPanelBySlug(this.state.views, qsys.slug);
+    if (qsys && slugOwner) {
+      const refused = slugTakenMessage(qsys.slug, slugOwner);
+      console.warn(`[stage-controller] createView refused: ${scrub(refused)}`);
+      throw new QsysPanelRefused(refused);
+    }
+    console.log(`[stage-controller] createView id=${scrub(id)} name="${scrub(view.name)}" kind=${scrub(kind)}${qsys ? ` Q-SYS ${scrub(qsys.kind)} panel /qsys/${scrub(qsys.slug)}` : ""}`);
     const views = [...this.state.views, view];
     this.state = { ...this.state, views };
     onAssigned?.(view);
@@ -4251,8 +4295,18 @@ export class StageController {
    * built `logLine` with scrub() on every value it carries.
    */
   private async commitViewPatch(id: string, patch: Partial<View>, logLine: string): Promise<StageState> {
-    const views = this.state.views.map((v) => (v.id === id ? { ...v, ...patch } : v));
-    console.log(scrub(logLine, 400));
+    return this.commitViews(
+      this.state.views.map((v) => (v.id === id ? { ...v, ...patch } : v)),
+      [logLine],
+    );
+  }
+
+  /** commitViewPatch's write, for a change that touches more than one view (a
+   *  panel rename that other panels' cog menus follow): one assignment, one save. */
+  private async commitViews(views: View[], logLines: readonly string[]): Promise<StageState> {
+    // Each line was built with scrub() on every value; the bound here is the
+    // longest of them, a kept-aside block in full (KEPT_BLOCK_LOG_MAX).
+    for (const line of logLines) console.log(scrub(line, KEPT_BLOCK_LOG_MAX + 512));
     this.state = { ...this.state, views };
     await viewsStore.save(views);
     this.recomputeResolved();
@@ -4286,6 +4340,7 @@ export class StageController {
     opts: { screensConfirmed?: boolean } = {},
   ): Promise<StageState> {
     const view = this.requireView(id, "setViewSurface");
+    this.assertStaysPanel(view, { surface });
     if (surface === "console" && viewSurface(view) !== "console") this.assertCanBeControlSurface(view);
 
     if (!opts.screensConfirmed) {
@@ -4331,6 +4386,7 @@ export class StageController {
 
   async setViewKind(id: string, kind: ViewKind): Promise<StageState> {
     const current = this.requireView(id, "views:setKind");
+    this.assertStaysPanel(current, { kind });
     // A console is live on every screen showing it, so it may only become a kind
     // that still has something to operate.
     if (viewSurface(current) === "console") this.assertCanBeControlSurface({ ...current, kind });
@@ -4450,6 +4506,122 @@ export class StageController {
       id,
       { showInSidebar },
       `[stage-controller] setViewShowInSidebar id=${scrub(id)} → ${scrub(showInSidebar ? "listed" : "HIDDEN")}`,
+    );
+  }
+
+  /**
+   * Why `block` cannot be this view's Q-SYS panel block, or null. A panel is a
+   * custom console, and its slug is not another view's. Asked before a PATCH writes
+   * anything, and again at the write, in the same turn the state changes.
+   */
+  qsysPanelRefusal(id: string, block: QsysPanelBlock | null, change: { kind?: ViewKind; surface?: ViewSurface } = {}): string | null {
+    if (!block) return null;
+    const view = this.state.views.find((v) => v.id === id);
+    if (!view) return null;
+    // Home is a console, and has its own page at /.
+    if (id === HOME_VIEW_ID) return "Home cannot be a Q-SYS panel";
+    if (!canBeQsysPanel({ ...view, kind: change.kind ?? view.kind, surface: change.surface ?? viewSurface(view) })) {
+      return `"${view.name}" is not a custom console, so it cannot be a Q-SYS panel`;
+    }
+    const owner = findPanelBySlug(this.state.views, block.slug, id);
+    return owner ? slugTakenMessage(block.slug, owner) : null;
+  }
+
+  /** Refuse, as a 400, a change that would leave a Q-SYS panel something other than a custom console. */
+  private assertStaysPanel(view: View, change: { kind?: ViewKind; surface?: ViewSurface }): void {
+    if (!view.qsys || canBeQsysPanel({ ...view, ...change })) return;
+    const refused = stillPanelMessage(view);
+    console.warn(`[stage-controller] ${scrub(view.id)}: ${scrub(refused)}`);
+    throw new QsysPanelRefused(refused);
+  }
+
+  /**
+   * Make a view a Q-SYS panel, change its panel settings, or (null) make it an
+   * ordinary console. One state change and one save, whatever it touches:
+   *
+   * - A block equal to one the view keeps aside (qsysInactive) restores it: it
+   *   leaves that list with its own old addresses (those no other panel has taken
+   *   since), and a block the view has now goes aside in its place, whole, so a
+   *   restore never drops a live panel.
+   * - Otherwise the old addresses are the server's, never the request's: a new
+   *   slug keeps the one it replaces as an alias, so `/qsys/<old>` still leads
+   *   here, and every other panel whose cog lists the old slug lists the new one.
+   */
+  async setViewQsys(id: string, block: QsysPanelBlock | null): Promise<StageState> {
+    const view = this.requireView(id, "views:setQsys");
+    const refused = this.qsysPanelRefusal(id, block);
+    if (refused) {
+      console.warn(`[stage-controller] setViewQsys id=${scrub(id)} refused: ${scrub(refused)}`);
+      throw new QsysPanelRefused(refused);
+    }
+    const was = view.qsys ?? null;
+    const kept: unknown[] = Array.isArray(view.qsysInactive) ? view.qsysInactive : [];
+    const restored = block === null ? -1 : kept.findIndex((raw) => sameBlock(raw, block));
+    let inactive = restored < 0 ? kept : kept.filter((_, i) => i !== restored);
+    const lines: string[] = [];
+    let next: QsysPanelBlock | null = block;
+    if (block && restored >= 0) {
+      const own = (block.aliases ?? []).filter((a) => !findPanelBySlug(this.state.views, a, id));
+      next = own.length > 0 ? { ...withoutAliases(block), aliases: own } : withoutAliases(block);
+      if (was) {
+        inactive = [...inactive, was];
+        lines.push(`[qsys] "${scrub(view.name)}": its panel settings for /qsys/${scrub(was.slug)} were kept aside, whole, to restore /qsys/${scrub(block.slug)}: ${scrub(JSON.stringify(was), KEPT_BLOCK_LOG_MAX)}`);
+      }
+    } else if (block) {
+      const renamedFrom = was && was.slug !== block.slug ? was.slug : null;
+      let aliases = [...(was?.aliases ?? []), ...(renamedFrom ? [renamedFrom] : [])].filter((a) => a !== block.slug);
+      if (aliases.length > QSYS_ALIASES_MAX) {
+        const forgotten = aliases.slice(0, aliases.length - QSYS_ALIASES_MAX);
+        aliases = aliases.slice(-QSYS_ALIASES_MAX);
+        lines.push(`[qsys] "${scrub(view.name)}" keeps its last ${QSYS_ALIASES_MAX} old addresses; ${scrub(forgotten.map((a) => `/qsys/${a}`).join(", "))} no longer lead to it`);
+      }
+      next = aliases.length > 0 ? { ...withoutAliases(block), aliases } : withoutAliases(block);
+    }
+    const renamed = was && next && restored < 0 && was.slug !== next.slug ? { from: was.slug, to: next.slug } : null;
+    let followed = 0;
+    const views = this.state.views.map((v) => {
+      if (v.id === id) {
+        const { qsys: _was, qsysInactive: _kept, ...rest } = v;
+        return { ...rest, ...(next ? { qsys: next } : {}), ...(inactive.length > 0 ? { qsysInactive: inactive } : {}) } as View;
+      }
+      if (!renamed || !v.qsys?.siblings.includes(renamed.from)) return v;
+      followed++;
+      const own = v.qsys.slug;
+      const siblings = [...new Set(v.qsys.siblings.map((s) => (s === renamed.from ? renamed.to : s)))].filter((s) => s !== own);
+      return { ...v, qsys: { ...v.qsys, siblings } };
+    });
+    if (renamed) {
+      lines.push(
+        `[qsys] panel "${scrub(view.name)}" moved from /qsys/${scrub(renamed.from)} to /qsys/${scrub(renamed.to)}; the old address still leads to it, and ${scrub(followed)} other panel(s) list the new one in their cog menus`,
+      );
+    }
+    lines.push(`[stage-controller] setViewQsys id=${scrub(id)} → ${next ? `${scrub(next.kind)} /qsys/${scrub(next.slug)}` : "not a panel"}`);
+    return this.commitViews(views, lines);
+  }
+
+  /**
+   * Forget one entry of a view's kept-aside panel settings: the operator chose to.
+   * Matched by its whole content, as it was kept (so settings this app cannot read
+   * can be dismissed too), and logged whole. 404 when the view keeps nothing like it.
+   */
+  async dismissQsysInactive(id: string, entry: unknown): Promise<StageState> {
+    const view = this.requireView(id, "views:dismissQsysInactive");
+    const kept: unknown[] = Array.isArray(view.qsysInactive) ? view.qsysInactive : [];
+    const want = JSON.stringify(entry);
+    const at = kept.findIndex((raw) => JSON.stringify(raw) === want);
+    if (at < 0) {
+      const refused = `"${view.name}" keeps no panel settings like that aside; the page may be out of date`;
+      console.warn(`[stage-controller] dismissQsysInactive id=${scrub(id)} refused: ${scrub(refused)}`);
+      throw new QsysPanelRefused(refused, 404);
+    }
+    const rest = kept.filter((_, i) => i !== at);
+    return this.commitViews(
+      this.state.views.map((v) => {
+        if (v.id !== id) return v;
+        const { qsysInactive: _kept, ...others } = v;
+        return { ...others, ...(rest.length > 0 ? { qsysInactive: rest } : {}) } as View;
+      }),
+      [`[qsys] "${scrub(view.name)}" (${scrub(id)}): kept-aside panel settings dismissed by the operator: ${scrub(want, KEPT_BLOCK_LOG_MAX)}`],
     );
   }
 
@@ -4684,7 +4856,13 @@ export class StageController {
     const src = this.requireView(id, "views:duplicate");
     const newId = await this.allocateViewId();
     const cloned = this.cloneViewRecord(src, newId, name?.trim() || `${src.name} copy`);
-    const copy = copyBoards ? await this.giveCopyItsOwnBoards(cloned.copy) : cloned.copy;
+    const boarded = copyBoards ? await this.giveCopyItsOwnBoards(cloned.copy) : cloned.copy;
+    // A copy of a Q-SYS panel is a panel at an address of its own: two views at one
+    // /qsys/<slug> would open whichever came first. Taken after the await, so a panel
+    // saved meanwhile keeps its address. (The screen-role migration's copies need
+    // none of this: it runs only on screens saved before panels existed.)
+    // Its old addresses stay with the panel they lead to.
+    const copy = boarded.qsys ? { ...boarded, qsys: { ...withoutAliases(boarded.qsys), slug: uniqueQsysSlug(src.qsys!.slug, qsysSlugsOf(this.state.views)) } } : boarded;
     console.log(
       `[stage-controller] duplicateView ${scrub(id)} → ${scrub(newId)} "${scrub(copy.name)}"${scrub(copyBoards ? " with its own boards" : "")}`,
     );
@@ -5356,11 +5534,16 @@ export class StageController {
    * same body that makes it a wall view), so a refusal here is the only one the
    * two writes can raise, and neither runs when it is returned.
    */
-  viewPatchRefusal(id: string, change: { kind?: ViewKind; surface?: ViewSurface }): string | null {
+  viewPatchRefusal(id: string, change: { kind?: ViewKind; surface?: ViewSurface; qsys?: QsysPanelBlock | null }): string | null {
+    const panelRefused = change.qsys === undefined ? null : this.qsysPanelRefusal(id, change.qsys, change);
+    if (panelRefused) return panelRefused;
     const view = this.state.views.find((v) => v.id === id);
     if (!view || (change.kind === undefined && change.surface === undefined)) return null;
     const final: View = { ...view, kind: change.kind ?? view.kind };
     const surface = change.surface ?? viewSurface(view);
+    // A Q-SYS panel stays a custom console while it is one; /qsys/<slug> draws its layout.
+    const panel = change.qsys === undefined ? view.qsys : change.qsys;
+    if (panel && !canBeQsysPanel({ ...final, surface })) return stillPanelMessage(view);
     try {
       if (surface === "console") this.assertCanBeControlSurface(final);
     } catch (err) {
@@ -5403,6 +5586,7 @@ export class StageController {
     const view = this.requireViewToShow(id);
     if (viewSurface(view) === surface) return this.state;
     if (surface === "console") this.assertCanBeControlSurface(view);
+    this.assertStaysPanel(view, { surface });
 
     const changing = screensShowing(id, this.state.outputs);
     if (opts.screens !== undefined) {
@@ -5480,7 +5664,9 @@ export class StageController {
     // Console ids are taken on their prefix by validation, which a restore shares
     // and which cannot see the views; here they are held to the consoles that exist.
     const consoles = sidebarConsolesOf(this.state.views);
-    const { arrangement, dropped } = keepKnownConsoles(next, consoles);
+    // A page draws no Q-SYS panel among the consoles, so it cannot send one back:
+    // where the saved arrangement had one is carried over from it.
+    const { arrangement, dropped } = keepKnownConsoles(keepHeldPlacements(this.state.sidebar, next, consoles), consoles);
     const saved = await sidebarConfigStore.set(arrangement);
     // Counted where the state changes, as setBarItems does.
     const listRevisions = { ...this.state.listRevisions, sidebar: this.state.listRevisions.sidebar + 1 };

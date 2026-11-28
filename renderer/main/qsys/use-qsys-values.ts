@@ -82,6 +82,12 @@ export interface QsysPanelState {
   live: boolean;
   connection: "connected" | "reconnecting" | "offline";
   epoch: number;
+  /** The server's connection to the Core as it last said; null until it has. */
+  core: "connected" | "reconnecting" | "offline" | null;
+  /** Whether a Core is set up and on; null until the server has said. */
+  configured: boolean | null;
+  /** This page's own event stream to Stage Utility is up. */
+  stream: boolean;
 }
 
 /** Worst of several states: offline beats unavailable beats live. */
@@ -115,7 +121,7 @@ type CatalogAnswer = {
   designCode: string;
   components: { name: string; controls: { Name: string; Type: string; Direction?: string; ValueMin?: number; ValueMax?: number; Choices?: unknown }[] }[];
 };
-type StatusPush = { connected?: unknown; state?: unknown; catalogAt?: unknown };
+type StatusPush = { connected?: unknown; state?: unknown; catalogAt?: unknown; configured?: unknown };
 
 /** A write that never left this page, said in the same shape as the server's refusals. */
 const notSent = (message: string): WriteResult => ({ ok: false, reason: "offline", message });
@@ -177,6 +183,8 @@ export class QsysPanel {
   private streamUp = getStreamStatus().up;
   /** The Core connection as its last status push said; null until one arrives. */
   private coreState: "connected" | "reconnecting" | "offline" | null = null;
+  /** Whether a Core is set up, as the last status said; null until one has. */
+  private coreConfigured: boolean | null = null;
 
   private hydrating = false;
   private again = false;
@@ -298,7 +306,7 @@ export class QsysPanel {
   }
 
   stateSnapshot(): QsysPanelState {
-    return this.cached("state", () => ({ live: this.live, connection: this.connection(), epoch: this.epoch }));
+    return this.cached("state", () => ({ live: this.live, connection: this.connection(), epoch: this.epoch, core: this.coreState, configured: this.coreConfigured, stream: this.streamUp }));
   }
 
   /** Whether input is accepted at all: the stream is up and the panel has been read since. */
@@ -431,7 +439,7 @@ export class QsysPanel {
       ready ? Promise.resolve(null) : invoke<StatusPush>("qsys:status"),
     ]);
     if (this.refs === 0) return;
-    if (status.status === "fulfilled" && status.value) this.noteCoreState(status.value.state);
+    if (status.status === "fulfilled" && status.value) this.noteCoreState(status.value);
 
     if (allow.status === "fulfilled") {
       this.allow = new Map(allow.value.entries.map((e) => [addressKey(e), e]));
@@ -560,13 +568,14 @@ export class QsysPanel {
     }
   }
 
-  private noteCoreState(state: unknown): void {
-    if (state === "connected" || state === "reconnecting" || state === "offline") this.coreState = state;
+  private noteCoreState(p: StatusPush): void {
+    if (p.state === "connected" || p.state === "reconnecting" || p.state === "offline") this.coreState = p.state;
+    if (typeof p.configured === "boolean") this.coreConfigured = p.configured;
   }
 
   private onStatus(p: StatusPush, replayed: boolean): void {
     if (replayed || !p) return;
-    this.noteCoreState(p.state);
+    this.noteCoreState(p);
     if (p.catalogAt !== this.catalogAt) {
       const known = this.catalogAt !== undefined;
       this.catalogAt = p.catalogAt;
@@ -774,8 +783,8 @@ export function __resetQsysPanelsForTests(): void {
 /**
  * The store for panel `viewId`, held for as long as the calling component is
  * mounted. Null without a view (Home, a bare preview): nothing is watched and
- * every object reads Unavailable. `kind` picks the meter channel; every panel is
- * "staff" until a View carries its own Q-SYS kind.
+ * every object reads Unavailable. `kind` picks the meter channel: the view's own
+ * (panelKindOf), so every object and the panel page share one store.
  */
 export function useQsysPanel(viewId: string | null, kind: PanelKind = "staff"): QsysPanel | null {
   const panel = useMemo(() => (viewId ? panelFor(viewId, kind) : null), [viewId, kind]);
@@ -799,7 +808,7 @@ export function useQsysPanelContext(): QsysPanel | null {
 
 const UNAVAILABLE: QsysValue = { value: null, string: "", position: null, state: "unavailable" };
 const NO_CONTROL: QsysControlInfo = { type: "", range: null, choices: null, writable: false, allowed: false, limits: { min: null, max: null }, hold: false };
-const NO_PANEL: QsysPanelState = { live: false, connection: "offline", epoch: 0 };
+const NO_PANEL: QsysPanelState = { live: false, connection: "offline", epoch: 0, core: null, configured: null, stream: false };
 
 /** One control's value as the Core last reported it, and whether input is open. */
 export function useQsysValue(a: QsysAddress | null): QsysValue {

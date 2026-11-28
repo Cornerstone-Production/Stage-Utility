@@ -16,7 +16,7 @@ const { QsysService } = await import("./qsys-service.js");
 const { QsysWatch, watchChannel, QSYS_VALUES_CHANNEL } = await import("./qsys-watch.js");
 const { QsysWriter } = await import("./qsys-write.js");
 const { qsysAllowlist } = await import("./qsys-allowlist-store.js");
-const { checkBindings, panelsFromViews, QsysBindings } = await import("./qsys-bindings.js");
+const { checkBindings, panelsFromViews, QsysBindings, writeAddressesOf } = await import("./qsys-bindings.js");
 const { addressKey } = await import("../../types/qsys.js");
 type AllowEntry = import("./qsys-allowlist-store.js").AllowEntry;
 type QsysCatalog = import("./qsys-service.js").QsysCatalog;
@@ -204,6 +204,27 @@ describe("panelsFromViews", () => {
       view("b", obj("x", { type: "container" } as LayoutObjectConfig)),
     ]);
     assert.deepEqual(panels, [{ id: "a", kind: "staff", addresses: [bind("Lobby_Mixer", "gain")] }]);
+  });
+
+  test("a panel's own kind picks its meter rate, and a panel with nothing on it yet is still a panel", () => {
+    const block = (kind: "volunteer" | "staff", slug: string) => ({ kind, slug, siblings: [], returnAfterMin: 5 });
+    const panels = panelsFromViews([
+      { ...view("v", obj("f", fader(bind("Lobby_Mixer", "gain")))), qsys: block("volunteer", "zone-1") },
+      { ...view("s", obj("f", fader(bind("Lobby_Mixer", "gain")))), qsys: block("staff", "zone-1-staff") },
+      { ...view("e"), qsys: block("volunteer", "empty") },
+    ]);
+    assert.deepEqual(panels, [
+      { id: "v", kind: "volunteer", addresses: [bind("Lobby_Mixer", "gain")] },
+      { id: "s", kind: "staff", addresses: [bind("Lobby_Mixer", "gain")] },
+      { id: "e", kind: "volunteer", addresses: [] },
+    ]);
+  });
+});
+
+describe("writeAddressesOf", () => {
+  test("only the controls a panel writes: a strip's gain and mute, not its name, meter or an indicator", () => {
+    const strip = { type: "qsys-strip", name: bind("M", "name"), label: "", gain: bind("M", "gain"), mute: { ...bind("M", "mute"), indicator: bind("M", "led") }, meter: bind("M", "meter") } as LayoutObjectConfig;
+    assert.deepEqual(writeAddressesOf(view("p", obj("s", strip), obj("m", meter(bind("M", "meter2"))), obj("f", fader(bind("M", "gain"))))), [bind("M", "gain"), bind("M", "mute")]);
   });
 });
 

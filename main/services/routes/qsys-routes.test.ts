@@ -138,7 +138,7 @@ describe("/api/qsys", () => {
     assert.equal(kept.length, 1, `the invalid file was not kept beside: ${kept.join(", ")}`);
     assert.match(await fs.readFile(path.join(TMP, kept[0]), "utf8"), /"min":5/);
     const after = (await callRoute(qsysRoutes, "/api/qsys/allowlist")).json as { entries: AllowEntry[]; invalid: string | null };
-    assert.deepEqual(after, { entries: [MUTE], invalid: null });
+    assert.deepEqual({ entries: after.entries, invalid: after.invalid }, { entries: [MUTE], invalid: null });
   });
 
   test("with no Core: status is not writable, the catalog is 503, and a write is refused offline", async () => {
@@ -152,6 +152,23 @@ describe("/api/qsys", () => {
     const r = await quietly(() => write({ component: "Lobby_Mixer", control: "gain", value: -5 }));
     assert.equal(r.status, 200);
     assert.deepEqual((r.json as { ok: boolean; reason: string }).reason, "offline");
+  });
+
+  test("the staff PIN: set over PUT, checked over POST, never answered as a hash; a bad body is refused", async () => {
+    const pin = (body: unknown) => callRoute(qsysRoutes, "/api/qsys/pin", { method: "PUT", body });
+    const check = (p: unknown) => callRoute(qsysRoutes, "/api/qsys/pin/check", { method: "POST", body: { pin: p } });
+    assert.deepEqual((await callRoute(qsysRoutes, "/api/qsys/pin")).json, { set: false });
+    assert.deepEqual((await check("1234")).json, { ok: false, lockedForMs: 0, notSet: true }, "no PIN set opened the app");
+    for (const bad of ["123", "12345", 1234, "abcd", undefined]) assert.equal((await pin({ pin: bad })).status, 400, `set ${String(bad)}`);
+    const set = await quietly(() => pin({ pin: "2468" }));
+    assert.equal(set.status, 200);
+    assert.deepEqual(set.json, { set: true }, "the PUT answered more than whether a PIN is set");
+    assert.deepEqual((await callRoute(qsysRoutes, "/api/qsys/pin")).json, { set: true });
+    assert.deepEqual((await check("2468")).json, { ok: true });
+    assert.deepEqual((await check("1357")).json, { ok: false, lockedForMs: 0 });
+    assert.equal((await check(2468)).status, 400);
+    assert.deepEqual((await quietly(() => pin({ pin: null }))).json, { set: false }, "the PIN could not be removed");
+    assert.deepEqual((await check("2468")).json, { ok: false, lockedForMs: 0, notSet: true });
   });
 
   test("PUT /api/qsys/allowlist saves a good list and refuses a bad one whole, naming the entry", async () => {
@@ -380,10 +397,114 @@ describe("/api/qsys", () => {
       const r = await callRoute(qsysRoutes, "/api/qsys/bindings");
       assert.equal(r.status, 503, `a check that could not run answered ${r.status} ${JSON.stringify(r.json)}`);
       assert.match((r.json as { error: string }).error, /could not run/);
+      assert.equal((r.json as { code?: string }).code, "check-failed", "a page could not tell this 503 from no Core");
     } finally {
       failing.mock.restore();
     }
     await quietly(() => qsysBindings.refresh());
     assert.equal((await callRoute(qsysRoutes, "/api/qsys/bindings")).status, 200, "a good run did not bring the report back");
   });
+
+  test("POST /api/qsys/allowlist/add-panel adds every control the panel writes at the Core's range, and touches no existing entry", async () => {
+    await quietly(connect);
+    const { viewsStore } = await import("../views-store.js");
+    const o = (id: string, config: unknown) => ({ id, x: 0, y: 0, w: 0.1, h: 0.1, z: 0, config });
+    await viewsStore.save([
+      {
+        id: "p1",
+        name: "Lobby",
+        kind: "custom",
+        surface: "console",
+        createdAt: "2026-01-01",
+        layout: {
+          version: 1,
+          canvas: {},
+          objects: [
+            o("f", { type: "qsys-fader", binding: { component: "Lobby_Mixer", control: "gain" }, orientation: "vertical", showDb: true, steps: false, stepDb: 1 }),
+            o("m", { type: "qsys-mute", binding: { component: "Lobby_Mixer", control: "mute" } }),
+            o("x", { type: "qsys-mute", binding: { component: "Lobby_Mixer", control: "nope" } }),
+            // Read only: a meter is never added.
+            o("r", { type: "qsys-meter", binding: { component: "Lobby_Mixer", control: "gain" }, form: "bar" }),
+          ],
+        },
+      },
+    ] as never);
+    const tight = { ...MUTE, label: "set by hand" };
+    assert.equal((await quietly(() => put([tight]))).status, 200);
+    const r = await quietly(() => callRoute(qsysRoutes, "/api/qsys/allowlist/add-panel", { method: "POST", body: { panelId: "p1" } }));
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    const body = r.json as { entries: AllowEntry[]; added: AllowEntry[]; skipped: unknown[] };
+    assert.deepEqual(body.added, [{ component: "Lobby_Mixer", control: "gain", label: "Lobby_Mixer gain", min: -100, max: 20, confirm: "none" }]);
+    assert.deepEqual(body.skipped, [{ component: "Lobby_Mixer", control: "nope", reason: "not-in-design" }]);
+    assert.deepEqual(await listed(), [tight, body.added[0]], "the hand-set entry changed, or the list was not saved");
+    // Again: nothing more to add.
+    const again = await quietly(() => callRoute(qsysRoutes, "/api/qsys/allowlist/add-panel", { method: "POST", body: { panelId: "p1" } }));
+    assert.deepEqual((again.json as { added: unknown[] }).added, []);
+    assert.equal((await callRoute(qsysRoutes, "/api/qsys/allowlist/add-panel", { method: "POST", body: { panelId: "gone" } })).status, 404);
+    assert.equal((await callRoute(qsysRoutes, "/api/qsys/allowlist/add-panel", { method: "POST", body: { panelId: 7 } })).status, 400);
+  });
+  test("PUT /api/qsys/allowlist with the revision it read saves; over a revision since moved it is refused 409 and saves nothing", async () => {
+    await quietly(() => put([GAIN]));
+    const read = (await callRoute(qsysRoutes, "/api/qsys/allowlist")).json as { rev: string };
+    assert.equal(typeof read.rev, "string");
+    const ok = await quietly(() => callRoute(qsysRoutes, "/api/qsys/allowlist", { method: "PUT", body: { entries: [GAIN, MUTE], rev: read.rev } }));
+    assert.equal(ok.status, 200, JSON.stringify(ok.json));
+    const after = ok.json as { rev: string };
+    assert.notEqual(after.rev, read.rev, "the revision did not move with the list");
+    assert.equal(((await callRoute(qsysRoutes, "/api/qsys/allowlist")).json as { rev: string }).rev, after.rev, "the save answered a revision GET does not");
+    // A page still holding the first revision.
+    const stale = await quietly(() => callRoute(qsysRoutes, "/api/qsys/allowlist", { method: "PUT", body: { entries: [], rev: read.rev } }));
+    assert.equal(stale.status, 409);
+    assert.equal((stale.json as { code?: string }).code, "rev-changed");
+    assert.deepEqual((await listed()).map((e) => e.control), ["gain", "mute"], "a stale save went through");
+    // Two pages that read the same revision save at once: one lands, the other is refused.
+    const both = await quietly(() =>
+      Promise.all([
+        callRoute(qsysRoutes, "/api/qsys/allowlist", { method: "PUT", body: { entries: [GAIN], rev: after.rev } }),
+        callRoute(qsysRoutes, "/api/qsys/allowlist", { method: "PUT", body: { entries: [MUTE], rev: after.rev } }),
+      ]),
+    );
+    assert.deepEqual(both.map((r) => r.status).sort(), [200, 409], "both saves over one revision landed");
+  });
+
+  test("POST /api/qsys/allowlist/import with the revision it read imports; over a revision since moved it is refused 409 and imports nothing", async () => {
+    await quietly(() => put([GAIN]));
+    const read = (await callRoute(qsysRoutes, "/api/qsys/allowlist")).json as { rev: string };
+    const file = (await callRoute(qsysRoutes, "/api/qsys/allowlist/export", { method: "POST" })).json as Record<string, unknown>;
+    const ok = await quietly(() => callRoute(qsysRoutes, "/api/qsys/allowlist/import", { method: "POST", body: { ...file, entries: [GAIN, MUTE], rev: read.rev } }));
+    assert.equal(ok.status, 200, JSON.stringify(ok.json));
+    const after = ok.json as { rev: string; entries: AllowEntry[] };
+    assert.deepEqual(after.entries, [GAIN, MUTE]);
+    assert.equal(((await callRoute(qsysRoutes, "/api/qsys/allowlist")).json as { rev: string }).rev, after.rev, "the import answered a revision GET does not");
+    const stale = await quietly(() => callRoute(qsysRoutes, "/api/qsys/allowlist/import", { method: "POST", body: { ...file, entries: [], rev: read.rev } }));
+    assert.equal(stale.status, 409);
+    assert.equal((stale.json as { code?: string }).code, "rev-changed");
+    assert.deepEqual(await listed(), [GAIN, MUTE], "a stale import went through");
+    const bad = await callRoute(qsysRoutes, "/api/qsys/allowlist/import", { method: "POST", body: { ...file, rev: 7 } });
+    assert.equal(bad.status, 400, "a rev that is not text was taken");
+  });
+
+  test("PUT /api/qsys/pin answers a save that failed as its own 500, says so on /log, and leaves the PIN as it was", async () => {
+    const pin = (body: unknown) => callRoute(qsysRoutes, "/api/qsys/pin", { method: "PUT", body });
+    await quietly(() => pin({ pin: "1357" }));
+    // The file's place taken by a directory: the store's rename over it fails.
+    const file = path.join(TMP, "qsys-pin.json");
+    await fs.rm(file, { force: true });
+    await fs.mkdir(path.join(file, "blocker"), { recursive: true });
+    const warned: string[] = [];
+    const warn = mock.method(console, "warn", (...a: unknown[]) => void warned.push(a.join(" ")));
+    let r;
+    try {
+      r = await pin({ pin: "2468" });
+    } finally {
+      warn.mock.restore();
+      await fs.rm(file, { recursive: true, force: true });
+    }
+    assert.equal(r.status, 500, JSON.stringify(r.json));
+    assert.equal((r.json as { error: string }).error, "the staff PIN could not be saved, so it is unchanged; see /log");
+    assert.ok(warned.some((w) => w.startsWith("[qsys] the staff PIN could not be saved: ")), warned.join("\n"));
+    assert.deepEqual((await callRoute(qsysRoutes, "/api/qsys/pin/check", { method: "POST", body: { pin: "1357" } })).json, { ok: true }, "the old PIN stopped opening");
+    await quietly(() => pin({ pin: null }));
+  });
+
 });

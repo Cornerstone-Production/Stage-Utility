@@ -485,6 +485,19 @@ function ImportResult({ report, nameOfType, onClose }: {
           {report.targetsAdded.map((t) => <Row key={t.id} label={`${t.kind.toUpperCase()} target "${t.name}"`} />)}
         </Group>
 
+        {report.qsysPanels.some((p) => p.renamedFrom !== undefined || p.missingSiblings.length > 0) && (
+          <Group title="Q-SYS panels">
+            {report.qsysPanels.flatMap((p) => [
+              ...(p.renamedFrom !== undefined
+                ? [<Row key={`${p.id}:slug`} label={p.name} sub={`address /qsys/${p.renamedFrom} was taken here, so this panel is at /qsys/${p.slug}`} warn />]
+                : []),
+              ...(p.missingSiblings.length > 0
+                ? [<Row key={`${p.id}:siblings`} label={p.name} sub={`names panels that do not exist here, so its cog menu leaves them out: ${p.missingSiblings.join(", ")}`} warn />]
+                : []),
+            ])}
+          </Group>
+        )}
+
         {report.targetsKept.length > 0 && (
           <Group title="Left alone">
             {report.targetsKept.map((t) => (

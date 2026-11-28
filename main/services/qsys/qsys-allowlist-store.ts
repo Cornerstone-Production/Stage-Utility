@@ -19,27 +19,20 @@
 // The allowlist exports and imports as its own file, never inside a view
 // bundle: it is safety policy, reviewed on its own.
 
+import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { getUserDataPath } from "../app-paths.js";
 import { DataStore } from "../data-store.js";
 import { errorMessage } from "../errors.js";
-import { isRecord } from "../is-record.js";
+import { isRecord } from "../../types/is-record.js";
 import { asObject, checked } from "../restore-check.js";
 import { hasControlChars, scrub } from "../scrub.js";
-import { addressKey } from "../../types/qsys.js";
+import { WriteQueue } from "../write-queue.js";
+import { addressKey, type AllowEntry } from "../../types/qsys.js";
 import type { QrcControl } from "./qrc-types.js";
 
-export interface AllowEntry {
-  component: string;
-  control: string;
-  label: string;
-  /** The value limits enforced on a numeric write; both null when no range is set. */
-  min: number | null;
-  max: number | null;
-  /** `hold`: every object bound to it asks for hold-to-confirm. */
-  confirm: "none" | "hold";
-}
+export type { AllowEntry };
 
 /** What an allowlist file says it is. */
 export const ALLOWLIST_FILE_FORMAT = "stage-utility-qsys-allowlist";
@@ -179,29 +172,89 @@ export function invalidPhrase(reason: string): string {
   return `the stored allowlist is not valid (${reason}), so nothing is writable; it is kept until a save replaces it`;
 }
 
+/** A list as saved, and its revision. */
+export type Saved = { entries: AllowEntry[]; rev: string };
+
+/** A save that named the revision it read, when the list has moved on since. 409. */
+export class AllowlistRevChanged extends Error {}
+
 /**
- * Validate with `parse` and save. A refusal is logged and rethrown, having saved
- * nothing. Over an invalid stored file it is refused unless `replaceInvalid`,
- * and then that file is copied beside first; a copy that fails refuses the save.
+ * The stored list's revision: a hash of what is enforced (the entries, and whether
+ * the stored file is invalid). A page sends back the one it read; a save over
+ * anything else is refused, so no one's edit is overwritten unseen.
  */
-async function accept(how: "save" | "import", parse: () => AllowEntry[], replaceInvalid: boolean): Promise<AllowEntry[]> {
-  try {
-    const entries = parse();
-    const reason = invalidReason.get(await store.load());
-    if (reason !== undefined) {
-      if (!replaceInvalid) {
-        throw new AllowlistStoredInvalid(`${invalidPhrase(reason)}. Send replaceInvalid: true to replace it; the invalid file is kept beside it`);
+function revOf(data: { entries: AllowEntry[] }): string {
+  const reason = invalidReason.get(data) ?? null;
+  return createHash("sha256").update(JSON.stringify([data.entries, reason])).digest("hex").slice(0, 16);
+}
+
+/** One change to the list at a time, read to save: the revision check holds across it. */
+const queue = new WriteQueue();
+
+/** How a save or an import may go: over an invalid stored file, and only over a revision. */
+export interface ChangeOptions {
+  replaceInvalid?: boolean;
+  expectRev?: string;
+}
+
+/**
+ * Validate with `parse` and save, in the queue. A refusal is logged and rethrown,
+ * having saved nothing. Over an invalid stored file it is refused unless
+ * `replaceInvalid`, and then that file is copied beside first; a copy that fails
+ * refuses the save. With `expectRev`, refused (AllowlistRevChanged) unless the
+ * stored list is still at that revision, checked in the same step as the save.
+ */
+function accept(how: "save" | "import", parse: () => AllowEntry[], { replaceInvalid = false, expectRev }: ChangeOptions): Promise<Saved> {
+  return queue.enqueue(async () => {
+    try {
+      const entries = parse();
+      const current = await store.load();
+      if (expectRev !== undefined && expectRev !== revOf(current)) {
+        throw new AllowlistRevChanged("the allowlist was changed since this list was read; read it again and make the change on that");
       }
-      const dir = getUserDataPath();
-      const kept = `${FILE}.invalid-${Date.now()}`;
-      await fs.copyFile(path.join(dir, FILE), path.join(dir, kept), fs.constants.COPYFILE_EXCL);
-      console.log(`[qsys] kept the invalid allowlist as ${scrub(kept)} before replacing it`);
+      const reason = invalidReason.get(current);
+      if (reason !== undefined) {
+        if (!replaceInvalid) {
+          throw new AllowlistStoredInvalid(`${invalidPhrase(reason)}. Send replaceInvalid: true to replace it; the invalid file is kept beside it`);
+        }
+        const dir = getUserDataPath();
+        const kept = `${FILE}.invalid-${Date.now()}`;
+        await fs.copyFile(path.join(dir, FILE), path.join(dir, kept), fs.constants.COPYFILE_EXCL);
+        console.log(`[qsys] kept the invalid allowlist as ${scrub(kept)} before replacing it`);
+      }
+      await store.save({ entries });
+      console.log(`[qsys] allowlist ${scrub(how === "save" ? "saved" : "imported")}: ${scrub(entries.length)} entries`);
+      // The revision of what was saved, read inside the step: the one a page sends next.
+      return { entries, rev: revOf(await store.load()) };
+    } catch (err) {
+      console.warn(`[qsys] allowlist ${scrub(how)} refused: ${scrub(errorMessage(err))}`);
+      throw err;
     }
-    await store.save({ entries });
-    console.log(`[qsys] allowlist ${scrub(how === "save" ? "saved" : "imported")}: ${scrub(entries.length)} entries`);
-    return entries;
+  });
+}
+
+
+/** addMissing's work, inside the serial step. */
+async function addMissingNow(candidates: AllowEntry[]): Promise<Saved & { added: AllowEntry[] }> {
+  let added: AllowEntry[] = [];
+  try {
+    const next = await store.update((current) => {
+      const reason = invalidReason.get(current);
+      if (reason !== undefined) throw new AllowlistStoredInvalid(`${invalidPhrase(reason)}. Replace it with a save or an import first`);
+      const have = new Set(current.entries.map(addressKey));
+      added = candidates.filter((c) => {
+        const k = addressKey(c);
+        if (have.has(k)) return false;
+        have.add(k);
+        return true;
+      });
+      // The same object back: nothing to add, and nothing written.
+      return added.length === 0 ? current : { entries: parseAllowEntries([...current.entries, ...added]) };
+    });
+    if (added.length > 0) console.log(`[qsys] allowlist: added ${scrub(added.length)} control(s) a panel uses, at the Core's own ranges`);
+    return { entries: next.entries, added, rev: revOf(next) };
   } catch (err) {
-    console.warn(`[qsys] allowlist ${scrub(how)} refused: ${scrub(errorMessage(err))}`);
+    console.warn(`[qsys] allowlist add refused: ${scrub(errorMessage(err))}`);
     throw err;
   }
 }
@@ -211,12 +264,13 @@ export const qsysAllowlist = {
     return (await store.load()).entries;
   },
 
-  /** The list, and why the stored file is refused (null while it is valid). */
-  async state(): Promise<{ entries: AllowEntry[]; invalid: string | null }> {
+  /** The list, why the stored file is refused (null while it is valid), and its revision. */
+  async state(): Promise<{ entries: AllowEntry[]; invalid: string | null; rev: string }> {
     const data = await store.load();
     const reason = invalidReason.get(data);
-    return { entries: data.entries, invalid: reason === undefined ? null : invalidPhrase(reason) };
+    return { entries: data.entries, invalid: reason === undefined ? null : invalidPhrase(reason), rev: revOf(data) };
   },
+
 
   /** The entry for an address, or undefined when it is not writable. */
   async lookup(component: string, control: string): Promise<AllowEntry | undefined> {
@@ -228,12 +282,24 @@ export const qsysAllowlist = {
   },
 
   /**
-   * Replace the whole list. Throws AllowlistRefused, having saved nothing, when
-   * any entry breaks a rule, and AllowlistStoredInvalid over an invalid stored
-   * file unless `replaceInvalid`.
+   * Replace the whole list; answers it as saved, and its revision. Throws
+   * AllowlistRefused, having saved nothing, when any entry breaks a rule,
+   * AllowlistStoredInvalid over an invalid stored file unless `replaceInvalid`, and
+   * AllowlistRevChanged when `expectRev` is not the stored list's revision.
    */
-  async replace(raw: unknown, { replaceInvalid = false } = {}): Promise<AllowEntry[]> {
-    return accept("save", () => parseAllowEntries(raw), replaceInvalid);
+  replace(raw: unknown, opts: ChangeOptions = {}): Promise<Saved> {
+    return accept("save", () => parseAllowEntries(raw), opts);
+  },
+
+  /**
+   * Add each of `candidates` whose address is not on the list yet, as one atomic
+   * read-modify-write. An entry already listed is never touched, so limits set by
+   * hand stay as they are. Over an invalid stored file it is refused
+   * (AllowlistStoredInvalid), and a list that would break a rule is refused whole
+   * (AllowlistRefused); either saves nothing. Returns the list and what was added.
+   */
+  addMissing(candidates: AllowEntry[]): Promise<Saved & { added: AllowEntry[] }> {
+    return queue.enqueue(() => addMissingNow(candidates));
   },
 
   /** Told after every save that landed (a save, an import, a restore). */
@@ -245,8 +311,8 @@ export const qsysAllowlist = {
     return { format: ALLOWLIST_FILE_FORMAT, version: ALLOWLIST_FILE_VERSION, entries: await this.list() };
   },
 
-  /** Replace the list from an allowlist file. A malformed file is refused whole and the old list kept; over an invalid stored file, as replace(). */
-  async importFile(raw: unknown, { replaceInvalid = false } = {}): Promise<AllowEntry[]> {
-    return accept("import", () => parseAllowlistFile(raw), replaceInvalid);
+  /** Replace the list from an allowlist file. A malformed file is refused whole and the old list kept; otherwise as replace(). */
+  importFile(raw: unknown, opts: ChangeOptions = {}): Promise<Saved> {
+    return accept("import", () => parseAllowlistFile(raw), opts);
   },
 };

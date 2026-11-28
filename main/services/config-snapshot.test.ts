@@ -119,6 +119,8 @@ const EXPECTED_CONFIG = [
   "presets.json",
   // The Q-SYS controls a panel may write, and their limits: safety policy the operator set.
   "qsys-allowlist.json",
+  // The staff PIN's salted hash: the operator chose it. Never the PIN itself.
+  "qsys-pin.json",
   "rosstalk-settings.json",
   "rosstalk-targets.json",
   // The operator's own colours, kept from the picker.

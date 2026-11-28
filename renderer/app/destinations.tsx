@@ -26,6 +26,7 @@ import {
   SlidersHorizontalIcon,
   VideoIcon,
   ZapIcon,
+  SlidersVerticalIcon,
 } from "lucide-react";
 
 import { PatchView } from "../main/patch-view";
@@ -39,6 +40,9 @@ import { StagePlotsEdit } from "../settings/sections/stageplots-edit";
 import { HomeRoute } from "./home/home-route";
 import { ScreensRouteSlot } from "./screens/kept-screens";
 import { ConsoleRoute } from "./console-route";
+import { QsysManagePanelRoute, QsysManageRoute } from "./qsys/qsys-manage-route";
+import { QsysPanelRoute } from "./qsys/qsys-panel-route";
+import { QSYS_MANAGE_PATH } from "./qsys/qsys-paths";
 import { ViewEditorRoute } from "./screens/view-editor-route";
 import { VideoFeedsRoute } from "./video-feeds/video-feeds-route";
 import { MicSlotsPage } from "./mic-slots/mic-slots-page";
@@ -158,6 +162,16 @@ export const DESTINATIONS: readonly Destination[] = [
     description: "When something happens in Stage, do something to a device.",
     icon: <ZapIcon className="size-4" />,
     Component: AutomationRoute,
+  },
+  // Q-SYS. The row is drawn by QsysRailRow (a flyout and a folder, not a link) and
+  // only when a panel exists or a Core is set up; the destination is /qsys/manage.
+  {
+    id: "qsys",
+    path: QSYS_MANAGE_PATH,
+    label: "Q-SYS",
+    description: "Panels, the connection to the Core, and what panels may change.",
+    icon: <SlidersVerticalIcon className="size-4" />,
+    Component: QsysManageRoute,
   },
   {
     id: "plan",
@@ -372,4 +386,10 @@ export const NESTED_ROUTES: readonly NestedRoute[] = [
   // nowhere to be: it rendered only on a panel Output, which meant the one
   // surface built for the operator was the one the operator could not open.
   { path: "/consoles/$viewId", Component: ConsoleRoute },
+  // Q-SYS: /qsys/manage is the Q-SYS destination in the rail. A panel inside the
+  // shell is titled with the panel's own name (active-page.ts, qsysPanelPages) and
+  // lights that row; the panel full screen is chromeless, what an iPad opens. The
+  // static /qsys/manage wins over the /qsys/$slug parameter.
+  { path: "/qsys/manage/$slug", Component: QsysManagePanelRoute },
+  { path: "/qsys/$slug", Component: QsysPanelRoute },
 ];

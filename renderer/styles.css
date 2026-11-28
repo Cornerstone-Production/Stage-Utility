@@ -655,6 +655,10 @@
      footer bands) and empty-image placeholders. Strictly R=G=B like --kiosk-bg —
      the values this replaced (#14161c, #13131a, #1a1a2e) all carried a blue bias. */
   --kiosk-surface-1: #171717;
+  /* A popover's shadow on the kiosk ground (a Q-SYS panel's cog menu). The app
+     theme's --su-shadow-2 is the light one in the light app, which on #0a0a0a is
+     invisible; this is the dark theme's own, whichever theme the app is in. */
+  --kiosk-shadow-pop: 0 1px 0 rgba(255, 255, 255, 0.06) inset, 0 16px 48px rgba(0, 0, 0, 0.6);
 }
 
 /* The kiosk backdrop. Applied behind every view + the embedded "Mic slots"
