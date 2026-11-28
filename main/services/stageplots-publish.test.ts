@@ -669,6 +669,88 @@ describe("publishing a venue", () => {
   });
 });
 
+describe("a page whose settings cannot be read", () => {
+  // The saved address or token cannot be read (the store or the secrets file): neither "no page is
+  // set up" nor a bad token. Every action meets it the same way, as a 503 that changed nothing,
+  // and never as a rejection that reaches the route as a 500.
+  const unreadable = (h: Harness) => {
+    (h.publisher as unknown as { deps: { target: () => Promise<unknown> } }).deps.target = async () => {
+      throw new Error("secrets store unreadable");
+    };
+  };
+  const CAUSE = /^The page settings could not be read: secrets store unreadable/;
+
+  test("Publish is refused with the cause, and sends nothing", async () => {
+    const h = await harness(venueDoc(), { target: async () => { throw new Error("secrets store unreadable"); } });
+    const r = await h.publisher.publish("v-1");
+    assert.equal(r.ok, false);
+    assert.equal(r.ok ? 0 : r.status, 503);
+    assert.match(r.ok ? "" : r.error, CAUSE);
+    assert.equal(h.page.requests.length, 0);
+    assert.equal((await h.venue()).publish, undefined);
+  });
+
+  test("Regenerate, Publish now and Unpublish are each refused, and the venue stays published", async () => {
+    const h = await harness();
+    const first = await h.publisher.publish("v-1");
+    assert.ok(first.ok);
+    const secret = (await h.venue()).publish?.secret;
+    const mark = h.page.requests.length;
+    unreadable(h);
+    const quiet = mock.method(console, "warn", () => undefined);
+    try {
+      for (const [name, run] of [
+        ["Regenerate", () => h.publisher.regenerate("v-1")],
+        ["Publish now", () => h.publisher.publishNow("v-1")],
+        ["Unpublish", () => h.publisher.unpublish("v-1")],
+      ] as const) {
+        const r = await run();
+        assert.equal(r.ok, false, name);
+        assert.equal(r.ok ? 0 : r.status, 503, name);
+        assert.match(r.ok ? "" : r.error, /The page settings could not be read: secrets store unreadable/, name);
+      }
+    } finally {
+      quiet.mock.restore();
+    }
+    assert.equal(h.page.requests.length, mark, "nothing was sent");
+    assert.equal((await h.venue()).publish?.secret, secret);
+  });
+
+  test("a delete is refused with the cause, so the link is not queued as if no page were set up", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    unreadable(h);
+    const r = await h.publisher.retireForDelete("v-1");
+    assert.equal(r.ok, false);
+    assert.equal(r.ok ? 0 : r.status, 503);
+    assert.match(r.ok ? "" : r.error, CAUSE);
+    assert.ok((await h.venue()).publish, "still published");
+    assert.deepEqual((await stageplotsStore.get()).pendingRemovals, []);
+  });
+
+  test("Remove now answers the cause, and keeps the queue", async () => {
+    const h = await harness();
+    assert.ok((await h.publisher.publish("v-1")).ok);
+    const parsed = parsePublishUrl(h.page.origin);
+    assert.ok(parsed.ok);
+    await stageplotsStore.update((d) => ({
+      ...d,
+      pendingRemovals: [{ secret: "A".repeat(43), origin: parsed.ok ? parsed.origin : "", since: "2026-01-01T00:00:00.000Z", reason: "unpublished" }] as never,
+    }));
+    unreadable(h);
+    const quiet = mock.method(console, "error", () => undefined);
+    try {
+      const r = await h.publisher.removePending();
+      assert.ok("error" in r);
+      assert.equal("error" in r ? r.status : 0, 503);
+      assert.match("error" in r ? r.error : "", /secrets store unreadable/);
+    } finally {
+      quiet.mock.restore();
+    }
+    assert.equal((await stageplotsStore.get()).pendingRemovals.length, 1);
+  });
+});
+
 describe("regenerating the link", () => {
   test("publishes the new secret fully before deleting anything under the old", async () => {
     const h = await harness(venueDoc(2, 2));
