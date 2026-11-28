@@ -532,8 +532,7 @@ describe("rebuildServiceBaptisms — the MAX_SESSIONS cap", () => {
 
     const warnings = captureConsole(t, "warn");
     try {
-      let outcome: Awaited<ReturnType<typeof rebuildServiceBaptisms>>;
-      outcome = await rebuildServiceBaptisms(KEY);
+      const outcome = await rebuildServiceBaptisms(KEY);
       const forService = (await baptismStore.listSessions()).filter((s) => s.serviceKey === KEY);
 
       assert.equal(outcome.added, 0, "the store is full — this rebuild's own new session must not be added");

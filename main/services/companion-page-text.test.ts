@@ -29,7 +29,6 @@ type CompanionPageView = import("./companion-export.js").CompanionPageView;
 const realFetch = companionDeps.fetch;
 const realTarget = companionDeps.getTarget;
 const realDeadline = pageVariableDeps.deadlineMs;
-const realLog = console.log;
 
 // A stuck read holds one of the shared slots until it ends, so a test that sticks one lets it go.
 const stuck: Array<() => void> = [];
@@ -41,7 +40,6 @@ afterEach(async () => {
   companionDeps.fetch = realFetch;
   companionDeps.getTarget = realTarget;
   pageVariableDeps.deadlineMs = realDeadline;
-  console.log = realLog;
   companionApi.invalidate();
 });
 
