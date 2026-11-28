@@ -20,6 +20,7 @@ import type { ConnectionState } from "../../types/integrations.js";
 import { startSelfSignedPage, type SelfSignedPage } from "../../services/fixtures/self-signed-page.js";
 import { SennheiserEwDx } from "./sennheiser-ewdx.js";
 import { SennheiserSpectera } from "./sennheiser-spectera.js";
+import { ShureUlxd } from "./shure-ulxd.js";
 
 /** Everything written to the console while `fn` runs, one string per call. */
 async function captured(fn: () => Promise<void>): Promise<string[]> {
@@ -74,6 +75,70 @@ describe("a wireless failure reaches /log without a debug variable", () => {
     assert.ok(
       said.some((l) => l.includes("localhost")),
       "the line does not name the base station, so two of them cannot be told apart",
+    );
+  });
+
+  it("a refused password is reported as that, and nothing else, while it waits to retry", async () => {
+    // The stream watchdog was armed before the request and never stopped on a
+    // refusal, so with a retry delay longer than the idle window it fired too,
+    // adding "did not open the telemetry stream" — pointing at the network.
+    const port = Number(new URL(page.origin).port);
+    const p = new SennheiserSpectera();
+    (p as unknown as { idleMs: number }).idleMs = 60;
+    const lines = await captured(async () => {
+      const failed = new Promise<void>((resolve) =>
+        p.onConnectionStateChange((s: ConnectionState) => {
+          if (s === "error") resolve();
+        }),
+      );
+      await p.connect({ host: "localhost", port, password: "wrong" });
+      await failed;
+      await new Promise((r) => setTimeout(r, 400)); // well past the idle window, short of the 3 s retry
+      await p.disconnect();
+    });
+    const said = lines.filter((l) => l.startsWith("[spectera]"));
+    assert.equal(said.length, 1, `expected only the refused-password line. Saw: ${JSON.stringify(said)}`);
+  });
+
+  it("a new configuration is news: the same refusal is said again after a reconnect", async () => {
+    const port = Number(new URL(page.origin).port);
+    const p = new SennheiserSpectera();
+    const refusedOnce = async () => {
+      const failed = new Promise<void>((resolve) =>
+        p.onConnectionStateChange((s: ConnectionState) => {
+          if (s === "error") resolve();
+        }),
+      );
+      await p.connect({ host: "localhost", port, password: "wrong" });
+      await failed;
+      await p.disconnect();
+    };
+    const lines = await captured(async () => {
+      await refusedOnce();
+      await refusedOnce();
+    });
+    assert.equal(
+      lines.filter((l) => /refused the API password/.test(l)).length,
+      2,
+      `an operator who re-entered the password and was refused again got no line. Saw: ${JSON.stringify(lines)}`,
+    );
+  });
+
+  it("a Shure receiver that refuses the connection says so", async () => {
+    const p = new ShureUlxd();
+    const lines = await captured(async () => {
+      const down = new Promise<void>((resolve) =>
+        p.onConnectionStateChange((s: ConnectionState) => {
+          if (s === "error") resolve();
+        }),
+      );
+      await p.connect({ host: "127.0.0.1", port: 9, channels: 2 });
+      await down;
+      await p.disconnect();
+    });
+    assert.ok(
+      lines.some((l) => l.startsWith("[shure:shure-ulxd] socket error:")),
+      `a refused connection left no line. Saw: ${JSON.stringify(lines)}`,
     );
   });
 

@@ -66,12 +66,12 @@ after(async () => {
 
 type Watch = { p: SennheiserSpectera; states: ConnectionState[]; statuses: DeviceStatus[] };
 
-async function watch(m: Mode): Promise<Watch> {
+async function watch(m: Mode, probeTimeoutMs = 120): Promise<Watch> {
   mode = m;
   const p = new SennheiserSpectera();
   const knobs = p as unknown as { idleMs: number; probeTimeoutMs: number };
   knobs.idleMs = 120;
-  knobs.probeTimeoutMs = 120;
+  knobs.probeTimeoutMs = probeTimeoutMs;
   const states: ConnectionState[] = [];
   const statuses: DeviceStatus[] = [];
   p.onConnectionStateChange((s) => states.push(s));
@@ -82,20 +82,28 @@ async function watch(m: Mode): Promise<Watch> {
 
 const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Poll until `ok()` or the deadline: a loaded runner is slower, not different. */
+async function until(ok: () => boolean, ms = 3_000): Promise<boolean> {
+  const end = Date.now() + ms;
+  while (!ok()) {
+    if (Date.now() > end) return false;
+    await wait(20);
+  }
+  return true;
+}
+
 describe("a Spectera stream that goes silent", () => {
   it("reads offline when the base station stops answering", async () => {
     const { p, states, statuses } = await watch("dead");
     try {
-      await wait(150);
-      assert.ok(states.includes("connected"), "the stream never connected, so this case proves nothing");
       assert.ok(
-        statuses.some((s) => s.channelId === "sek1" && s.online),
+        await until(() => statuses.some((s) => s.channelId === "sek1" && s.online)),
         "the pack never read online, so this case proves nothing",
       );
-      await wait(700);
-      assert.notEqual(
-        p.getConnectionState(),
-        "connected",
+      assert.ok(states.includes("connected"), "the stream never connected, so this case proves nothing");
+      // The first retry is 3 s away, so nothing can flip it back inside this deadline.
+      assert.ok(
+        await until(() => p.getConnectionState() !== "connected", 2_500),
         "the base station went silent and stopped answering, and the connection still reads connected",
       );
       const last = statuses.filter((s) => s.channelId === "sek1").at(-1);
@@ -106,7 +114,9 @@ describe("a Spectera stream that goes silent", () => {
   });
 
   it("stays connected while a quiet base station answers the check", async () => {
-    const { p, states } = await watch("quiet");
+    // A generous check timeout: this case asserts the box is NOT dropped, so a
+    // slow TLS handshake on a loaded runner must not decide it.
+    const { p, states } = await watch("quiet", 1_000);
     try {
       await wait(900); // several idle windows
       assert.equal(p.getConnectionState(), "connected", `a healthy, quiet base station was dropped: ${states.join(" → ")}`);
@@ -119,11 +129,24 @@ describe("a Spectera stream that goes silent", () => {
   it("gives up on a stream request that is never answered", async () => {
     const { p, states } = await watch("mute");
     try {
-      await wait(700);
       assert.ok(
-        states.includes("error"),
+        await until(() => states.includes("error"), 2_500),
         `the request was accepted and never answered, and the connection sat at: ${states.join(" → ")}`,
       );
+    } finally {
+      await p.disconnect();
+    }
+  });
+
+  it("hangs up on a check still in flight when the connection is turned off", async () => {
+    const { p } = await watch("dead", 10_000);
+    try {
+      const inner = p as unknown as { probe: http.ClientRequest | null };
+      assert.ok(await until(() => inner.probe !== null), "no check was ever sent, so this case proves nothing");
+      const probe = inner.probe!;
+      await p.disconnect();
+      assert.equal(probe.destroyed, true, "the check outlived the connection it was checking");
+      assert.equal(probe.listenerCount("response"), 0, "the check's response handler survived the teardown");
     } finally {
       await p.disconnect();
     }
