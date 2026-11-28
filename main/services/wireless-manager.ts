@@ -16,7 +16,7 @@ import { settingsStore } from "./settings-store.js";
 import { clampMeterRate } from "./settings-rules.js";
 import {
   allCredentialKeys,
-  mergeSecrets,
+  foldSecrets,
   publicConfig,
   splitConfig,
   wirelessCredentialTarget,
@@ -169,12 +169,22 @@ class WirelessManager {
     if (patch.config !== undefined) {
       // The form posts back the mask it was shown, so a patch that only changes
       // the IP still carries "••••" in the password field. Merging that verbatim
-      // would hand the driver the mask as its password. mergeSecrets resolves it
+      // would hand the driver the mask as its password. foldSecrets resolves it
       // against what is stored: mask keeps, "" clears, anything else replaces.
       const stored = await secretsStore.getSecrets(wirelessSecretSlot(conn.id));
-      const merged = mergeSecrets(conn.providerId, patch.config, stored);
+      const { next: merged, cleared, ignored } = foldSecrets(conn.providerId, patch.config, stored);
+      // Key names and types, never values: these are credential slots.
+      if (cleared.length > 0) {
+        console.log(`[wireless] cleared the stored ${scrub(cleared.join(", "))} on ${scrub(conn.name)}`);
+      }
+      for (const { key, type } of ignored) {
+        console.warn(
+          `[wireless] ignoring a non-string credential on ${scrub(conn.name)}: ${scrub(key)} arrived as ${scrub(type)}. ` +
+            "The stored value is unchanged.",
+        );
+      }
       // Rebuild from the credential-free parts of BOTH, then add back only what
-      // mergeSecrets kept. Spreading the patch over conn.config cannot clear a
+      // foldSecrets kept. Spreading the patch over conn.config cannot clear a
       // credential — an object that merely lacks the key does not delete it — so
       // clearing a password left the old one live in memory: the API kept
       // reporting it as set and the driver kept authenticating with it.

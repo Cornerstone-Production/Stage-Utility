@@ -44,7 +44,9 @@ Where a driver needs a password — Spectera's base-station API password — it 
 kept in the encrypted `secrets.bin`, not in `wireless-connections.json`, so it is
 excluded from config snapshots like every other credential. The API and the SSE
 channel report it as `••••` when set and `""` when not; saving the mask back
-leaves it unchanged, and saving an empty value clears it. It is only sent to the
+leaves it unchanged, and saving an empty value clears it, which `/log` records
+as `[wireless] cleared the stored password on <connection>`. A value that is not
+a string is ignored, with a line saying so. It is only sent to the
 address it was entered for: changing the connection's host, port or provider
 clears it unless the same change types it again, the panel says so, and `/log`
 records `[wireless] cleared the stored password on <connection>`.
