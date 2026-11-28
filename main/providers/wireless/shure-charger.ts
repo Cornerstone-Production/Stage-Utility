@@ -11,20 +11,12 @@
 // BATT_CAPACITY_MAX, BATT_HEALTH, BATT_BARS, BATT_ERROR and BATT_MODULE_TYPE.
 // Every raw frame is logged under SHURE_DEBUG=1.
 
-import type { ConfigField } from "../../types/integrations.js";
 import type { ChannelState } from "./device-provider-base.js";
 import { ShureBaseProvider, batteryMinutesFrom, shureNumber, stripBraces } from "./shure-base.js";
 
 export class ShureCharger extends ShureBaseProvider {
   readonly id = "shure-charger";
   readonly label = "Shure SBC Charger";
-  readonly configSchema: ConfigField[] = [
-    { key: "host", label: "Device IP / Hostname", type: "text", placeholder: "192.168.1.110" },
-    { key: "port", label: "TCP Port", type: "number", placeholder: "2202" },
-    // One SBC220 = 2 bays; up to 4 can be linked behind one IP, reporting bays
-    // 1–8. Set this to 2 × (number of linked units).
-    { key: "channels", label: "Number of Bays", type: "number", placeholder: "8" },
-  ];
 
   protected readonly defaultChannels = 8;
   protected readonly defaultDeviceType = "charger" as const;
@@ -36,7 +28,6 @@ export class ShureCharger extends ShureBaseProvider {
   // Re-poll the bays on a timer — chargers change slowly and may not push.
   // 30s (was 15s) halves the command volume with no practical loss of freshness
   // (battery %, dock/undock change slowly).
-  private pollTimer: ReturnType<typeof setInterval> | null = null;
   private static readonly POLL_MS = 30_000;
 
   /** The unit's own name (DEVICE_ID), e.g. "RF: 5-8". Device-level, so it is held
@@ -101,10 +92,9 @@ export class ShureCharger extends ShureBaseProvider {
   protected onConnected(): void {
     console.log(`[shure:${this.id}] sending init commands`);
     this.pollAllBays();
-    if (this.pollTimer) clearInterval(this.pollTimer);
-    // send() is a no-op while disconnected, so a lingering interval is harmless;
-    // re-created on each (re)connect.
-    this.pollTimer = setInterval(() => this.pollAllBays(), ShureCharger.POLL_MS);
+    // Owned by the base class, which stops it when the socket closes and on
+    // disconnect() (see shure-charger-interval.test.ts).
+    this.every("bay-poll", ShureCharger.POLL_MS, () => this.pollAllBays());
   }
 
   private pollAllBays(): void {

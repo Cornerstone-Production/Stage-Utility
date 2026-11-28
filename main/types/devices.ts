@@ -1,6 +1,6 @@
 // Normalized device types — brand-agnostic shapes that every DeviceProvider emits.
 
-import type { ConfigField, ConnectionState } from "./integrations.js";
+import type { ConnectionState } from "./integrations.js";
 
 export interface WirelessConnection {
   id: string;
@@ -91,7 +91,6 @@ export interface DeviceChannel {
 export interface DeviceProvider {
   readonly id: string;
   readonly label: string;
-  readonly configSchema: ConfigField[];
   connect(cfg: Record<string, unknown>): Promise<void>;
   disconnect(): Promise<void>;
   listChannels(): Promise<DeviceChannel[]>;

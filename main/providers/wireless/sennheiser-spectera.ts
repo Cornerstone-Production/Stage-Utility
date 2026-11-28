@@ -19,10 +19,9 @@
 import { clamp } from "../../services/clamp.js";
 import * as https from "node:https";
 import { scrub } from "../../services/scrub.js";
-import { createSseReader, SSE_MAX_BUFFER, type SseEvent, type SseReader } from "../../services/sse-reader.js";
+import { createSseReader, keepSocketAlive, SSE_MAX_BUFFER, type SseEvent, type SseReader } from "../../services/sse-reader.js";
 
 import type { DeviceChannel, DeviceProvider } from "../../types/devices.js";
-import type { ConfigField } from "../../types/integrations.js";
 import { DeviceProviderBase, blankChannel, type ChannelState } from "./device-provider-base.js";
 
 const DEBUG = !!process.env.SPECTERA_DEBUG;
@@ -30,6 +29,22 @@ const DEFAULT_PORT = 443;
 const USERNAME = "controlSennheiser"; // fixed per Sennheiser SSCv2 auth
 const RECONNECT_BASE_MS = 3_000;
 const RECONNECT_MAX_MS = 3_600_000; // internal ceiling; the service-window scheduler applies the real cap
+/**
+ * How long the stream may carry nothing before the base station is checked.
+ *
+ * The stream is receive-only: nothing is written to its socket, so a base
+ * station that loses power or network without closing it produces no 'end' and
+ * no 'error', ever. Its event cadence when nothing changes is NOT known (no
+ * hardware to measure, nothing in the public SSCv2 docs), so silence alone does
+ * not mark it offline: a quiet stream gets one request, and only a base station
+ * that answers neither is declared gone. Also bounds a stream request that is
+ * accepted and never answered, which used to sit at "connecting" for ever.
+ */
+const STREAM_IDLE_MS = 20_000;
+/** How long the check on a quiet stream may take before the box counts as gone. */
+const PROBE_TIMEOUT_MS = 10_000;
+/** TCP keep-alive on the stream: the slow backstop, see keepSocketAlive. */
+const STREAM_KEEPALIVE_MS = 10_000;
 // Resource branches we ask the base station to push.
 const SUBSCRIBE_PATHS = ["/api/mts/paired/all", "/api/rf/channels", "/api/audio/links"];
 
@@ -46,25 +61,6 @@ export function specteraTarget(cfg: Record<string, unknown>): { host: string | n
 export class SennheiserSpectera extends DeviceProviderBase implements DeviceProvider {
   readonly id = "sennheiser-spectera";
   readonly label = "Sennheiser Spectera";
-  readonly configSchema: ConfigField[] = [
-    {
-      key: "host",
-      label: "Base Station IP / Hostname",
-      type: "text",
-      placeholder: "192.168.1.130",
-    },
-    {
-      key: "port",
-      label: "HTTPS Port",
-      type: "number",
-      placeholder: "443",
-    },
-    {
-      key: "password",
-      label: "API Password",
-      type: "password",
-    },
-  ];
 
   private host: string | null = null;
   private port = DEFAULT_PORT;
@@ -72,19 +68,36 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
   private running = false;
 
   private req: ReturnType<typeof https.request> | null = null;
+  /** The check sent on a quiet stream, while one is in flight. */
+  private probe: ReturnType<typeof https.request> | null = null;
+  /** When the stream last carried a byte. A check that fails after the stream
+   *  has spoken again is stale, not a verdict. */
+  private lastByteAt = 0;
+  /** Instance fields, not constants, so a test can shorten them. */
+  private idleMs = STREAM_IDLE_MS;
+  private probeTimeoutMs = PROBE_TIMEOUT_MS;
   private sse: SseReader = newSseReader();
   private sessionUuid: string | null = null;
   private reconnectMs = RECONNECT_BASE_MS;
   private channels = new Map<string, ChannelState>();
 
-  // ── DeviceProvider interface ──────────────────────────────────────────────
+  protected logTag(): string {
+    return "[spectera]";
+  }
 
+  /** The base station as a log line names it: two of them must be told apart. */
+  private where(): string {
+    return `${scrub(this.host ?? "?")}:${this.port}`;
+  }
+
+  // ── DeviceProvider interface ──────────────────────────────────────────────
 
   async connect(cfg: Record<string, unknown>): Promise<void> {
     const target = specteraTarget(cfg);
     this.host = target.host;
     this.port = target.port;
     this.password = typeof cfg.password === "string" ? cfg.password : "";
+    this.forgetFailures();
     this.running = true;
     this.openStream();
   }
@@ -107,6 +120,19 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
     return "Basic " + Buffer.from(`${USERNAME}:${this.password}`).toString("base64");
   }
 
+  /** Every request this driver makes: the stream, the subscription, the check. */
+  private requestOptions(path: string, method: string, headers: Record<string, string | number> = {}): https.RequestOptions {
+    return {
+      host: this.host ?? undefined,
+      port: this.port,
+      path,
+      method,
+      headers: { Authorization: this.authHeader(), ...headers },
+      rejectUnauthorized: false, // base station uses a self-signed cert
+      agent: false,
+    };
+  }
+
   private openStream(): void {
     if (!this.running || !this.host) {
       if (!this.host) this.setState("error");
@@ -117,41 +143,116 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
     this.sessionUuid = null;
 
     const req = https.request(
-      {
-        host: this.host,
-        port: this.port,
-        path: "/api/ssc/state/subscriptions",
-        method: "GET",
-        headers: { Authorization: this.authHeader(), Accept: "text/event-stream" },
-        rejectUnauthorized: false, // base station uses a self-signed cert
-        agent: false,
-      },
+      this.requestOptions("/api/ssc/state/subscriptions", "GET", { Accept: "text/event-stream" }),
       (res) => {
         if (res.statusCode === 401 || res.statusCode === 403) {
-          if (DEBUG) console.log(`[spectera] auth failed (${res.statusCode})`);
+          this.reportFailure(
+            "auth",
+            `${this.where()} refused the API password (HTTP ${res.statusCode}). ` +
+              "Check the password under Wireless Gear, and that API access is enabled on the base station.",
+          );
           res.resume();
+          // Done with this request: its watchdog would otherwise fire while the
+          // retry waits and add a "did not open" line pointing at the network.
+          this.abortStream();
           this.setState("error");
           this.scheduleReconnect();
           return;
         }
         if (res.statusCode !== 200) {
-          if (DEBUG) console.log(`[spectera] unexpected status ${res.statusCode}`);
+          this.reportFailure(`status ${res.statusCode}`, `${this.where()} answered the telemetry stream with HTTP ${res.statusCode}`);
           res.resume();
+          this.abortStream();
+          this.setState("error");
           this.scheduleReconnect();
           return;
         }
         res.setEncoding("utf8");
-        res.on("data", (chunk: string) => this.onSse(chunk));
+        // Raw bytes feed the watchdog, not parsed events: a keep-alive comment
+        // or a half-delivered event is still the base station talking.
+        res.on("data", (chunk: string) => {
+          this.lastByteAt = Date.now();
+          this.armStreamWatchdog();
+          this.onSse(chunk);
+        });
         res.on("end", () => this.onStreamClosed());
         res.on("close", () => this.onStreamClosed());
       },
     );
     this.req = req;
-    req.on("error", (err) => {
-      if (DEBUG) console.log(`[spectera] request error: ${scrub(err.message)}`);
+    req.on("error", (err: NodeJS.ErrnoException) => {
+      this.reportFailure(`error ${err.code ?? err.message}`, `${this.where()} stream failed: ${scrub(err.message)}`);
       this.onStreamClosed();
     });
+    keepSocketAlive(req, STREAM_KEEPALIVE_MS);
+    // Armed before the request is answered, so a base station that accepts the
+    // connection and never replies is bounded too.
+    this.armStreamWatchdog();
     req.end();
+  }
+
+  private armStreamWatchdog(): void {
+    this.armWatchdog(this.idleMs, () => this.onStreamQuiet());
+  }
+
+  /** The stream has carried nothing for `idleMs`. */
+  private onStreamQuiet(): void {
+    if (!this.running || !this.req) return;
+    if (!this.sessionUuid) {
+      // Nothing to check against yet: the stream itself never got going.
+      this.reportFailure(
+        "no answer",
+        `${this.where()} did not open the telemetry stream within ${this.idleMs / 1000}s; marking its packs offline`,
+      );
+      this.onStreamClosed();
+      return;
+    }
+    this.checkBaseStation(this.sessionUuid);
+  }
+
+  /**
+   * Ask a quiet base station whether it is still there. Any HTTP answer, of
+   * any status, proves it is up and the stream is simply quiet; no answer
+   * within `probeTimeoutMs` means it is gone. A base station that rebooted
+   * answers this but resets the old stream's socket on the next TCP keep-alive.
+   */
+  private checkBaseStation(uuid: string): void {
+    if (!this.host || this.probe) return;
+    const stream = this.req;
+    const sentAt = Date.now();
+    const probe = https.request(
+      // `timeout` as an option, not setTimeout() afterwards: the option also
+      // covers the TCP connect, which is where a powered-off box behind a
+      // router hangs — setTimeout() starts only once the socket has connected.
+      { ...this.requestOptions(`/api/ssc/state/subscriptions/${encodeURIComponent(uuid)}`, "GET"), timeout: this.probeTimeoutMs },
+      (res) => {
+        res.resume();
+        if (this.probe !== probe) return;
+        this.probe = null;
+        if (this.running && this.req === stream) this.armStreamWatchdog();
+      },
+    );
+    this.probe = probe;
+    probe.on("timeout", () => probe.destroy(new Error(`no answer within ${this.probeTimeoutMs / 1000}s`)));
+    probe.on("error", (err: Error) => {
+      if (this.probe !== probe) return;
+      this.probe = null;
+      if (!this.running || this.req !== stream) return;
+      // The stream spoke while the check was out: alive after all. Its bytes
+      // re-armed the watchdog, but re-arm here too so a quiet stream is never
+      // left with neither a watchdog nor a check.
+      if (this.lastByteAt > sentAt) {
+        this.armStreamWatchdog();
+        return;
+      }
+      this.reportFailure(
+        "silent",
+        `${this.where()} sent nothing for ${this.idleMs / 1000}s and did not answer a check (${scrub(err.message)}); ` +
+          "marking its packs offline",
+      );
+      this.onStreamClosed();
+    });
+    probe.end();
   }
 
   private onStreamClosed(): void {
@@ -171,39 +272,17 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
   }
 
   private abortStream(): void {
+    // The watchdog and any check in flight belong to this stream.
+    this.stopLinkTimers();
+    if (this.probe) {
+      const probe = this.probe;
+      this.probe = null;
+      discardRequest(probe);
+    }
     if (this.req) {
       const req = this.req;
       this.req = null;
-      // BY NAME — these two are the ones openStream() attaches to the REQUEST,
-      // 'response' being the callback passed to https.request(). 'error' is the
-      // one that matters: it calls onStreamClosed(), so destroying a request on
-      // purpose would otherwise schedule a reconnect for a stream we hung up on.
-      // A bare removeAllListeners() would take Node's own listeners with them.
-      //
-      // The data/end/close handlers live on the RESPONSE, which is a different
-      // emitter and was never reachable from here; destroy() below closes it, and
-      // onStreamClosed() is idempotent and gated on `running`.
-      for (const event of ["error", "response"] as const) req.removeAllListeners(event);
-      // An 'error' still arrives AFTER the listeners come off, and it arrives
-      // asynchronously, so the try/catch below cannot see it: Node's HTTP client
-      // manufactures "socket hang up" when a socket closes with a response still
-      // outstanding, which is exactly what destroying a half-open SSE request
-      // does. With nothing listening that is an uncaughtException, and it takes
-      // the whole server down — an operator disabling this integration while it
-      // was mid-reconnect was one keystroke from doing it.
-      //
-      // Absorbed rather than reported: this request was hung up on deliberately,
-      // there is no caller left to hand a failure to, and `running` is already
-      // false. Kept on DEBUG so it is still visible when somebody is pinning the
-      // schema against a real base station.
-      req.on("error", (err: Error) => {
-        if (DEBUG) console.log(`[spectera] discarded stream error after abort: ${scrub(err.message)}`);
-      });
-      try {
-        req.destroy();
-      } catch {
-        /* already gone */
-      }
+      discardRequest(req);
     }
   }
 
@@ -211,6 +290,7 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
   // optional `event:` and one or more `data:` lines. Framing lives in the shared
   // reader (services/sse-reader.ts).
   private onSse(chunk: string): void {
+    this.reportWorking();
     for (const event of this.sse.push(chunk)) this.handleEvent(event);
   }
 
@@ -235,6 +315,10 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
       return;
     }
     this.setState("connected");
+    // Telemetry flowing is what proves the subscription worked: the PUT goes
+    // out once per stream, so its own 2xx can land inside the outage log's
+    // settle window and leave a refusal's run open.
+    this.reportWorking("subscribe");
     this.applyData(data);
   }
 
@@ -242,26 +326,32 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
     if (!this.host) return;
     const body = JSON.stringify({ subscribe: SUBSCRIBE_PATHS, requested: SUBSCRIBE_PATHS });
     const put = https.request(
-      {
-        host: this.host,
-        port: this.port,
-        path: `/api/ssc/state/subscriptions/${encodeURIComponent(uuid)}`,
-        method: "PUT",
-        headers: {
-          Authorization: this.authHeader(),
-          "Content-Type": "application/json",
-          "Content-Length": Buffer.byteLength(body),
-        },
-        rejectUnauthorized: false,
-        agent: false,
-      },
+      this.requestOptions(`/api/ssc/state/subscriptions/${encodeURIComponent(uuid)}`, "PUT", {
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body),
+      }),
       (res) => {
         if (DEBUG) console.log(`[spectera] subscribe → status ${res.statusCode}`);
+        // A refused subscription leaves the stream open and "connected" with no
+        // telemetry on it, which nothing else would ever explain.
+        const code = res.statusCode ?? 0;
+        if (code >= 200 && code < 300) this.reportWorking("subscribe");
+        else {
+          this.reportFailure(
+            `subscribe ${code}`,
+            `${this.where()} refused the telemetry subscription (HTTP ${code}); the stream is open but no readings will arrive`,
+            "subscribe",
+          );
+        }
         res.resume();
       },
     );
-    put.on("error", (err) => {
-      if (DEBUG) console.log(`[spectera] subscribe error: ${scrub(err.message)}`);
+    put.on("error", (err: NodeJS.ErrnoException) => {
+      this.reportFailure(
+        `subscribe ${err.code ?? err.message}`,
+        `${this.where()} telemetry subscription failed: ${scrub(err.message)}`,
+        "subscribe",
+      );
     });
     put.write(body);
     put.end();
@@ -391,11 +481,48 @@ export class SennheiserSpectera extends DeviceProviderBase implements DeviceProv
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 /**
+ * Hang up on a request this driver no longer wants: the stream, or a check on it.
+ *
+ * BY NAME — 'error', 'response' and the check's 'timeout' are the ones this file
+ * attaches to a request ('response' being the callback passed to
+ * https.request()), and 'socket' is keepSocketAlive's. 'error' is the one that matters: on the stream it calls
+ * onStreamClosed(), so destroying a request on purpose would otherwise schedule
+ * a reconnect for a stream we hung up on. A bare removeAllListeners() would take
+ * Node's own listeners with them.
+ *
+ * The data/end/close handlers live on the RESPONSE, which is a different emitter
+ * and was never reachable from here; destroy() below closes it, and
+ * onStreamClosed() is idempotent and gated on `running`.
+ */
+function discardRequest(req: ReturnType<typeof https.request>): void {
+  for (const event of ["error", "response", "socket", "timeout"] as const) req.removeAllListeners(event);
+  // An 'error' still arrives AFTER the listeners come off, and it arrives
+  // asynchronously, so the try/catch below cannot see it: Node's HTTP client
+  // manufactures "socket hang up" when a socket closes with a response still
+  // outstanding, which is exactly what destroying a half-open SSE request does.
+  // With nothing listening that is an uncaughtException, and it takes the whole
+  // server down — an operator disabling this integration while it was
+  // mid-reconnect was one keystroke from doing it.
+  //
+  // Absorbed rather than reported: this request was hung up on deliberately,
+  // there is no caller left to hand a failure to. Kept on DEBUG so it is still
+  // visible when somebody is pinning the schema against a real base station.
+  req.on("error", (err: Error) => {
+    if (DEBUG) console.log(`[spectera] discarded request error after abort: ${scrub(err.message)}`);
+  });
+  try {
+    req.destroy();
+  } catch {
+    /* already gone */
+  }
+}
+
+/**
  * A fresh reader per connection — a partial event does not survive the stream,
  * and carrying one over would splice the tail of the old stream onto the head of
  * the new one.
  *
- * The overflow line is not DEBUG-gated, unlike the rest of this file's logging.
+ * The overflow line is not DEBUG-gated, unlike the raw-event trace.
  * Everything else here is a successful exchange; this one says telemetry was
  * dropped, and the old runaway guard cleared the buffer in total silence, so a
  * base station flooding the stream left nothing at all to read.

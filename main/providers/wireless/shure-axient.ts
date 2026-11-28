@@ -8,7 +8,6 @@
 // come from the per-channel SAMPLE. The `SLOT_`-prefixed fields are the docked
 // charging-bay batteries and are intentionally ignored.
 
-import type { ConfigField } from "../../types/integrations.js";
 import {
   ShureBaseProvider,
   clamp,
@@ -22,26 +21,6 @@ import {
 export class ShureAxient extends ShureBaseProvider {
   readonly id = "shure-axient";
   readonly label = "Shure Axient Digital";
-  readonly configSchema: ConfigField[] = [
-    {
-      key: "host",
-      label: "Device IP / Hostname",
-      type: "text",
-      placeholder: "192.168.1.100",
-    },
-    {
-      key: "port",
-      label: "TCP Port",
-      type: "number",
-      placeholder: "2202",
-    },
-    {
-      key: "channels",
-      label: "Number of Channels",
-      type: "number",
-      placeholder: "4",
-    },
-  ];
 
   protected readonly defaultChannels = 4;
   protected readonly defaultDeviceType = "receiver" as const;
