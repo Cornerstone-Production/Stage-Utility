@@ -66,6 +66,30 @@ export abstract class ConnectionLifecycle {
     return RECONNECT_BASE_MS;
   }
 
+  /**
+   * A fixed ceiling on the back-off, or null for the shared window-aware cap.
+   *
+   * For an OUTPUT (RossTalk, TSL). Nothing subscribes to one, so the shared cap
+   * reads it as dormant all week and stretches a retry toward 30 minutes: a
+   * switcher powered on mid-week would sit unreachable that long. Both used to
+   * get their ceiling by overriding scheduleReconnect with a private counter,
+   * which left `reconnectAttempt` at 0 for good, so every retry looked like the
+   * first failure. A number here keeps the deliberate ceiling and the one
+   * counter.
+   */
+  protected get reconnectCeilingMs(): number | null {
+    return null;
+  }
+
+  /**
+   * Let the event loop exit with a retry still queued. RossTalk's sockets are
+   * unref'd so an idle output never holds the process open, and its pending
+   * reconnect has to be too, or a shutdown (or a test run) waits for it.
+   */
+  protected get unrefReconnect(): boolean {
+    return false;
+  }
+
   setConnectionListener(cb: (state: ConnState, message: string | null) => void): void {
     this.onConn = cb;
   }
@@ -197,10 +221,10 @@ export abstract class ConnectionLifecycle {
    * peeked at.
    */
   protected nextReconnectDelayMs(): number {
-    const delay = serviceWindow.capDelayMs(
-      this.reconnectBaseMs * 2 ** this.reconnectAttempt,
-      channelHasSubscribers(this.channel),
-    );
+    const raw = this.reconnectBaseMs * 2 ** this.reconnectAttempt;
+    const ceiling = this.reconnectCeilingMs;
+    const delay =
+      ceiling === null ? serviceWindow.capDelayMs(raw, channelHasSubscribers(this.channel)) : Math.min(raw, ceiling);
     this.reconnectAttempt++;
     return delay;
   }
@@ -214,6 +238,7 @@ export abstract class ConnectionLifecycle {
     if (!this.running) return;
     this.clearReconnect();
     this.reconnectTimer = setTimeout(() => void this.connect(), delayMs);
+    if (this.unrefReconnect) this.reconnectTimer.unref();
   }
 
   protected clearReconnect(): void {

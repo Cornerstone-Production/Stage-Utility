@@ -20,7 +20,6 @@ import { ConnectionLifecycle } from "./integration-base.js";
 import { sensourceService } from "./sensource-service.js";
 
 
-const RECONNECT_BASE_MS = 3000;
 const RECONNECT_MAX_MS = 30000;
 /** Re-send the current labels on this cadence so a tile never goes stale/blank. */
 const REFRESH_MS = 5000;
@@ -81,11 +80,10 @@ class TslService extends ConnectionLifecycle {
   private socket: net.Socket | null = null;
   private connected = false;
   private refreshTimer: ReturnType<typeof setInterval> | null = null;
-  private backoffAttempt = 0;
 
   constructor() {
     // No SSE channel: TSL is an OUTPUT (tally to a Ross switcher), so nothing
-    // subscribes to it. That is also why scheduleReconnect is overridden below.
+    // subscribes to it. That is also why it sets its own reconnect ceiling below.
     super("tsl", "tsl:status");
   }
 
@@ -115,7 +113,6 @@ class TslService extends ConnectionLifecycle {
 
   override start(): void {
     if (this.running || !this.configured) return;
-    this.backoffAttempt = 0;
     console.log(`[tsl] connecting ${this.host}:${this.port}`);
     super.start();
     if (!this.refreshTimer) {
@@ -175,7 +172,7 @@ class TslService extends ConnectionLifecycle {
     this.socket = sock;
     sock.on("connect", () => {
       this.connected = true;
-      this.backoffAttempt = 0;
+      this.resetBackoff();
       this.report("connected", `Sending to ${this.host}:${this.port}`);
       this.sendAll(sensourceService.getLatest());
     });
@@ -203,16 +200,13 @@ class TslService extends ConnectionLifecycle {
   }
 
   /**
-   * Keeps TSL's own fixed 30s ceiling instead of the base's window-aware cap.
-   * Nothing subscribes to a tally output, so the shared cap would read it as
-   * "dormant" and stretch retries to 30 minutes — meaning a switcher powered on
-   * mid-week could sit dark for half an hour. Deliberate divergence.
+   * TSL's own fixed 30s ceiling instead of the base's window-aware cap. Nothing
+   * subscribes to a tally output, so the shared cap would read it as "dormant"
+   * and stretch retries to 30 minutes — meaning a switcher powered on mid-week
+   * could sit dark for half an hour. Deliberate divergence.
    */
-  protected override scheduleReconnect(): void {
-    if (!this.running) return;
-    const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** this.backoffAttempt);
-    this.backoffAttempt++;
-    this.scheduleIn(delay);
+  protected override get reconnectCeilingMs(): number {
+    return RECONNECT_MAX_MS;
   }
 }
 
