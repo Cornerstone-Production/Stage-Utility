@@ -12,6 +12,7 @@
 // leaving half a year behind.
 
 import { errorMessage, isNotFound } from "../errors.js";
+import { canonicalJson } from "../canonical-json.js";
 import { scrub } from "../scrub.js";
 import { readFileSync } from "node:fs";
 import type { Dirent } from "node:fs";
@@ -273,18 +274,6 @@ function requireStore<T>(files: Record<string, Uint8Array>, name: string): T | n
   }
 }
 
-/** Stable JSON: keys sorted at every depth, so two records that differ only in the
- *  order their producer happened to emit fields compare as equal. */
-function canonical(v: unknown): string {
-  if (v === null || typeof v !== "object") return JSON.stringify(v) ?? "null";
-  if (Array.isArray(v)) return `[${v.map(canonical).join(",")}]`;
-  const o = v as Record<string, unknown>;
-  return `{${Object.keys(o)
-    .sort()
-    .map((k) => `${JSON.stringify(k)}:${canonical(o[k])}`)
-    .join(",")}}`;
-}
-
 /** Every record this box holds for a serviceKey, across the three keyed stores. */
 async function localRecordsByKey(): Promise<Map<string, Record<string, unknown>>> {
   const out = new Map<string, Record<string, unknown>>();
@@ -325,7 +314,7 @@ export async function inspectArchive(zip: Uint8Array): Promise<ImportPlan> {
   // "41 already here" into the one number worth acting on.
   const mine = await localRecordsByKey();
   const theirs = archiveRecordsByKey(files);
-  const differs = (key: string) => canonical(mine.get(key) ?? {}) !== canonical(theirs.get(key) ?? {});
+  const differs = (key: string) => canonicalJson(mine.get(key) ?? {}) !== canonicalJson(theirs.get(key) ?? {});
 
   const present = services.filter((s) => local.has(s.serviceKey));
   const localIds = new Set((await baptismStore.listSessions()).map((s) => s.id));
@@ -368,7 +357,7 @@ export async function importArchive(
   const mineByKey = await localRecordsByKey();
   const theirsByKey = archiveRecordsByKey(files);
   const contentDiffers = (key: string) =>
-    canonical(mineByKey.get(key) ?? {}) !== canonical(theirsByKey.get(key) ?? {});
+    canonicalJson(mineByKey.get(key) ?? {}) !== canonicalJson(theirsByKey.get(key) ?? {});
   const dispositionOf = (key: string): ServiceDisposition => {
     if (explicitReplace.has(key)) return "replace"; // replace wins over merge
     if (explicitMerge.has(key)) return "merge";
