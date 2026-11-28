@@ -13,7 +13,8 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { afterEach, beforeEach, describe, test } from "node:test";
+import { beforeEach, describe, test } from "node:test";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-credential-moves-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -35,7 +36,6 @@ const CASES = [
 ] as const;
 
 let warned: string[] = [];
-const realWarn = console.warn;
 
 function seedState(id: string): void {
   (integrationManager as unknown as { states: Map<string, unknown> }).states.set(id, {
@@ -49,18 +49,13 @@ function seedState(id: string): void {
 
 const stored = async (id: string, key: string) => (await secretsStore.getSecrets(id))[key];
 
-beforeEach(async () => {
-  warned = [];
-  console.warn = (...args: unknown[]) => void warned.push(args.join(" "));
+beforeEach(async (t) => {
+  warned = captureConsole(t, "warn");
   for (const c of CASES) {
     seedState(c.id);
     await secretsStore.setSecrets(c.id, {});
     await settingsStore.removeIntegrationConfigKeys(c.id, ["host", "port", "https"]);
   }
-});
-
-afterEach(() => {
-  console.warn = realWarn;
 });
 
 test("the integrations whose credential follows a typed address are exactly the ones with a host and a password field", () => {

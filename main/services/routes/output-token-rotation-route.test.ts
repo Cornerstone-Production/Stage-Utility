@@ -13,6 +13,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { beforeEach, describe, it } from "node:test";
+import { captureConsole } from "../fixtures/capture-console.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-token-rotation-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -36,17 +37,12 @@ async function enroll(token: string): Promise<string> {
   return "holding";
 }
 
-/** Run `body` and return the [output-helper] lines it logged. */
-async function logged(body: () => Promise<unknown>): Promise<string[]> {
-  const lines: string[] = [];
-  const realLog = console.log;
-  console.log = (...a: unknown[]) => { lines.push(a.map(String).join(" ")); };
-  try {
-    await body();
-  } finally {
-    console.log = realLog;
-  }
-  return lines.filter((l) => l.startsWith("[output-helper]"));
+/** Run `body` and return the [output-helper] lines it logged, out of what
+ *  `log` (the test's console capture) has gathered so far. */
+async function logged(log: string[], body: () => Promise<unknown>): Promise<string[]> {
+  const from = log.length;
+  await body();
+  return log.slice(from).filter((l) => l.startsWith("[output-helper]"));
 }
 
 beforeEach(async () => {
@@ -90,8 +86,9 @@ describe("a helper output's token replaced on its Mac", () => {
     assert.equal((await kioskDevicesStore.load()).find((d) => d.id === ID)?.token, "", "a token shown before the release was pinned");
   });
 
-  it("logs the mismatch once, and again only after it has matched", async () => {
-    const first = await logged(async () => {
+  it("logs the mismatch once, and again only after it has matched", async (t) => {
+    const log = captureConsole(t, "log");
+    const first = await logged(log, async () => {
       for (let i = 0; i < 3; i++) {
         assert.equal(await enroll(NEW), "holding");
         // What the discovery responder does on every probe from a bound device.
@@ -102,15 +99,16 @@ describe("a helper output's token replaced on its Mac", () => {
     assert.match(first[0], /^\[output-helper\] mac-1\.decklink-ab-0 showed a token other than the one pinned for screen display-1, so it gets the holding screen; if its token was replaced on its Mac, release it from that screen and set it up again$/);
     assert.ok(!first[0].includes(NEW) && !first[0].includes(OLD), "a token reached the log");
 
-    const again = await logged(async () => {
+    const again = await logged(log, async () => {
       await enroll(OLD);
       await enroll(NEW);
     });
     assert.equal(again.length, 1, again.join("\n"));
   });
 
-  it("says nothing for a bound output that shows no token, or a device that is not bound", async () => {
-    const lines = await logged(async () => {
+  it("says nothing for a bound output that shows no token, or a device that is not bound", async (t) => {
+    const log = captureConsole(t, "log");
+    const lines = await logged(log, async () => {
       await callRoute(kioskDeviceRoutes, `/enroll?device=${encodeURIComponent(ID)}`);
       await kioskDevicesStore.save([]);
       await enroll(NEW);
