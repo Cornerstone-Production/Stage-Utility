@@ -29,6 +29,7 @@ import { describe, it, type TestContext } from "node:test";
 
 import { ProdComService } from "./prodcom-service.js";
 import { startProdComStub, type ProdComStub, type StubEntry, type StubOptions } from "./fixtures/prodcom-stub.js";
+import { captureConsoleDuringAsync } from "./fixtures/capture-console.js";
 
 /** A fixed "now" so the four-hour horizon and the stub's rows line up exactly. */
 const NOW = Date.parse("2026-09-11T12:00:00Z");
@@ -84,19 +85,8 @@ async function connected(t: TestContext, options: StubOptions = {}): Promise<{ s
 }
 
 /** Run `fn` with console.log/warn captured. */
-async function withLogs(fn: () => Promise<void>): Promise<string[]> {
-  const lines: string[] = [];
-  const log = console.log;
-  const warn = console.warn;
-  console.log = (...a: unknown[]) => lines.push(String(a[0]));
-  console.warn = (...a: unknown[]) => lines.push(String(a[0]));
-  try {
-    await fn();
-  } finally {
-    console.log = log;
-    console.warn = warn;
-  }
-  return lines;
+function withLogs(fn: () => Promise<void>): Promise<string[]> {
+  return captureConsoleDuringAsync(["log", "warn"], fn);
 }
 
 /**

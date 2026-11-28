@@ -14,6 +14,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { addBroadcastListener } from "./broadcaster.js";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-osc-manager-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -126,7 +127,7 @@ describe("which target a packet is attributed to", () => {
 });
 
 describe("two targets on one address", () => {
-  test("only the first is attributed, and the operator is told", async () => {
+  test("only the first is attributed, and the operator is told", async (t) => {
     // A packet carries a source ADDRESS and no port, so an X32 entry for
     // sending and a second entry for its /xremote subscribe are the same sender
     // as far as this can tell. A layout button survives on the wildcard; a rule
@@ -135,30 +136,24 @@ describe("two targets on one address", () => {
     const SHARED = "192.0.2.50";
     const A = "aaaaaaaa-0000-4000-8000-000000000001";
     const B = "bbbbbbbb-0000-4000-8000-000000000002";
-    const warnings: string[] = [];
-    const realWarn = console.warn;
-    console.warn = (...args: unknown[]) => void warnings.push(args.join(" "));
-    try {
-      await oscStore.save([
-        { id: A, name: "Desk send", enabled: true, config: { host: SHARED, port: 10023 } },
-        { id: B, name: "Desk subscribe", enabled: true, config: { host: SHARED, port: 10024 } },
-      ]);
-      await oscManager.reloadTargets();
-      await settle();
-      oscManager.receive(encodeMessage("/shared", [{ type: "i", value: 1 }]), SHARED);
-      const keys = Object.keys(values()).filter((k) => k.endsWith("::/shared")).sort();
-      assert.deepEqual(keys, [`${A}::/shared`, "*::/shared"].sort(), "the FIRST target wins the key");
-      assert.ok(
-        warnings.some((w) => w.includes(SHARED) && w.includes("Desk send") && w.includes("Desk subscribe")),
-        "nothing warned that two enabled targets share an address — a rule scoped to the second " +
-          `would fire never, silently. Warnings seen: ${JSON.stringify(warnings)}`,
-      );
-    } finally {
-      console.warn = realWarn;
-    }
+    const warnings = captureConsole(t, "warn");
+    await oscStore.save([
+      { id: A, name: "Desk send", enabled: true, config: { host: SHARED, port: 10023 } },
+      { id: B, name: "Desk subscribe", enabled: true, config: { host: SHARED, port: 10024 } },
+    ]);
+    await oscManager.reloadTargets();
+    await settle();
+    oscManager.receive(encodeMessage("/shared", [{ type: "i", value: 1 }]), SHARED);
+    const keys = Object.keys(values()).filter((k) => k.endsWith("::/shared")).sort();
+    assert.deepEqual(keys, [`${A}::/shared`, "*::/shared"].sort(), "the FIRST target wins the key");
+    assert.ok(
+      warnings.some((w) => w.includes(SHARED) && w.includes("Desk send") && w.includes("Desk subscribe")),
+      "nothing warned that two enabled targets share an address — a rule scoped to the second " +
+        `would fire never, silently. Warnings seen: ${JSON.stringify(warnings)}`,
+    );
   });
 
-  test("two NAMES resolving to one address break the tie the same way", async () => {
+  test("two NAMES resolving to one address break the tie the same way", async (t) => {
     // The literal lookup is a `find` (first wins) and the resolved map was a
     // `set` (last wins). Two targets on one box would be attributed to
     // DIFFERENT ones depending on whether the operator typed an address or a
@@ -166,8 +161,7 @@ describe("two targets on one address", () => {
     const A = "cccccccc-0000-4000-8000-000000000003";
     const B = "dddddddd-0000-4000-8000-000000000004";
     const ONE_IP = "192.0.2.60";
-    const realWarn = console.warn;
-    console.warn = () => {};
+    captureConsole(t, "warn");
     try {
       oscDeps.lookup = async () => [ONE_IP];
       await oscStore.save([
@@ -184,7 +178,6 @@ describe("two targets on one address", () => {
       );
       assert.equal(values()[`${B}::/tie`], undefined);
     } finally {
-      console.warn = realWarn;
       oscDeps.lookup = async (hostname) => (hostname === NAME_HOST ? [NAME_IP] : []);
     }
   });

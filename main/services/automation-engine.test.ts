@@ -8,6 +8,7 @@ import { test, describe, beforeEach, after } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { captureConsole, captureConsoleDuringAsync } from "./fixtures/capture-console.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-automation-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -321,14 +322,7 @@ describe("run by hand", () => {
 
   test("the server log names the rule, the caller and the outcome, scrubbed", async () => {
     const id = await rec({ name: "Doors\nforged line" });
-    const lines: string[] = [];
-    const real = console.log;
-    console.log = (...a: unknown[]) => void lines.push(a.map(String).join(" "));
-    try {
-      await run(id, { caller: "ha token" });
-    } finally {
-      console.log = real;
-    }
+    const lines = await captureConsoleDuringAsync(["log"], () => run(id, { caller: "ha token" }));
     const mine = lines.filter((l) => l.startsWith("[automation]") && l.includes("run by hand"));
     assert.equal(mine.length, 1);
     assert.match(mine[0], /from ha token: fired/);
@@ -340,19 +334,11 @@ describe("run by hand", () => {
 // rules in one evening had nothing to read on /log. One line per add, update
 // and remove, tagged [automation].
 describe("rule edits are logged", () => {
-  const realLog = console.log;
   let lines: string[] = [];
 
-  beforeEach(async () => {
+  beforeEach(async (t) => {
     await automationEngine.init();
-    lines = [];
-    console.log = (...args: unknown[]) => {
-      lines.push(args.map(String).join(" "));
-    };
-  });
-
-  after(() => {
-    console.log = realLog;
+    lines = captureConsole(t, "log");
   });
 
   const matching = (re: RegExp) => lines.filter((l) => re.test(l));
@@ -365,7 +351,7 @@ describe("rule edits are logged", () => {
       "adding a rule logged nothing, or logged more than once",
     );
 
-    lines = [];
+    lines.length = 0;
     await automationEngine.updateRule(id, { name: "front wash 2" });
     assert.deepEqual(
       matching(/^\[automation\] rule updated /),
@@ -373,7 +359,7 @@ describe("rule edits are logged", () => {
       "updating a rule logged nothing, or logged more than once",
     );
 
-    lines = [];
+    lines.length = 0;
     await automationEngine.removeRule(id);
     assert.deepEqual(
       matching(/^\[automation\] rule removed /),
@@ -394,15 +380,15 @@ describe("rule edits are logged", () => {
     });
     assert.deepEqual(matching(/as cue /), [`[automation] rule added "Reset" (${made.id}) as cue "stage_reset"`]);
 
-    lines = [];
+    lines.length = 0;
     await automationEngine.updateRule(made.id, { trigger: { id: "call.by-name", params: { name: "stage_reset_two" } } });
     assert.deepEqual(matching(/^\[automation\] cue /), [`[automation] cue "stage_reset" is now "stage_reset_two" (rule "Reset")`]);
 
-    lines = [];
+    lines.length = 0;
     await automationEngine.updateRule(made.id, { trigger: { id: "pco.service-started", params: {} } });
     assert.deepEqual(matching(/^\[automation\] cue /), [`[automation] cue "stage_reset_two" is no longer a cue (rule "Reset")`]);
 
-    lines = [];
+    lines.length = 0;
     await automationEngine.updateRule(made.id, { name: "Reset 2" });
     assert.deepEqual(matching(/^\[automation\] cue /), [], "a rule that is not a cue logged a cue line");
     await automationEngine.removeRule(made.id);

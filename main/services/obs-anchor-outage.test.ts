@@ -32,6 +32,7 @@ process.env.HOME = path.join(TMP, "home");
 
 const { obsService } = await import("./obs-service.js");
 import type { ObsStatusDTO } from "../types/stage.js";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 /** The private surface this drives. anchor() is the whole subject. */
 type Anchorer = {
@@ -64,8 +65,6 @@ const RECORDING: ObsStatusDTO = {
 };
 
 const realNow = Date.now;
-const realWarn = console.warn;
-const realLog = console.log;
 let clock = Date.parse("2026-09-11T15:20:00.000Z");
 let logs: string[] = [];
 
@@ -93,12 +92,10 @@ const hit = (durationMs: number): Promise<string | null> => {
 };
 
 describe("the record anchor's failure log", () => {
-  beforeEach(() => {
+  beforeEach((t) => {
     clock = Date.parse("2026-09-11T15:20:00.000Z");
     Date.now = () => clock;
-    logs = [];
-    console.warn = (...a: unknown[]) => void logs.push(a.join(" "));
-    console.log = (...a: unknown[]) => void logs.push(a.join(" "));
+    logs = captureConsole(t, "warn", "log");
     svc.clearPoll();
     svc.adapter = adapter;
     svc.last = { ...RECORDING };
@@ -106,8 +103,6 @@ describe("the record anchor's failure log", () => {
 
   afterEach(() => {
     Date.now = realNow;
-    console.warn = realWarn;
-    console.log = realLog;
     svc.clearPoll();
     svc.adapter = null;
     obsService.stop();
@@ -187,7 +182,7 @@ describe("the record anchor's failure log", () => {
     assert.equal(failed().length, 1);
 
     svc.clearPoll(); // what a close or a stop does
-    logs = [];
+    logs.length = 0;
     clock += 1000;
     await miss();
 

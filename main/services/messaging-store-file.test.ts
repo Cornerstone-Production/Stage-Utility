@@ -8,6 +8,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, test } from "node:test";
+import { captureConsoleDuringAsync } from "./fixtures/capture-console.js";
 
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), "messaging-file-"));
 process.env.STAGE_UTILITY_DATA = DATA;
@@ -31,14 +32,12 @@ fs.writeFileSync(
   }),
 );
 
-const warned: string[] = [];
-const realWarn = console.warn;
-console.warn = (...args: unknown[]) => {
-  warned.push(args.map(String).join(" "));
-};
-const { messagingStore } = await import("./messaging-store.js");
-await messagingStore.init();
-console.warn = realWarn;
+let loaded!: typeof import("./messaging-store.js");
+const warned = await captureConsoleDuringAsync(["warn"], async () => {
+  loaded = await import("./messaging-store.js");
+  await loaded.messagingStore.init();
+});
+const { messagingStore } = loaded;
 
 describe("reading a hand-edited file", () => {
   test("keeps the groups that satisfy the limits, and only those", () => {

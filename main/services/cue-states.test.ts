@@ -31,6 +31,7 @@ import {
 import type { VariableResult } from "./companion-api.js";
 import { CALL_TRIGGER_ID } from "./automation-triggers.js";
 import type { Rule } from "../types/automation.js";
+import { captureConsoleDuringAsync } from "./fixtures/capture-console.js";
 
 function cue(name: string, params: Record<string, string | number> = {}): Rule {
   return {
@@ -92,16 +93,13 @@ async function tickSettle(): Promise<void> {
 
 /** Capture console for one call, so the dedupe can be asserted on real lines. */
 async function withLog<T>(fn: () => Promise<T>): Promise<T> {
-  const warn = console.warn;
-  const log = console.log;
-  console.warn = (...args: unknown[]) => void logged.push(args.map(String).join(" "));
-  console.log = (...args: unknown[]) => void logged.push(args.map(String).join(" "));
-  try {
-    return await fn();
-  } finally {
-    console.warn = warn;
-    console.log = log;
-  }
+  let result!: T;
+  logged.push(
+    ...(await captureConsoleDuringAsync(["warn", "log"], async () => {
+      result = await fn();
+    })),
+  );
+  return result;
 }
 
 beforeEach(() => {

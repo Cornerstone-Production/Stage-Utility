@@ -14,6 +14,7 @@ import { describe, it } from "node:test";
 
 import { rebuildTimelineRecord, type EventRow } from "./rebuild.js";
 import type { ServiceTimeline, ServiceTimelineItem } from "../../types/stage.js";
+import { captureConsoleDuring } from "../fixtures/capture-console.js";
 
 /** at,detail — every `pco item` row of 18 Sep 2026, in the order written. */
 const EVENING: [string, string][] = [
@@ -279,14 +280,9 @@ describe("rebuildTimelineRecord: identity of the items", () => {
 
   /** Run a rebuild with console.warn captured. */
   function withWarnings(fn: () => ServiceTimeline): { out: ServiceTimeline; warnings: string[] } {
-    const warnings: string[] = [];
-    const realWarn = console.warn;
-    console.warn = (...args: unknown[]) => void warnings.push(args.map(String).join(" "));
-    try {
-      return { out: fn(), warnings };
-    } finally {
-      console.warn = realWarn;
-    }
+    let out!: ServiceTimeline;
+    const warnings = captureConsoleDuring(["warn"], () => { out = fn(); });
+    return { out, warnings };
   }
 
   /** A stored entry, with only the fields these cases read spelled out. */

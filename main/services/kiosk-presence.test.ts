@@ -8,6 +8,7 @@ import {
 } from "./kiosk-presence.js";
 import { HEALTH_TTL_MS } from "./output-health.js";
 import { addBroadcastListener } from "./broadcaster.js";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 // Devices heard on the network. The whole point of this module is that it does
 // NOT persist: an unclaimed device exists only while it is probing, which is why
@@ -113,28 +114,20 @@ describe("devices heard", () => {
 // bounded and logged.
 describe("a list that is always open", () => {
   const T0 = 1_000_000;
-  const lines: string[] = [];
-  const warnings: string[] = [];
-  const realLog = console.log;
-  const realWarn = console.warn;
+  let lines: string[] = [];
+  let warnings: string[] = [];
   const frames: { seen: { id: string }[] }[] = [];
   let listening = false;
-  beforeEach(() => {
-    lines.length = 0;
-    warnings.length = 0;
+  beforeEach((t) => {
+    lines = captureConsole(t, "log");
+    warnings = captureConsole(t, "warn");
     frames.length = 0;
-    console.log = (...a: unknown[]) => { lines.push(a.map(String).join(" ")); };
-    console.warn = (...a: unknown[]) => { warnings.push(a.map(String).join(" ")); };
     if (!listening) {
       listening = true;
       addBroadcastListener((channel, payload) => {
         if (channel === "kiosk:devices") frames.push(payload as (typeof frames)[number]);
       });
     }
-  });
-  afterEach(() => {
-    console.log = realLog;
-    console.warn = realWarn;
   });
 
   const SEEN = "[kiosk-presence] device seen:";
@@ -333,35 +326,20 @@ describe("what is broadcast", () => {
 // being shown.
 describe("output health", () => {
   const report = (over: Record<string, number> = {}) => ({ fps: 59.94, repeated: 0.2, dropped: 0, at: 1, ...over });
-  const lines: string[] = [];
-  const realLog = console.log;
-  beforeEach(() => {
-    lines.length = 0;
-    console.log = (...a: unknown[]) => {
-      lines.push(a.map(String).join(" "));
-    };
+  let lines: string[] = [];
+  beforeEach((t) => {
+    lines = captureConsole(t, "log");
   });
-  const quiet = () => {
-    console.log = realLog;
-  };
 
   test("a healthy output reporting for a long time logs nothing", () => {
-    try {
-      for (let i = 0; i < 30; i++) recordHealth("mac1.sdi-1", report(), "decklink", 1_000_000 + i * 10_000);
-    } finally {
-      quiet();
-    }
+    for (let i = 0; i < 30; i++) recordHealth("mac1.sdi-1", report(), "decklink", 1_000_000 + i * 10_000);
     assert.deepEqual(lines, [], "every report was logged");
   });
 
   test("a sustained drop is logged once when it starts and once when it ends", () => {
     const t0 = 1_000_000;
-    try {
-      let n = 0;
-      for (const dropped of [0, 4, 9, 15, 15, 15, 15]) recordHealth("mac1.sdi-1", report({ dropped }), "decklink", t0 + n++ * 10_000);
-    } finally {
-      quiet();
-    }
+    let n = 0;
+    for (const dropped of [0, 4, 9, 15, 15, 15, 15]) recordHealth("mac1.sdi-1", report({ dropped }), "decklink", t0 + n++ * 10_000);
     assert.equal(lines.length, 2, lines.join("\n"));
     assert.match(lines[0], /^\[output-helper\] mac1\.sdi-1 is struggling: 15 frames dropped so far/);
     assert.match(lines[1], /^\[output-helper\] mac1\.sdi-1 has recovered/);
@@ -371,13 +349,9 @@ describe("output health", () => {
     // A display asleep or a screen locked reports 0 fps, and its dropped count
     // has no card behind it. The same run that marks a DeckLink port struggling
     // must leave it alone.
-    try {
-      let n = 0;
-      for (const dropped of [0, 4, 9, 15]) {
-        recordHealth("mac1.hdmi-1", report({ fps: 0, repeated: 30, dropped }), "display", 1_000_000 + n++ * 10_000);
-      }
-    } finally {
-      quiet();
+    let n = 0;
+    for (const dropped of [0, 4, 9, 15]) {
+      recordHealth("mac1.hdmi-1", report({ fps: 0, repeated: 30, dropped }), "display", 1_000_000 + n++ * 10_000);
     }
     assert.deepEqual(lines, [], "a display output was logged as struggling");
     assert.equal(healthList(1_000_000 + 40_000)[0].struggling, false);
@@ -418,7 +392,6 @@ describe("output health", () => {
         `no line said it stopped: ${lines.join(" | ")}`,
       );
     } finally {
-      quiet();
       mock.timers.reset();
     }
   });
@@ -431,17 +404,13 @@ describe("output health", () => {
 describe("the sweep timer", () => {
   const STEP = 15_000;
   const T0 = 1_000_000;
-  const lines: string[] = [];
-  const realLog = console.log;
+  let lines: string[] = [];
   const frames: { seen: unknown[]; health: unknown[] }[] = [];
   let listening = false;
 
-  beforeEach(() => {
-    lines.length = 0;
+  beforeEach((t) => {
+    lines = captureConsole(t, "log");
     frames.length = 0;
-    console.log = (...a: unknown[]) => {
-      lines.push(a.map(String).join(" "));
-    };
     if (!listening) {
       listening = true;
       addBroadcastListener((channel, payload) => {
@@ -451,7 +420,6 @@ describe("the sweep timer", () => {
     mock.timers.enable({ apis: ["setInterval", "Date"], now: T0 });
   });
   afterEach(() => {
-    console.log = realLog;
     mock.timers.reset();
   });
 
@@ -508,17 +476,10 @@ describe("the sweep timer", () => {
 });
 
 describe("a device told it is no longer set up here", () => {
-  const lines: string[] = [];
-  const realLog = console.log;
-  beforeEach(() => {
+  let lines: string[] = [];
+  beforeEach((t) => {
     resetKioskPresence();
-    lines.length = 0;
-    console.log = (...a: unknown[]) => {
-      lines.push(a.map(String).join(" "));
-    };
-  });
-  afterEach(() => {
-    console.log = realLog;
+    lines = captureConsole(t, "log");
   });
   const LINE = "[kiosk-responder] d1 still names this server but is not set up here; told it so";
 

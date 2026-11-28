@@ -10,6 +10,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
+import { captureConsoleDuringAsync } from "./fixtures/capture-console.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-boards-boot-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -51,21 +52,12 @@ const SLOTS = {
 };
 
 const lines: string[] = [];
-const realLog = console.log;
-const realError = console.error;
 const readJson = async (file: string): Promise<Record<string, unknown> | unknown[]> => JSON.parse(await fs.readFile(path.join(TMP, file), "utf8"));
 const labels = (rows: Slot[] | undefined) => (rows ?? []).map((r) => (r.link as { label: string }).label);
 
 async function boot(): Promise<void> {
   lines.length = 0;
-  console.log = (...a: unknown[]) => { lines.push(a.map(String).join(" ")); };
-  console.error = (...a: unknown[]) => { lines.push(a.map(String).join(" ")); };
-  try {
-    await stageController.init();
-  } finally {
-    console.log = realLog;
-    console.error = realError;
-  }
+  lines.push(...(await captureConsoleDuringAsync(["log", "error"], () => stageController.init())));
 }
 
 before(async () => {

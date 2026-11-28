@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { EventPollHub, POLL_CLIENT_TTL_MS, serializePollResponse, type PollFrame } from "./event-poll.js";
+import { captureConsoleDuring } from "./fixtures/capture-console.js";
 
 /** A movable clock, so 60 s of buffer age costs no wall time. */
 function clock(start = 1_000_000) {
@@ -50,15 +51,7 @@ function makeHub(opts: { now?: () => number } = {}) {
  * and read back from the console.
  */
 function captureLog(fn: () => void): string[] {
-  const lines: string[] = [];
-  const real = console.log;
-  console.log = (...args: unknown[]) => { lines.push(args.map(String).join(" ")); };
-  try {
-    fn();
-  } finally {
-    console.log = real;
-  }
-  return lines;
+  return captureConsoleDuring(["log"], fn);
 }
 
 describe("event-poll buffer", () => {

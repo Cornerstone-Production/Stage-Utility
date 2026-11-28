@@ -16,6 +16,7 @@ import { describe, it, after, beforeEach, afterEach } from "node:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import { captureConsoleDuringAsync } from "./fixtures/capture-console.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "stage-prep-tags-"));
 process.env.STAGE_UTILITY_DATA = TMP;
@@ -64,16 +65,8 @@ let tags: { tagName: string; personIds: string[] }[] = [];
 let tagCalls = 0;
 let broadcasts = 0;
 
-async function logged(fn: () => Promise<void>): Promise<string[]> {
-  const out: string[] = [];
-  const saved = console.log;
-  console.log = (...a: unknown[]) => void out.push(a.map(String).join(" "));
-  try {
-    await fn();
-  } finally {
-    console.log = saved;
-  }
-  return out;
+function logged(fn: () => Promise<void>): Promise<string[]> {
+  return captureConsoleDuringAsync(["log"], fn);
 }
 
 beforeEach(() => {

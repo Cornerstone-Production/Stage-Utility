@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, mock, test } from "node:test";
 
 import type { DuplicateCheck } from "../types/kiosk.js";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 const { startDuplicateCheck, stopDuplicateCheck, heardDuplicate, recheckFromScratch, duplicateCheckState } = await import(
   "./kiosk-duplicate-check.js"
@@ -20,9 +21,7 @@ const WINDOW = 3_000;
 /** Every send, in order, each resolved by the test. */
 let sends: { resolve: (failure: string | null) => void }[] = [];
 const reports: DuplicateCheck[] = [];
-const realLog = console.log;
-const realWarn = console.warn;
-const logged: string[] = [];
+let logged: string[] = [];
 
 /** Let the promise continuations run. */
 const flush = async () => {
@@ -30,13 +29,11 @@ const flush = async () => {
 };
 const flagged = () => duplicateCheckState().duplicates.map((d) => d.address);
 
-beforeEach(() => {
+beforeEach((t) => {
   mock.timers.enable({ apis: ["setTimeout"] });
   sends = [];
   reports.length = 0;
-  logged.length = 0;
-  console.log = (...a: unknown[]) => logged.push(a.join(" "));
-  console.warn = (...a: unknown[]) => logged.push(a.join(" "));
+  logged = captureConsole(t, "log", "warn");
   startDuplicateCheck({
     send: () => new Promise((resolve) => sends.push({ resolve })),
     serverId: () => "srv",
@@ -50,8 +47,6 @@ beforeEach(() => {
 afterEach(() => {
   stopDuplicateCheck();
   mock.timers.reset();
-  console.log = realLog;
-  console.warn = realWarn;
 });
 
 /** Let the round in flight go out, and its window close. */

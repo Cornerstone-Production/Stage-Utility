@@ -21,21 +21,11 @@ import { startSelfSignedPage, type SelfSignedPage } from "../../services/fixture
 import { SennheiserEwDx } from "./sennheiser-ewdx.js";
 import { SennheiserSpectera } from "./sennheiser-spectera.js";
 import { ShureUlxd } from "./shure-ulxd.js";
+import { captureConsoleDuringAsync } from "../../services/fixtures/capture-console.js";
 
 /** Everything written to the console while `fn` runs, one string per call. */
-async function captured(fn: () => Promise<void>): Promise<string[]> {
-  const lines: string[] = [];
-  const spies = (["log", "warn", "error"] as const).map((level) =>
-    mock.method(console, level, (...args: unknown[]) => {
-      lines.push(args.map(String).join(" "));
-    }),
-  );
-  try {
-    await fn();
-  } finally {
-    for (const s of spies) s.mock.restore();
-  }
-  return lines;
+function captured(fn: () => Promise<void>): Promise<string[]> {
+  return captureConsoleDuringAsync(["log", "warn", "error"], fn);
 }
 
 describe("a wireless failure reaches /log without a debug variable", () => {

@@ -14,11 +14,12 @@
 //   - the next whole frame parses normally.
 
 import assert from "node:assert/strict";
-import { describe, it, mock } from "node:test";
+import { describe, it } from "node:test";
 
 import type { ChannelState } from "./device-provider-base.js";
 import { SHURE_MAX_RECEIVE_BUFFER } from "./shure-base.js";
 import { ShureUlxd } from "./shure-ulxd.js";
+import { captureConsole } from "../../services/fixtures/capture-console.js";
 
 type Inner = {
   handleData(chunk: string): void;
@@ -40,62 +41,46 @@ function flood(p: Inner, chars: number): void {
 }
 
 describe("a Shure receive buffer", () => {
-  it("is dropped past its cap, with a line saying so", () => {
-    const warn = mock.method(console, "warn", () => {});
-    try {
-      const p = fresh();
-      p.handleData("< ");
-      flood(p, SHURE_MAX_RECEIVE_BUFFER * 3);
-      assert.ok(
-        p.receiveBuffer.length <= SHURE_MAX_RECEIVE_BUFFER,
-        `the buffer grew to ${p.receiveBuffer.length} chars with no frame end in sight`,
-      );
-      const lines = warn.mock.calls.map((c) => String(c.arguments[0]));
-      const overflow = lines.filter((l) => /receive buffer/.test(l));
-      assert.equal(overflow.length, 1, `expected one overflow line per run, saw: ${JSON.stringify(lines)}`);
-      assert.match(overflow[0], /^\[shure:shure-ulxd\] /);
-    } finally {
-      warn.mock.restore();
-    }
+  it("is dropped past its cap, with a line saying so", (t) => {
+    const lines = captureConsole(t, "warn");
+    const p = fresh();
+    p.handleData("< ");
+    flood(p, SHURE_MAX_RECEIVE_BUFFER * 3);
+    assert.ok(
+      p.receiveBuffer.length <= SHURE_MAX_RECEIVE_BUFFER,
+      `the buffer grew to ${p.receiveBuffer.length} chars with no frame end in sight`,
+    );
+    const overflow = lines.filter((l) => /receive buffer/.test(l));
+    assert.equal(overflow.length, 1, `expected one overflow line per run, saw: ${JSON.stringify(lines)}`);
+    assert.match(overflow[0], /^\[shure:shure-ulxd\] /);
   });
 
-  it("does not parse the tail of the dropped run as a frame", () => {
-    const warn = mock.method(console, "warn", () => {});
-    const log = mock.method(console, "log", () => {});
-    try {
-      const p = fresh();
-      // One chunk past the cap, so the drop leaves the buffer empty and the next
-      // chunk is all that remains of the run. Flooded in smaller chunks, some
-      // padding survives the last drop and the fragment never looks like a frame,
-      // so the case passes with no resync at all.
-      p.handleData("< " + "x ".repeat(SHURE_MAX_RECEIVE_BUFFER));
-      assert.equal(p.receiveBuffer, "", "the oversized run was not dropped");
-      // This closes the oversized frame. Everything before its `>` belongs to it.
-      p.handleData("REP 1 CHAN_NAME {Fragment} >");
-      assert.notEqual(p.channelStates.get(1)?.name, "Fragment", "the dropped run's tail was parsed as a report");
+  it("does not parse the tail of the dropped run as a frame", (t) => {
+    captureConsole(t, "warn", "log");
+    const p = fresh();
+    // One chunk past the cap, so the drop leaves the buffer empty and the next
+    // chunk is all that remains of the run. Flooded in smaller chunks, some
+    // padding survives the last drop and the fragment never looks like a frame,
+    // so the case passes with no resync at all.
+    p.handleData("< " + "x ".repeat(SHURE_MAX_RECEIVE_BUFFER));
+    assert.equal(p.receiveBuffer, "", "the oversized run was not dropped");
+    // This closes the oversized frame. Everything before its `>` belongs to it.
+    p.handleData("REP 1 CHAN_NAME {Fragment} >");
+    assert.notEqual(p.channelStates.get(1)?.name, "Fragment", "the dropped run's tail was parsed as a report");
 
-      // And the stream is whole again from here.
-      p.handleData("< REP 1 CHAN_NAME {Lead} >");
-      assert.equal(p.channelStates.get(1)?.name, "Lead", "the first whole frame after a drop was not parsed");
-    } finally {
-      warn.mock.restore();
-      log.mock.restore();
-    }
+    // And the stream is whole again from here.
+    p.handleData("< REP 1 CHAN_NAME {Lead} >");
+    assert.equal(p.channelStates.get(1)?.name, "Lead", "the first whole frame after a drop was not parsed");
   });
 
-  it("leaves ordinary traffic alone", () => {
-    const warn = mock.method(console, "warn", () => {});
-    const log = mock.method(console, "log", () => {});
-    try {
-      const p = fresh();
-      // A frame split across chunks is the normal case, not an overflow.
-      p.handleData("< REP 2 CHAN_NAME {Spl");
-      p.handleData("it} >");
-      assert.equal(p.channelStates.get(2)?.name, "Split");
-      assert.equal(warn.mock.calls.filter((c) => /receive buffer/.test(String(c.arguments[0]))).length, 0);
-    } finally {
-      warn.mock.restore();
-      log.mock.restore();
-    }
+  it("leaves ordinary traffic alone", (t) => {
+    const lines = captureConsole(t, "warn");
+    captureConsole(t, "log");
+    const p = fresh();
+    // A frame split across chunks is the normal case, not an overflow.
+    p.handleData("< REP 2 CHAN_NAME {Spl");
+    p.handleData("it} >");
+    assert.equal(p.channelStates.get(2)?.name, "Split");
+    assert.equal(lines.filter((l) => /receive buffer/.test(l)).length, 0);
   });
 });

@@ -8,6 +8,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
+import { captureConsoleDuringAsync } from "./fixtures/capture-console.js";
 
 const DATA = fs.mkdtempSync(path.join(os.tmpdir(), "messaging-cap-"));
 process.env.STAGE_UTILITY_DATA = DATA;
@@ -22,14 +23,12 @@ fs.writeFileSync(
   }),
 );
 
-const warned: string[] = [];
-const realWarn = console.warn;
-console.warn = (...args: unknown[]) => {
-  warned.push(args.map(String).join(" "));
-};
-const { messagingStore } = await import("./messaging-store.js");
-await messagingStore.init();
-console.warn = realWarn;
+let loaded!: typeof import("./messaging-store.js");
+const warned = await captureConsoleDuringAsync(["warn"], async () => {
+  loaded = await import("./messaging-store.js");
+  await loaded.messagingStore.init();
+});
+const { messagingStore } = loaded;
 
 test("keeps the first 20 groups, 24 quick messages and 12 quick replies, and says why the rest went", () => {
   const config = messagingStore.get();

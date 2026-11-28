@@ -26,6 +26,7 @@ import { beforeEach, describe, test } from "node:test";
 import * as os from "node:os";
 import * as path from "node:path";
 import * as fsp from "node:fs/promises";
+import { captureConsole } from "./fixtures/capture-console.js";
 
 // integration-manager and pvp-service resolve the data directory at import.
 process.env.STAGE_UTILITY_DATA = await fsp.mkdtemp(path.join(os.tmpdir(), "builtin-cues-"));
@@ -60,14 +61,12 @@ let LAYERS: string[] = [];
 let CHANGED = 0;
 let LOG: string[] = [];
 
-const realLog = console.log;
-
-beforeEach(() => {
+beforeEach((t) => {
   ENABLED = new Set(["obs", "reaper", "pvp"]);
   CONNECTED = new Set(["planning-center"]);
   LAYERS = [];
   CHANGED = 0;
-  LOG = [];
+  LOG = captureConsole(t, "log");
   builtinCuesDeps.enabled = () => ENABLED;
   builtinCuesDeps.connected = () => CONNECTED;
   builtinCuesDeps.pvpLayers = () => LAYERS;
@@ -75,14 +74,6 @@ beforeEach(() => {
     CHANGED++;
   };
   __resetBuiltinCues();
-  console.log = (...args: unknown[]) => {
-    LOG.push(args.map(String).join(" "));
-  };
-});
-
-/** Restore the console for the reporter between files. */
-process.on("exit", () => {
-  console.log = realLog;
 });
 
 /** One stored cue, as the engine holds it. */
@@ -322,7 +313,7 @@ describe("a stored rule owns its name", () => {
       '[cues] built-in obs_record not offered: rule "REC on" owns obs_record_on',
     ]);
     // Rebuilt on every manifest read; only a CHANGE is worth a line.
-    LOG = [];
+    LOG.length = 0;
     builtinCueRules([stored("obs_record_on", "REC on")]);
     assert.deepEqual(LOG, []);
   });
@@ -350,7 +341,7 @@ describe("the count line", () => {
     assert.deepEqual(offeredLines(), [
       "[cues] 13 built-in cues offered (obs 3, reaper 1, pvp 7, app 2)",
     ]);
-    LOG = [];
+    LOG.length = 0;
     builtinCueRules([]);
     assert.deepEqual(LOG, [], "an unchanged set said something");
     ENABLED = new Set(["reaper"]);
