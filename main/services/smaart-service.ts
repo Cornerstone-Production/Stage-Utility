@@ -12,7 +12,12 @@ import { errorMessage } from "./errors.js";
 import type { SplMetricsDTO } from "../types/stage.js";
 import { broadcast } from "./broadcaster.js";
 import { StatusIntegration } from "./integration-base.js";
-import { ModernSmaartAdapter, type SmaartInput, type SplReading } from "./smaart-protocol.js";
+import { ModernSmaartAdapter, type SmaartAdapter, type SmaartInput, type SplReading } from "./smaart-protocol.js";
+
+/** The one seam: tests drive the connect path without a Smaart. */
+export const smaartDeps: { adapter: (host: string, port: number) => SmaartAdapter } = {
+  adapter: (host, port) => new ModernSmaartAdapter(host, port),
+};
 /** Trailing throttle for broadcasts — 4 Hz is smooth for a numeric readout. */
 const BROADCAST_THROTTLE_MS = 250;
 /** Per-stream frame rate requested from Smaart (≤ 8). */
@@ -29,7 +34,7 @@ class SmaartService extends StatusIntegration<SplMetricsDTO> {
   private port: number | null = null;
   private password: string | null = null;
 
-  private adapter: ModernSmaartAdapter | null = null;
+  private adapter: SmaartAdapter | null = null;
   private streamClosers: (() => void)[] = [];
 
   private dirty = false;
@@ -89,7 +94,7 @@ class SmaartService extends StatusIntegration<SplMetricsDTO> {
   protected async connect(): Promise<void> {
     if (!this.running || !this.host || !this.port) return;
     const run = this.run;
-    const adapter = new ModernSmaartAdapter(this.host, this.port);
+    const adapter = smaartDeps.adapter(this.host, this.port);
     this.adapter = adapter;
     try {
       await adapter.connect({ password: this.password });
@@ -138,7 +143,7 @@ class SmaartService extends StatusIntegration<SplMetricsDTO> {
     }
   }
 
-  private openStreams(adapter: ModernSmaartAdapter, inputs: SmaartInput[]): void {
+  private openStreams(adapter: SmaartAdapter, inputs: SmaartInput[]): void {
     this.teardownStreams();
     for (const inp of inputs) {
       const id = meterId(inp.deviceName, inp.channelName);
@@ -169,7 +174,7 @@ class SmaartService extends StatusIntegration<SplMetricsDTO> {
   }
 
   /** A stream dropped — if we're still meant to be running, reconnect the lot. */
-  private onStreamClose(adapter: ModernSmaartAdapter): void {
+  private onStreamClose(adapter: SmaartAdapter): void {
     if (!this.running || this.adapter !== adapter) return;
     this.noteOutage("stream closed — reconnecting");
     this.teardownStreams();

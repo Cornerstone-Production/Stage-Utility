@@ -178,3 +178,197 @@ test("YouTube: the replaced channel's failure is not reported, and its answer is
   assert.deepEqual(reports.filter((r) => r.state === "error"), [], "the old channel's failure was reported on the new one");
   assert.equal(youtubeService.getLatest().connected, true, "the old channel's failure blanked the new one");
 });
+
+// ── The rest of the run guards, one case each ────────────────────────────────
+
+test("REAPER: transport()'s read of the replaced host is not published", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const held: ((r: Response) => void)[] = [];
+  reaperDeps.fetch = ((input: unknown) => {
+    if (String(input).includes("old.example")) return new Promise<Response>((resolve) => held.push(resolve));
+    return Promise.resolve(answer(transport(0)));
+  }) as typeof fetch;
+  const quietLog = console.log;
+  console.log = () => {};
+  t.after(() => {
+    console.log = quietLog;
+  });
+
+  reaperService.configure("old.example", 8080); // its poll is held
+  await settle();
+  const pressed = reaperService.transport("record"); // and so is this read
+  await settle();
+  reaperService.configure("new.example", 8080);
+  await settle();
+  for (const release of held) release(answer(transport(5))); // the old box was recording
+  await pressed;
+  await settle();
+
+  assert.equal(reaperService.getLatest().recording, false, "transport()'s read of the old box was published as the new one's");
+});
+
+test("Scores: a poll for the teams the operator stopped following does not overwrite the new list's", async (t) => {
+  // The old poll read only the OLD teams' league. Parsed against the new
+  // favourites it finds nothing, and published that "nothing" over the game the
+  // new poll had just put up.
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { scoresService } = await import("./scores-service.js");
+  const realGlobalFetch = globalThis.fetch;
+  let releaseOld!: () => void;
+  const json = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as unknown as Response;
+  const game = (id: string, away: string, home: string) => ({
+    id,
+    status: { type: { state: "pre" } },
+    competitions: [
+      {
+        competitors: [
+          { id: away, homeAway: "away", team: { id: away, abbreviation: away } },
+          { id: home, homeAway: "home", team: { id: home, abbreviation: home } },
+        ],
+      },
+    ],
+  });
+  globalThis.fetch = (async (input: unknown) => {
+    if (String(input).includes("baseball/mlb")) {
+      await new Promise<void>((r) => {
+        releaseOld = r;
+      });
+      return json({ events: [game("e1", "1", "2")] });
+    }
+    return json({ events: [game("e9", "9", "8")] });
+  }) as typeof fetch;
+  const quietLog = console.log;
+  console.log = () => {};
+  t.after(() => {
+    console.log = quietLog;
+    globalThis.fetch = realGlobalFetch;
+    scoresService.stop();
+  });
+  const team = (league: "mlb" | "nhl", teamId: string) =>
+    ({ league, teamId, displayName: teamId, abbreviation: teamId, logo: null, color: null });
+
+  scoresService.configure([team("mlb", "1")]);
+  await settle();
+  scoresService.configure([team("nhl", "9")]);
+  await settle();
+  assert.deepEqual(scoresService.getLatest().games.map((g) => g.eventId), ["e9"], "the new team's game is up");
+  releaseOld();
+  await settle();
+
+  assert.deepEqual(
+    scoresService.getLatest().games.map((g) => g.eventId),
+    ["e9"],
+    "the old poll's empty answer replaced the new team's game",
+  );
+});
+
+/**
+ * Resi with two accounts, "old" and "new". The old account's request at `holdAt`
+ * (a URL suffix) waits for `release`; everything else answers at once. Rows
+ * from /events carry the account they came from.
+ */
+async function twoResiAccounts(t: TestContext, holdAt: string, fail = false) {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { resiService } = await import("./resi-service.js");
+  const realGlobalFetch = globalThis.fetch;
+  const json = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as unknown as Response;
+  let release!: () => void;
+  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+    const url = String(input);
+    const auth = String((init?.headers as Record<string, string> | undefined)?.Authorization ?? "");
+    const old = auth.includes("old-token") || String(init?.body ?? "").includes('"old"');
+    if (old && url.includes(holdAt)) {
+      await new Promise<void>((r) => (release = r));
+      if (fail) throw new Error("Resi returned HTTP 500");
+    }
+    if (url.endsWith("/auth/token")) return json({ access_token: old ? "old-token" : "new-token", expires_in: 3600 });
+    if (url.endsWith("/users/me")) return json({ customerId: old ? "c-old" : "c-new" });
+    if (url.endsWith("/events")) return json([{ account: old ? "old" : "new" }]);
+    return json([]);
+  }) as typeof fetch;
+  const reports: string[] = [];
+  resiService.setConnectionListener((state) => reports.push(state));
+  const quiet = { warn: console.warn, log: console.log };
+  console.warn = () => {};
+  console.log = () => {};
+  t.after(() => {
+    console.warn = quiet.warn;
+    console.log = quiet.log;
+    globalThis.fetch = realGlobalFetch;
+    resiService.setConnectionListener(() => {});
+    resiService.stop();
+  });
+
+  resiService.configure("old", "pw");
+  await settle();
+  resiService.configure("new", "pw");
+  await settle();
+  assert.equal(resiService.getLatest().connected, true, "the new account answered");
+  reports.length = 0;
+  release();
+  await settle();
+  return {
+    reports,
+    peek: resiService as unknown as { customerId: string | null; events: unknown[]; token: string | null },
+  };
+}
+
+test("Resi: the replaced account's customer id is not cached", async (t) => {
+  const { peek } = await twoResiAccounts(t, "/users/me");
+  assert.equal(peek.customerId, "c-new", "the replaced account's customer id was cached for the new one");
+});
+
+test("Resi: the replaced account's broadcast list is not cached", async (t) => {
+  const { peek } = await twoResiAccounts(t, "/events");
+  assert.deepEqual(peek.events, [{ account: "new" }], "the replaced account's broadcast list was cached for the new one");
+});
+
+test("Resi: a failure of the replaced account's poll is not the new account's", async (t) => {
+  const { reports, peek } = await twoResiAccounts(t, "/encoders/status", true);
+  assert.deepEqual(reports.filter((s) => s === "error"), [], "the replaced account's failure was reported on the new one");
+  assert.equal(peek.token, "new-token", "the replaced account's failure dropped the new account's token");
+});
+
+test("YouTube: an access token minted for the replaced credentials is not cached", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const { youtubeService } = await import("./youtube-service.js");
+  const realGlobalFetch = globalThis.fetch;
+  const json = (body: unknown) => ({ ok: true, status: 200, json: async () => body }) as unknown as Response;
+  let releaseOld!: () => void;
+  globalThis.fetch = (async (input: unknown, init?: RequestInit) => {
+    if (String(input).startsWith("https://oauth2.googleapis.com/token")) {
+      const old = String(init?.body).includes("old-refresh");
+      if (old) await new Promise<void>((r) => (releaseOld = r));
+      return json({ access_token: old ? "old-access" : "new-access" });
+    }
+    return json({ items: [] });
+  }) as typeof fetch;
+  const quietLog = console.log;
+  console.log = () => {};
+  t.after(() => {
+    console.log = quietLog;
+    globalThis.fetch = realGlobalFetch;
+    youtubeService.stop();
+  });
+  const oauth = (refreshToken: string) => ({
+    mode: "oauth" as const,
+    apiKey: "",
+    channel: "",
+    clientId: "client",
+    clientSecret: "secret",
+    refreshToken,
+  });
+
+  youtubeService.configure(oauth("old-refresh"));
+  await settle();
+  youtubeService.configure(oauth("new-refresh"));
+  await settle();
+  releaseOld();
+  await settle();
+
+  assert.equal(
+    (youtubeService as unknown as { accessToken: string | null }).accessToken,
+    "new-access",
+    "the replaced credentials' access token was cached for the new ones",
+  );
+});

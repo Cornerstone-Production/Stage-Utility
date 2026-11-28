@@ -197,3 +197,26 @@ test("TSL: a restart leaves one socket open, and the new one still sending", asy
     "the old socket's close marked the live one disconnected",
   );
 });
+
+test("RossTalk: a queued reconnect does not hold the process open", async (t) => {
+  // Real timers: the property is the timer's ref, which a mock does not model.
+  const port = await refusingPort();
+  warnsTagged(t, "rosstalk");
+  const delays: number[] = [];
+  class Probed extends RossTalkConnection {
+    protected override scheduleIn(ms: number): void {
+      delays.push(ms);
+      super.scheduleIn(ms);
+    }
+    get pending(): NodeJS.Timeout | null {
+      return (this as unknown as { reconnectTimer: NodeJS.Timeout | null }).reconnectTimer;
+    }
+  }
+  const conn = new Probed("unref", () => {});
+  t.after(() => conn.stop());
+  conn.configure("127.0.0.1", port);
+  await until(() => delays.length >= 1, "the first retry to queue");
+
+  assert.ok(conn.pending, "a retry is queued");
+  assert.equal(conn.pending.hasRef(), false, "a queued RossTalk reconnect holds the process open");
+});

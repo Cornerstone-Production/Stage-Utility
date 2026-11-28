@@ -200,3 +200,101 @@ test("OBS: a refused connect writes one line and queues one retry", async (t) =>
   assert.equal(lines.length, 1, `one refused connect wrote ${lines.length} lines:\n${lines.join("\n")}`);
   assert.equal(delays.length, 1, `one refused connect queued ${delays.length} retries`);
 });
+
+/**
+ * One flap of an integration that polls slower than two minutes: a failure,
+ * a good poll `gapMs` later, and a failure `gapMs` after that. Returns the
+ * tagged lines. The connect is driven by hand, one poll per step.
+ */
+async function slowFlap(
+  t: TestContext,
+  tag: string,
+  svc: { connect(): Promise<void>; clearReconnect(): void },
+  setUp: (up: boolean) => void,
+  gapMs: number,
+): Promise<string[]> {
+  const lines: string[] = [];
+  const { warn, log } = console;
+  const keep = (...a: unknown[]) => {
+    const line = a.map(String).join(" ");
+    if (line.startsWith(`[${tag}] `) && !/polling|following/.test(line)) lines.push(line);
+  };
+  console.warn = keep;
+  console.log = keep;
+  t.after(() => {
+    console.warn = warn;
+    console.log = log;
+  });
+  for (const up of [true, false]) {
+    svc.clearReconnect();
+    t.mock.timers.tick(gapMs);
+    setUp(up);
+    await svc.connect();
+    await settle();
+  }
+  return lines;
+}
+
+test("YouTube: a channel failing on alternate idle polls is one outage", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+  const { youtubeService } = await import("./youtube-service.js");
+  const realGlobalFetch = globalThis.fetch;
+  let ytUp = false;
+  globalThis.fetch = (async () => {
+    if (!ytUp) throw new Error("fetch failed");
+    return { ok: true, status: 200, json: async () => ({ items: [] }) } as unknown as Response;
+  }) as typeof fetch;
+  t.after(() => {
+    globalThis.fetch = realGlobalFetch;
+    youtubeService.stop();
+  });
+  const quietLog = console.log;
+  console.log = () => {};
+  youtubeService.configure({ mode: "key", apiKey: "k", channel: "UCaaaaaaaaaaaaaaaaaaaaaa", clientId: "", clientSecret: "", refreshToken: "" });
+  await settle(); // the first poll fails
+  console.log = quietLog;
+  const said = await slowFlap(
+    t,
+    "youtube",
+    youtubeService as unknown as { connect(): Promise<void>; clearReconnect(): void },
+    (up) => (ytUp = up),
+    300_000, // the idle cadence
+  );
+  // The first failure's line came before capture began; nothing more may follow.
+  assert.deepEqual(said, [], `one flap at the idle cadence wrote:\n${said.join("\n")}`);
+});
+
+test("Scores: an ESPN failing on alternate dormant polls is one outage", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"], now: 1_000_000 });
+  const { scoresService } = await import("./scores-service.js");
+  const realGlobalFetch = globalThis.fetch;
+  let espnUp = false;
+  globalThis.fetch = (async () => {
+    if (!espnUp) throw new Error("fetch failed");
+    return { ok: true, status: 200, json: async () => ({ events: [] }) } as unknown as Response;
+  }) as typeof fetch;
+  t.after(() => {
+    globalThis.fetch = realGlobalFetch;
+    scoresService.stop();
+  });
+  const { warn, log } = console;
+  console.warn = () => {};
+  console.log = () => {};
+  scoresService.configure([{ league: "mlb", teamId: "1", displayName: "1", abbreviation: "1", logo: null, color: null }]);
+  await settle(); // the first poll fails
+  console.warn = warn;
+  console.log = log;
+  const said = await slowFlap(
+    t,
+    "scores",
+    scoresService as unknown as { connect(): Promise<void>; clearReconnect(): void },
+    (up) => (espnUp = up),
+    30 * 60_000, // the dormant cadence
+  );
+  // An hour into the outage the failure is reminded; it is never "recovered".
+  assert.deepEqual(
+    said.filter((l) => !/still failing/.test(l)),
+    [],
+    `one flap at the dormant cadence was a recovery and a new outage:\n${said.join("\n")}`,
+  );
+});
