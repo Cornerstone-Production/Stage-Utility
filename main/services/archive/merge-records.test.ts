@@ -566,3 +566,18 @@ test("a reading whose stamp will not parse is not the latest one either", () => 
   const hidden = { ...corrupted, samples: [...corrupted.samples, { t: "bogus", attendance: rawAt(10), occupancy: 300 }] };
   assert.equal(mergeAttendanceRecord(hidden, boxRecord(20, 30, 7, () => 300)).frames, "implausible");
 });
+
+test("an archive that comes back from the other box still shows the disagreement", () => {
+  // X is honest. Y's baseline is 300 low, re-based by a later edit, so the
+  // no-overlap signature cannot see it; only the overlap can.
+  const x = boxRecord(0, 10, 0, () => 300);
+  const yHonest = boxRecord(5, 15, 7, () => 300);
+  const y = { ...yHonest, attendanceBaseline: yHonest.attendanceBaseline - 300 };
+  assert.equal(mergeAttendanceRecord(x, y).frames, "implausible");
+  // Y takes X's archive first, so Y's record now holds copies of X's readings;
+  // then X takes Y's archive back.
+  const yAfter = mergeAttendanceRecord(y, x).record;
+  const back = mergeAttendanceRecord(x, yAfter);
+  assert.equal(back.frames, "implausible", "the copies hid X's own evidence");
+  assert.equal(back.record.attendanceBaseline, 500, "X's baseline was moved");
+});

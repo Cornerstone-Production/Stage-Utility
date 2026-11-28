@@ -170,19 +170,25 @@ export function framesDisagree(mine: AttendanceRecord, theirs: AttendanceRecord)
   const b = rawSeries(theirs, theirBase);
   if (!a.length || !b.length) return null;
 
-  // A reading of this box's at an instant the archive also has is a copy an
-  // earlier import took from it, not a second box's evidence. Paired — with
-  // its own original or with a neighbouring archive reading, since an archive
-  // can hold two streams unioned — it measures only the two baselines, and a
-  // re-import would decide differently from the first. So it is never paired,
-  // and an overlap made only of such copies counts as none.
+  // A stamp both records hold is a reading one of them copied from the other
+  // in an earlier import, so the two copies are one box's reading, not two.
+  // Pairing a shared archive reading with a shared reading of this box's —
+  // its own copy, or a neighbouring one when the archive holds two streams
+  // unioned — measures only the two baselines, and a re-import would decide
+  // differently from the first. So a pair is skipped only when BOTH readings
+  // are shared. A re-import then pairs exactly as the first import did (every
+  // archive reading is shared, and only this box's own readings can answer
+  // it), and an archive coming back from the other box still pairs that box's
+  // own readings with this box's originals.
   const theirStamps = new Set(b.map(([t]) => t));
-  const independent = a.filter(([t]) => !theirStamps.has(t));
+  const myStamps = new Set(a.map(([t]) => t));
   const diffs: number[] = [];
   const levels: number[] = [];
   for (const [t, raw] of b) {
     let best: [number, number] | null = null;
-    for (const p of independent) {
+    const shared = myStamps.has(t);
+    for (const p of a) {
+      if (shared && theirStamps.has(p[0])) continue;
       if (Math.abs(p[0] - t) <= PAIR_MS && (best == null || Math.abs(p[0] - t) < Math.abs(best[0] - t))) best = p;
     }
     if (best) {
