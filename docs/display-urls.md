@@ -37,7 +37,7 @@ with `preview-`, collide with another display's id or slug, or contain anything
 outside `a-z`, `0-9` and `-`.
 
 Reserved: the empty path, `settings`, `log`, `logs`, `photos`, `enroll`, and every
-operator page below — `history`, `baptism`, `patch`, `servicecue`, `scriptview`, `automation`,
+operator page below — `history`, `baptism`, `patch`, `stageplots`, `servicecue`, `scriptview`, `automation`,
 `plan`, `screens`, `mic-slots`, `video-feeds`, `consoles`, `views`, `displays` — plus the
 `preview-` prefix.
 These are pages in their own right: a display slugged `history` would render the
@@ -102,6 +102,7 @@ They follow the light/dark theme, unlike the always-dark display URLs above.
 | `/video-feeds` | Video feeds: every feed, and the editor for each |
 | `/servicecue/manage` | Rundown launcher |
 | `/patch` | This week's stage patch, for volunteers |
+| `/stageplots/manage` | Stage plots: every venue's plots, read-only, with **Edit** for the editor. The crew's copy is `/stageplots`, which renders without the app's sidebar and header |
 | `/automation` | Automation rules |
 | `/plan` | Which service and plan this machine follows |
 | `/history` | Service history, timing and attendance — read-only |
@@ -109,12 +110,13 @@ They follow the light/dark theme, unlike the always-dark display URLs above.
 | `/settings/integrations` | Connected devices and services |
 | `/settings/messages` | Groups of screens, quick messages and quick replies |
 | `/settings/branding` | App name, logos, accent color |
-| `/settings/advanced` | Updates, network, backups, kiosk devices; one address per tab, `/settings/advanced/<tab>` |
+| `/settings/advanced` | Updates, network, backups, the public ServiceCue link, kiosk devices; one address per tab, `/settings/advanced/<tab>` |
 
 Plus the pages reached from those: `/screens/<view id>/edit` (the layout
 editor), `/consoles/<view id>` (a console you built), `/patch/edit`,
-`/servicecue/presets`, `/servicecue/<service type>/<layout>`, and
-`/history/manage`.
+`/servicecue/presets`, `/servicecue/<service type>/<layout>`,
+`/stageplots/edit` (the editor), `/stageplots/<venue address>` and
+`/stageplots/manage/<venue address>`, and `/history/manage`.
 
 Moving between them does not reload the page, so the event stream and cached
 plan data survive a navigation.
@@ -137,7 +139,7 @@ it shows the record without the controls that change it. It also renders without
 the app's sidebar and header — just the record and its own "History" heading — so
 the link shows nothing else of the app. The operator's own history — edit
 recorded times, merge a split service, delete one — is `/history/manage`, in the
-sidebar under Services, with the app's usual chrome.
+sidebar (under Services by default), with the app's usual chrome.
 
 Either one opens a single service directly at `?service=<serviceKey>` — a link
 into a specific recording, rather than the day list. A reload or a copied link
@@ -148,7 +150,7 @@ list instead of an empty page.
 heading and no sidebar or header, for a stage tablet or a producer's second
 screen, and each rundown under it, `/servicecue/<service type>/<layout>`, is the
 whole window. The operator's copy of the launcher is `/servicecue/manage`, in the
-sidebar under Content, with the app's usual chrome; `/servicecue/presets`, which
+sidebar (under Content by default), with the app's usual chrome; `/servicecue/presets`, which
 edits layouts, keeps the chrome too. `?plan=<id>` on a rundown opens another plan
 of that type without changing the one the app follows; see
 [Plan switcher](features/servicecue-and-baptisms.md#plan-switcher). `?from=<path>`

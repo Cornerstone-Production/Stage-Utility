@@ -34,7 +34,7 @@ done. Dismiss it and it stays dismissed.
 | Settings | **Integrations**, **Messages**, **Branding**, **Advanced** |
 
 That is the default arrangement. Every install can rearrange it: see
-[Customizing the sidebar](#customizing-the-sidebar).
+[Customizing the sidebar](#customizing-the-sidebar). Pages elsewhere in these docs name a page by its default section, as in Settings → Advanced; an install that has renamed or moved sections finds the same page by its name.
 
 **Screens** carries a number when devices have been heard on the network that are
 not set up, from any page, and it goes when they are set up or stop being heard.
@@ -64,10 +64,10 @@ without leaving the mode.
 | Reorder a page, or move it to another section | Drag it. A caret shows where it will land |
 | Put a page beside Home | Drag it into the unnamed group at the top |
 | Hide a page | Drag it out of the sidebar, or press its **×**. It goes to the tray and still opens from a link, from Home and from settings search |
-| Bring a page back | Click its tile in the tray to return it to the section it came from, or drag the tile to a place |
+| Bring a page back | Click its tile in the tray to return it to the end of its default section (the last section of pages if that section was removed), or drag the tile to a place |
 | Move a section | Drag its heading by the grip |
 | Rename a section | Click its name |
-| Remove a section | Press **×** on its heading. Its pages go to the tray, and the toast offers **Undo** |
+| Remove a section | Press **×** on its heading. Its pages go to the tray, except Advanced, which moves to the last section left, and the toast offers **Undo** |
 | Add a section | **New section**, in the sidebar or the tray. An empty section is not drawn outside the mode |
 | Start over | **Restore default sidebar** in the tray, with **Undo** |
 
@@ -467,7 +467,7 @@ Changes save as they are made.
 
 | Section | |
 |---|---|
-| **What it shows** | the view, grouped as **Wall views** and **Control surfaces**. Under the picker one line says what the choice makes the screen: a *Control surface* pill and *Its buttons work for anyone at it.*, a *Wall display* pill and *Read-only. Buttons draw but do nothing.*, or *Shows nothing yet.* **View settings →** opens the view's settings and **Edit layout** its layout editor. For a screen showing a console, **List in the sidebar** keeps that console in the sidebar's list, or out of it: see [Consoles](#consoles) |
+| **What it shows** | the view, grouped as **Wall views** and **Control surfaces**. Under the picker one line says what the choice makes the screen: a *Control surface* pill and *Its buttons work for anyone at it.*, a *Wall display* pill and *Read-only. Buttons draw but do nothing.*, or *Shows nothing yet.* **View settings →** opens the view's settings and **Edit layout** its layout editor. For a ServiceCue view, **Edit layout** opens the view's page, where **Layout** picks the [ServiceCue layout](servicecue-and-baptisms.md#layouts) it draws: **All columns** or any layout from the ServiceCue layouts page. For a screen showing a console, **List in the sidebar** keeps that console in the sidebar's list, or out of it: see [Consoles](#consoles) |
 | **Name and address** | the name; the **friendly link** (an alias such as `lobby`, saved with **Save** so a refusal stays on screen: see [Friendly URLs](../display-urls.md#friendly-urls)); and the permanent address, which never changes, with a button that copies it |
 | **On the screen** | **Top bar** (the brand, plan and QR strip along the top), **Lock** (keeps the top bar but removes its links, so the screen cannot be navigated away from) and **Text size** (50 to 300 %, for ServiceCue and readouts). Top bar and Lock are offered only where the view draws a bar; a calendar or a script wall draws none |
 | **Messages** | the [message groups](stage-messages.md#putting-a-screen-in-groups) the screen is in |
@@ -762,16 +762,18 @@ The tabs follow the keyboard pattern for tab strips: only the selected tab is re
 **Tab**, and the arrow keys, **Home** and **End** move to another tab and open it. While an
 update is waiting the **Updates** tab carries a dot, and while host names wait for an accept
 or a dismiss the **Network** tab carries their count. The sidebar's Advanced row shows the
-same two marks, and clicking it then opens the tab they are about (**Updates** when both
-apply). After an update restarts the server, a note saying so appears above the tabs, on
+same marks, and clicking it opens the tab they are about. Another server answering with this
+server's id puts a red mark on the **Network** tab and on the row, and comes first; otherwise
+**Updates** comes before **Network** when both apply. After an update restarts the server, a note saying so appears above the tabs, on
 whichever tab you land on, until you dismiss it.
 
 | Tab (`<tab>`) | Cards | Holds |
 |---|---|---|
-| **General** (`general`) | General | **Time zone**, **Clock format**, **Context bar** |
-| **Updates** (`updates`) | Updates | the update status with **Check now**, **Update now** and **Restart**, **Update track**, how updates are applied and the **Update window**, and whether Mac output helpers and Windows kiosks follow the server |
+| **General** (`general`) | General, Layout | **Time zone**, **Clock format**; **Sidebar** and **Context bar**, each with a **Customize…** button that opens [Customize mode](#customizing-the-sidebar) |
+| **Updates** (`updates`) | Updates | the update status with **Check now**, **Update now**, **Restart** and **What's new** (the running release's notes, read-only: see [What's new, at any time](../ops/updates-and-logs.md#whats-new-at-any-time)), **Update track**, how updates are applied and the **Update window**, and whether Mac output helpers and Windows kiosks follow the server |
 | **Schedule** (`schedule`) | Reconnects, Attendance sampling | **Wake around service times** and its three timings; the **Pre-service ramp** and **Post-service taper** |
-| **Network** (`network`) | Addresses, Host names | the **Public address (DNS)**, whether the server **answers devices looking for a server**, the commands that set up a screen; the host-name list and its refusal switch |
+| **Network** (`network`) | Addresses, Host names | the **Public address (DNS)**, the **Server id** and whether another server is answering with it, whether the server **answers devices looking for a server**, the commands that set up a screen; the host-name list and its refusal switch |
+| **Public link** (`public-link`) | Public link | the page address and publishing token, the switch, the link to hand out with its QR code, what the public sees, and the **Cloudflare connection** that keeps the page up to date: see [On the web](servicecue-and-baptisms.md#on-the-web) |
 | **Data** (`data`) | Backups, Records | **Automatic backups** and the **Config snapshot**; the **Data archive** and **History milestones** |
 | **Video relay** (`video`) | Video relay | the relay's ports and the ffmpeg path |
 | **Search** (`search`) | | every setting, below |

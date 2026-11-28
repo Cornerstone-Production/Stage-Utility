@@ -83,6 +83,7 @@ one of yours is never silent.
 |---|---|
 | The layout, and any view it embeds | An embed whose target is missing renders an error, so dependencies come automatically |
 | Slot boards | Every board the view and its widgets show, with its name and column width, and its layout for every service type, not just the active one. A board shown twice is carried once and shared on arrival, as it was. Each arrives as a new board (`<name> (imported)` when the name is taken) |
+| ServiceCue layouts | The layouts a ServiceCue view in the file uses. A layout whose id is already here is kept as yours; one whose name is taken arrives as `<name> 2` (the first free number), and the import report says so |
 | Notes and checklists | Keyed to their objects, so they follow them |
 | Images | Stored by content hash, so a logo you already have is shared, not duplicated |
 | OSC and RossTalk targets | Definition only. A target you already have with the same id is kept as yours |

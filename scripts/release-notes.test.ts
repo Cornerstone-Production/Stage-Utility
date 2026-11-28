@@ -433,6 +433,67 @@ describe("an override for a Beta-only decision that can no longer be made in the
     assert.match(r.stderr, /which is not a non-breaking .+ commit in/);
   });
 
+  it("omits a feature from the notes, and counts it nowhere", () => {
+    // A `feat` cannot be Beta-only. A release that carries a feature and the revert
+    // that took it out again must not announce it, and must not say it held anything
+    // back either: nothing was held back, the change is not there.
+    const plain = notesFor(VERSION, "v1.0.0", repo.dir);
+    assert.match(sectionText(plain, "New"), /a printable diagram/, "the control: it is announced without the override");
+    const out = withOverride(file, [
+      { commit: repo.sha.diagramFeat, omit: true, reason: "Reverted in this release." },
+    ], () => notesFor(VERSION, "v1.0.0", repo.dir));
+    assert.doesNotMatch(out, /a printable diagram/, "an omitted feature is still in the notes");
+    assert.match(sectionText(out, "New"), /playlists and a scheduler/, "and only that one went");
+    assert.equal(
+      out.match(/\d+ further (fix|fixes|improvement|improvements) made while building/g)?.join("|"),
+      plain.match(/\d+ further (fix|fixes|improvement|improvements) made while building/g)?.join("|"),
+      "an omission changed a held-back count",
+    );
+  });
+
+  it("omits a fix too, and says on the release log that it did and why", () => {
+    const r = withOverride(file, [
+      { commit: repo.sha.rackColour, omit: true, reason: "Reverted in this release." },
+    ], () => runNotes(VERSION, "v1.0.0", repo.dir));
+    assert.equal(r.status, 0);
+    assert.doesNotMatch(r.stdout, /rack colour bled/);
+    assert.match(r.stderr, /left out of the notes — Reverted in this release\./);
+    // Left out, not held back: the held-back count must not take it in (three from
+    // the scope rule and the one trailer, as without any override).
+    assert.match(r.stdout, /3 further fixes made while building/);
+  });
+
+  it("an omitted commit with a direction as well stops the release", () => {
+    const r = withOverride(file, [
+      { commit: repo.sha.diagramFeat, omit: true, betaOnly: true, reason: "both" },
+    ], () => runNotes(VERSION, "v1.0.0", repo.dir));
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /has both "omit" and "betaOnly"/);
+  });
+
+  it("an omit that is not true stops the release", () => {
+    const r = withOverride(file, [
+      { commit: repo.sha.diagramFeat, omit: false, reason: "a mistake for betaOnly: false" },
+    ], () => runNotes(VERSION, "v1.0.0", repo.dir));
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /"omit" can only be true/);
+  });
+
+  it("an omit naming a commit outside the release stops the release", () => {
+    const r = withOverride(file, [
+      { commit: repo.sha.oldFix, omit: true, reason: "a commit from before the anchor" },
+    ], () => runNotes(VERSION, "v1.0.0", repo.dir));
+    assert.notEqual(r.status, 0, "an omission that can never apply read as handled");
+    assert.match(r.stderr, /which is not a non-breaking .+ commit in/);
+  });
+
+  it("a PRERELEASE shows an omitted feature: the beta track has been running it", () => {
+    const out = withOverride(preFile, [
+      { commit: repo.sha.diagramFeat, omit: true, reason: "Reverted in the release." },
+    ], () => notesFor(`${VERSION}-beta.1`, "v1.0.0", repo.dir));
+    assert.match(sectionText(out, "New"), /a printable diagram/);
+  });
+
   it("a file that will not parse stops the release rather than quietly generating notes", () => {
     const r = withOverride(file, "{ not json", () => runNotes(VERSION, "v1.0.0", repo.dir));
     assert.notEqual(r.status, 0, "a broken override file generated notes as though it were absent");
@@ -490,9 +551,10 @@ describe("the overrides in docs/release-notes/overrides", () => {
     "1.19.0",
     "1.27.0",
     "1.28.1",
+    "1.29.0",
   ];
 
-  interface Override { commit: string; betaOnly: boolean; reason: string }
+  interface Override { commit: string; betaOnly?: boolean; omit?: boolean; reason: string }
 
   function subjectOf(sha: string): string {
     return execFileSync("git", ["log", "-1", "--format=%s", sha], {
@@ -511,7 +573,11 @@ describe("the overrides in docs/release-notes/overrides", () => {
       const list = JSON.parse(fs.readFileSync(path.join(SHIPPED_OVERRIDE_DIR, `${v}.json`), "utf8")) as Override[];
       assert.ok(list.length, `${v}.json is empty`);
       for (const e of list) {
-        assert.equal(typeof e.betaOnly, "boolean", `${v}.json: ${e.commit} has no direction`);
+        // A direction, or an omission: exactly one of the two.
+        assert.ok(
+          (typeof e.betaOnly === "boolean") !== (e.omit === true),
+          `${v}.json: ${e.commit} needs "betaOnly": true or false, or "omit": true, and not both`,
+        );
         assert.ok(e.reason?.trim(), `${v}.json: ${e.commit} has no reason`);
         // Reachable from HEAD, not merely a valid-looking hex string.
         assert.doesNotThrow(
@@ -520,6 +586,44 @@ describe("the overrides in docs/release-notes/overrides", () => {
         );
       }
     }
+  });
+
+  it("1.29.0 leaves out exactly the photo themes commits, and nothing else", () => {
+    // Photo themes was held out of 1.29.0 after its commits were on `beta`. A
+    // `feat` cannot be held back as beta-only, so each is left out of the notes by
+    // name. Matched by the SUBJECT git reports for each SHA, sorted, one per line:
+    // a wrong SHA cannot satisfy it, and two branches that each add one merge.
+    const list = JSON.parse(fs.readFileSync(path.join(SHIPPED_OVERRIDE_DIR, "1.29.0.json"), "utf8")) as Override[];
+    const omitted = list.filter((e) => e.omit).map((e) => subjectOf(e.commit)).sort();
+    assert.deepEqual(omitted, [
+      "feat: connect OpenAI with an API key on Integrations",
+      "feat: read photo themes and re-read them when the channel moves",
+      "feat: send each themed person's original photo with the theme",
+      "feat: theme a service's mic slot photos from the Mic slots page",
+      "feat: theme a service's mic slot photos with one OpenAI prompt",
+      "fix: Approve and Approve all ready approve only the edits that were shown",
+      "fix: Generate no longer says everyone has a photo when nobody could be sent",
+      "fix: Generate's count matches what it sends, and the sheet names whom it skipped",
+      "fix: Redo all says how many photos it will bill and asks before sending",
+      "fix: Redo all's count comes from the server, by the rule Redo all sends with",
+      "fix: Redo from a plan whose roster cannot be read says so instead of \"not on this plan\"",
+      "fix: Theme photos names a plan's day on the app's calendar, not UTC's",
+      "fix: Theme photos stays open without a working OpenAI key",
+      "fix: a changed prompt stays flagged until everyone made under the old one is redone",
+      "fix: a person removed or a theme deleted while an original is read is not sent to OpenAI",
+      "fix: a run stopped by a refused key or exhausted credits fails each person once",
+      "fix: a theme change whose save fails no longer drops the edits it would have cancelled",
+      "fix: an OpenAI answer that only starts like a PNG fails the person with a reason",
+      "fix: an edit that lands behind a remove of that person is not kept",
+      "fix: photo themes pay once per photo and keep the operator's choices",
+      "fix: removing someone whose first theme photo is being made cancels it instead of a 404",
+      "fix: the OpenAI tile and dialog follow a key saved, removed or refused elsewhere",
+      "fix: the Theme photos review findings",
+      "perf: a photo-themes frame that changes nothing no longer re-renders the Mic slots page",
+      "polish: OpenAI sits with the other integrations as a tile that opens its key dialog",
+      "polish: Theme photos and the OpenAI dialog draw their links with the shared inline-link style",
+      "polish: Theme photos names a plan's day in the Mic slots page's own order",
+    ]);
   });
 
   it("1.18.0 corrects the three trailers the release review found", () => {

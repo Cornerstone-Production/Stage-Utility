@@ -22,7 +22,7 @@ Nothing here knows who deploys it: no account id, no address, no church.
 | `src/hub.ts` | the Durable Object: SQLite storage, and the viewers' sockets through the WebSocket Hibernation API |
 | `src/hub-api.ts` | what the handler needs from the object, so it can be run against an in-memory one |
 | `test/` | the Worker whole, in workerd |
-| `public/` | the built pages, `servicecue.html` and `stageplots.html`. Gitignored: `npm run servicecue:build` at the repository root writes it |
+| `public/` | the built pages, `servicecue.html`, `stageplots.html` and `landing.html`. Gitignored: `npm run servicecue:build` at the repository root writes it |
 
 ## Working on it
 

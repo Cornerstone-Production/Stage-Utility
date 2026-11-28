@@ -28,6 +28,15 @@ out of the stable release's **Fixed** list (**Improved**, for a `perf` or `polis
 into the held-back count, `false` puts it in. `reason` is required, and is printed to
 the release log when the override is applied.
 
+A commit whose change is not in the release, because a revert in it took the
+change out again, is left out of the notes with `"omit": true` in place of
+`betaOnly`. That takes a `feat` too, which a Beta-only decision cannot reach, and
+counts it nowhere:
+
+```json
+{ "commit": "22bf4ddf", "omit": true, "reason": "Held out of this release and shipped in its own." }
+```
+
 Anything wrong here fails the release rather than generating notes without it.
 See [Correcting a trailer after the commit is on `beta`](../../contributing.md#correcting-a-trailer-after-the-commit-is-on-beta).
 

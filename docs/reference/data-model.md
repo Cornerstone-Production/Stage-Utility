@@ -409,7 +409,7 @@ class means for backups.
 | `automation-settings.json` | config | Simulate and disarm |
 | `baptism-triggers.json` | config | Which plan items start the baptism timer's phases, per plan |
 | `baptism.json` | runtime | The baptism timer's live state and its saved sessions |
-| `bar-config.json` | config | The [context bar](../features/context-bar.md)'s items and order |
+| `bar-config.json` | config | The [context bar](../features/context-bar.md)'s desktop items and order, and the phone's own set (`mobileItems`; empty means the phone follows the desktop bar) |
 | `checklist-ticks.json` | runtime | Which checklist rows are ticked, per plan |
 | `history-milestones.json` | config | The dated marks on the Trends chart |
 | `home-snoozes.json` | runtime | What is snoozed on Home's [Needs attention](../features/operator-app.md#needs-attention); cleared when a service starts |
@@ -429,7 +429,7 @@ class means for backups.
 | `saved-colors.json` | config | Colors kept from the color picker |
 | `scores-favourites.json` | config | Followed teams |
 | `servicecue-config.json` | config | Which service types the ServiceCue landing shows |
-| `servicecue-layouts.json` | config | ServiceCue column layouts |
+| `servicecue-layouts.json` | config | ServiceCue layouts |
 | `servicecue-publish.json` | config | Whether ServiceCue is [published to the web](../features/servicecue-and-baptisms.md#on-the-web), and the address of its page. The token is in `secrets.bin`, which a backup does not carry |
 | `servicecue-roles.json` | config | ServiceCue category roles |
 | `service-timeline.json` | runtime | Per-item timing recordings, one file per service in a folder of the same name |
@@ -439,7 +439,7 @@ class means for backups.
 | `slots.json` | config | [Slot](#slots) boards: their names and column widths, and each board's layouts by service type and plan |
 | `spl-history.json` | runtime | Sound-level recordings, one file per service in a folder of the same name |
 | `stageplot-drafts.json` | config | The [stage plot](../features/stageplots.md#save-and-discard) editor's unsaved drafts, one per plot |
-| `stageplots.json` | config | [Stage plot](../features/stageplots.md) venues, plots, the backgrounds they draw on, and each plan's plot overrides |
+| `stageplots.json` | config | [Stage plot](../features/stageplots.md) venues, plots, the backgrounds they draw on, each plan's plot overrides, each published venue's secret link and the old links waiting to be removed from the public page |
 | `stream-starts.json` | runtime | When each streaming platform was first seen live |
 | `trends-prefs.json` | config | Which Smaart metric the Trends card plots under Sound |
 | `update-notices.json` | runtime | Which release has been announced, the after-update notice until it is dismissed, and the running release's notes kept for What's new |

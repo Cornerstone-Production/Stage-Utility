@@ -50,3 +50,5 @@ shows every metric the meter reports, each with its live value. The caption unde
 number names both, as `SPL A Slow · FOH`. With **Loudest meter**, a picked
 metric is also what "loudest" is judged on. If Smaart stops reporting the
 picked metric the tile reads `—` and names it, rather than showing another.
+
+**In History and ServiceCue:** the SPL history recorder keeps every metric the meter reports. History's [Trends card](../features/attendance-and-history.md#all-services) plots one of them for the whole organisation under **Sound**, and a ServiceCue layout's **Max SPL** column shows each item's loudest reading; see [Layouts](../features/servicecue-and-baptisms.md#layouts).

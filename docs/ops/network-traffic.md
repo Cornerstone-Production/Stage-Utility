@@ -184,6 +184,7 @@ What reaches the internet, and when:
 | SenSource Vea, and SafeSpace | People counts, only while those integrations are on |
 | ESPN | Live scores for followed teams, only while any are followed |
 | YouTube, and Resi | Whether you are live, only while those integrations are on |
+| Your public ServiceCue page, and Cloudflare | [ServiceCue on the web](servicecue-on-the-web.md), only while the Public link is on: the layouts, rundowns and live position ServiceCue shows, and published stage plots, to the page address you set. With a Cloudflare API token saved, Cloudflare's API too, to update that page |
 | Wherever an embed or external feed points | A YouTube or Resi player reaches its own platform, and an external feed reaches whatever address it names |
 
 Once, the first time video is switched on with a pull or push feed, the server

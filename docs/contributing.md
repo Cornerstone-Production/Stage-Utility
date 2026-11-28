@@ -171,6 +171,23 @@ that would never be applied, which reads as handled and is not.
 A prerelease reads no override file. It keeps every fix regardless, because
 somebody on the beta track has been running the broken version.
 
+#### Leaving a commit out of a release's notes
+
+A feature can be built on `beta` and then held out of the release it was heading
+for: a `revert:` lands in the same release and the change is not in it. The
+original commits are still in the history, and a `feat` cannot be held back as
+beta-only, so the notes would announce something the release does not have. An
+override entry with `"omit": true` in place of `"betaOnly"` leaves the commit out
+of every section and counts it nowhere, since nothing was held back:
+
+```json
+{ "commit": "22bf4ddf", "omit": true, "reason": "Held out of this release and shipped in its own; a revert in it takes the change out again." }
+```
+
+It takes any visible commit, `feat` included, and it is a hard failure when the
+commit is not one in the release's range, as above. An entry has `betaOnly` or
+`omit`, never both. A prerelease reads no file, so a beta still lists the commit.
+
 ## Releases
 
 Automated from the commit types above, by `.github/workflows/release.yml`. Your
