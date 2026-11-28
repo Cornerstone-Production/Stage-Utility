@@ -20,7 +20,7 @@
 import { strict as assert } from "node:assert";
 import { after, beforeEach, describe, test } from "node:test";
 
-import { installDom, mountInAct } from "../../../test-dom.js";
+import { installDom, mountInAct, settle as sharedSettle } from "../../../test-dom.js";
 
 const teardown = installDom();
 
@@ -58,9 +58,7 @@ import type { LaneItem } from "./lane.js";
  *  `setImmediate`. Without draining it a closed popover's callback runs after
  *  this file's DOM has gone and the FILE fails while every test in it passes —
  *  the same hop number-input.test.tsx settled on, and for the same reason. */
-async function flushReact(): Promise<void> {
-  for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve));
-}
+const flushReact = () => sharedSettle({ turns: 10 });
 
 beforeEach(() => cleanup());
 after(async () => {

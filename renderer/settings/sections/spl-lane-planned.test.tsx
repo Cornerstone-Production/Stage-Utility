@@ -17,7 +17,7 @@
 import { strict as assert } from "node:assert";
 import { after, afterEach, test } from "node:test";
 
-import { eventually, installRenderDom, mountInAct } from "../../test-dom.js";
+import { eventually, installRenderDom, mountInAct, settle as sharedSettle } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -87,9 +87,7 @@ const SPL = {
  *  draws either way, and the fallback needs no series fixture. */
 const splFetch = (async () => ({ ok: false, status: 404, json: async () => ({}), text: async () => "" })) as unknown as typeof fetch;
 
-async function flushReact(): Promise<void> {
-  for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve));
-}
+const flushReact = () => sharedSettle({ turns: 10 });
 
 afterEach(cleanup);
 after(async () => {

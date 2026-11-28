@@ -21,7 +21,7 @@ import { strict as assert } from "node:assert";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
-import { installDom } from "../../test-dom.js";
+import { installDom, settle as sharedSettle } from "../../test-dom.js";
 
 const teardown = installDom();
 (globalThis as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
@@ -165,10 +165,7 @@ after(() => {
   teardown();
 });
 
-const settle = () =>
-  act(async () => {
-    for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0));
-  });
+const settle = () => sharedSettle({ turns: 6 });
 
 async function renderHistory(readOnly = false): Promise<ReturnType<typeof render>> {
   let view!: ReturnType<typeof render>;

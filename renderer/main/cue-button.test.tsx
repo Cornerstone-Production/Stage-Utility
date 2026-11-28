@@ -10,13 +10,13 @@
 import { strict as assert } from "node:assert";
 import { after, describe, test } from "node:test";
 
-import { installDom, unmountAndTeardown } from "../test-dom.js";
+import { installDom, settle as sharedSettle, unmountAndTeardown } from "../test-dom.js";
 import { NoStream } from "../test-fixtures/no-stream.js";
 
 const teardown = installDom();
 (globalThis as { EventSource?: unknown }).EventSource = NoStream;
 
-const { render, cleanup, fireEvent, act } = await import("@testing-library/react");
+const { render, cleanup, fireEvent } = await import("@testing-library/react");
 const React = await import("react");
 const { ObjectContent } = await import("./layout-renderer.js");
 const { makeRenderCtx } = await import("./test-render-ctx.js");
@@ -77,10 +77,7 @@ function mount(cues: CuesLive | null, cue: string, interactive = true, choosePre
  * scheduler — without it, the same race can land the flush after teardown
  * instead of merely after the test.
  */
-const settle = () =>
-  act(async () => {
-    await new Promise((r) => setTimeout(r, 20));
-  });
+const settle = () => sharedSettle({ ms: 20 });
 
 const stateOf = (container: HTMLElement) =>
   container.querySelector("[data-state]")?.getAttribute("data-state");

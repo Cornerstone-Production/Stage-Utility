@@ -13,7 +13,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, test } from "node:test";
 
-import { eventually, installRenderDom, mountInAct } from "../../test-dom.js";
+import { eventually, installRenderDom, mountInAct, settle as sharedSettle } from "../../test-dom.js";
 
 const teardown = installRenderDom();
 
@@ -198,9 +198,7 @@ function splFetch({ series }: { series: boolean }): typeof fetch {
 
 /** React's scheduler queues with setImmediate; a Radix popover's teardown lands
  *  there. Drain it or a closed popover settles after this file's DOM has gone. */
-async function flushReact(): Promise<void> {
-  for (let i = 0; i < 10; i++) await new Promise((resolve) => setImmediate(resolve));
-}
+const flushReact = () => sharedSettle({ turns: 10 });
 
 beforeEach(() => localStorage.clear());
 afterEach(cleanup);

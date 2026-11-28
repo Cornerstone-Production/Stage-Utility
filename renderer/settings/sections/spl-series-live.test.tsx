@@ -13,7 +13,7 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, describe, test } from "node:test";
 
-import { eventually, installDom } from "../../test-dom.js";
+import { eventually, installDom, settle as sharedSettle } from "../../test-dom.js";
 import { FakeEventSource } from "../../test-fixtures/fake-event-source.js";
 
 const teardown = installDom();
@@ -124,13 +124,7 @@ function routed(series: (key: string) => { status: number; body?: unknown }): Ro
   return r;
 }
 
-async function settle(): Promise<void> {
-  for (let i = 0; i < 4; i++) {
-    await act(async () => {
-      await Promise.resolve();
-    });
-  }
-}
+const settle = () => sharedSettle({ turns: 4 });
 
 /** The `d` of the raw peak line, or "" when no raw line is drawn. */
 const peakPath = () =>
