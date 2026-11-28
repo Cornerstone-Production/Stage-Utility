@@ -189,7 +189,7 @@ export function QsysCoreBrowser({
   writable: boolean;
   value: QsysBinding | null;
   /** `legend`: the name the Core draws on the chosen control, when it reported one. */
-  onChange: (b: QsysBinding | null, legend?: string, control?: CatalogControl) => void;
+  onChange: (b: QsysBinding | null, legend?: string, control?: CatalogControl, siblings?: CatalogControl[]) => void;
   /** What this binding is called in the inspector ("Fader control", "On trigger"). */
   label?: string;
   /** What the button says while nothing is bound. */
@@ -231,8 +231,8 @@ export function QsysCoreBrowser({
           })
           .sort(natural);
 
-  const pick = (comp: string, c: CatalogControl) => {
-    onChange({ component: comp, control: c.Name }, legendOf(c) ?? undefined, c);
+  const pick = (comp: CatalogComponent, c: CatalogControl) => {
+    onChange({ component: comp.name, control: c.Name }, legendOf(c) ?? undefined, c, comp.controls);
     setOpen(false);
     setQuery("");
     setComponent(null);
@@ -251,7 +251,7 @@ export function QsysCoreBrowser({
 
   const controlRow = (comp: CatalogComponent, c: CatalogControl, showComponent: boolean) => (
     <li key={`${comp.name}/${c.Name}`}>
-      <button type="button" data-qsys-control={c.Name} className={row} onClick={() => pick(comp.name, c)}>
+      <button type="button" data-qsys-control={c.Name} className={row} onClick={() => pick(comp, c)}>
         <span className="min-w-0 truncate">
           <span className="font-mono">{c.Name}</span>
           {legendOf(c) && (
