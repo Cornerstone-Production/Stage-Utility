@@ -10,7 +10,7 @@
 // hand-written once per integration — see INTEGRATIONS in automation-triggers.ts.
 
 import type { ConditionCtx, ConditionDef } from "../types/automation.js";
-import { hasContent, type PvpLayerDTO } from "../types/pvp.js";
+import { findPvpLayer, hasContent, type PvpLayerDTO } from "../types/pvp.js";
 import { zonedMinuteOfDay, zonedParts } from "./app-timezone.js";
 import { INTEGRATIONS } from "./automation-triggers.js";
 import { externKeyed } from "../types/extern-keyed.js";
@@ -130,10 +130,10 @@ function pvpLayerCondition(
     holds: (ctx, params) => {
       const layers = ctx.pvpLayers;
       if (!layers) return false;
-      const want = String(params.layer ?? "").trim().toLowerCase();
-      if (!want) return false;
-      const l = layers.find((x) => x.name.trim().toLowerCase() === want);
-      return !!l && holds(l);
+      // A name two layers share never holds, whichever of them PVP lists
+      // first: see findPvpLayer. pvp-service logs the duplicate once.
+      const got = findPvpLayer(layers, String(params.layer ?? ""));
+      return got.kind === "found" && holds(got.layer);
     },
   };
 }

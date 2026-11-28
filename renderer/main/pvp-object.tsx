@@ -12,7 +12,7 @@ import { useLayoutEffect, useRef, useState } from "react";
 import { PvpLayerRow } from "./pvp-layer-row";
 import { noSuchLayer, pvpUnavailableReason } from "./pvp-progress";
 import type { LayoutObjectConfig } from "@main/types/stage";
-import { hasContent, type PvpLayerDTO, type PvpStatusDTO } from "@main/types/pvp";
+import { findPvpLayer, hasContent, type PvpLayerDTO, type PvpStatusDTO } from "@main/types/pvp";
 
 type Config = Extract<LayoutObjectConfig, { type: "pvp-layers" }>;
 
@@ -21,16 +21,18 @@ type Config = Extract<LayoutObjectConfig, { type: "pvp-layers" }>;
  *
  * PURE and exported so the filter is testable without React. "with-content" is
  * decided by `state`, which parseWorkspace derived from the PRESENCE of
- * playingMedia — never from isPlaying, and never from playingItem.
+ * playingMedia — never from isPlaying, and never from playingItem. "one" draws
+ * nothing for a name two layers share (see findPvpLayer), and emptyReason says
+ * so.
  */
 export function visibleLayers(layers: readonly PvpLayerDTO[], c: Config): PvpLayerDTO[] {
   if (c.show === "all") return [...layers];
   if (c.show === "one") {
-    const want = (c.layerName ?? "").trim().toLowerCase();
     // An unconfigured "one" shows nothing rather than everything: silently
-    // showing all eleven would look like the filter had been ignored.
-    if (!want) return [];
-    return layers.filter((l) => l.name.trim().toLowerCase() === want);
+    // showing all eleven would look like the filter had been ignored. A blank
+    // name finds nothing, so findPvpLayer answers that too.
+    const got = findPvpLayer(layers, c.layerName ?? "");
+    return got.kind === "found" ? [got.layer] : [];
   }
   return layers.filter(hasContent);
 }
@@ -52,7 +54,10 @@ export function emptyReason(status: PvpStatusDTO | null, c: Config): string {
   if (c.show === "one") {
     // The untrimmed name, as it was: the sentence quotes back what the operator
     // typed into the layout, not a tidied version of it.
-    return (c.layerName ?? "").trim() ? noSuchLayer(c.layerName ?? "") : "No layer chosen";
+    const name = c.layerName ?? "";
+    if (!name.trim()) return "No layer chosen";
+    if (findPvpLayer(status?.layers ?? [], name).kind === "duplicate") return `More than one layer is named ${name}`;
+    return noSuchLayer(name);
   }
   return "Nothing on screen";
 }

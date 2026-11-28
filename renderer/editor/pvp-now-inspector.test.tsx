@@ -150,3 +150,23 @@ describe("Warn near the end", () => {
     assert.equal(got.c!.warnRedSec, 10, "typing an amber rewrote the red");
   });
 });
+
+describe("the Layer picker with two PVP layers of one name", () => {
+  // Through the rendered picker, not pvpLayerOptions alone: the call site
+  // drawing `layers.map(...)` again would pass a test of the helper.
+  const live = (uuid: string, name: string) => ({
+    uuid, name, index: 0, state: "video" as const, mediaName: "clip.mp4", mediaUuid: `m-${uuid}`,
+    lastCueName: null, lastCueUuid: null, nextCueName: null, mediaSinceAt: null,
+    hidden: false, muted: false, opacity: 1, playbackRate: 1, anchorElapsedSec: 1, durationSec: 20,
+  });
+
+  test("offers the shared name once, labelled duplicate", async () => {
+    const pvp = { connected: true, layers: [live("a", "Lyrics"), live("b", "lyrics "), live("c", "Graphics")], sampledAt: null, imageDurationSec: null };
+    render(React.createElement(TooltipProvider, null, React.createElement(PvpNowInspector, { c: base({ layerName: "Lyrics" }), pvp, onConfig: () => {} })));
+    await settle();
+    assert.deepEqual(
+      [...document.querySelectorAll("option")].map((o) => o.textContent),
+      ["Any layer with content", "Lyrics · duplicate", "Graphics · playing", "Type a layer name…"],
+    );
+  });
+});

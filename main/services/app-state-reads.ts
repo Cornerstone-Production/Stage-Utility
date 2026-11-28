@@ -26,7 +26,7 @@ import { pvpService } from "./pvp-service.js";
 import { reaperService } from "./reaper-service.js";
 import { resiService } from "./resi-service.js";
 import { youtubeService } from "./youtube-service.js";
-import type { PvpLayerDTO } from "../types/pvp.js";
+import { findPvpLayer, type PvpLayerDTO } from "../types/pvp.js";
 
 /** A source's answer: a value, or why nobody can say. */
 export interface AppStateValue {
@@ -98,14 +98,11 @@ const PVP_MUTED = APP_STATE_FAMILIES.get("pvp.layer-muted")!;
 /**
  * The one PVP layer this ref names, or why nobody can say.
  *
- * Matched exactly as pvp-actions.ts's `resolveLayer` matches — trimmed and
- * case-insensitively — so the switch and the action that drives it find the same
- * layer or fail together. A reading that resolved a name the action could not
- * would be a switch reporting a state for a layer the cue never touched.
- *
- * Two layers of the same name is UNKNOWN rather than the first hit: PVP allows
- * it, `resolveLayer` would address whichever came back first, and a switch
- * silently reporting one of two layers is worse than one saying it cannot tell.
+ * Through findPvpLayer, as pvp-actions.ts's `resolveLayer` is, so the switch and
+ * the action that drives it find the same layer or fail together. A reading
+ * that resolved a name the action could not would be a switch reporting a
+ * state for a layer the cue never touched. Two layers of the same name is
+ * UNKNOWN rather than the first hit, as findPvpLayer says.
  */
 function pvpLayer(name: string): { layer: PvpLayerDTO } | { reason: string } {
   const status = pvpService.getLatest();
@@ -113,12 +110,10 @@ function pvpLayer(name: string): { layer: PvpLayerDTO } | { reason: string } {
   // reader above refuses to guess: a layer reported as visible when the truth is
   // that nobody knows is a switch lying during the one hour it is watched.
   if (!status.connected) return { reason: "ProVideoPlayer is not connected" };
-  const want = name.trim().toLowerCase();
-  const hits = status.layers.filter((l) => l.name.trim().toLowerCase() === want);
-  if (hits.length > 1) return { reason: `Two or more PVP layers are called "${name}"` };
-  const layer = hits[0];
-  if (!layer) return { reason: `No PVP layer called "${name}"` };
-  return { layer };
+  const got = findPvpLayer(status.layers, name);
+  if (got.kind === "duplicate") return { reason: `Two or more PVP layers are called "${name}"` };
+  if (got.kind === "missing") return { reason: `No PVP layer called "${name}"` };
+  return { layer: got.layer };
 }
 
 const flag = (

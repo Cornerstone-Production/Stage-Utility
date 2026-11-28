@@ -39,6 +39,17 @@ between tabs.
 | **Cooldown** | seconds before this rule may fire again (default 30) |
 | **Once per service** | fire at most once per service occurrence |
 
+A service occurrence is the one History records: the Planning Center service time
+(two services on one plan are two occurrences), or the service's date when Planning
+Center names no service time. A service that runs past its planned end stays the
+same occurrence until History closes it, although Planning Center has already moved
+its current service time on to the next service, so a rule that fires in the
+overrun can still fire in the next service. One limit comes with that, shared
+with History: once a service has ended, a plan item that goes live more than ten
+minutes before the next service's start reopens the service that ended, unless it
+is the item that service opened with, and a rule firing then counts against the
+service that ended.
+
 ![The Automation page: Simulate and Disarm above the tabs, and the Commands tab listing each command with its badges, the screens it is used on and a Run button](images/automation-rules.png)
 
 A rule is made with **New command** (Commands tab) or **New rule** (Rules tab),
@@ -236,7 +247,9 @@ condition holds rather than blocking, so a half-built rule does not silently nev
 fire — with one deliberate exception: a ProVideoPlayer layer condition with no
 layer named does **not** hold, because "some layer, I did not say which" would
 qualify a rule against a layer nobody chose. That question is **ProVideoPlayer has
-something on screen**, which exists separately. None of them hold while PVP has
+something on screen**, which exists separately. For the same reason a layer name
+two PVP layers share does not hold either (see
+[ProVideoPlayer](integrations/provideoplayer.md#rules)). None of them hold while PVP has
 never connected, either: unreachable is unknown, not empty. "Baptism phase is" does not hold at all until the timer has run — including
 for "idle", because before it runs we do not know that it is idle.
 
@@ -723,7 +736,8 @@ the second colon, so a layer called `Lower Thirds: Speaker` is written
 the reading, exactly as it stops the action: the state then reads unknown with
 `No PVP layer called "<name>"` rather than reporting the layer as shown. Two
 layers of one name read unknown too — PVP allows the duplicate, and a switch
-that silently picked one of them would report a layer nobody chose.
+that silently picked one of them would report a layer nobody chose. The action
+refuses the same name, so the switch and the command fail together.
 
 `app:youtube.live` and `app:resi.live` are read-only: there is no action here that
 starts or stops a broadcast on either platform. Bind a pair to one when the command

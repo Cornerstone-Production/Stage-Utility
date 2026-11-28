@@ -342,7 +342,9 @@ PVP's own live layers, each with its current state word beside it, or **Type a
 layer name…** to type one instead — kept visible whenever the typed name is not
 (yet) one PVP is reporting, so a layout can be built on a laptop away from the
 machine. Until a layer is chosen the widget shows nothing and says so. A name that does not match a live layer shows its own selected option,
-labelled **not found**, rather than snapping back to a default. **Progress bar**
+labelled **not found**, rather than snapping back to a default. A name two PVP
+layers share is one option, labelled **duplicate**, and the widget shows neither
+layer and says so. **Progress bar**
 adds a hairline rule under each rolling clip; it is off by default, because the
 time remaining is always shown and four rules stacked in one tile is a lot of
 chrome for a glance.
@@ -358,8 +360,8 @@ while a clip is rolling, the countdown IS the value, with the file it belongs to
 and the file's total length underneath. A layer with nothing left to count —
 still, ended, or nothing on it at all — falls back to the current command's name (or
 the file name, without its extension, when there is no command to read), with a state
-word — **playing**, **paused**, **still**, **ended**, **empty** or **not
-found** — beside the caption.
+word — **playing**, **paused**, **still**, **ended**, **empty**, **not
+found** or **duplicate** — beside the caption.
 
 **Layer** picks which layer it reads, from the same dropdown of live layers the
 layer list's Show uses (see above), or Any layer with content to follow whichever
@@ -370,6 +372,7 @@ caption is the fixed word "ProVideoPlayer" (Compact: bare "PVP"; Countdown only
 draws no caption at all). A named layer
 PVP is not currently reporting reads **not found**, with its own sentence — never
 "empty", which is a different problem (the layer exists and has nothing on it).
+A named layer two PVP layers share reads **duplicate** and shows neither of them.
 
 **Progress bar** draws a hairline rule under the countdown. It advances smoothly
 rather than a step a second, and snaps instead of sliding whenever the change is

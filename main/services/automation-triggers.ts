@@ -17,6 +17,7 @@ import { PREFERRED_METRICS } from "./spl-recorder.js";
 import { planTimeDueIn } from "./automation-plan-times.js";
 import type { PlanTimeDTO } from "../types/stage.js";
 import { externKeyed } from "../types/extern-keyed.js";
+import { findPvpLayer } from "../types/pvp.js";
 
 type Live = {
   mode?: string;
@@ -101,13 +102,18 @@ const asPvp = (v: unknown): PvpLayer[] => {
  *  event — unreachable is unknown, not stopped. */
 const pvpUp = (v: unknown): boolean => (v && typeof v === "object" ? (v as PvpSnap).connected !== false : false);
 
-/** Does this layer match the rule's `layer` param? Blank matches ANY layer, so an
- *  unconfigured rule fires rather than silently never firing. Matched on the
- *  NAME: a uuid is opaque in a rule editor and changes when a workspace is
- *  rebuilt from a template. */
-const pvpNamed = (l: PvpLayer, want: unknown): boolean => {
-  const w = String(want ?? "").trim().toLowerCase();
-  return !w || (l.name ?? "").trim().toLowerCase() === w;
+/** Which of these layers the rule's `layer` param names. Blank matches ANY layer,
+ *  so an unconfigured rule fires rather than silently never firing. Matched on
+ *  the NAME, through findPvpLayer like every other reader of a layer name: a
+ *  uuid is opaque in a rule editor and changes when a workspace is rebuilt from
+ *  a template, and a name two layers share names neither of them. */
+const pvpNamed = (layers: readonly PvpLayer[], want: unknown): ((l: PvpLayer) => boolean) => {
+  const name = String(want ?? "");
+  if (!name.trim()) return () => true;
+  const got = findPvpLayer(layers, name);
+  if (got.kind !== "found") return () => false;
+  const named = got.layer;
+  return (l) => l === named;
 };
 
 /** Pairs of (before, after) for layers present in BOTH snapshots, matched on
@@ -142,7 +148,8 @@ const PVP_LAYER_PARAM: ParamDef = {
  *
  *  - `!pvpUp(next)` is what stops PVP going UNREACHABLE reading as every layer
  *    clearing and stopping at the same instant. Unknown is not empty.
- *  - `pvpNamed` applies the optional layer param, whose blank value means "any".
+ *  - `pvpNamed` applies the optional layer param, whose blank value means "any"
+ *    and which, naming two layers, names neither.
  *
  * Written out per trigger it was five triggers deep and a sixth could forget
  * one — which is why pvpFlagTriggers already had this shape internally. This is
@@ -162,9 +169,8 @@ function pvpEdgeTrigger(
     help,
     didFire: (prev, next, params) => {
       if (!pvpUp(next)) return false;
-      return pvpPairs(prev, next).some(
-        ({ before, after }) => pvpNamed(after, params.layer) && edge(before, after),
-      );
+      const named = pvpNamed(asPvp(next), params.layer);
+      return pvpPairs(prev, next).some(({ before, after }) => named(after) && edge(before, after));
     },
   });
 }

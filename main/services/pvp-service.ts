@@ -28,7 +28,14 @@ import {
   layerSignature, parseWorkspace, updateMediaSince, withMediaSinceAt, withNextCues,
 } from "./pvp-parse.js";
 import type { MediaSinceEntry } from "./pvp-parse.js";
-import { PVP_OFFLINE, hasContent, type PvpLayerDTO, type PvpStatusDTO } from "../types/pvp.js";
+import {
+  PVP_OFFLINE,
+  duplicatedPvpLayerNames,
+  hasContent,
+  pvpLayerKey,
+  type PvpLayerDTO,
+  type PvpStatusDTO,
+} from "../types/pvp.js";
 
 /** Active cadence. Governs how fast a cue change reaches a rule, not how smooth
  *  the progress bar is — the bar is interpolated on the client. A 20-second loop
@@ -195,6 +202,9 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
   /** So an unreachable playlist endpoint is reported once per outage rather than
    *  once a second. Cleared on the next good read. */
   private playlistErrorLogged = false;
+  /** The duplicated layer names last logged, so a workspace that keeps two
+   *  layers of one name is said once, not on every poll. */
+  private loggedDuplicateNames = "";
 
   constructor() {
     super("pvp", "pvp:status", PVP_OFFLINE);
@@ -579,6 +589,7 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
     // layers back into the channel too, and a frame from one of those without
     // next cues (or a media-since stamp) would blank the line for a beat every
     // time a rule fired.
+    this.noteDuplicateNames(layers);
     const withCues = this.successors ? withNextCues(layers, this.successors) : layers;
     const decorated = withMediaSinceAt(withCues, this.mediaSince);
     this.emitIfChanged({
@@ -587,6 +598,32 @@ class PvpService extends StatusIntegration<PvpStatusDTO> {
       sampledAt: new Date().toISOString(),
       imageDurationSec: this.imageDurationSec,
     });
+  }
+
+  /**
+   * Say when two or more layers share a name, and again when that changes.
+   *
+   * Nothing that takes a layer by name picks one of them (see findPvpLayer): a
+   * cue naming it fails, a rule conditioned on it stops holding, a switch reads
+   * unknown and a widget pinned to it shows neither. The cue's failure is
+   * logged where it happens; the quiet ones are not, so this line is what an
+   * operator finds when a rule went silent or a widget went blank.
+   */
+  private noteDuplicateNames(layers: readonly PvpLayerDTO[]): void {
+    const names = duplicatedPvpLayerNames(layers);
+    // Compared case- and order-blind, as the names are matched: PVP listing the
+    // same two layers the other way round is not news.
+    const said = names.map(pvpLayerKey).sort().join("\n");
+    if (said === this.loggedDuplicateNames) return;
+    this.loggedDuplicateNames = said;
+    if (names.length === 0) {
+      console.log("[pvp] every layer name is unique again");
+      return;
+    }
+    const list = names.map((n) => `"${scrub(n)}"`).join(", ");
+    console.warn(
+      `[pvp] more than one layer is called ${list}: cues, rules, switches and widgets that name it will not pick one until it is renamed`,
+    );
   }
 
   /**
