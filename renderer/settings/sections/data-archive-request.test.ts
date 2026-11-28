@@ -25,7 +25,7 @@ describe("postArchive", () => {
     await assert.rejects(postArchive("/api/archive/import", BYTES, { failure: "Import failed." }), /That is not an archive\./);
   });
 
-  test("a stalled request ends, and says it ran out of time", async () => {
+  test("a stalled request ends, and says it ran out of time", { timeout: 3000 }, async () => {
     mock.method(globalThis, "fetch", (_url: string, init: RequestInit) =>
       new Promise((_resolve, reject) => init.signal?.addEventListener("abort", () => reject(init.signal?.reason))),
     );
