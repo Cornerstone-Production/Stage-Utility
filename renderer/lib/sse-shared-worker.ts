@@ -20,6 +20,7 @@
 // until it had them.
 
 import { HYDRATED_SET } from "./sse-channels";
+import { uid } from "./uid";
 import { SSE_HEARTBEAT_EVENT, SSE_SILENCE_MS } from "../../main/types/sse";
 import { SUBSCRIBE_REPORT_TIMEOUT_MS, createSubscribeReporter } from "./subscribe-reporter";
 
@@ -88,8 +89,8 @@ function lost(): void {
   silenceTimer = null;
   tellStream(false);
 }
-// One stable id for the shared connection (insecure-context safe — no crypto.randomUUID).
-const cid = `sw-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+// One stable id for the shared connection (insecure-context safe — uid() has the fallback).
+const cid = uid("sw");
 
 const RECONNECT_MIN_MS = 1000;
 const RECONNECT_MAX_MS = 30_000;

@@ -18,8 +18,7 @@ const EMPTY_DEVICE: SlotDevice = {
 /** A new slot id, always "slot-…". Through uid(): crypto.randomUUID is
  *  undefined over plain HTTP, and calling it directly threw there. */
 export function freshSlotId(): string {
-  const id = uid("slot");
-  return id.startsWith("slot-") ? id : `slot-${id}`;
+  return uid("slot");
 }
 
 /** The next channel number on a board: one past the highest numeric one, so
