@@ -89,10 +89,13 @@ export interface AlignedAttendance {
  * A baseline that is a finite number is trusted here. Records a Recalculate,
  * window edit or merge touched in v1.9.3 or v1.9.4 (fixed in v1.10.0) may
  * carry an already-baselined value there (normally 0), which shifts wrongly.
- * The archive import checks for that first (implausibleBaseline in
- * archive/merge-records.ts) and does not align such a record. History's merge
- * does not: a window trim leaves the same gap to totalAttendance as that bug,
- * and History's merge is the repair tool, which has always trusted it.
+ * The archive import checks for that first (framesDisagree in
+ * archive/merge-records.ts) and does not align such a pair. History's merge
+ * does not: it is the repair tool, and has always trusted the baseline.
+ *
+ * A side with no samples contributes no frame, whatever its baseline: there is
+ * nothing of its to place, and a baseline on an empty record (an Edit times on
+ * a record that never got a reading used to stamp 0 there) says nothing.
  */
 export function alignAttendance(into: AttendanceFrame, from: AttendanceFrame): AlignedAttendance {
   const intoBase = finiteOrNull(into.attendanceBaseline);
@@ -104,15 +107,15 @@ export function alignAttendance(into: AttendanceFrame, from: AttendanceFrame): A
   let intoBy = 0;
   let fromBy = 0;
   let frames: AlignedAttendance["frames"] = "aligned";
-  if (intoBase != null && fromBase != null) {
+  if (!intoList.length || !fromList.length) {
+    base = intoList.length ? intoBase : fromBase;
+  } else if (intoBase != null && fromBase != null) {
     base = Math.min(intoBase, fromBase);
     intoBy = intoBase - base;
     fromBy = fromBase - base;
-  } else if (intoList.length && fromList.length) {
+  } else {
     base = intoBase;
     frames = "unknown";
-  } else {
-    base = intoList.length ? intoBase : fromBase;
   }
 
   const shifted = (list: AttendanceSample[], n: number) =>
@@ -180,7 +183,9 @@ export function recomputeAttendance(att: ServiceAttendance): void {
   // what the recorder writes and what a merge needs to convert between two
   // records' frames. Advancing it by the same amount the samples are about to be
   // re-based by keeps raw = sample + baseline true.
-  att.attendanceBaseline = (att.attendanceBaseline ?? 0) + base;
+  // A record with no samples has nothing to re-base, and its baseline stays as
+  // it is: null stays null rather than becoming a 0 that reads as a frame.
+  if (s.length) att.attendanceBaseline = (att.attendanceBaseline ?? 0) + base;
   if (base !== 0) for (const x of s) x.attendance -= base;
   Object.assign(att, attendanceStats(s));
 }

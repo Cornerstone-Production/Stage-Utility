@@ -438,14 +438,15 @@ export async function importArchive(
     (a, b) => {
       const { record, frames, implausible, skippedSamples } = mergeAttendanceRecord(a as never, b as never);
       const key = scrub((a as { serviceKey: string }).serviceKey);
-      // Without both baselines the two series cannot be put in one frame, so
-      // they were joined as they stood: the curve may step where they meet.
+      // Either way the two series were joined as they stood, unshifted: the
+      // curve may step where they meet. "implausible": a baseline is wrong.
       if (frames === "implausible") {
         console.warn(
           `[archive] import into ${key}: merged the attendance without aligning it, because ` +
-            `${scrub(implausible ?? "a baseline does not fit its counts")}.`,
+            `${scrub(implausible ?? "the two baselines cannot both be right")}.`,
         );
       }
+      // "unknown": one side has no baseline at all.
       if (frames === "unknown") {
         console.warn(
           `[archive] import into ${key}: one side's attendance has no baseline, ` +

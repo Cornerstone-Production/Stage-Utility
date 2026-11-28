@@ -343,7 +343,7 @@ test("an attendance merge it could not align, or that left samples out, says so 
   assert.ok(warned.some((w) => w.startsWith("[archive]") && w.includes("left out 1 attendance sample")), warned.join("\n"));
 });
 
-test("an import over a record whose baseline does not fit its counts is joined unshifted, and says why", async () => {
+test("an import over a record whose baseline disagrees with the other box's is joined unshifted, and says why", async () => {
   // This box's record carries the already-baselined 0 a v1.9.3 Recalculate
   // wrote; its samples and total still say the service began at raw 500.
   const { attendanceStore } = await import("../attendance-store.js");
@@ -374,7 +374,7 @@ test("an import over a record whose baseline does not fit its counts is joined u
   }
   const after = (await attendanceStore.get(key))!;
   assert.ok(Math.max(...after.samples.map((x) => x.attendance)) < 100, "the archive's samples were shifted by the whole morning");
-  assert.ok(warned.some((w) => w.startsWith("[archive]") && w.includes("this box's record") && w.includes("daily total")), warned.join("\n"));
+  assert.ok(warned.some((w) => w.startsWith("[archive]") && w.includes("disagree by about")), warned.join("\n"));
 });
 
 test("replace wins over merge when a key is somehow in both lists", async () => {

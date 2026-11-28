@@ -450,19 +450,16 @@ test("an incoming recording placed onto an empty record of this box keeps its ow
   assert.equal(mergeAttendanceRecord(a, b).record.attendanceBaseline, null);
 });
 
-// ── A baseline that does not fit its own record ─────────────────────────────
+// ── Baselines that cannot both be right ─────────────────────────────────────
 //
 // Recalculate, Edit times and History's merge in v1.9.3 and v1.9.4 (fixed in
 // v1.10.0) wrote an already-baselined value into attendanceBaseline, normally
-// 0, and left the samples alone. Such a record says it counts from 0 while its
-// samples count from wherever the service began, so aligning on it shifts the
-// other recording by the whole morning's entries. The record's own
-// totalAttendance (the raw counter at its last reading, which nothing rewrote)
-// is the evidence: baseline + the last sample should land on it.
+// 0, and left the samples alone. Aligning on such a record shifts the other
+// recording by every entry before its service. Where the two overlap, both
+// boxes read one counter, so baseline + sample must agree between them.
 
-test("an import over a record whose baseline does not fit its counts is not shifted, and says why", () => {
-  // This box's 11am: really baselined at raw 500, but a v1.9.3 Recalculate
-  // left attendanceBaseline 0. Its total still reads the raw 520.
+test("an import over a record whose baseline disagrees with the other box's is not shifted, and says why", () => {
+  // This box's 9am: really baselined at raw 500, but a v1.9.3 Recalculate left 0.
   const corrupted = { ...boxRecord(0, 10, 0, () => 300), attendanceBaseline: 0 };
   const b = boxRecord(5, 15, 7, () => 300); // the archive's box, honestly baselined at 510
 
@@ -471,21 +468,49 @@ test("an import over a record whose baseline does not fit its counts is not shif
   const series = record.samples!.map((s) => (s as { attendance: number }).attendance);
   assert.ok(Math.max(...series) < 100, `the archive's samples were shifted by the whole morning: ${series.join(", ")}`);
   assert.equal(frames, "implausible");
-  assert.match(implausible ?? "", /this box/);
+  assert.match(implausible ?? "", /disagree by about 500/);
   assert.equal(record.attendanceBaseline, 0, "this box's baseline is kept as it was");
+  assert.equal(mergeAttendanceRecord(boxRecord(0, 10, 0, () => 300), { ...b, attendanceBaseline: 0 }).frames, "implausible", "the archive's side, the same");
 });
 
-test("the archive's record can be the implausible one too", () => {
-  const a = boxRecord(0, 10, 0, () => 300);
-  const corrupted = { ...boxRecord(5, 15, 7, () => 300), attendanceBaseline: 0 };
-  const { frames, implausible } = mergeAttendanceRecord(a, corrupted);
-  assert.equal(frames, "implausible");
-  assert.match(implausible ?? "", /archive/);
-});
-
-test("a record a few entries past its last sample still aligns: the last 30 seconds are slack", () => {
-  const a = { ...boxRecord(0, 25, 0, () => 300), totalAttendance: rawAt(25) + 6 };
+test("a trimmed or split-saved record that agrees with the other box still aligns", () => {
+  // Its daily total ran on hundreds past its last kept sample: a window trim,
+  // or a split save in the next service's arrivals. Its baseline is right.
+  const trimmed = { ...boxRecord(0, 25, 0, () => 300), totalAttendance: rawAt(25) + 600 };
   const b = boxRecord(10, 30, 7, () => 300);
-  assert.equal(mergeAttendanceRecord(a, b).frames, "aligned");
-  assert.equal(mergeAttendanceRecord({ ...a, totalAttendance: rawAt(25) + 40 }, b).frames, "implausible");
+  assert.equal(mergeAttendanceRecord(trimmed, b).frames, "aligned");
+});
+
+test("with no overlap, only the bug's own signature is not aligned on", () => {
+  // Baseline equal to its first sample (the value the bug copied in) and a
+  // total far above baseline + latest: the shape v1.9.3 left.
+  const corrupted = { ...boxRecord(0, 10, 0, () => 300), attendanceBaseline: 0 };
+  const later = boxRecord(20, 30, 7, () => 300);
+  const { frames, implausible } = mergeAttendanceRecord(corrupted, later);
+  assert.equal(frames, "implausible");
+  assert.match(implausible ?? "", /this box's record's baseline 0 equals its first sample/);
+  // A trimmed record with a real baseline is not that shape.
+  const trimmed = { ...boxRecord(0, 10, 0, () => 300), totalAttendance: rawAt(10) + 600 };
+  assert.equal(mergeAttendanceRecord(trimmed, later).frames, "aligned");
+});
+
+test("an empty record's baseline is no frame: a Recalculate on it then an import shifts nothing", async () => {
+  const { recomputeAttendance } = await import("../attendance-aggregate.js");
+  const empty = { ...boxRecord(0, 0, 0, () => 300), samples: [], attendanceBaseline: null, totalAttendance: 0 };
+  recomputeAttendance(empty as never);
+  assert.equal(empty.attendanceBaseline, null, "a recompute of a record with no samples stamped a baseline");
+  const withZero = { ...empty, attendanceBaseline: 0 }; // what the old recompute left
+  const b = boxRecord(10, 20, 7, () => 300); // baseline 520
+
+  const out = mergeAttendanceRecord(withZero, b).record;
+
+  assert.deepEqual(out.samples!.map((s) => (s as { attendance: number }).attendance), b.samples.map((s) => s.attendance), "shifted onto an empty record's 0");
+  assert.equal(out.attendanceBaseline, 520);
+});
+
+test("a reading whose stamp will not parse does not decide the check", () => {
+  const a = boxRecord(0, 10, 0, () => 300);
+  const b = boxRecord(5, 15, 7, () => 300);
+  const bogus = { ...b, samples: [{ t: "bogus", attendance: 0, occupancy: 300 }, ...b.samples] };
+  assert.equal(mergeAttendanceRecord(a, bogus).frames, "aligned");
 });

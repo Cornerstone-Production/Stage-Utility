@@ -111,20 +111,32 @@ interface AttendanceRecord {
 export interface MergedAttendanceRecord {
   record: AttendanceRecord;
   /** "unknown" when one side had no usable baseline, and "implausible" when
-   *  one side's baseline does not fit its own counts (see implausibleBaseline):
+   *  the two baselines cannot both be right (see framesDisagree):
    *  either way the two series were joined as they stood, unshifted. Returned
    *  so the import can say so. */
   frames: "aligned" | "unknown" | "implausible";
-  /** For "implausible": which record, and the numbers that gave it away. */
+  /** For "implausible": the numbers that gave it away. */
   implausible?: string;
   /** Incoming samples left out because they were not readings: no string
    *  stamp, or an attendance or occupancy that is not a number. */
   skippedSamples: number;
 }
 
+/** Readings with a stamp Date can read, oldest first, as [ms, raw counter]. */
+function rawSeries(r: AttendanceRecord, base: number): [number, number][] {
+  return (Array.isArray(r.samples) ? r.samples : [])
+    .filter(isReading)
+    .map((x): [number, number] => [Date.parse(x.t), base + x.attendance])
+    .filter(([t]) => Number.isFinite(t))
+    .sort((x, y) => x[0] - y[0]);
+}
+
+/** Two readings this close together read the counter at nearly one moment. */
+const PAIR_MS = 15_000;
+
 /**
- * Why a record's baseline cannot be aligned on, or null when it fits or there is
- * nothing to judge it by.
+ * Why two records' baselines cannot be aligned on, or null when they can (or
+ * when there is nothing to judge by, and the baselines are trusted).
  *
  * Recalculate, Edit times and History's merge in v1.9.3 and v1.9.4 (fixed in
  * v1.10.0) wrote an already-baselined value (normally 0) into
@@ -132,32 +144,59 @@ export interface MergedAttendanceRecord {
  * from 0 while its samples count from wherever its service began, and aligning
  * on it shifts the other recording by every entry before that service.
  *
- * The record's own totalAttendance is the evidence. It is the raw counter at
- * the record's last reading, nothing rewrote it, and the recorder stores each
- * sample as raw − baseline, so baseline + the latest sample lands on it, give
- * or take the entries in the last 30 seconds. A record that misses by more
- * than 10 people or 2% is not aligned on.
+ * Where the two recordings overlap — the restarted-box case this alignment is
+ * for — the evidence is direct: both boxes read the same counter, so baseline
+ * + sample must agree between readings taken within 15 seconds of each other.
+ * A median disagreement over 20 people or 5% means one baseline is wrong, and
+ * which one cannot be told. A window trim, a split save or a crash leaves both
+ * agreeing, so none of those is flagged.
  *
- * It can also flag a record that is fine: one whose tail a window trim cut
- * off, so its last sample is older than its total. That costs only what every
- * import did before this alignment existed (the series joined unshifted) plus
- * a line on the log, where a wrong shift would have cost a curve off by
- * hundreds and no word about it. A record with no total, or no readings,
- * is not judged.
+ * Where they do not overlap there is no such evidence, and only the bug's own
+ * signature is looked for: a baseline equal to the record's first sample (the
+ * value the bug copied in, unchanged since) on a record whose daily total sits
+ * well above baseline + its latest sample. A legitimate record shares that
+ * shape only when its counter really started near zero, where a shift by its
+ * baseline is right anyway, or a trimmed one did; the fallback then costs what
+ * every import did before this alignment existed, plus a line on the log. A
+ * corrupted record a later fixed-code edit re-based is not recognised.
  */
-export function implausibleBaseline(r: AttendanceRecord): string | null {
-  const base = finiteOrNull(r.attendanceBaseline);
-  const total = finiteOrNull(r.totalAttendance);
-  if (base == null || total == null || total <= 0) return null;
-  const readings = (Array.isArray(r.samples) ? r.samples : []).filter(isReading);
-  const latest = readings.reduce<AttendanceSample | null>(
-    (m, x) => (m == null || Date.parse(x.t) > Date.parse(m.t) ? x : m),
-    null,
-  );
-  if (!latest) return null;
-  const raw = base + latest.attendance;
-  if (Math.abs(total - raw) <= Math.max(10, Math.round(total * 0.02))) return null;
-  return `baseline ${base} + latest sample ${latest.attendance} is ${raw}, but its daily total reads ${total}`;
+export function framesDisagree(mine: AttendanceRecord, theirs: AttendanceRecord): string | null {
+  const mineBase = finiteOrNull(mine.attendanceBaseline);
+  const theirBase = finiteOrNull(theirs.attendanceBaseline);
+  if (mineBase == null || theirBase == null) return null;
+  const a = rawSeries(mine, mineBase);
+  const b = rawSeries(theirs, theirBase);
+  if (!a.length || !b.length) return null;
+
+  const diffs: number[] = [];
+  const levels: number[] = [];
+  for (const [t, raw] of b) {
+    let best: [number, number] | null = null;
+    for (const p of a) if (Math.abs(p[0] - t) <= PAIR_MS && (best == null || Math.abs(p[0] - t) < Math.abs(best[0] - t))) best = p;
+    if (best) {
+      diffs.push(Math.abs(best[1] - raw));
+      levels.push(Math.max(best[1], raw));
+    }
+  }
+  if (diffs.length >= 3) {
+    const median = (xs: number[]) => [...xs].sort((x, y) => x - y)[Math.floor(xs.length / 2)];
+    const off = median(diffs);
+    if (off > Math.max(20, median(levels) * 0.05)) {
+      return `where the two recordings overlap their counts disagree by about ${off} people (baselines ${mineBase} and ${theirBase})`;
+    }
+    return null;
+  }
+
+  const signature = (r: AttendanceRecord, base: number, series: [number, number][], who: string): string | null => {
+    const total = finiteOrNull(r.totalAttendance);
+    const readings = (Array.isArray(r.samples) ? r.samples : []).filter(isReading).filter((x) => Number.isFinite(Date.parse(x.t)));
+    const first = readings.reduce<AttendanceSample | null>((m, x) => (m == null || Date.parse(x.t) < Date.parse(m.t) ? x : m), null);
+    if (total == null || total <= 0 || first == null || base !== first.attendance) return null;
+    const latest = series[series.length - 1][1];
+    if (total - latest <= Math.max(10, Math.round(total * 0.02))) return null;
+    return `${who}'s baseline ${base} equals its first sample, and baseline + its latest sample is ${latest} while its daily total reads ${total}`;
+  };
+  return signature(mine, mineBase, a, "this box's record") ?? signature(theirs, theirBase, b, "the archive's record");
 }
 
 /**
@@ -227,17 +266,9 @@ export function mergeAttendanceRecord(mine: AttendanceRecord, theirs: Attendance
   const incoming: unknown[] = Array.isArray(theirs.samples) ? theirs.samples : [];
   const readings = incoming.filter(isReading);
   const skippedSamples = incoming.length - readings.length;
-  const suspect = [
-    { who: "this box's record", why: implausibleBaseline(mine) },
-    { who: "the archive's record", why: implausibleBaseline({ ...theirs, samples: readings }) },
-  ].filter((x) => x.why != null);
-  if (suspect.length) {
-    return {
-      record: fillOnlyAttendance(mine, theirs, readings),
-      frames: "implausible",
-      implausible: suspect.map((x) => `${x.who}: ${x.why}`).join("; "),
-      skippedSamples,
-    };
+  const disagree = framesDisagree(mine, { ...theirs, samples: readings });
+  if (disagree) {
+    return { record: fillOnlyAttendance(mine, theirs, readings), frames: "implausible", implausible: disagree, skippedSamples };
   }
   const aligned = alignAttendance(mine, { ...theirs, samples: readings });
   const out: AttendanceRecord = {
